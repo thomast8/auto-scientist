@@ -1,0 +1,1466 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Auto-Scientist Pipeline</title>
+<style>
+  @import url('https://fonts.googleapis.com/css2?family=DM+Mono:wght@300;400;500&family=Instrument+Serif&display=swap');
+
+  :root {
+    --bg: #0a0e1a;
+    --bg-subtle: #0f1525;
+    --grid: #151d33;
+    --text: #c8cad0;
+    --text-dim: #5a6178;
+    --text-bright: #e8eaf0;
+    --accent-amber: #d4a24e;
+    --accent-amber-dim: rgba(212, 162, 78, 0.15);
+    --accent-blue: #4e8fd4;
+    --accent-blue-dim: rgba(78, 143, 212, 0.12);
+    --accent-green: #4ed47a;
+    --accent-green-dim: rgba(78, 212, 122, 0.12);
+    --accent-rose: #d44e6e;
+    --accent-rose-dim: rgba(212, 78, 110, 0.12);
+    --accent-violet: #8e6ed4;
+    --accent-violet-dim: rgba(142, 110, 212, 0.12);
+    --accent-cyan: #4ec5d4;
+    --accent-cyan-dim: rgba(78, 197, 212, 0.12);
+    --border: #1e2744;
+    --border-hover: #2a3558;
+  }
+
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+
+  body {
+    background: var(--bg);
+    color: var(--text);
+    font-family: 'DM Mono', monospace;
+    min-height: 100vh;
+    overflow-x: hidden;
+  }
+
+  /* Subtle grid background */
+  body::before {
+    content: '';
+    position: fixed;
+    inset: 0;
+    background-image:
+      linear-gradient(var(--grid) 1px, transparent 1px),
+      linear-gradient(90deg, var(--grid) 1px, transparent 1px);
+    background-size: 40px 40px;
+    opacity: 0.5;
+    pointer-events: none;
+    z-index: 0;
+  }
+
+  .container {
+    position: relative;
+    z-index: 1;
+    max-width: 1400px;
+    margin: 0 auto;
+    padding: 48px 32px;
+  }
+
+  header {
+    margin-bottom: 56px;
+    animation: fadeUp 0.6s ease-out;
+  }
+
+  header h1 {
+    font-family: 'Instrument Serif', serif;
+    font-size: 2.8rem;
+    font-weight: 400;
+    color: var(--text-bright);
+    letter-spacing: -0.02em;
+    line-height: 1.1;
+  }
+
+  header h1 span {
+    color: var(--accent-amber);
+  }
+
+  header p {
+    margin-top: 12px;
+    font-size: 0.78rem;
+    color: var(--text-dim);
+    font-weight: 300;
+    max-width: 680px;
+    line-height: 1.6;
+  }
+
+  /* Legend */
+  .legend {
+    display: flex;
+    gap: 28px;
+    margin-bottom: 44px;
+    flex-wrap: wrap;
+    animation: fadeUp 0.6s ease-out 0.1s both;
+  }
+
+  .legend-item {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    font-size: 0.7rem;
+    color: var(--text-dim);
+    font-weight: 300;
+  }
+
+  .legend-line {
+    width: 32px;
+    height: 2px;
+    border-radius: 1px;
+  }
+
+  .legend-line.writes {
+    background: var(--accent-amber);
+  }
+
+  .legend-line.reads {
+    background: var(--accent-blue);
+    background-image: repeating-linear-gradient(
+      90deg,
+      var(--accent-blue) 0px, var(--accent-blue) 6px,
+      transparent 6px, transparent 10px
+    );
+    background-size: 10px 2px;
+  }
+
+  .legend-line.web {
+    background: var(--accent-cyan);
+    background-image: repeating-linear-gradient(
+      90deg,
+      var(--accent-cyan) 0px, var(--accent-cyan) 2px,
+      transparent 2px, transparent 5px
+    );
+    background-size: 5px 2px;
+  }
+
+  /* Pipeline flow strip */
+  .flow-strip {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    margin-bottom: 52px;
+    padding: 14px 20px;
+    background: var(--bg-subtle);
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    font-size: 0.68rem;
+    color: var(--text-dim);
+    font-weight: 300;
+    overflow-x: auto;
+    animation: fadeUp 0.6s ease-out 0.15s both;
+  }
+
+  .flow-strip .step {
+    white-space: nowrap;
+    padding: 4px 10px;
+    border-radius: 4px;
+    transition: all 0.2s;
+  }
+
+  .flow-strip .step:hover {
+    color: var(--text-bright);
+    background: var(--accent-amber-dim);
+  }
+
+  .flow-strip .arrow {
+    color: var(--text-dim);
+    opacity: 0.4;
+    font-size: 0.6rem;
+  }
+
+  .flow-strip .step.optional {
+    opacity: 0.5;
+    border: 1px dashed var(--border);
+  }
+
+  /* Main grid layout */
+  .agents-grid {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 24px;
+    margin-bottom: 48px;
+  }
+
+  @media (max-width: 900px) {
+    .agents-grid { grid-template-columns: 1fr; }
+  }
+
+  /* Agent cards */
+  .agent-card {
+    background: var(--bg-subtle);
+    border: 1px solid var(--border);
+    border-radius: 12px;
+    padding: 28px;
+    transition: all 0.3s;
+    animation: fadeUp 0.5s ease-out both;
+  }
+
+  .agent-card:hover {
+    border-color: var(--border-hover);
+    transform: translateY(-2px);
+    box-shadow: 0 8px 32px rgba(0,0,0,0.3);
+  }
+
+  .agent-card:nth-child(1) { animation-delay: 0.2s; }
+  .agent-card:nth-child(2) { animation-delay: 0.25s; }
+  .agent-card:nth-child(3) { animation-delay: 0.3s; }
+  .agent-card:nth-child(4) { animation-delay: 0.35s; }
+  .agent-card:nth-child(5) { animation-delay: 0.4s; }
+  .agent-card:nth-child(6) { animation-delay: 0.45s; }
+
+  .agent-header {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    margin-bottom: 18px;
+  }
+
+  .agent-icon {
+    width: 36px;
+    height: 36px;
+    border-radius: 8px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 0.9rem;
+    flex-shrink: 0;
+  }
+
+  .agent-card.analyst .agent-icon { background: var(--accent-blue-dim); color: var(--accent-blue); }
+  .agent-card.scientist .agent-icon { background: var(--accent-amber-dim); color: var(--accent-amber); }
+  .agent-card.critic .agent-icon { background: var(--accent-rose-dim); color: var(--accent-rose); }
+  .agent-card.coder .agent-icon { background: var(--accent-green-dim); color: var(--accent-green); }
+  .agent-card.runner .agent-icon { background: var(--accent-violet-dim); color: var(--accent-violet); }
+
+
+  .agent-name {
+    font-family: 'Instrument Serif', serif;
+    font-size: 1.35rem;
+    font-weight: 400;
+    color: var(--text-bright);
+  }
+
+  .agent-role {
+    font-size: 0.65rem;
+    color: var(--text-dim);
+    font-weight: 300;
+    margin-top: 2px;
+  }
+
+  .agent-detail {
+    font-size: 0.72rem;
+    color: var(--text-dim);
+    font-weight: 300;
+    margin-bottom: 18px;
+    line-height: 1.5;
+  }
+
+  .data-section {
+    margin-bottom: 10px;
+  }
+
+  .data-section-label {
+    font-size: 0.6rem;
+    text-transform: uppercase;
+    letter-spacing: 0.12em;
+    margin-bottom: 8px;
+    font-weight: 500;
+  }
+
+  .agent-card.analyst .data-section-label.reads { color: var(--accent-blue); }
+  .agent-card.analyst .data-section-label.writes { color: var(--accent-amber); }
+  .agent-card.scientist .data-section-label.reads { color: var(--accent-blue); }
+  .agent-card.scientist .data-section-label.writes { color: var(--accent-amber); }
+  .agent-card.critic .data-section-label.reads { color: var(--accent-blue); }
+  .agent-card.critic .data-section-label.writes { color: var(--accent-amber); }
+  .agent-card.coder .data-section-label.reads { color: var(--accent-blue); }
+  .agent-card.coder .data-section-label.writes { color: var(--accent-amber); }
+  .agent-card.runner .data-section-label.reads { color: var(--accent-blue); }
+  .agent-card.runner .data-section-label.writes { color: var(--accent-amber); }
+  .data-tags {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 6px;
+  }
+
+  .data-tag {
+    font-size: 0.65rem;
+    padding: 3px 10px;
+    border-radius: 4px;
+    font-weight: 400;
+    border: 1px solid;
+    transition: all 0.2s;
+    cursor: default;
+    position: relative;
+  }
+
+  .data-tag.read {
+    background: var(--accent-blue-dim);
+    border-color: rgba(78, 143, 212, 0.2);
+    color: var(--accent-blue);
+  }
+
+  .data-tag.write {
+    background: var(--accent-amber-dim);
+    border-color: rgba(212, 162, 78, 0.2);
+    color: var(--accent-amber);
+  }
+
+  .data-tag.capability {
+    background: var(--accent-cyan-dim);
+    border-color: rgba(78, 197, 212, 0.2);
+    color: var(--accent-cyan);
+  }
+
+  .data-tag:hover {
+    transform: translateY(-1px);
+    box-shadow: 0 2px 8px rgba(0,0,0,0.2);
+  }
+
+  .data-tag.blocked {
+    background: rgba(212, 78, 78, 0.06);
+    border-color: rgba(212, 78, 78, 0.15);
+    color: #8a4a4a;
+    text-decoration: line-through;
+    opacity: 0.6;
+  }
+
+  /* No-access markers */
+  .boundary-note {
+    font-size: 0.62rem;
+    color: var(--accent-rose);
+    opacity: 0.7;
+    margin-top: 10px;
+    padding-top: 8px;
+    border-top: 1px dashed rgba(212, 78, 110, 0.15);
+    font-weight: 300;
+  }
+
+  /* Information boundary matrix */
+  .boundary-section {
+    margin-top: 16px;
+    animation: fadeUp 0.5s ease-out 0.5s both;
+  }
+
+  .boundary-section h2 {
+    font-family: 'Instrument Serif', serif;
+    font-size: 1.6rem;
+    font-weight: 400;
+    color: var(--text-bright);
+    margin-bottom: 20px;
+  }
+
+  .matrix-table {
+    width: 100%;
+    border-collapse: separate;
+    border-spacing: 0;
+    background: var(--bg-subtle);
+    border: 1px solid var(--border);
+    border-radius: 12px;
+    overflow: hidden;
+    font-size: 0.72rem;
+  }
+
+  .matrix-table th {
+    font-weight: 500;
+    text-align: left;
+    padding: 14px 16px;
+    color: var(--text-dim);
+    border-bottom: 1px solid var(--border);
+    font-size: 0.65rem;
+    text-transform: uppercase;
+    letter-spacing: 0.08em;
+  }
+
+  .matrix-table td {
+    padding: 12px 16px;
+    border-bottom: 1px solid var(--border);
+    font-weight: 300;
+    vertical-align: middle;
+  }
+
+  .matrix-table tr:last-child td {
+    border-bottom: none;
+  }
+
+  .matrix-table tr:hover td {
+    background: rgba(255,255,255,0.015);
+  }
+
+  .matrix-table .agent-col {
+    color: var(--text-bright);
+    font-weight: 400;
+    white-space: nowrap;
+  }
+
+  .badge {
+    display: inline-block;
+    padding: 2px 8px;
+    border-radius: 3px;
+    font-size: 0.62rem;
+    font-weight: 400;
+  }
+
+  .badge.yes {
+    background: var(--accent-green-dim);
+    color: var(--accent-green);
+  }
+
+  .badge.no {
+    background: rgba(212, 78, 78, 0.08);
+    color: #7a4a4a;
+  }
+
+  .badge.produces {
+    background: var(--accent-amber-dim);
+    color: var(--accent-amber);
+  }
+
+  .badge.input {
+    background: var(--accent-blue-dim);
+    color: var(--accent-blue);
+  }
+
+  /* Footer */
+  .footer-note {
+    margin-top: 48px;
+    padding-top: 24px;
+    border-top: 1px solid var(--border);
+    font-size: 0.62rem;
+    color: var(--text-dim);
+    font-weight: 300;
+    line-height: 1.7;
+    animation: fadeUp 0.5s ease-out 0.6s both;
+  }
+
+  .footer-note strong {
+    color: var(--text);
+    font-weight: 500;
+  }
+
+  /* ===== Diagram section ===== */
+  .diagram-section {
+    margin-bottom: 56px;
+    animation: fadeUp 0.6s ease-out 0.18s both;
+  }
+
+  .diagram-section h2 {
+    font-family: 'Instrument Serif', serif;
+    font-size: 1.6rem;
+    font-weight: 400;
+    color: var(--text-bright);
+    margin-bottom: 20px;
+  }
+
+  .diagram-wrap {
+    background: var(--bg-subtle);
+    border: 1px solid var(--border);
+    border-radius: 12px;
+    padding: 24px 16px 16px;
+    overflow-x: auto;
+  }
+
+  .diagram-wrap svg {
+    display: block;
+    margin: 0 auto;
+  }
+
+  /* Hover interaction: dim everything, then highlight the hovered group */
+  .diagram-wrap svg.has-hover .agent-group,
+  .diagram-wrap svg.has-hover .artifact-node,
+  .diagram-wrap svg.has-hover .arrow-line {
+    opacity: 0.12;
+    transition: opacity 0.25s;
+  }
+
+  .diagram-wrap svg.has-hover .agent-group.highlight,
+  .diagram-wrap svg.has-hover .artifact-node.highlight,
+  .diagram-wrap svg.has-hover .arrow-line.highlight {
+    opacity: 1;
+    transition: opacity 0.15s;
+  }
+
+  .diagram-wrap svg .agent-group,
+  .diagram-wrap svg .artifact-node,
+  .diagram-wrap svg .arrow-line {
+    transition: opacity 0.3s;
+  }
+
+  /* Agent node hover cursor */
+  .diagram-wrap svg .agent-group { cursor: pointer; }
+
+  /* Animated particle on arrows */
+  @keyframes flowParticle {
+    0%   { offset-distance: 0%; opacity: 0; }
+    10%  { opacity: 1; }
+    90%  { opacity: 1; }
+    100% { offset-distance: 100%; opacity: 0; }
+  }
+
+  .flow-dot {
+    offset-rotate: 0deg;
+    animation: flowParticle 3s linear infinite;
+  }
+
+  /* Tooltip */
+  .svg-tooltip {
+    position: fixed;
+    pointer-events: none;
+    background: #131829;
+    border: 1px solid var(--border-hover);
+    border-radius: 8px;
+    padding: 12px 16px;
+    max-width: 420px;
+    font-size: 0.68rem;
+    line-height: 1.55;
+    color: var(--text);
+    opacity: 0;
+    transition: opacity 0.15s;
+    z-index: 100;
+    box-shadow: 0 8px 32px rgba(0,0,0,0.5);
+    white-space: pre-line;
+  }
+  .svg-tooltip.visible { opacity: 1; }
+  .svg-tooltip .tt-label {
+    color: var(--text-bright);
+    font-weight: 500;
+    font-size: 0.72rem;
+    margin-bottom: 6px;
+    display: block;
+  }
+  .svg-tooltip code {
+    background: rgba(255,255,255,0.05);
+    padding: 1px 4px;
+    border-radius: 3px;
+    font-size: 0.64rem;
+  }
+
+  .diagram-wrap svg .artifact-node { cursor: help; }
+
+  @keyframes fadeUp {
+    from { opacity: 0; transform: translateY(12px); }
+    to { opacity: 1; transform: translateY(0); }
+  }
+</style>
+</head>
+<body>
+<div class="svg-tooltip" id="svg-tooltip"></div>
+<div class="container">
+
+  <header>
+    <h1>Auto-Scientist <span>Pipeline</span></h1>
+    <p>Data flow and information boundaries across the four-agent iteration loop.
+       Each agent sees only the data relevant to its role. Only the Coder reads code.</p>
+  </header>
+
+  <div class="legend">
+    <div class="legend-item">
+      <div class="legend-line writes"></div>
+      <span>produces / writes</span>
+    </div>
+    <div class="legend-item">
+      <div class="legend-line reads"></div>
+      <span>reads / consumes</span>
+    </div>
+    <div class="legend-item">
+      <div class="legend-line web"></div>
+      <span>web search access</span>
+    </div>
+    <div class="legend-item">
+      <span class="data-tag blocked" style="font-size:0.62rem;padding:2px 6px">blocked</span>
+      <span>explicitly denied</span>
+    </div>
+  </div>
+
+  <div class="flow-strip">
+    <span class="step" style="color:var(--accent-cyan)">Ingestor</span>
+    <span class="arrow">&rarr;</span>
+    <span class="step">Analyst</span>
+    <span class="arrow">&rarr;</span>
+    <span class="step">Scientist</span>
+    <span class="arrow">&rarr;</span>
+    <span class="step" style="opacity:0.5">stop?</span>
+    <span class="arrow">&rarr;</span>
+    <span class="step">Critic &harr; Defender</span>
+    <span class="arrow">&rarr;</span>
+    <span class="step">Coder (write + run)</span>
+    <span class="arrow">&rarr;</span>
+    <span class="step" style="opacity:0.5">evaluate</span>
+    <span class="arrow">&rarr;</span>
+    <span class="step" style="opacity:0.4">loop</span>
+  </div>
+
+  <!-- ===== Visual Diagram ===== -->
+  <div class="diagram-section">
+    <h2>Data Flow <span style="color:var(--accent-amber)">Diagram</span></h2>
+    <div class="diagram-wrap">
+      <svg id="pipeline-svg" viewBox="0 0 1360 680" width="1360" height="680"
+           xmlns="http://www.w3.org/2000/svg" font-family="'DM Mono', monospace">
+        <defs>
+          <!-- Arrowheads -->
+          <marker id="ah-amber" viewBox="0 0 10 8" refX="10" refY="4"
+                  markerWidth="8" markerHeight="6" orient="auto-start-reverse">
+            <path d="M0,0 L10,4 L0,8 Z" fill="#d4a24e"/>
+          </marker>
+          <marker id="ah-blue" viewBox="0 0 10 8" refX="10" refY="4"
+                  markerWidth="8" markerHeight="6" orient="auto-start-reverse">
+            <path d="M0,0 L10,4 L0,8 Z" fill="#4e8fd4"/>
+          </marker>
+          <marker id="ah-blue-dim" viewBox="0 0 10 8" refX="10" refY="4"
+                  markerWidth="8" markerHeight="6" orient="auto-start-reverse">
+            <path d="M0,0 L10,4 L0,8 Z" fill="#4e8fd4" opacity="0.5"/>
+          </marker>
+          <marker id="ah-loop" viewBox="0 0 10 8" refX="10" refY="4"
+                  markerWidth="8" markerHeight="6" orient="auto-start-reverse">
+            <path d="M0,0 L10,4 L0,8 Z" fill="#8e6ed4"/>
+          </marker>
+          <marker id="ah-cyan" viewBox="0 0 10 8" refX="10" refY="4"
+                  markerWidth="8" markerHeight="6" orient="auto-start-reverse">
+            <path d="M0,0 L10,4 L0,8 Z" fill="#4ec5d4"/>
+          </marker>
+
+          <!-- Glow filters -->
+          <filter id="glow-amber" x="-30%" y="-30%" width="160%" height="160%">
+            <feGaussianBlur in="SourceGraphic" stdDeviation="3" result="blur"/>
+            <feFlood flood-color="#d4a24e" flood-opacity="0.15"/>
+            <feComposite in2="blur" operator="in"/>
+            <feMerge><feMergeNode/><feMergeNode in="SourceGraphic"/></feMerge>
+          </filter>
+        </defs>
+
+        <!-- =============== AGENTS (middle band, y=300) =============== -->
+        <!-- Analyst -->
+        <g class="agent-group" data-agent="analyst"
+           data-tooltip="Analyst (observer)|Uses query() with Read + Glob tools. Examines results.txt and plot PNGs, measures against success criteria. max_turns: 5.
+
+Reads: results.txt, plots, lab notebook, success criteria
+Produces: analysis JSON (score, criteria, metrics, observations)
+Does NOT recommend changes or formulate hypotheses.">
+          <rect x="60" y="280" width="155" height="58" rx="10"
+                fill="#0f1525" stroke="#4e8fd4" stroke-width="1.5"/>
+          <text x="137" y="314" text-anchor="middle"
+                fill="#e8eaf0" font-size="13" font-weight="500">Analyst</text>
+          <text x="137" y="330" text-anchor="middle"
+                fill="#5a6178" font-size="9">observer</text>
+        </g>
+
+        <!-- Scientist -->
+        <g class="agent-group" data-agent="scientist"
+           data-tooltip="Scientist (planner)|Pure prompt-in, JSON-out. No tools, max_turns: 1. Receives everything via prompt injection.
+
+Reads: analysis JSON, lab notebook, domain knowledge
+Produces: plan JSON with hypothesis, strategy, changes, and 3-8 per-iteration success criteria.
+Does NOT read or write code.">
+          <rect x="290" y="280" width="155" height="58" rx="10"
+                fill="#0f1525" stroke="#d4a24e" stroke-width="1.5"/>
+          <text x="367" y="314" text-anchor="middle"
+                fill="#e8eaf0" font-size="13" font-weight="500">Scientist</text>
+          <text x="367" y="330" text-anchor="middle"
+                fill="#5a6178" font-size="9">planner</text>
+        </g>
+
+        <!-- Critic / Scientist -->
+        <g class="agent-group" data-agent="critic"
+           data-tooltip="Critic / Scientist (debate)|Plain API calls (OpenAI/Google/Anthropic). Multi-round: Critic challenges, Scientist responds, Critic refines.
+
+Both sides get identical context (symmetric).
+Both have web search to verify claims and look up papers.
+Challenges: hypothesis, strategy, success criteria quality.
+Neither side sees analysis JSON or Python code.
+After debate, the Scientist revises the plan in a separate call.">
+          <rect x="530" y="280" width="185" height="58" rx="10"
+                fill="#0f1525" stroke="#d44e6e" stroke-width="1.5"/>
+          <text x="622" y="314" text-anchor="middle"
+                fill="#e8eaf0" font-size="13" font-weight="500">Critic / Scientist</text>
+          <text x="622" y="330" text-anchor="middle"
+                fill="#5a6178" font-size="9">debate</text>
+        </g>
+
+        <!-- Coder -->
+        <g class="agent-group" data-agent="coder"
+           data-tooltip="Coder (implementer)|Uses query() with Read, Write, Edit, Bash, Glob, Grep. max_turns: 30. Safety callbacks block writes outside experiments/.
+
+Reads: plan JSON, critique, previous script, domain knowledge
+Produces: experiment.py (self-contained, runnable script)
+Implements the Scientist's plan, including SUCCESS CRITERIA evaluation in code.
+Only agent that reads or writes Python code.">
+          <rect x="800" y="280" width="155" height="58" rx="10"
+                fill="#0f1525" stroke="#4ed47a" stroke-width="1.5"/>
+          <text x="877" y="314" text-anchor="middle"
+                fill="#e8eaf0" font-size="13" font-weight="500">Coder</text>
+          <text x="877" y="330" text-anchor="middle"
+                fill="#5a6178" font-size="9">implementer</text>
+        </g>
+
+        <!-- Run phase (now handled by the Coder agent) -->
+        <g class="agent-group" data-agent="coder"
+           data-tooltip="Run phase (Coder)|The Coder agent runs the script it wrote via Bash, fixes errors, and writes run_result.json.
+
+The script itself prints structured output via print statements. No LLM post-processing of results.
+Timeout: configurable (default 120 min). Self-correction on errors.">
+          <rect x="1040" y="280" width="155" height="58" rx="10"
+                fill="#0f1525" stroke="#8e6ed4" stroke-width="1.5"/>
+          <text x="1117" y="314" text-anchor="middle"
+                fill="#e8eaf0" font-size="13" font-weight="500">Run + Fix</text>
+          <text x="1117" y="330" text-anchor="middle"
+                fill="#5a6178" font-size="9">coder self-corrects</text>
+        </g>
+
+        <!-- =============== PIPELINE ARTIFACTS (top, y=130) =============== -->
+        <!-- results.txt -->
+        <g class="artifact-node" data-artifact="results"
+           data-tooltip="results.txt|Self-compiled by the experiment script via print(). Example:
+
+v03 Results: Bi-exponential Decay
+========================================
+1. DATA RECAP
+   Subject: single subject, 4 breath-holds used
+2. FULL SPECIFICATION
+   PaO2(t) = A*exp(-t/tau1) + B*exp(-t/tau2)
+3. RESULTS
+   R2=0.987, RMSE=1.23
+4. SUCCESS CRITERIA
+   1. R2 > 0.95 for all holds: PASS (0.987)
+   2. No params at bounds:     FAIL (tau2=500 at bound)
+   Score: 1/2 PASS, 1 FAIL">
+          <rect x="22" y="118" width="96" height="32" rx="6"
+                fill="rgba(142,110,212,0.1)" stroke="#8e6ed4" stroke-width="1" stroke-opacity="0.5"/>
+          <text x="70" y="139" text-anchor="middle"
+                fill="#8e6ed4" font-size="10">results.txt</text>
+        </g>
+
+        <!-- plots -->
+        <g class="artifact-node" data-artifact="plots"
+           data-tooltip="plots (PNGs)|Diagnostic plots saved by the experiment script. The Analyst reads each one with the Read tool (multimodal).
+
+Examples:
+- v03_fit_overlay.png (predicted vs observed per hold)
+- v03_residuals.png (residual patterns over time)
+- v03_parameter_profile.png (profile likelihood for key params)
+- v03_sensitivity.png (leave-one-out sensitivity analysis)">
+          <rect x="128" y="118" width="72" height="32" rx="6"
+                fill="rgba(142,110,212,0.1)" stroke="#8e6ed4" stroke-width="1" stroke-opacity="0.5"/>
+          <text x="164" y="139" text-anchor="middle"
+                fill="#8e6ed4" font-size="10">plots</text>
+        </g>
+
+        <!-- analysis JSON -->
+        <g class="artifact-node" data-artifact="analysis"
+           data-tooltip="analysis JSON|Structured observation from the Analyst. Example:
+
+{
+  &quot;success_score&quot;: 75,
+  &quot;criteria_results&quot;: [
+    {&quot;name&quot;: &quot;R2 > 0.95&quot;, &quot;status&quot;: &quot;pass&quot;, &quot;measured_value&quot;: 0.987},
+    {&quot;name&quot;: &quot;No params at bounds&quot;, &quot;status&quot;: &quot;fail&quot;, ...}
+  ],
+  &quot;key_metrics&quot;: {&quot;r2&quot;: 0.987, &quot;rmse&quot;: 1.23},
+  &quot;improvements&quot;: [&quot;R2 improved from 0.91 to 0.987&quot;],
+  &quot;regressions&quot;: [&quot;tau2 now at upper bound (500)&quot;],
+  &quot;iteration_criteria_results&quot;: [{&quot;name&quot;: &quot;...&quot;, ...}]
+}">
+          <rect x="246" y="118" width="110" height="32" rx="6"
+                fill="rgba(78,143,212,0.1)" stroke="#4e8fd4" stroke-width="1" stroke-opacity="0.5"/>
+          <text x="301" y="139" text-anchor="middle"
+                fill="#4e8fd4" font-size="10">analysis JSON</text>
+        </g>
+
+        <!-- plan JSON -->
+        <g class="artifact-node" data-artifact="plan"
+           data-tooltip="plan JSON|Structured plan from the Scientist. Example:
+
+{
+  &quot;hypothesis&quot;: &quot;Bi-exponential decay will fix the at-bound tau problem&quot;,
+  &quot;strategy&quot;: &quot;structural&quot;,
+  &quot;changes&quot;: [
+    {&quot;what&quot;: &quot;Replace single-exp with bi-exp PaO2 decay&quot;,
+     &quot;why&quot;: &quot;Single-exp inadequate for long holds&quot;,
+     &quot;how&quot;: &quot;PaO2 = A*exp(-t/tau1) + B*exp(-t/tau2)&quot;,
+     &quot;priority&quot;: 1}
+  ],
+  &quot;success_criteria&quot;: [
+    {&quot;name&quot;: &quot;No params at bounds&quot;, &quot;metric_key&quot;: &quot;params_at_bounds&quot;,
+     &quot;condition&quot;: &quot;== 0&quot;, ...}
+  ],
+  &quot;should_stop&quot;: false
+}">
+          <rect x="440" y="118" width="92" height="32" rx="6"
+                fill="rgba(212,162,78,0.1)" stroke="#d4a24e" stroke-width="1" stroke-opacity="0.5"/>
+          <text x="486" y="139" text-anchor="middle"
+                fill="#d4a24e" font-size="10">plan JSON</text>
+        </g>
+
+        <!-- critique -->
+        <g class="artifact-node" data-artifact="critique"
+           data-tooltip="critique|Final refined critique from the debate. Example:
+
+The bi-exponential approach is sound for long holds, but the success criterion 'no params at bounds' is too strict for a structural change. Consider: (1) allowing 1 param at bounds as acceptable for first iteration, (2) adding a criterion for AIC/BIC improvement over single-exp to confirm the extra parameters are justified, (3) the tau2 identifiability concern - profile it before trusting the fit.">
+          <rect x="755" y="118" width="82" height="32" rx="6"
+                fill="rgba(212,78,110,0.1)" stroke="#d44e6e" stroke-width="1" stroke-opacity="0.5"/>
+          <text x="796" y="139" text-anchor="middle"
+                fill="#d44e6e" font-size="10">critique</text>
+        </g>
+
+        <!-- experiment.py -->
+        <g class="artifact-node" data-artifact="script"
+           data-tooltip="experiment.py|Self-contained Python script. All imports, data loading, computation, output, and plotting in one file. No framework imports.
+
+Prints structured results to stdout (captured as results.txt). Saves diagnostic plots as PNGs. Evaluates the Scientist's success criteria in code and prints the SUCCESS CRITERIA section.
+
+Example: ~500-2500 lines depending on complexity.">
+          <rect x="994" y="118" width="114" height="32" rx="6"
+                fill="rgba(78,212,122,0.1)" stroke="#4ed47a" stroke-width="1" stroke-opacity="0.5"/>
+          <text x="1051" y="139" text-anchor="middle"
+                fill="#4ed47a" font-size="10">experiment.py</text>
+        </g>
+
+        <!-- =============== PERSISTENT STORES (bottom, y=530) =============== -->
+        <!-- Success Criteria -->
+        <g class="artifact-node" data-artifact="criteria"
+           data-tooltip="success criteria (top-level)|Defined by the Scientist on iteration 1, stored in ExperimentState. Determines when the investigation is done. May be revised by the Scientist on later iterations with justification.
+
+Example (from config.json):
+1. [REQUIRED] Overall R2 (metric: r2_mean, target: >= 0.95)
+2. [REQUIRED] No global params at bounds (metric: global_at_bounds, target: == 0)
+3. [optional] Nadir timing error (metric: nadir_err_max, target: <= 5.0)
+
+These are separate from per-iteration criteria (which the Scientist defines each iteration).">
+          <rect x="32" y="518" width="126" height="32" rx="6"
+                fill="rgba(78,143,212,0.06)" stroke="#4e8fd4" stroke-width="1" stroke-opacity="0.3" stroke-dasharray="4 3"/>
+          <text x="95" y="539" text-anchor="middle"
+                fill="#4e8fd4" font-size="10" opacity="0.7">success criteria</text>
+        </g>
+
+        <!-- Lab Notebook -->
+        <g class="artifact-node" data-artifact="notebook"
+           data-tooltip="lab notebook|Strategic journal written by the Scientist. Records hypothesis, reasoning, and dead ends. Not a copy of approach specs.
+
+Example:
+## v03 - Bi-exponential PaO2 decay
+Hypothesis: single-exponential is inadequate for holds > 300s. The optimizer pushes tau_washout to its bound to compensate.
+
+Strategy: structural. Replace single-exp with bi-exp for FL-type holds.
+
+Key insight from v02: FL#6 tau_washout=250 is at bound regardless of other parameter changes. This is a structural limitation, not a tuning problem.
+
+Result: 1/2 criteria passed. tau2 identifiability is a new concern.">
+          <rect x="240" y="518" width="115" height="32" rx="6"
+                fill="rgba(78,143,212,0.06)" stroke="#4e8fd4" stroke-width="1" stroke-opacity="0.3" stroke-dasharray="4 3"/>
+          <text x="297" y="539" text-anchor="middle"
+                fill="#4e8fd4" font-size="10" opacity="0.7">lab notebook</text>
+        </g>
+
+        <!-- Domain Knowledge -->
+        <g class="artifact-node" data-artifact="domain"
+           data-tooltip="domain knowledge|Domain-specific context from the config. Injected into Scientist, Coder, and Critic prompts.
+
+Example (SpO2 domain):
+Pulse oximetry measures peripheral oxygen saturation (SpO2) using light absorption. During breath-hold apnea, arterial PaO2 declines exponentially. The Severinghaus oxygen dissociation curve relates PaO2 to SaO2. Key physiological parameters: PvO2 (~25 mmHg), P50 (~26.6 mmHg), PaCO2 rise rate (~0.13 mmHg/s during apnea). Sensor lag (tau) is 10-30s for finger pulse oximeters.">
+          <rect x="470" y="518" width="140" height="32" rx="6"
+                fill="rgba(78,143,212,0.06)" stroke="#4e8fd4" stroke-width="1" stroke-opacity="0.3" stroke-dasharray="4 3"/>
+          <text x="540" y="539" text-anchor="middle"
+                fill="#4e8fd4" font-size="10" opacity="0.7">domain knowledge</text>
+        </g>
+
+        <!-- Dataset -->
+        <g class="artifact-node" data-artifact="dataset"
+           data-tooltip="dataset|Canonical dataset produced by the Ingestor from raw user data. Stored in experiments/data/. Never modified after ingestion.
+
+The Ingestor inspects raw input (any format), canonicalizes it (CSV, SQLite, or Parquet), and writes it here. Original raw data is preserved unchanged.
+
+Example (SpO2):
+SQLite database with tables:
+- breath_holds (hold_id, lung_volume, start_time, end_time)
+- spo2_readings (timestamp, spo2, heart_rate, hold_id)
+
+6 breath-holds, 1-Hz sampling, ~1200 data points total.">
+          <rect x="1058" y="518" width="80" height="32" rx="6"
+                fill="rgba(142,110,212,0.06)" stroke="#8e6ed4" stroke-width="1" stroke-opacity="0.3" stroke-dasharray="4 3"/>
+          <text x="1098" y="539" text-anchor="middle"
+                fill="#8e6ed4" font-size="10" opacity="0.7">dataset</text>
+        </g>
+
+        <!-- Web Search (floating near Critic) -->
+        <g class="artifact-node" data-artifact="web"
+           data-tooltip="web search|Both Critic and Defender can search the web to verify claims, look up papers, and check methods.
+
+Supported providers:
+- OpenAI: Responses API with web_search_preview tool
+- Google: GenAI with GoogleSearch grounding
+- Anthropic: web_search_20250305 tool
+
+Grounds the debate in real science rather than hallucinated citations.">
+          <rect x="580" y="192" width="88" height="28" rx="14"
+                fill="rgba(78,197,212,0.1)" stroke="#4ec5d4" stroke-width="1" stroke-opacity="0.5" stroke-dasharray="2 3"/>
+          <text x="624" y="211" text-anchor="middle"
+                fill="#4ec5d4" font-size="9">web search</text>
+        </g>
+
+        <!-- =============== ARROWS: Produces (amber, solid) =============== -->
+        <!-- Analyst produces analysis JSON -->
+        <path class="arrow-line" data-agents="analyst" data-artifacts="analysis"
+              d="M 185,280 C 185,240 301,190 301,152"
+              fill="none" stroke="#d4a24e" stroke-width="1.8" marker-end="url(#ah-amber)"/>
+        <!-- Scientist produces plan JSON -->
+        <path class="arrow-line" data-agents="scientist" data-artifacts="plan"
+              d="M 400,280 C 400,240 486,190 486,152"
+              fill="none" stroke="#d4a24e" stroke-width="1.8" marker-end="url(#ah-amber)"/>
+        <!-- Critic produces critique -->
+        <path class="arrow-line" data-agents="critic" data-artifacts="critique"
+              d="M 680,280 C 680,230 796,190 796,152"
+              fill="none" stroke="#d4a24e" stroke-width="1.8" marker-end="url(#ah-amber)"/>
+        <!-- Coder produces experiment.py -->
+        <path class="arrow-line" data-agents="coder" data-artifacts="script"
+              d="M 920,280 C 920,230 1051,190 1051,152"
+              fill="none" stroke="#d4a24e" stroke-width="1.8" marker-end="url(#ah-amber)"/>
+
+        <!-- =============== ARROWS: Reads pipeline (blue, dashed) =============== -->
+        <!-- results.txt feeds Analyst -->
+        <path class="arrow-line" data-agents="analyst" data-artifacts="results"
+              d="M 70,150 C 70,200 100,240 110,278"
+              fill="none" stroke="#4e8fd4" stroke-width="1.5" stroke-dasharray="6 4"
+              marker-end="url(#ah-blue)"/>
+        <!-- plots feed Analyst -->
+        <path class="arrow-line" data-agents="analyst" data-artifacts="plots"
+              d="M 164,150 C 164,200 155,240 150,278"
+              fill="none" stroke="#4e8fd4" stroke-width="1.5" stroke-dasharray="6 4"
+              marker-end="url(#ah-blue)"/>
+        <!-- analysis JSON feeds Scientist -->
+        <path class="arrow-line" data-agents="scientist" data-artifacts="analysis"
+              d="M 320,150 C 330,200 350,240 355,278"
+              fill="none" stroke="#4e8fd4" stroke-width="1.5" stroke-dasharray="6 4"
+              marker-end="url(#ah-blue)"/>
+        <!-- plan JSON feeds Critic -->
+        <path class="arrow-line" data-agents="critic" data-artifacts="plan"
+              d="M 510,150 C 520,200 570,250 580,278"
+              fill="none" stroke="#4e8fd4" stroke-width="1.5" stroke-dasharray="6 4"
+              marker-end="url(#ah-blue)"/>
+        <!-- experiment.py feeds Runner -->
+        <path class="arrow-line" data-agents="runner" data-artifacts="script"
+              d="M 1070,150 C 1080,200 1100,240 1105,278"
+              fill="none" stroke="#4e8fd4" stroke-width="1.5" stroke-dasharray="6 4"
+              marker-end="url(#ah-blue)"/>
+
+        <!-- =============== ARROWS: Runner loop (violet, curved over top) =============== -->
+        <path class="arrow-line" data-agents="runner" data-artifacts="results,plots"
+              d="M 1150,280 C 1150,40 70,40 70,116"
+              fill="none" stroke="#8e6ed4" stroke-width="1.8" stroke-opacity="0.6"
+              marker-end="url(#ah-loop)"/>
+        <!-- small label on the loop -->
+        <text x="610" y="30" text-anchor="middle" fill="#8e6ed4" font-size="9" opacity="0.5">
+          stdout + PNGs loop back to next iteration
+        </text>
+
+        <!-- =============== ARROWS: Persistent reads (blue, thin, from bottom) =============== -->
+        <!-- Success criteria → Analyst -->
+        <path class="arrow-line" data-agents="analyst" data-artifacts="criteria"
+              d="M 95,518 C 95,460 120,380 125,340"
+              fill="none" stroke="#4e8fd4" stroke-width="1" stroke-opacity="0.4" stroke-dasharray="4 3"
+              marker-end="url(#ah-blue-dim)"/>
+        <!-- Lab notebook → Analyst -->
+        <path class="arrow-line" data-agents="analyst" data-artifacts="notebook"
+              d="M 270,518 C 260,460 175,380 160,340"
+              fill="none" stroke="#4e8fd4" stroke-width="1" stroke-opacity="0.4" stroke-dasharray="4 3"
+              marker-end="url(#ah-blue-dim)"/>
+        <!-- Lab notebook → Scientist -->
+        <path class="arrow-line" data-agents="scientist" data-artifacts="notebook"
+              d="M 297,518 C 297,440 350,380 360,340"
+              fill="none" stroke="#4e8fd4" stroke-width="1" stroke-opacity="0.4" stroke-dasharray="4 3"
+              marker-end="url(#ah-blue-dim)"/>
+        <!-- Lab notebook → Critic -->
+        <path class="arrow-line" data-agents="critic" data-artifacts="notebook"
+              d="M 330,518 C 380,440 580,380 600,340"
+              fill="none" stroke="#4e8fd4" stroke-width="1" stroke-opacity="0.4" stroke-dasharray="4 3"
+              marker-end="url(#ah-blue-dim)"/>
+        <!-- Domain knowledge → Analyst -->
+        <path class="arrow-line" data-agents="analyst" data-artifacts="domain"
+              d="M 490,518 C 430,460 170,380 150,340"
+              fill="none" stroke="#4e8fd4" stroke-width="1" stroke-opacity="0.4" stroke-dasharray="4 3"
+              marker-end="url(#ah-blue-dim)"/>
+        <!-- Domain knowledge → Scientist -->
+        <path class="arrow-line" data-agents="scientist" data-artifacts="domain"
+              d="M 510,518 C 480,460 395,380 380,340"
+              fill="none" stroke="#4e8fd4" stroke-width="1" stroke-opacity="0.4" stroke-dasharray="4 3"
+              marker-end="url(#ah-blue-dim)"/>
+        <!-- Domain knowledge → Critic -->
+        <path class="arrow-line" data-agents="critic" data-artifacts="domain"
+              d="M 540,518 C 540,450 620,380 630,340"
+              fill="none" stroke="#4e8fd4" stroke-width="1" stroke-opacity="0.4" stroke-dasharray="4 3"
+              marker-end="url(#ah-blue-dim)"/>
+        <!-- Domain knowledge → Coder -->
+        <path class="arrow-line" data-agents="coder" data-artifacts="domain"
+              d="M 580,518 C 640,440 840,380 860,340"
+              fill="none" stroke="#4e8fd4" stroke-width="1" stroke-opacity="0.4" stroke-dasharray="4 3"
+              marker-end="url(#ah-blue-dim)"/>
+        <!-- Dataset → Runner -->
+        <path class="arrow-line" data-agents="runner" data-artifacts="dataset"
+              d="M 1098,518 C 1098,450 1110,380 1115,340"
+              fill="none" stroke="#8e6ed4" stroke-width="1" stroke-opacity="0.4" stroke-dasharray="4 3"
+              marker-end="url(#ah-blue-dim)"/>
+
+        <!-- Dataset → Coder -->
+        <path class="arrow-line" data-agents="coder" data-artifacts="dataset"
+              d="M 1078,518 C 1060,450 900,380 880,340"
+              fill="none" stroke="#4e8fd4" stroke-width="1" stroke-opacity="0.4" stroke-dasharray="4 3"
+              marker-end="url(#ah-blue-dim)"/>
+
+        <!-- Web search → Critic -->
+        <path class="arrow-line" data-agents="critic" data-artifacts="web"
+              d="M 624,220 C 624,245 622,260 622,278"
+              fill="none" stroke="#4ec5d4" stroke-width="1.2" stroke-dasharray="2 3"
+              marker-end="url(#ah-blue-dim)"/>
+
+        <!-- =============== ARROWS: Writes to persistent stores (amber, solid) =============== -->
+        <!-- Scientist writes to lab notebook -->
+        <path class="arrow-line" data-agents="scientist" data-artifacts="notebook"
+              d="M 367,338 C 367,420 310,480 297,516"
+              fill="none" stroke="#d4a24e" stroke-width="1.5" marker-end="url(#ah-amber)"/>
+        <!-- =============== FLOW PARTICLES =============== -->
+        <!-- Particle on the loop arrow -->
+        <circle r="3" fill="#8e6ed4" opacity="0.8" class="flow-dot"
+                style="offset-path: path('M 1150,280 C 1150,40 70,40 70,116'); animation-duration: 4s;"/>
+        <!-- Particle: analyst → analysis -->
+        <circle r="2.5" fill="#d4a24e" opacity="0.9" class="flow-dot"
+                style="offset-path: path('M 185,280 C 185,240 301,190 301,152'); animation-duration: 2s; animation-delay: 0.3s;"/>
+        <!-- Particle: scientist → plan -->
+        <circle r="2.5" fill="#d4a24e" opacity="0.9" class="flow-dot"
+                style="offset-path: path('M 400,280 C 400,240 486,190 486,152'); animation-duration: 2s; animation-delay: 0.8s;"/>
+        <!-- Particle: critic → critique -->
+        <circle r="2.5" fill="#d4a24e" opacity="0.9" class="flow-dot"
+                style="offset-path: path('M 680,280 C 680,230 796,190 796,152'); animation-duration: 2s; animation-delay: 1.3s;"/>
+        <!-- Particle: coder → script -->
+        <circle r="2.5" fill="#d4a24e" opacity="0.9" class="flow-dot"
+                style="offset-path: path('M 920,280 C 920,230 1051,190 1051,152'); animation-duration: 2s; animation-delay: 1.8s;"/>
+
+        <!-- =============== INGESTOR (Phase 0, feeds dataset) =============== -->
+        <g class="agent-group" data-agent="ingestor"
+           data-tooltip="Ingestor (Phase 0)|Runs once before the iteration loop. Inspects raw user data, canonicalizes it (CSV/SQLite/Parquet), and writes to experiments/data/.
+
+Uses query() with Bash, Read, Write, Glob, Grep. In interactive mode also AskUserQuestion. max_turns: 30.
+Never modifies original data. Logs assumptions to the lab notebook.">
+          <rect x="1190" y="518" width="120" height="32" rx="6"
+                fill="rgba(78,197,212,0.08)" stroke="#4ec5d4" stroke-width="1" stroke-opacity="0.5"/>
+          <text x="1250" y="539" text-anchor="middle"
+                fill="#4ec5d4" font-size="10">Ingestor</text>
+        </g>
+        <!-- Arrow: Ingestor produces dataset -->
+        <path class="arrow-line" data-agents="ingestor" data-artifacts="dataset"
+              d="M 1190,534 L 1140,534"
+              fill="none" stroke="#4ec5d4" stroke-width="1.5"
+              marker-end="url(#ah-cyan)"/>
+
+        <!-- =============== PRE-SET LABELS =============== -->
+        <text x="95" y="562" text-anchor="middle" fill="#5a6178" font-size="7" opacity="0.5">pre-set</text>
+        <text x="540" y="562" text-anchor="middle" fill="#5a6178" font-size="7" opacity="0.5">pre-set</text>
+        <text x="1250" y="562" text-anchor="middle" fill="#4ec5d4" font-size="7" opacity="0.5">phase 0</text>
+
+        <!-- =============== SECTION LABELS =============== -->
+        <text x="20" y="100" fill="#5a6178" font-size="9" font-weight="500"
+              text-transform="uppercase" letter-spacing="1.5">PIPELINE ARTIFACTS</text>
+        <text x="20" y="508" fill="#5a6178" font-size="9" font-weight="500"
+              text-transform="uppercase" letter-spacing="1.5">PERSISTENT STORES</text>
+        <text x="20" y="270" fill="#5a6178" font-size="9" font-weight="500"
+              text-transform="uppercase" letter-spacing="1.5">AGENTS</text>
+
+        <!-- =============== PLAN feeds CODER (via the Coder reads the plan) =============== -->
+        <path class="arrow-line" data-agents="coder" data-artifacts="plan"
+              d="M 532,134 C 640,134 800,200 840,278"
+              fill="none" stroke="#4e8fd4" stroke-width="1.2" stroke-opacity="0.35" stroke-dasharray="4 3"
+              marker-end="url(#ah-blue-dim)"/>
+
+      </svg>
+    </div>
+    <p style="font-size:0.65rem;color:var(--text-dim);margin-top:10px;font-weight:300;">
+      Hover over any agent to highlight its connections. Amber arrows = produces. Blue dashed = reads. Violet arc = loop.
+    </p>
+  </div>
+
+  <script>
+  (function() {
+    const svg = document.getElementById('pipeline-svg');
+    const agents = svg.querySelectorAll('.agent-group');
+    const arrows = svg.querySelectorAll('.arrow-line');
+    const artifacts = svg.querySelectorAll('.artifact-node');
+
+    agents.forEach(ag => {
+      const name = ag.dataset.agent;
+
+      ag.addEventListener('mouseenter', () => {
+        svg.classList.add('has-hover');
+        ag.classList.add('highlight');
+
+        // Highlight connected arrows and their artifacts
+        arrows.forEach(ar => {
+          const arAgents = (ar.dataset.agents || '').split(',');
+          if (arAgents.includes(name)) {
+            ar.classList.add('highlight');
+            // Highlight connected artifacts
+            const arArtifacts = (ar.dataset.artifacts || '').split(',');
+            arArtifacts.forEach(artName => {
+              artifacts.forEach(artNode => {
+                if (artNode.dataset.artifact === artName) {
+                  artNode.classList.add('highlight');
+                }
+              });
+            });
+          }
+        });
+      });
+
+      ag.addEventListener('mouseleave', () => {
+        svg.classList.remove('has-hover');
+        svg.querySelectorAll('.highlight').forEach(el => el.classList.remove('highlight'));
+      });
+    });
+  })();
+
+  // Tooltip system
+  (function() {
+    const tooltip = document.getElementById('svg-tooltip');
+    const allTipped = document.querySelectorAll('[data-tooltip]');
+
+    allTipped.forEach(el => {
+      el.addEventListener('mouseenter', () => {
+        const raw = el.dataset.tooltip;
+        const pipeIdx = raw.indexOf('|');
+        let label = '';
+        let body = raw;
+        if (pipeIdx !== -1) {
+          label = raw.slice(0, pipeIdx);
+          body = raw.slice(pipeIdx + 1);
+        }
+        // Build tooltip content safely using DOM methods
+        tooltip.textContent = '';
+        if (label) {
+          const labelEl = document.createElement('span');
+          labelEl.className = 'tt-label';
+          labelEl.textContent = label;
+          tooltip.appendChild(labelEl);
+        }
+        const bodyEl = document.createTextNode(body);
+        tooltip.appendChild(bodyEl);
+        tooltip.classList.add('visible');
+      });
+
+      el.addEventListener('mousemove', e => {
+        const pad = 16;
+        let x = e.clientX + pad;
+        let y = e.clientY + pad;
+        // Keep tooltip on screen
+        const rect = tooltip.getBoundingClientRect();
+        if (x + rect.width > window.innerWidth - pad) {
+          x = e.clientX - rect.width - pad;
+        }
+        if (y + rect.height > window.innerHeight - pad) {
+          y = e.clientY - rect.height - pad;
+        }
+        tooltip.style.left = x + 'px';
+        tooltip.style.top = y + 'px';
+      });
+
+      el.addEventListener('mouseleave', () => {
+        tooltip.classList.remove('visible');
+      });
+    });
+  })();
+  </script>
+
+  <div class="agents-grid">
+
+    <!-- Ingestor -->
+    <div class="agent-card ingestor" style="border-color: rgba(78,197,212,0.25);">
+      <div class="agent-header">
+        <div class="agent-icon">&#x1F4E5;</div>
+        <div>
+          <div class="agent-name">Ingestor</div>
+          <div class="agent-role">Phase 0. Canonicalizes raw data and produces operational config.</div>
+        </div>
+      </div>
+      <div class="agent-detail">
+        Uses <code>query()</code> with Bash, Read, Write, Glob, Grep.
+        In interactive mode, also uses AskUserQuestion for human clarification.
+        Runs once before the iteration loop.
+      </div>
+      <div class="data-section">
+        <div class="data-section-label reads">reads</div>
+        <div class="data-tags">
+          <span class="data-tag read">raw data (file/dir)</span>
+          <span class="data-tag read">goal</span>
+        </div>
+      </div>
+      <div class="data-section">
+        <div class="data-section-label writes">produces</div>
+        <div class="data-tags">
+          <span class="data-tag write">canonical dataset</span>
+          <span class="data-tag write">ingest.py</span>
+          <span class="data-tag write">notebook entry</span>
+        </div>
+      </div>
+      <div class="boundary-note" style="color: var(--accent-cyan); border-color: rgba(78,197,212,0.15);">
+        Never modifies original data. Outputs to experiments/data/.
+      </div>
+    </div>
+
+    <!-- Analyst -->
+    <div class="agent-card analyst">
+      <div class="agent-header">
+        <div class="agent-icon">&#x1F50D;</div>
+        <div>
+          <div class="agent-name">Analyst</div>
+          <div class="agent-role">Pure observer. Reports facts, no recommendations.</div>
+        </div>
+      </div>
+      <div class="agent-detail">
+        Uses <code>query()</code> with Read + Glob tools. Examines results and plots,
+        measures against success criteria. max_turns: 5.
+      </div>
+      <div class="data-section">
+        <div class="data-section-label reads">reads</div>
+        <div class="data-tags">
+          <span class="data-tag read">results.txt</span>
+          <span class="data-tag read">plots (PNGs)</span>
+          <span class="data-tag read">lab notebook</span>
+          <span class="data-tag read">success criteria</span>
+        </div>
+      </div>
+      <div class="data-section">
+        <div class="data-section-label writes">produces</div>
+        <div class="data-tags">
+          <span class="data-tag write">analysis JSON</span>
+        </div>
+      </div>
+      <div class="boundary-note">
+        &#x2717; No code access &nbsp; &#x2717; No recommendations
+      </div>
+    </div>
+
+    <!-- Scientist -->
+    <div class="agent-card scientist">
+      <div class="agent-header">
+        <div class="agent-icon">&#x1F9EA;</div>
+        <div>
+          <div class="agent-name">Scientist</div>
+          <div class="agent-role">Strategic planner. No tools, no code access.</div>
+        </div>
+      </div>
+      <div class="agent-detail">
+        Pure prompt-in, JSON-out call. Receives everything via prompt injection.
+        No tools, max_turns: 1. Formulates hypothesis and creates detailed plan.
+      </div>
+      <div class="data-section">
+        <div class="data-section-label reads">reads (via prompt)</div>
+        <div class="data-tags">
+          <span class="data-tag read">analysis JSON</span>
+          <span class="data-tag read">lab notebook</span>
+          <span class="data-tag read">domain knowledge</span>
+        </div>
+      </div>
+      <div class="data-section">
+        <div class="data-section-label writes">produces</div>
+        <div class="data-tags">
+          <span class="data-tag write">plan JSON</span>
+          <span class="data-tag write">notebook entry</span>
+          <span class="data-tag write">stop decision</span>
+        </div>
+      </div>
+      <div class="boundary-note">
+        &#x2717; No code access &nbsp; &#x2717; No tools &nbsp; &#x2717; No web search
+      </div>
+    </div>
+
+    <!-- Critic / Scientist Debate -->
+    <div class="agent-card critic">
+      <div class="agent-header">
+        <div class="agent-icon">&#x2694;</div>
+        <div>
+          <div class="agent-name">Critic &amp; Scientist</div>
+          <div class="agent-role">Multi-round debate. Symmetric context, web search.</div>
+        </div>
+      </div>
+      <div class="agent-detail">
+        Plain API calls (OpenAI/Google/Anthropic). Critic challenges the plan,
+        Scientist responds, Critic refines. Both sides see identical information.
+        After debate, the Scientist revises the plan in a separate structured call.
+      </div>
+      <div class="data-section">
+        <div class="data-section-label reads">reads (both sides, symmetric)</div>
+        <div class="data-tags">
+          <span class="data-tag read">plan JSON</span>
+          <span class="data-tag read">lab notebook</span>
+          <span class="data-tag read">domain knowledge</span>
+          <span class="data-tag capability">web search</span>
+        </div>
+      </div>
+      <div class="data-section">
+        <div class="data-section-label writes">produces</div>
+        <div class="data-tags">
+          <span class="data-tag write">debate transcript</span>
+          <span class="data-tag write">revised plan JSON</span>
+        </div>
+      </div>
+      <div class="boundary-note">
+        &#x2717; No analysis JSON &nbsp; &#x2717; No code access &nbsp; &#x2717; No script content
+      </div>
+    </div>
+
+    <!-- Coder -->
+    <div class="agent-card coder">
+      <div class="agent-header">
+        <div class="agent-icon">&#x1F4BB;</div>
+        <div>
+          <div class="agent-name">Coder</div>
+          <div class="agent-role">Pure implementer. Only agent with code access.</div>
+        </div>
+      </div>
+      <div class="agent-detail">
+        Uses <code>query()</code> with Read, Write, Edit, Bash, Glob, Grep.
+        Safety callbacks block writes outside experiments/. max_turns: 30.
+      </div>
+      <div class="data-section">
+        <div class="data-section-label reads">reads</div>
+        <div class="data-tags">
+          <span class="data-tag read">revised plan JSON</span>
+          <span class="data-tag read">previous script</span>
+          <span class="data-tag read">domain knowledge</span>
+        </div>
+      </div>
+      <div class="data-section">
+        <div class="data-section-label writes">produces</div>
+        <div class="data-tags">
+          <span class="data-tag write">experiment.py</span>
+        </div>
+      </div>
+      <div class="boundary-note" style="color: var(--accent-green); border-color: rgba(78,212,122,0.15);">
+        &#x2713; Only agent that reads/writes Python code
+      </div>
+    </div>
+
+    <!-- Run phase (merged into Coder) -->
+    <div class="agent-card runner">
+      <div class="agent-header">
+        <div class="agent-icon">&#x25B6;</div>
+        <div>
+          <div class="agent-name">Run + Fix (Coder)</div>
+          <div class="agent-role">Coder agent runs its own script via Bash, self-corrects errors.</div>
+        </div>
+      </div>
+      <div class="agent-detail">
+        The Coder runs <code>uv run script.py</code>, reads errors, fixes code, and retries.
+        Writes <code>run_result.json</code> reporting success/failure. The script itself
+        prints structured output (approach spec, parameters, metrics).
+      </div>
+      <div class="data-section">
+        <div class="data-section-label reads">reads</div>
+        <div class="data-tags">
+          <span class="data-tag read">experiment.py</span>
+          <span class="data-tag read">dataset</span>
+        </div>
+      </div>
+      <div class="data-section">
+        <div class="data-section-label writes">produces</div>
+        <div class="data-tags">
+          <span class="data-tag write">results.txt</span>
+          <span class="data-tag write">plots (PNGs)</span>
+          <span class="data-tag write">run_result.json</span>
+        </div>
+      </div>
+      <div class="boundary-note" style="color: var(--accent-violet); border-color: rgba(142,110,212,0.15);">
+        results.txt compiled by the script itself via print(), no LLM post-processing
+      </div>
+    </div>
+
+  </div>
+
+  <!-- Information Boundary Matrix -->
+  <div class="boundary-section">
+    <h2>Information Boundary <span style="color:var(--accent-amber)">Matrix</span></h2>
+    <table class="matrix-table">
+      <thead>
+        <tr>
+          <th>Agent</th>
+          <th>Sees code?</th>
+          <th>Sees analysis?</th>
+          <th>Sees notebook?</th>
+          <th>Web search?</th>
+          <th>Tools?</th>
+        </tr>
+      </thead>
+      <tbody>
+        <tr>
+          <td class="agent-col">Ingestor</td>
+          <td><span class="badge no">no</span></td>
+          <td><span class="badge no">no</span></td>
+          <td><span class="badge yes">writes</span></td>
+          <td><span class="badge no">no</span></td>
+          <td>Bash, Read, Write, Glob, Grep (+AskUserQuestion in interactive)</td>
+        </tr>
+        <tr>
+          <td class="agent-col">Analyst</td>
+          <td><span class="badge no">no</span></td>
+          <td><span class="badge produces">produces</span></td>
+          <td><span class="badge yes">yes</span></td>
+          <td><span class="badge no">no</span></td>
+          <td>Read, Glob</td>
+        </tr>
+        <tr>
+          <td class="agent-col">Scientist</td>
+          <td><span class="badge no">no</span></td>
+          <td><span class="badge input">input</span></td>
+          <td><span class="badge yes">yes</span></td>
+          <td><span class="badge no">no</span></td>
+          <td>none</td>
+        </tr>
+        <tr>
+          <td class="agent-col">Critic</td>
+          <td><span class="badge no">no</span></td>
+          <td><span class="badge no">no</span></td>
+          <td><span class="badge yes">yes</span></td>
+          <td><span class="badge yes">yes</span></td>
+          <td>web only</td>
+        </tr>
+        <tr>
+          <td class="agent-col">Scientist (debate)</td>
+          <td><span class="badge no">no</span></td>
+          <td><span class="badge no">no</span></td>
+          <td><span class="badge yes">yes</span></td>
+          <td><span class="badge yes">yes</span></td>
+          <td>web only</td>
+        </tr>
+        <tr>
+          <td class="agent-col">Coder</td>
+          <td><span class="badge yes" style="background:var(--accent-green-dim);color:var(--accent-green)">only agent</span></td>
+          <td><span class="badge no">no</span></td>
+          <td><span class="badge no">no</span></td>
+          <td><span class="badge no">no</span></td>
+          <td>Read, Write, Edit, Bash, Glob, Grep</td>
+        </tr>
+        <tr>
+          <td class="agent-col">Run + Fix</td>
+          <td colspan="5" style="color:var(--text-dim);font-style:italic">
+            Coder agent runs its own script via Bash, self-corrects errors, writes run_result.json.
+          </td>
+        </tr>
+      </tbody>
+    </table>
+  </div>
+
+  <div class="footer-note">
+    <strong>Why these boundaries?</strong>
+    The plan already incorporates the analysis, so passing both to the Critic is redundant.
+    Code is an implementation detail that only the implementer needs.
+    The Critic and Scientist debate strategy on equal footing with symmetric context.
+    After the debate, the Scientist revises the plan; the Coder gets only the revised plan.
+    results.txt is self-compiled by the experiment script via print statements, removing
+    the need for an LLM summarizer.
+    <br><br>
+    <strong>Lab notebook</strong> is a strategic journal (hypothesis, reasoning, dead ends),
+    not a copy of approach specs or detailed results. That detail lives in results.txt.
+  </div>
+
+</div>
+</body>
+</html>

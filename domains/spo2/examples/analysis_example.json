@@ -1,0 +1,48 @@
+{
+  "version": "v7.05",
+  "success_score": 60,
+  "failures": [
+    "b_s = 1.75, far from target range (0.8, 1.2)",
+    "p = 3.52 at borderline of expected range [1.5, 3.5]",
+    "delta range = 20.2s, above 15s target",
+    "RV#4 eff_lag at 5.0s floor (FLOOR BINDING)",
+    "LOHO-Inference R2 for RV#4 = -1.08 (outlier)",
+    "gamma = 1.30 at upper bound in Stage B"
+  ],
+  "key_metrics": {
+    "tau_0": 15.01,
+    "b_s": 1.75,
+    "p": 3.52,
+    "saturation_pct": 0.4,
+    "delta_range_s": 20.2,
+    "loho_timing_s": 0.0,
+    "qc_pass_r2a": 0.97,
+    "qc_pass_r2n": 0.98,
+    "weaklag_divergence_pct": 9.6,
+    "gamma": 1.30,
+    "gamma_at_bound": 1
+  },
+  "what_worked": [
+    "Baseline-corrected measurement equation eliminated saturation: 0.4% vs 17.6%",
+    "Power-law curvature is identifiable (both tau_0 and p profiles are non-monotone)",
+    "LOHO-Inference R2 dramatically improved for QC-passing holds (0.91-0.98)",
+    "Parameter efficiency: 18 params vs 28 in v7.04 (-36%), with better fits",
+    "Nadir timing is perfect: 0.0s for all 5 holds"
+  ],
+  "what_didnt_work": [
+    "b_s = 1.75, the power-law descent + gamma kernel under-predicts deviation amplitude",
+    "Delta range = 20.2s still too wide (target < 15s)",
+    "RV#4 remains an irreducible outlier (structural incompatibility with post-apnea model)",
+    "gamma = 1.30 at upper bound, cannot reach preferred value"
+  ],
+  "stagnation_detected": false,
+  "paradigm_shift_recommended": false,
+  "should_stop": false,
+  "stop_reason": null,
+  "recommended_changes": [
+    "Widen gamma bounds to [0.8, 1.6] so gamma can reach its preferred value",
+    "Investigate b_s = 1.75: try reducing cv from 0.15 to 0.10",
+    "Consider excluding RV#4 entirely given its -43% influence",
+    "Recenter p prior from LogNormal(log 2, 0.35) to LogNormal(log 3, 0.35)"
+  ]
+}
