@@ -26,6 +26,7 @@ class Orchestrator:
         critic_models: list[str] | None = None,
         interactive: bool = False,
         max_consecutive_failures: int = 5,
+        debate_rounds: int = 2,
     ):
         self.state = state
         self.data_path = data_path
@@ -34,6 +35,7 @@ class Orchestrator:
         self.critic_models = critic_models or []
         self.interactive = interactive
         self.max_consecutive_failures = max_consecutive_failures
+        self.debate_rounds = debate_rounds
         self.config: DomainConfig | None = None
 
     async def run(self) -> None:
@@ -123,9 +125,47 @@ class Orchestrator:
 
     async def _run_critic(self, analysis: dict | None) -> str | None:
         """Send analysis to critic model(s) for debate."""
-        # TODO: Invoke Critic
-        print("  CRITIQUE: not yet implemented")
-        return None
+        if not self.critic_models or analysis is None:
+            print("  CRITIQUE: skipped (no critics configured or no analysis)")
+            return None
+
+        from auto_scientist.agents.critic import run_debate
+        from auto_scientist.history import build_compressed_history
+
+        compressed_history = build_compressed_history(self.state)
+        notebook_path = self.output_dir / "lab_notebook.md"
+        notebook_content = notebook_path.read_text() if notebook_path.exists() else ""
+
+        domain_knowledge = ""
+        if self.config:
+            domain_knowledge = self.config.domain_knowledge
+
+        # Read the latest script content for the defender
+        script_content = ""
+        if self.state.versions:
+            latest = self.state.versions[-1]
+            script_path = Path(latest.script_path)
+            if script_path.exists():
+                script_content = script_path.read_text()
+
+        print(f"  CRITIQUE: debating with {len(self.critic_models)} critic(s), {self.debate_rounds} round(s)")
+        critiques = await run_debate(
+            critic_specs=self.critic_models,
+            analysis=analysis,
+            compressed_history=compressed_history,
+            notebook_content=notebook_content,
+            domain_knowledge=domain_knowledge,
+            script_content=script_content,
+            max_rounds=self.debate_rounds,
+        )
+
+        # Combine all critiques into a single string for the Scientist
+        parts = []
+        for entry in critiques:
+            parts.append(f"### Critique from {entry['model']}\n\n{entry['critique']}")
+        combined = "\n\n---\n\n".join(parts)
+        print(f"  CRITIQUE: received {len(critiques)} critique(s)")
+        return combined
 
     async def _run_scientist(self, analysis: dict | None, critique: str | None) -> Path | None:
         """Invoke the Scientist agent to implement changes."""

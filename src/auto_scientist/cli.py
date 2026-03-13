@@ -28,6 +28,12 @@ def cli():
 @click.option("--schedule", default=None, help="Time window for execution (e.g., '22:00-06:00')")
 @click.option("--interactive", is_flag=True, help="Enable interactive discovery mode")
 @click.option(
+    "--debate-rounds",
+    default=2,
+    type=int,
+    help="Number of critic-scientist debate rounds (1 = single-pass, default 2)",
+)
+@click.option(
     "--output-dir",
     default="experiments",
     type=click.Path(),
@@ -41,6 +47,7 @@ def run(
     critics: str,
     schedule: str | None,
     interactive: bool,
+    debate_rounds: int,
     output_dir: str,
 ):
     """Run autonomous scientific modelling from raw data."""
@@ -60,6 +67,7 @@ def run(
         max_iterations=max_iterations,
         critic_models=critic_list,
         interactive=interactive,
+        debate_rounds=debate_rounds,
     )
 
     asyncio.run(orchestrator.run())

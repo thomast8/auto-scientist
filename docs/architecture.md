@@ -33,9 +33,12 @@ Phase 2: ITERATION (autonomous loop)
       Input: results text + plots + lab notebook
       Output: structured analysis JSON
 
-  [2] Critic (GPT/Gemini/other LLM, text-only API call)
-      Input: analysis JSON + lab notebook
-      Output: critique, alternative hypotheses, challenges
+  [2] Critic-Scientist Debate (configurable rounds, default 2)
+      Round 1: Critic (GPT/Gemini/other) produces initial critique
+      Round 2+: Defender (Claude API) responds, Critic refines
+      Only the final refined critique is passed downstream
+      Input: analysis JSON + lab notebook + script content
+      Output: refined critique, alternative hypotheses, challenges
 
   [3] Scientist Agent (Claude, read/write)
       Input: analysis + critique + previous script + lab notebook
@@ -66,10 +69,14 @@ Phase 3: REPORT (one-time)
 - `max_turns`: 5
 
 **Critic** (Phase 2, step 2):
-- Plain API call (OpenAI/Google/Anthropic SDK), no agent tools needed
-- Input: analysis JSON + lab notebook + compressed history
-- Output: free-text critique with challenges, alternative hypotheses, suggestions
-- Configurable: list of models to consult (can be empty for no debate)
+- Multi-round debate between external critic models and a lightweight Claude defender
+- Round 1: plain API call to critic model (OpenAI/Google/Anthropic SDK)
+- Round 2+: defender (Claude via API, no tools) responds to critique, then critic refines
+- Defender gets full context: analysis + notebook + history + script content
+- Only the final refined critique is passed to the Scientist (debate transcript is not)
+- Configurable: `--debate-rounds N` (default 2; 1 = single-pass, no debate)
+- Configurable: list of critic models to consult (can be empty to skip critique entirely)
+- Defender model defaults to `claude-sonnet-4-6`
 
 **Scientist Agent** (Phase 2, step 3):
 - Uses `query()` (fresh session, reads files via tools)
@@ -90,10 +97,10 @@ Phase 3: REPORT (one-time)
 ### State Machine
 
 ```
-DISCOVERY -> ANALYZE -> CRITIQUE -> IMPLEMENT -> VALIDATE -> RUN -> EVALUATE
-                                                                      |
-                                                              ANALYZE (loop)
-                                                              or STOP
+DISCOVERY -> ANALYZE -> CRITIQUE (multi-round debate) -> IMPLEMENT -> VALIDATE -> RUN -> EVALUATE
+                              |                                                           |
+                        critic -> defender -> critic (refine)                      ANALYZE (loop)
+                        (repeats for debate_rounds - 1)                           or STOP
 ```
 
 `VALIDATE` = syntax check on generated script. If fails, re-invoke Scientist with error (max 3 retries).
@@ -254,6 +261,7 @@ auto-scientist run \
   --goal "Model the relationship between X and Y with a physically grounded model" \
   --max-iterations 20 \
   --critics openai:gpt-4o,google:gemini-2.5-pro \
+  --debate-rounds 2 \
   --schedule "22:00-06:00"
 
 # Resume after crash, pause, or overnight stop
