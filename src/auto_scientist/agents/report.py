@@ -6,6 +6,10 @@ first to final version, key insights, and recommendations for future work.
 
 from pathlib import Path
 
+from claude_agent_sdk import ClaudeAgentOptions, ResultMessage, query
+
+from auto_scientist.history import build_compressed_history
+from auto_scientist.prompts.report import REPORT_SYSTEM, REPORT_USER
 from auto_scientist.state import ExperimentState
 
 
@@ -24,9 +28,36 @@ async def run_report(
     Returns:
         Path to the generated report file.
     """
-    # TODO: Implement with claude-code-sdk query()
-    # 1. Read lab notebook + all results files
-    # 2. Identify best model and key turning points
-    # 3. Generate report: journey, insights, best model, recommendations
-    # 4. Write report to output_dir/report.md
-    raise NotImplementedError("Report agent not yet implemented")
+    notebook_content = notebook_path.read_text() if notebook_path.exists() else "(no notebook)"
+    compressed_history = build_compressed_history(state)
+    report_path = output_dir / "report.md"
+
+    user_prompt = REPORT_USER.format(
+        domain=state.domain,
+        goal=state.goal,
+        total_iterations=state.iteration,
+        best_version=state.best_version or "none",
+        best_score=state.best_score,
+        notebook_content=notebook_content,
+        compressed_history=compressed_history,
+        report_path=str(report_path),
+    )
+
+    options = ClaudeAgentOptions(
+        system_prompt=REPORT_SYSTEM,
+        allowed_tools=["Read", "Write", "Glob"],
+        max_turns=10,
+        permission_mode="acceptEdits",
+        cwd=output_dir,
+    )
+
+    async for message in query(prompt=user_prompt, options=options):
+        if isinstance(message, ResultMessage):
+            pass  # Agent is done
+
+    if not report_path.exists():
+        raise FileNotFoundError(
+            f"Report agent did not create the expected report at {report_path}"
+        )
+
+    return report_path

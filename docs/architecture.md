@@ -9,10 +9,11 @@ The user has been manually iterating on SpO2 models (v5.x to v7.x, 18 versions) 
 **Key design decisions**:
 - Fully autonomous by default (optional interactive mode)
 - LLM as scientist with full creative latitude (decides when to stop, when to pivot)
-- Multi-model debate (Claude implements, GPT/Gemini/other critiques)
+- Multi-model debate (Claude plans, GPT/Gemini/other critiques the plan)
 - Three-phase flow: Discovery, Iteration, Report
-- Analyst/Scientist agent split for context efficiency
-- Lab notebook pattern for cross-iteration memory
+- Four-agent iteration loop: Analyst (observe), Scientist (plan), Critic (challenge), Coder (implement)
+- Strict information boundaries: only the Coder sees Python code
+- Lab notebook as strategic journal; results.txt compiled by the script itself
 - Multimodal analysis (plots + text)
 - Runs on Claude Pro/Max subscription (no API cost tracking, token-aware scheduling)
 - Scheduling support (run overnight to preserve daytime token budget)
@@ -29,29 +30,61 @@ Phase 1: DISCOVERY (autonomous, one-time)
   System: explores data, researches domain, designs first model, writes v1 script
 
 Phase 2: ITERATION (autonomous loop)
-  [1] Analyst Agent (Claude, read-only)
-      Input: results text + plots + lab notebook
-      Output: structured analysis JSON
+  [0] Synthesis (optional, every N iterations)
+      Condenses the lab notebook into a concise narrative for prompt injection.
+      Raw notebook stays on disk untouched.
 
-  [2] Critic-Scientist Debate (configurable rounds, default 2)
-      Round 1: Critic (GPT/Gemini/other) produces initial critique
+  [1] Analyst Agent (Claude, read-only observer)
+      Input: results text + plots + lab notebook + success criteria
+      Output: structured JSON observation (score, criteria, metrics, observations)
+
+  [2] Scientist Agent (Claude, no tools, prompt-in/JSON-out)
+      Input: analysis JSON + lab notebook + domain knowledge
+      Output: structured JSON plan (hypothesis, strategy, changes, notebook entry)
+      Does NOT read Python code. Analysis + notebook is sufficient for planning.
+
+  [3] Stop Check
+      If Scientist sets should_stop=true, skip to Report phase
+
+  [4] Critic-Scientist Debate (configurable rounds, default 2)
+      Round 1: Critic (GPT/Gemini/other) critiques the Scientist's plan
       Round 2+: Defender (Claude API) responds, Critic refines
       Only the final refined critique is passed downstream
-      Input: analysis JSON + lab notebook + script content
+      Input: plan JSON + lab notebook + compressed history + domain knowledge
+      Both sides get symmetric context (no analysis, no script)
+      Both sides have web search for claim verification and literature lookup
       Output: refined critique, alternative hypotheses, challenges
 
-  [3] Scientist Agent (Claude, read/write)
-      Input: analysis + critique + previous script + lab notebook
-      Output: new script + updated lab notebook
+  [5] Coder Agent (Claude, read/write implementer)
+      Input: plan JSON + critique + previous script
+      Output: new experiment script
+      Only agent that reads/writes Python code
 
-  [4] Runner (Python subprocess, no LLM)
+  [6] Runner (Python subprocess, no LLM)
       Executes script, captures stdout + plots, saves results
+      results.txt is compiled by the script itself (print statements)
 
   Loop back to [1]
 
 Phase 3: REPORT (one-time)
   Generates final summary: best model, journey, recommendations
 ```
+
+### Information Boundaries
+
+A core design principle: each agent sees only the information relevant to its role.
+
+| Agent | Sees code? | Sees analysis JSON? | Sees notebook? | Has web search? |
+|-------|-----------|-------------------|---------------|----------------|
+| Analyst | No | Produces it | Yes | No |
+| Scientist | No | Yes (input) | Yes | No |
+| Critic | No | No | Yes | Yes |
+| Defender | No | No | Yes | Yes |
+| Coder | Yes (only agent) | No | No | No |
+
+Why: The plan already incorporates the analysis, so passing both to the Critic
+is redundant. Code is an implementation detail that only the implementer needs.
+The Critic and Defender debate strategy on equal footing with symmetric context.
 
 ### Agent Details
 
@@ -64,50 +97,78 @@ Phase 3: REPORT (one-time)
 **Analyst Agent** (Phase 2, step 1):
 - Uses `query()` (fresh session each iteration, bounded context)
 - Tools: Read (results file + plot PNGs), Glob (find output files)
-- Input: results text + plot images + lab notebook
-- Output: structured JSON: `success_score`, `failures[]`, `key_metrics`, `what_worked`, `what_didnt_work`, `stagnation_detected`, `paradigm_shift_recommended`, `should_stop`, `stop_reason`
+- Input: results text + plot images + lab notebook + success criteria
+- Output: structured JSON: `success_score`, `criteria_results[]`, `key_metrics`, `improvements`, `regressions`, `observations`
+- Role: pure observer, reports facts only, no recommendations
 - `max_turns`: 5
 
-**Critic** (Phase 2, step 2):
+**Scientist Agent** (Phase 2, step 2):
+- Pure prompt-in, JSON-out call (no tools, `max_turns`: 1)
+- Input (via prompt injection): analysis JSON + lab notebook + domain knowledge
+- Does NOT read Python code; analysis + notebook is sufficient for strategic planning
+- Output: structured JSON plan: `hypothesis`, `strategy`, `changes[]`, `expected_impact`, `should_stop`, `stop_reason`, `notebook_entry`
+- Role: strategic thinker, formulates hypotheses and plans, does NOT write code
+
+**Critic** (Phase 2, step 4):
 - Multi-round debate between external critic models and a lightweight Claude defender
 - Round 1: plain API call to critic model (OpenAI/Google/Anthropic SDK)
 - Round 2+: defender (Claude via API, no tools) responds to critique, then critic refines
-- Defender gets full context: analysis + notebook + history + script content
-- Only the final refined critique is passed to the Scientist (debate transcript is not)
+- Input: plan JSON + lab notebook + compressed history + domain knowledge
+- Neither side sees analysis JSON or experiment scripts (symmetric context)
+- Both Critic and Defender have web search (verify claims, look up papers, check methods)
+- Only the final refined critique is passed to the Coder (debate transcript is not)
 - Configurable: `--debate-rounds N` (default 2; 1 = single-pass, no debate)
 - Configurable: list of critic models to consult (can be empty to skip critique entirely)
 - Defender model defaults to `claude-sonnet-4-6`
 
-**Scientist Agent** (Phase 2, step 3):
-- Uses `query()` (fresh session, reads files via tools)
+**Coder Agent** (Phase 2, step 5):
+- Uses `query()` (fresh session, reads/writes files via tools)
 - Tools: Read, Write, Edit, Bash (for syntax check), Glob, Grep
-- Input (via prompt): analysis JSON + critic's feedback + lab notebook
-- Input (via tools): reads previous script, writes new script
-- Output: new experiment script + updated lab notebook + hypothesis doc
+- Input (via prompt): scientist's plan JSON + critique + previous script path
+- Output: new experiment script at `{version_dir}/experiment.py`
+- Role: pure implementer, follows the plan without making strategic decisions
+- Only agent that reads or writes Python code
 - `max_turns`: 30
 - Safety hooks: block writes outside experiments/ dir, block writes to data files
 
-**Runner** (Phase 2, step 4):
+**Runner** (Phase 2, step 6):
 - Plain Python `asyncio.create_subprocess_exec`
 - Runs: domain-configured command (e.g., `uv run python -u {script_path}`)
 - Captures: stdout to results file, checks for output plots
+- `results.txt` is compiled by the experiment script itself via print statements.
+  The Coder writes scripts that print structured output (model spec, parameters,
+  metrics, diagnostics, success criteria). No LLM post-processing needed.
 - Timeout: configurable (default 120 min)
 - Syntax validation before run: `python -m py_compile`
 
 ### State Machine
 
 ```
-DISCOVERY -> ANALYZE -> CRITIQUE (multi-round debate) -> IMPLEMENT -> VALIDATE -> RUN -> EVALUATE
-                              |                                                           |
-                        critic -> defender -> critic (refine)                      ANALYZE (loop)
-                        (repeats for debate_rounds - 1)                           or STOP
+DISCOVERY -> [SYNTHESIS] -> ANALYZE -> PLAN -> STOP_CHECK -> CRITIQUE
+                                                                |
+                                                          critic -> defender -> critic
+                                                          (repeats for debate_rounds - 1)
+                                                                |
+                                                             IMPLEMENT -> VALIDATE -> RUN -> EVALUATE
+                                                                                                |
+                                                                                    [SYNTHESIS] -> ANALYZE (loop)
+                                                                                    or STOP
 ```
 
-`VALIDATE` = syntax check on generated script. If fails, re-invoke Scientist with error (max 3 retries).
+`SYNTHESIS` = optional, runs every N iterations (configurable via `--synthesis-interval`).
+`VALIDATE` = syntax check on generated script. If fails, re-invoke Coder with error (max 3 retries).
 
 ### Lab Notebook
 
-A markdown file (`experiments/lab_notebook.md`) maintained by the Scientist. The Scientist reads this at the start of each iteration and appends to it. The orchestrator never modifies it.
+A markdown file (`experiments/lab_notebook.md`) maintained by the orchestrator. The Scientist writes the notebook entry as part of its plan, and the orchestrator appends it to the file.
+
+The notebook is a **strategic journal**: hypothesis, reasoning, key lessons, dead ends. It is NOT a copy of the model spec or results. That lives in `results.txt`.
+
+### Periodic Investigation Synthesis
+
+After 10+ iterations, the notebook can become bloated. The synthesis step (plain Anthropic API call) condenses the full notebook + compressed history into a concise narrative (~30-50% of original). The synthesis replaces the raw notebook in agent prompts for that iteration; the raw notebook file stays on disk untouched.
+
+Configurable via `--synthesis-interval N` (default 0 = disabled).
 
 ### Compressed History (for Critic)
 
@@ -142,24 +203,27 @@ auto-scientist/
       runner.py                      # Subprocess experiment runner
       history.py                     # Compressed history builder
       scheduler.py                   # Time-window scheduling logic
+      synthesis.py                   # Periodic notebook condensation
       agents/
         __init__.py
         discovery.py                 # Phase 1: data exploration + first model
         analyst.py                   # Phase 2: results + plots -> structured JSON
-        critic.py                    # Phase 2: multi-model critique
-        scientist.py                 # Phase 2: implement changes + update notebook
+        scientist.py                 # Phase 2: analysis -> hypothesis + plan
+        critic.py                    # Phase 2: multi-model critique of plan
+        coder.py                     # Phase 2: plan -> experiment script
         report.py                    # Phase 3: final summary
       prompts/
         __init__.py
         discovery.py
         analyst.py
         scientist.py
+        coder.py
         report.py
       models/
         __init__.py
-        openai_client.py             # OpenAI API wrapper for critic
-        google_client.py             # Google AI wrapper for critic
-        anthropic_client.py          # Anthropic API wrapper for critic
+        openai_client.py             # OpenAI API wrapper (web search via Responses API)
+        google_client.py             # Google AI wrapper (Google Search grounding)
+        anthropic_client.py          # Anthropic API wrapper (web_search tool)
   domains/
     spo2/
       __init__.py
@@ -183,6 +247,7 @@ auto-scientist/
     test_history.py
     test_runner.py
     test_scheduler.py
+    test_critic.py
   docs/
     architecture.md
 ```
@@ -262,6 +327,7 @@ auto-scientist run \
   --max-iterations 20 \
   --critics openai:gpt-4o,google:gemini-2.5-pro \
   --debate-rounds 2 \
+  --synthesis-interval 5 \
   --schedule "22:00-06:00"
 
 # Resume after crash, pause, or overnight stop
@@ -306,22 +372,17 @@ Parameter reduction: Stage A 28 -> 18 (-10), Stage B 18 -> 17 (-1).
 ### Example: Analysis Output (what the Analyst should produce)
 
 ```
-What worked:
+Improvements:
   - Baseline-corrected measurement equation eliminated saturation: 0.4% vs 17.6%.
   - Power-law curvature is identifiable. Both tau_0 and p profiles are non-monotone.
   - LOHO-Inference R2 dramatically improved for QC-passing holds.
   - Parameter efficiency: 18 params vs 28 in v7.04 (-36%), with better fits.
 
-What didn't work:
+Regressions:
   - b_s = 1.75, far from the ideal 1.0. The baseline-corrected equation makes b_s
     a gain around baseline. b_s > 1 means the model amplifies the deviation.
   - Delta range = 20.2s, still too wide.
   - gamma = 1.30 at upper bound in Stage B.
-
-Recommended next steps:
-  - Widen gamma bounds to [0.8, 1.6]
-  - Investigate b_s = 1.75: try reducing cv or adding per-hold b_s
-  - Consider excluding RV#4 entirely
 ```
 
 ### Example: Success Criteria (what the system evaluates)
@@ -359,42 +420,6 @@ QC-pass R2a    0.57      0.97    +70% (dramatic)
 
 ---
 
-## Implementation Plan
-
-### Commit 1: Scaffold (DONE)
-
-Created repo with full directory structure, all modules with docstrings/stubs, pyproject.toml, 34 passing tests, domain examples, docs, and CLAUDE.md.
-
-### Commit 2: Runner + Scheduler + History
-- Subprocess execution with timeout
-- Time-window scheduling
-- Compressed history builder
-
-### Commit 3: Analyst Agent
-- `query()` with structured output, multimodal (text + plots)
-
-### Commit 4: Critic
-- Multi-model critique dispatcher (OpenAI, Google, Anthropic wrappers)
-
-### Commit 5: Scientist Agent
-- `query()` with file tools, safety hooks, lab notebook
-
-### Commit 6: Orchestrator + Iteration Loop
-- State machine, error handling, crash recovery
-
-### Commit 7: Discovery Agent
-- Autonomous data exploration, domain research, first model
-
-### Commit 8: Report Agent
-- Final summary generation
-
-### Commit 9: SpO2 Domain + Examples
-- DomainConfig, domain knowledge prompts, real v5 to v7 examples
-
-### Commit 10: CLI polish + README + domain template
-
----
-
 ## Verification
 
 ### Unit tests
@@ -402,10 +427,11 @@ Created repo with full directory structure, all modules with docstrings/stubs, p
 - `test_history.py`: compressed history generation
 - `test_runner.py`: subprocess execution, timeout, syntax validation
 - `test_scheduler.py`: time window logic
+- `test_critic.py`: debate loop, plan injection, symmetric context, web search
 
 ### Integration test (1 iteration)
 1. Use SpO2 domain with a simple seed script and `--max-iterations 1`
-2. Verify: Analyst produces valid JSON, Critic produces text, Scientist writes valid script, Runner executes, state updated, lab notebook has entry
+2. Verify: Analyst produces valid JSON, Scientist produces plan, Critic produces text, Coder writes valid script, Runner executes, state updated, lab notebook has entry
 
 ### Reproduction test (the real validation)
 1. `auto-scientist run --data domains/spo2/seed/data/ --goal "Model SpO2 dynamics during breath-holds in a physiologically grounded, transferable way" --max-iterations 20 --schedule "22:00-06:00"`

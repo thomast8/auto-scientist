@@ -31,15 +31,30 @@ class TestParseCriticSpec:
 
 
 @pytest.fixture
-def analysis():
-    return {"score": 5, "what_worked": "baseline correction"}
+def plan():
+    return {
+        "hypothesis": "Adjusting learning rate will improve convergence",
+        "strategy": "incremental",
+        "changes": [
+            {
+                "what": "Reduce learning rate",
+                "why": "Current rate causes oscillation",
+                "how": "Set lr=0.001",
+                "priority": 1,
+            }
+        ],
+        "expected_impact": "Smoother convergence, better final score",
+        "should_stop": False,
+        "stop_reason": None,
+        "notebook_entry": "## v02 - Learning rate adjustment",
+    }
 
 
 @pytest.fixture
-def base_kwargs(analysis):
+def base_kwargs(plan):
     return {
         "critic_specs": ["openai:gpt-4o"],
-        "analysis": analysis,
+        "plan": plan,
         "compressed_history": "v1: initial model",
         "notebook_content": "# Lab Notebook\nEntry 1",
     }
@@ -47,10 +62,10 @@ def base_kwargs(analysis):
 
 class TestRunDebate:
     @pytest.mark.asyncio
-    async def test_empty_specs_returns_empty(self, analysis):
+    async def test_empty_specs_returns_empty(self, plan):
         result = await run_debate(
             critic_specs=[],
-            analysis=analysis,
+            plan=plan,
             compressed_history="",
             notebook_content="",
         )
@@ -130,7 +145,7 @@ class TestRunDebate:
         assert mock_anthropic.call_count == 2
 
     @pytest.mark.asyncio
-    async def test_multiple_critics(self, analysis):
+    async def test_multiple_critics(self, plan):
         """Each critic runs its own independent debate."""
         with (
             patch(
@@ -151,7 +166,7 @@ class TestRunDebate:
         ):
             result = await run_debate(
                 critic_specs=["openai:gpt-4o", "google:gemini-2.5-pro"],
-                analysis=analysis,
+                plan=plan,
                 compressed_history="",
                 notebook_content="",
                 max_rounds=2,
@@ -162,8 +177,24 @@ class TestRunDebate:
         assert result[1] == {"model": "google:gemini-2.5-pro", "critique": "Google refined"}
 
     @pytest.mark.asyncio
-    async def test_script_content_in_defender_prompt(self, base_kwargs):
-        """Defender prompt includes script content when provided."""
+    async def test_plan_in_critic_prompt(self, base_kwargs):
+        """Critic prompt includes the scientist's plan."""
+        with (
+            patch(
+                "auto_scientist.agents.critic.query_openai",
+                new_callable=AsyncMock,
+                return_value="Critique of plan",
+            ) as mock_openai,
+        ):
+            await run_debate(**base_kwargs, max_rounds=1)
+
+        critic_prompt = mock_openai.call_args[0][1]
+        assert "Scientist's Plan" in critic_prompt
+        assert "Adjusting learning rate" in critic_prompt
+
+    @pytest.mark.asyncio
+    async def test_plan_in_defender_prompt(self, base_kwargs):
+        """Defender prompt includes the scientist's plan."""
         with (
             patch(
                 "auto_scientist.agents.critic.query_openai",
@@ -176,14 +207,85 @@ class TestRunDebate:
                 return_value="Defense",
             ) as mock_anthropic,
         ):
-            await run_debate(
-                **base_kwargs,
-                script_content="import numpy as np\n# experiment code",
-                max_rounds=2,
-            )
+            await run_debate(**base_kwargs, max_rounds=2)
 
         defender_prompt = mock_anthropic.call_args[0][1]
-        assert "import numpy as np" in defender_prompt
+        assert "Your Plan" in defender_prompt
+        assert "Adjusting learning rate" in defender_prompt
+
+    @pytest.mark.asyncio
+    async def test_no_analysis_or_script_in_prompts(self, base_kwargs):
+        """Neither the critic nor defender sees analysis JSON or script content."""
+        with (
+            patch(
+                "auto_scientist.agents.critic.query_openai",
+                new_callable=AsyncMock,
+                side_effect=["Critique", "Refined"],
+            ) as mock_openai,
+            patch(
+                "auto_scientist.agents.critic.query_anthropic",
+                new_callable=AsyncMock,
+                return_value="Defense",
+            ) as mock_anthropic,
+        ):
+            await run_debate(**base_kwargs, max_rounds=2)
+
+        critic_prompt = mock_openai.call_args_list[0][0][1]
+        defender_prompt = mock_anthropic.call_args[0][1]
+
+        # Neither side should see "Latest Analysis" or "Current Script" sections
+        assert "Latest Analysis" not in critic_prompt
+        assert "Current Script" not in defender_prompt
+
+    @pytest.mark.asyncio
+    async def test_web_search_enabled(self, base_kwargs):
+        """Critic and defender calls pass web_search=True."""
+        with (
+            patch(
+                "auto_scientist.agents.critic.query_openai",
+                new_callable=AsyncMock,
+                side_effect=["Critique", "Refined"],
+            ) as mock_openai,
+            patch(
+                "auto_scientist.agents.critic.query_anthropic",
+                new_callable=AsyncMock,
+                return_value="Defense",
+            ) as mock_anthropic,
+        ):
+            await run_debate(**base_kwargs, max_rounds=2)
+
+        # Critic calls should have web_search=True
+        for call in mock_openai.call_args_list:
+            assert call.kwargs.get("web_search") is True
+
+        # Defender call should have web_search=True
+        assert mock_anthropic.call_args.kwargs.get("web_search") is True
+
+    @pytest.mark.asyncio
+    async def test_symmetric_context(self, base_kwargs):
+        """Critic and defender receive the same context (symmetric)."""
+        with (
+            patch(
+                "auto_scientist.agents.critic.query_openai",
+                new_callable=AsyncMock,
+                side_effect=["Critique", "Refined"],
+            ) as mock_openai,
+            patch(
+                "auto_scientist.agents.critic.query_anthropic",
+                new_callable=AsyncMock,
+                return_value="Defense",
+            ) as mock_anthropic,
+        ):
+            await run_debate(**base_kwargs, max_rounds=2)
+
+        critic_prompt = mock_openai.call_args_list[0][0][1]
+        defender_prompt = mock_anthropic.call_args[0][1]
+
+        # Both should see notebook, history, domain knowledge, and plan
+        assert "Lab Notebook" in critic_prompt
+        assert "Lab Notebook" in defender_prompt
+        assert "Experiment History" in critic_prompt
+        assert "Experiment History" in defender_prompt
 
     @pytest.mark.asyncio
     async def test_custom_defender_model(self, base_kwargs):
@@ -209,11 +311,11 @@ class TestRunDebate:
         assert mock_anthropic.call_args[0][0] == "claude-haiku-4-5-20251001"
 
     @pytest.mark.asyncio
-    async def test_unknown_provider_raises(self, analysis):
+    async def test_unknown_provider_raises(self, plan):
         with pytest.raises(ValueError, match="Unknown critic provider"):
             await run_debate(
                 critic_specs=["unknown:model"],
-                analysis=analysis,
+                plan=plan,
                 compressed_history="",
                 notebook_content="",
             )
@@ -221,7 +323,7 @@ class TestRunDebate:
 
 class TestRunCriticBackwardCompat:
     @pytest.mark.asyncio
-    async def test_run_critic_calls_run_debate_with_rounds_1(self, analysis):
+    async def test_run_critic_calls_run_debate_with_rounds_1(self, plan):
         """run_critic is equivalent to run_debate with max_rounds=1."""
         with patch(
             "auto_scientist.agents.critic.query_openai",
@@ -233,7 +335,7 @@ class TestRunCriticBackwardCompat:
         ) as mock_anthropic:
             result = await run_critic(
                 critic_specs=["openai:gpt-4o"],
-                analysis=analysis,
+                plan=plan,
                 compressed_history="history",
                 notebook_content="notebook",
             )

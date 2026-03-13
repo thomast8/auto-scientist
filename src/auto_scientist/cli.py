@@ -1,6 +1,7 @@
 """CLI entry point: run, resume, status commands."""
 
 import asyncio
+import importlib
 from pathlib import Path
 
 import click
@@ -8,6 +9,29 @@ import click
 from auto_scientist.config import DomainConfig
 from auto_scientist.orchestrator import Orchestrator
 from auto_scientist.state import ExperimentState
+
+
+def load_domain_config(name: str) -> DomainConfig:
+    """Dynamically load a domain config and inject its domain knowledge.
+
+    Convention: domains/{name}/config.py exports {NAME}_CONFIG,
+    domains/{name}/prompts.py exports {NAME}_DOMAIN_KNOWLEDGE.
+    """
+    upper = name.upper()
+
+    config_mod = importlib.import_module(f"domains.{name}.config")
+    config: DomainConfig = getattr(config_mod, f"{upper}_CONFIG")
+
+    try:
+        prompts_mod = importlib.import_module(f"domains.{name}.prompts")
+        knowledge: str = getattr(prompts_mod, f"{upper}_DOMAIN_KNOWLEDGE", "")
+    except (ModuleNotFoundError, AttributeError):
+        knowledge = ""
+
+    if knowledge:
+        config = config.model_copy(update={"domain_knowledge": knowledge})
+
+    return config
 
 
 @click.group()
@@ -39,6 +63,12 @@ def cli():
     type=click.Path(),
     help="Output directory for experiments",
 )
+@click.option(
+    "--synthesis-interval",
+    default=0,
+    type=int,
+    help="Condense notebook every N iterations (0 = disabled)",
+)
 def run(
     data: str,
     goal: str,
@@ -49,15 +79,24 @@ def run(
     interactive: bool,
     debate_rounds: int,
     output_dir: str,
+    synthesis_interval: int,
 ):
     """Run autonomous scientific modelling from raw data."""
     critic_list = [c.strip() for c in critics.split(",") if c.strip()] if critics else []
+
+    # Load domain config if a domain name is specified
+    config: DomainConfig | None = None
+    if domain:
+        config = load_domain_config(domain)
+
+    data_abs = str(Path(data).resolve())
 
     state = ExperimentState(
         domain=domain or "auto",
         goal=goal,
         phase="discovery",
         schedule=schedule,
+        data_path=data_abs,
     )
 
     orchestrator = Orchestrator(
@@ -68,6 +107,8 @@ def run(
         critic_models=critic_list,
         interactive=interactive,
         debate_rounds=debate_rounds,
+        config=config,
+        synthesis_interval=synthesis_interval,
     )
 
     asyncio.run(orchestrator.run())
@@ -85,10 +126,18 @@ def resume(state: str):
     loaded_state = ExperimentState.load(Path(state))
     output_dir = Path(state).parent
 
+    # Reload domain config if available
+    config: DomainConfig | None = None
+    if loaded_state.domain and loaded_state.domain != "auto":
+        config = load_domain_config(loaded_state.domain)
+
+    data_path = Path(loaded_state.data_path) if loaded_state.data_path else None
+
     orchestrator = Orchestrator(
         state=loaded_state,
-        data_path=None,
+        data_path=data_path,
         output_dir=output_dir,
+        config=config,
     )
 
     asyncio.run(orchestrator.run())

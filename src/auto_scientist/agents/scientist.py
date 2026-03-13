@@ -1,45 +1,124 @@
-"""Scientist agent: implements model changes and updates lab notebook.
+"""Scientist agent: pure prompt-in, JSON-out strategic planner.
 
-Uses query() (fresh session, reads files via tools).
-Tools: Read, Write, Edit, Bash (for syntax check), Glob, Grep.
-Input (via prompt): analysis JSON + critic's feedback + lab notebook.
-Input (via tools): reads previous script, writes new script.
-Output: new experiment script + updated lab notebook + hypothesis doc.
-max_turns: 30
-Safety hooks: block writes outside experiments/ dir, block writes to data files.
+No tools. Does not read Python code. Receives analysis + notebook via prompt.
+Output: structured JSON plan with hypothesis, strategy, changes, notebook entry.
 """
 
+import json
 from pathlib import Path
 from typing import Any
+
+from claude_agent_sdk import (
+    AssistantMessage,
+    ClaudeAgentOptions,
+    ResultMessage,
+    TextBlock,
+    query,
+)
+
+from auto_scientist.prompts.scientist import SCIENTIST_SYSTEM, SCIENTIST_USER
+
+# JSON schema for structured output
+SCIENTIST_PLAN_SCHEMA = {
+    "type": "object",
+    "properties": {
+        "hypothesis": {"type": "string"},
+        "strategy": {"type": "string", "enum": ["incremental", "structural", "exploratory"]},
+        "changes": {
+            "type": "array",
+            "items": {
+                "type": "object",
+                "properties": {
+                    "what": {"type": "string"},
+                    "why": {"type": "string"},
+                    "how": {"type": "string"},
+                    "priority": {"type": "integer", "enum": [1, 2, 3]},
+                },
+                "required": ["what", "why", "how", "priority"],
+            },
+        },
+        "expected_impact": {"type": "string"},
+        "should_stop": {"type": "boolean"},
+        "stop_reason": {"type": ["string", "null"]},
+        "notebook_entry": {"type": "string"},
+    },
+    "required": [
+        "hypothesis",
+        "strategy",
+        "changes",
+        "expected_impact",
+        "should_stop",
+        "stop_reason",
+        "notebook_entry",
+    ],
+}
 
 
 async def run_scientist(
     analysis: dict[str, Any],
-    critiques: list[dict[str, str]],
-    previous_script: Path,
     notebook_path: Path,
-    output_dir: Path,
     version: str,
     domain_knowledge: str = "",
-) -> Path:
-    """Implement model changes based on analysis and critique.
+) -> dict[str, Any]:
+    """Formulate hypothesis and plan based on analysis.
+
+    The Scientist does not read code. It receives the analysis JSON and
+    notebook content via prompt injection and returns a structured plan.
 
     Args:
         analysis: Structured analysis JSON from the Analyst.
-        critiques: List of critic responses.
-        previous_script: Path to the previous version's script.
-        notebook_path: Path to the lab notebook (read and append).
-        output_dir: Directory for the new version's outputs.
-        version: Version string for the new experiment (e.g., 'v8.01').
+        notebook_path: Path to the lab notebook (read for context).
+        version: Version string for the new experiment (e.g., 'v01').
         domain_knowledge: Domain-specific context.
 
     Returns:
-        Path to the newly created experiment script.
+        Structured plan dict with keys: hypothesis, strategy, changes,
+        expected_impact, should_stop, stop_reason, notebook_entry.
     """
-    # TODO: Implement with claude-code-sdk query()
-    # 1. Read previous script, lab notebook
-    # 2. Synthesize analysis + critique into a hypothesis
-    # 3. Write new script with changes
-    # 4. Append to lab notebook
-    # 5. Return path to new script
-    raise NotImplementedError("Scientist agent not yet implemented")
+    notebook_path = Path(notebook_path)
+    notebook_content = notebook_path.read_text() if notebook_path.exists() else ""
+
+    user_prompt = SCIENTIST_USER.format(
+        domain_knowledge=domain_knowledge or "(no domain knowledge provided)",
+        analysis_json=(
+            json.dumps(analysis, indent=2) if analysis else "(no analysis yet - first iteration)"
+        ),
+        notebook_content=notebook_content or "(empty notebook - first iteration)",
+        version=version,
+    )
+
+    options = ClaudeAgentOptions(
+        system_prompt=SCIENTIST_SYSTEM,
+        allowed_tools=[],
+        max_turns=1,
+        output_format={"type": "json_schema", "schema": SCIENTIST_PLAN_SCHEMA},
+    )
+
+    result_text = ""
+    assistant_texts: list[str] = []
+
+    async for message in query(prompt=user_prompt, options=options):
+        if isinstance(message, ResultMessage):
+            if message.result:
+                result_text = message.result
+        elif isinstance(message, AssistantMessage):
+            for block in message.content:
+                if isinstance(block, TextBlock):
+                    assistant_texts.append(block.text)
+
+    # Parse the result - prefer ResultMessage.result, fallback to assistant text
+    raw = result_text
+    if not raw:
+        raw = "\n".join(assistant_texts)
+
+    if not raw:
+        raise RuntimeError("Scientist agent returned no output")
+
+    # Extract JSON from the response (handle possible markdown fencing)
+    raw = raw.strip()
+    if raw.startswith("```"):
+        lines = raw.split("\n")
+        lines = [line for line in lines if not line.strip().startswith("```")]
+        raw = "\n".join(lines)
+
+    return json.loads(raw)

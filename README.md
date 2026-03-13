@@ -8,7 +8,7 @@ Autonomous scientific modelling framework. Provide a dataset and problem stateme
 2. **Iteration**: Runs an autonomous loop of analyze -> critique -> implement -> run
 3. **Report**: Generates a final summary of the best model and key insights
 
-The system uses Claude (via claude-code-sdk) as the primary scientist, with optional multi-model debate (GPT, Gemini) for critique.
+The system uses Claude (via claude-code-sdk) as the primary scientist, with optional multi-round critic-scientist debate (GPT, Gemini, or any supported model critiques; Claude defends; critic refines).
 
 ## Quick Start
 
@@ -22,11 +22,18 @@ auto-scientist run \
   --goal "Model the relationship between X and Y" \
   --max-iterations 20
 
-# With multi-model critique
+# With multi-model critique (2-round debate by default)
 auto-scientist run \
   --data ./my_data.csv \
   --goal "..." \
   --critics openai:gpt-4o,google:gemini-2.5-pro
+
+# Single-pass critique (no debate)
+auto-scientist run \
+  --data ./my_data.csv \
+  --goal "..." \
+  --critics openai:gpt-4o \
+  --debate-rounds 1
 
 # Schedule for overnight (preserves daytime token budget)
 auto-scientist run \
@@ -60,7 +67,7 @@ This project is under active development. Current state:
 - [x] Project scaffold and structure
 - [ ] Runner + Scheduler + History
 - [ ] Analyst Agent
-- [ ] Critic (multi-model)
+- [x] Critic (multi-model, multi-round debate)
 - [ ] Scientist Agent
 - [ ] Orchestrator + Iteration Loop
 - [ ] Discovery Agent
