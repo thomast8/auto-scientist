@@ -49,6 +49,19 @@ needing to make strategic decisions. For each change, explain:
 Write a notebook entry documenting your hypothesis, strategy, and planned
 changes. This becomes the permanent record of your reasoning for this iteration.
 
+## Success Criteria
+
+Define 3-8 success criteria that are concrete, measurable predictions of your
+hypothesis. Each criterion should be testable from the experiment's output.
+Good criteria are specific ("R2 > 0.95 for all holds") not vague ("model fits
+well"). The experiment script will evaluate these and print pass/fail results.
+
+For each criterion, provide:
+- name: human-readable label
+- description: what it tests and why
+- metric_key: the key the script will use to report the measured value
+- condition: human-readable target (e.g., "> 0.95", "== true", "< 10%")
+
 Your output must be a JSON object with these exact keys:
 - hypothesis: str (what you think will improve results and why)
 - strategy: str (one of "incremental", "structural", "exploratory")
@@ -58,6 +71,7 @@ Your output must be a JSON object with these exact keys:
 - should_stop: bool
 - stop_reason: str | null
 - notebook_entry: str (markdown text to append to the lab notebook)
+- success_criteria: list[object] (each with: name, description, metric_key, condition)
 """
 
 SCIENTIST_USER = """\

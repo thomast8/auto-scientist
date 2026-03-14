@@ -47,6 +47,14 @@ def plan():
         "should_stop": False,
         "stop_reason": None,
         "notebook_entry": "## v02 - Learning rate adjustment",
+        "success_criteria": [
+            {
+                "name": "Convergence improves",
+                "description": "Final loss should decrease with lower learning rate",
+                "metric_key": "final_loss_decreased",
+                "condition": "== true",
+            }
+        ],
     }
 
 
@@ -212,6 +220,20 @@ class TestRunDebate:
         defender_prompt = mock_anthropic.call_args[0][1]
         assert "Your Plan" in defender_prompt
         assert "Adjusting learning rate" in defender_prompt
+
+    @pytest.mark.asyncio
+    async def test_criteria_in_critic_prompt(self, base_kwargs):
+        """Critic prompt includes success criteria from the plan."""
+        with patch(
+            "auto_scientist.agents.critic.query_openai",
+            new_callable=AsyncMock,
+            return_value="Critique",
+        ) as mock_openai:
+            await run_debate(**base_kwargs, max_rounds=1)
+
+        critic_prompt = mock_openai.call_args[0][1]
+        assert "success_criteria" in critic_prompt
+        assert "Convergence improves" in critic_prompt
 
     @pytest.mark.asyncio
     async def test_no_analysis_or_script_in_prompts(self, base_kwargs):

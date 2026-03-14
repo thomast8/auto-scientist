@@ -8,16 +8,20 @@ Three-phase pipeline: Discovery -> Iteration -> Report.
 
 Iteration loop (four agents):
 1. **Analyst** (observer): reads results + plots, outputs structured JSON. No recommendations.
-2. **Scientist** (planner): pure prompt-in/JSON-out, no tools, no code access. Outputs plan.
+2. **Scientist** (planner): pure prompt-in/JSON-out, no tools, no code access. Outputs plan + per-iteration success criteria.
 3. **Critic** (challenger): multi-round debate with Claude Defender. Both have web search. Symmetric context (plan + notebook + history + domain knowledge). No analysis JSON, no script.
 4. **Coder** (implementer): only agent that reads/writes Python code. Follows the plan.
 
 Orchestrator flow: [Synthesis] -> Analyst -> Scientist -> stop check -> Critic debates plan -> Coder -> Validate -> Run -> Evaluate
 
+### Success Criteria (two tiers)
+- **Top-level** (from Discovery/config): define when the investigation is done
+- **Per-iteration** (from Scientist): testable predictions of each hypothesis, evaluated by the script in code, transcribed by the Analyst
+
 ### Information Boundaries
 - Only the Coder sees Python code
 - The Scientist plans from analysis JSON + notebook (no code)
-- Critic and Defender get symmetric context (no analysis, no script)
+- Critic and Defender get symmetric context (no analysis, no script); they challenge the plan's criteria too
 - results.txt is compiled by the script itself (print statements), no LLM post-processing
 
 ### Key Components

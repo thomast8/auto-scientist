@@ -42,6 +42,12 @@ Your output must be a JSON object with these exact keys:
 - improvements: list[str] (what got better vs previous iteration, with numbers)
 - regressions: list[str] (what got worse vs previous iteration, with numbers)
 - observations: list[str] (notable patterns from plots/results, purely descriptive)
+- iteration_criteria_results: list[object] (each with: name, status, measured_value)
+  The experiment output may include a SUCCESS CRITERIA section with per-iteration
+  criteria defined by the Scientist. Transcribe these results into
+  iteration_criteria_results. These are separate from the top-level success
+  criteria and do not affect the success_score. If no SUCCESS CRITERIA section
+  is present, return an empty list.
 """
 
 ANALYST_USER = """\

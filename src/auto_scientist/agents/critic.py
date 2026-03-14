@@ -173,7 +173,9 @@ def _build_critic_prompt(
         "3. Specific concerns about the planned changes",
         "4. Whether a different strategy type is needed"
         " (incremental/structural/exploratory)",
-        "5. Any concerns about the expected impact or feasibility",
+        "5. Whether the success criteria are well-chosen tests of the hypothesis"
+        " (too lenient? redundant? missing obvious failure modes?)",
+        "6. Any concerns about the expected impact or feasibility",
         "",
         "Use web search to verify scientific claims, look up relevant papers,",
         "and check whether proposed methods are sound.",

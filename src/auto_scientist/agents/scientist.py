@@ -41,6 +41,19 @@ SCIENTIST_PLAN_SCHEMA = {
         "should_stop": {"type": "boolean"},
         "stop_reason": {"type": ["string", "null"]},
         "notebook_entry": {"type": "string"},
+        "success_criteria": {
+            "type": "array",
+            "items": {
+                "type": "object",
+                "properties": {
+                    "name": {"type": "string"},
+                    "description": {"type": "string"},
+                    "metric_key": {"type": "string"},
+                    "condition": {"type": "string"},
+                },
+                "required": ["name", "description", "metric_key", "condition"],
+            },
+        },
     },
     "required": [
         "hypothesis",
@@ -50,6 +63,7 @@ SCIENTIST_PLAN_SCHEMA = {
         "should_stop",
         "stop_reason",
         "notebook_entry",
+        "success_criteria",
     ],
 }
 

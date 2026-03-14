@@ -44,6 +44,18 @@ ANALYST_SCHEMA = {
         "improvements": {"type": "array", "items": {"type": "string"}},
         "regressions": {"type": "array", "items": {"type": "string"}},
         "observations": {"type": "array", "items": {"type": "string"}},
+        "iteration_criteria_results": {
+            "type": "array",
+            "items": {
+                "type": "object",
+                "properties": {
+                    "name": {"type": "string"},
+                    "status": {"type": "string", "enum": ["pass", "fail"]},
+                    "measured_value": {"type": "string"},
+                },
+                "required": ["name", "status", "measured_value"],
+            },
+        },
     },
     "required": [
         "success_score",
@@ -52,6 +64,7 @@ ANALYST_SCHEMA = {
         "improvements",
         "regressions",
         "observations",
+        "iteration_criteria_results",
     ],
 }
 

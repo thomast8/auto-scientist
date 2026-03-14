@@ -37,7 +37,19 @@ The script MUST print structured results to stdout. Include:
 4. Changes from the previous version (what changed and why)
 5. Key parameter/configuration values
 6. Metrics and diagnostic results
-7. Success criteria evaluation (pass/fail for each criterion)
+7. Success criteria evaluation: the plan includes a `success_criteria` list.
+   For EACH criterion, compute the measured value in code and print a
+   SUCCESS CRITERIA section at the end of stdout in this exact format:
+
+   SUCCESS CRITERIA
+   ----------------
+   1. {name}: PASS ({measured_value})
+   2. {name}: FAIL ({measured_value}, expected {condition})
+
+   Score: X/Y PASS, Z FAIL
+
+   The pass/fail evaluation MUST be computed by the script in code, not
+   hardcoded. This is the honest record of whether the hypothesis held.
 8. Summary of findings
 
 ### Plots

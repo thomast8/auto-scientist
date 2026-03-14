@@ -40,8 +40,10 @@ Phase 2: ITERATION (autonomous loop)
 
   [2] Scientist Agent (Claude, no tools, prompt-in/JSON-out)
       Input: analysis JSON + lab notebook + domain knowledge
-      Output: structured JSON plan (hypothesis, strategy, changes, notebook entry)
+      Output: structured JSON plan (hypothesis, strategy, changes, notebook entry,
+              per-iteration success criteria)
       Does NOT read Python code. Analysis + notebook is sufficient for planning.
+      Defines 3-8 testable predictions (success criteria) for each hypothesis.
 
   [3] Stop Check
       If Scientist sets should_stop=true, skip to Report phase
@@ -98,16 +100,18 @@ The Critic and Defender debate strategy on equal footing with symmetric context.
 - Uses `query()` (fresh session each iteration, bounded context)
 - Tools: Read (results file + plot PNGs), Glob (find output files)
 - Input: results text + plot images + lab notebook + success criteria
-- Output: structured JSON: `success_score`, `criteria_results[]`, `key_metrics`, `improvements`, `regressions`, `observations`
+- Output: structured JSON: `success_score`, `criteria_results[]`, `key_metrics`, `improvements`, `regressions`, `observations`, `iteration_criteria_results[]`
 - Role: pure observer, reports facts only, no recommendations
+- Evaluates two tiers: top-level criteria (from config, drives stopping) and per-iteration criteria (from Scientist, transcribed from script output)
 - `max_turns`: 5
 
 **Scientist Agent** (Phase 2, step 2):
 - Pure prompt-in, JSON-out call (no tools, `max_turns`: 1)
 - Input (via prompt injection): analysis JSON + lab notebook + domain knowledge
 - Does NOT read Python code; analysis + notebook is sufficient for strategic planning
-- Output: structured JSON plan: `hypothesis`, `strategy`, `changes[]`, `expected_impact`, `should_stop`, `stop_reason`, `notebook_entry`
+- Output: structured JSON plan: `hypothesis`, `strategy`, `changes[]`, `expected_impact`, `should_stop`, `stop_reason`, `notebook_entry`, `success_criteria[]`
 - Role: strategic thinker, formulates hypotheses and plans, does NOT write code
+- Defines 3-8 per-iteration success criteria: concrete, measurable predictions of the hypothesis that the experiment script evaluates
 
 **Critic** (Phase 2, step 4):
 - Multi-round debate between external critic models and a lightweight Claude defender
