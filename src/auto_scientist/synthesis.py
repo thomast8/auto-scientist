@@ -1,10 +1,9 @@
 """Periodic investigation synthesis.
 
 Plain Anthropic API call (no tools, no agent). Runs every N iterations
-before the Analyst, condensing the full notebook + compressed history
-into a concise narrative. The synthesis replaces raw notebook content
-in downstream prompts for that iteration; the raw notebook file stays
-on disk untouched.
+before the Analyst, condensing the full notebook into a concise narrative.
+The synthesis replaces raw notebook content in downstream prompts for that
+iteration; the raw notebook file stays on disk untouched.
 """
 
 from auto_scientist.models.anthropic_client import query_anthropic
@@ -15,9 +14,6 @@ concise investigation narrative that captures the essential context.
 
 ## Lab Notebook (Full)
 {notebook_content}
-
-## Compressed History
-{compressed_history}
 
 ## Domain Knowledge
 {domain_knowledge}
@@ -40,7 +36,6 @@ contain enough context for a scientist to plan the next iteration.
 
 async def run_synthesis(
     notebook_content: str,
-    compressed_history: str,
     domain_knowledge: str = "",
     model: str = "claude-sonnet-4-6",
 ) -> str:
@@ -48,7 +43,6 @@ async def run_synthesis(
 
     Args:
         notebook_content: Full text of the lab notebook.
-        compressed_history: Compact per-iteration history.
         domain_knowledge: Domain-specific context.
         model: Anthropic model to use.
 
@@ -57,7 +51,6 @@ async def run_synthesis(
     """
     prompt = SYNTHESIS_PROMPT.format(
         notebook_content=notebook_content,
-        compressed_history=compressed_history,
         domain_knowledge=domain_knowledge or "(none provided)",
     )
     return await query_anthropic(model, prompt)

@@ -50,19 +50,22 @@ Phase 2: ITERATION (autonomous loop)
 
   [4] Critic-Scientist Debate (configurable rounds, default 2)
       Round 1: Critic (GPT/Gemini/other) critiques the Scientist's plan
-      Round 2+: Defender (Claude API) responds, Critic refines
-      Only the final refined critique is passed downstream
-      Input: plan JSON + lab notebook + compressed history + domain knowledge
+      Round 2+: Scientist (Claude API) responds, Critic refines
+      Input: plan JSON + lab notebook + domain knowledge
       Both sides get symmetric context (no analysis, no script)
       Both sides have web search for claim verification and literature lookup
-      Output: refined critique, alternative hypotheses, challenges
+      Output: debate transcript (all rounds)
 
-  [5] Coder Agent (Claude, read/write implementer)
-      Input: plan JSON + critique + previous script
+  [5] Scientist Revision (Claude, no tools, prompt-in/JSON-out)
+      Input: original plan + debate transcript + analysis + notebook
+      Output: revised plan JSON (same schema, incorporating valid critique)
+
+  [6] Coder Agent (Claude, read/write implementer)
+      Input: revised plan JSON + previous script
       Output: new experiment script
       Only agent that reads/writes Python code
 
-  [6] Runner (Python subprocess, no LLM)
+  [7] Runner (Python subprocess, no LLM)
       Executes script, captures stdout + plots, saves results
       results.txt is compiled by the script itself (print statements)
 
@@ -81,12 +84,12 @@ A core design principle: each agent sees only the information relevant to its ro
 | Analyst | No | Produces it | Yes | No |
 | Scientist | No | Yes (input) | Yes | No |
 | Critic | No | No | Yes | Yes |
-| Defender | No | No | Yes | Yes |
+| Scientist (debate) | No | No | Yes | Yes |
 | Coder | Yes (only agent) | No | No | No |
 
 Why: The plan already incorporates the analysis, so passing both to the Critic
 is redundant. Code is an implementation detail that only the implementer needs.
-The Critic and Defender debate strategy on equal footing with symmetric context.
+The Critic and Scientist debate strategy on equal footing with symmetric context.
 
 ### Agent Details
 
@@ -113,29 +116,35 @@ The Critic and Defender debate strategy on equal footing with symmetric context.
 - Role: strategic thinker, formulates hypotheses and plans, does NOT write code
 - Defines 3-8 per-iteration success criteria: concrete, measurable predictions of the hypothesis that the experiment script evaluates
 
-**Critic** (Phase 2, step 4):
-- Multi-round debate between external critic models and a lightweight Claude defender
+**Critic-Scientist Debate** (Phase 2, step 4):
+- Multi-round debate between external critic models and the Scientist (Claude via API)
 - Round 1: plain API call to critic model (OpenAI/Google/Anthropic SDK)
-- Round 2+: defender (Claude via API, no tools) responds to critique, then critic refines
-- Input: plan JSON + lab notebook + compressed history + domain knowledge
+- Round 2+: Scientist responds to critique, then critic refines
+- Input: plan JSON + lab notebook + domain knowledge
 - Neither side sees analysis JSON or experiment scripts (symmetric context)
-- Both Critic and Defender have web search (verify claims, look up papers, check methods)
-- Only the final refined critique is passed to the Coder (debate transcript is not)
+- Both Critic and Scientist have web search (verify claims, look up papers, check methods)
+- Returns full debate transcript for the Scientist revision step
 - Configurable: `--debate-rounds N` (default 2; 1 = single-pass, no debate)
-- Configurable: list of critic models to consult (can be empty to skip critique entirely)
-- Defender model defaults to `claude-sonnet-4-6`
+- Configurable: list of critic models to consult (can be empty to skip debate entirely)
+- Scientist debate model defaults to `claude-sonnet-4-6`
 
-**Coder Agent** (Phase 2, step 5):
+**Scientist Revision** (Phase 2, step 5):
+- Second `query()` call to the Scientist after the debate
+- Input: original plan + debate transcript + analysis JSON + notebook + domain knowledge
+- Output: revised plan JSON (same schema, incorporating valid critique)
+- The Coder never sees the debate transcript or critique directly
+
+**Coder Agent** (Phase 2, step 6):
 - Uses `query()` (fresh session, reads/writes files via tools)
 - Tools: Read, Write, Edit, Bash (for syntax check), Glob, Grep
-- Input (via prompt): scientist's plan JSON + critique + previous script path
+- Input (via prompt): revised plan JSON + previous script path
 - Output: new experiment script at `{version_dir}/experiment.py`
 - Role: pure implementer, follows the plan without making strategic decisions
 - Only agent that reads or writes Python code
 - `max_turns`: 30
 - Safety hooks: block writes outside experiments/ dir, block writes to data files
 
-**Runner** (Phase 2, step 6):
+**Runner** (Phase 2, step 7):
 - Plain Python `asyncio.create_subprocess_exec`
 - Runs: domain-configured command (e.g., `uv run python -u {script_path}`)
 - Captures: stdout to results file, checks for output plots

@@ -63,7 +63,6 @@ def base_kwargs(plan):
     return {
         "critic_specs": ["openai:gpt-4o"],
         "plan": plan,
-        "compressed_history": "v1: initial model",
         "notebook_content": "# Lab Notebook\nEntry 1",
     }
 
@@ -74,14 +73,13 @@ class TestRunDebate:
         result = await run_debate(
             critic_specs=[],
             plan=plan,
-            compressed_history="",
             notebook_content="",
         )
         assert result == []
 
     @pytest.mark.asyncio
-    async def test_single_round_no_defender(self, base_kwargs):
-        """With max_rounds=1, only the critic is called, no defender."""
+    async def test_single_round_no_scientist_response(self, base_kwargs):
+        """With max_rounds=1, only the critic is called, no scientist response."""
         with (
             patch(
                 "auto_scientist.agents.critic.query_openai",
@@ -98,12 +96,14 @@ class TestRunDebate:
         assert len(result) == 1
         assert result[0]["model"] == "openai:gpt-4o"
         assert result[0]["critique"] == "Initial critique"
+        assert len(result[0]["transcript"]) == 1
+        assert result[0]["transcript"][0]["role"] == "critic"
         mock_openai.assert_called_once()
         mock_anthropic.assert_not_called()
 
     @pytest.mark.asyncio
-    async def test_two_rounds_calls_defender_then_refines(self, base_kwargs):
-        """With max_rounds=2, critic -> defender -> critic refinement."""
+    async def test_two_rounds_calls_scientist_then_refines(self, base_kwargs):
+        """With max_rounds=2, critic -> scientist -> critic refinement."""
         with (
             patch(
                 "auto_scientist.agents.critic.query_openai",
@@ -113,7 +113,7 @@ class TestRunDebate:
             patch(
                 "auto_scientist.agents.critic.query_anthropic",
                 new_callable=AsyncMock,
-                return_value="Defense response",
+                return_value="Scientist response",
             ) as mock_anthropic,
         ):
             result = await run_debate(**base_kwargs, max_rounds=2)
@@ -123,17 +123,17 @@ class TestRunDebate:
         assert mock_openai.call_count == 2
         mock_anthropic.assert_called_once()
 
-        # Defender prompt should contain the initial critique
-        defender_prompt = mock_anthropic.call_args[0][1]
-        assert "Initial critique" in defender_prompt
+        # Scientist prompt should contain the initial critique
+        scientist_prompt = mock_anthropic.call_args[0][1]
+        assert "Initial critique" in scientist_prompt
 
-        # Refinement prompt should contain the defense
+        # Refinement prompt should contain the scientist's response
         refinement_prompt = mock_openai.call_args_list[1][0][1]
-        assert "Defense response" in refinement_prompt
+        assert "Scientist response" in refinement_prompt
 
     @pytest.mark.asyncio
     async def test_three_rounds(self, base_kwargs):
-        """With max_rounds=3, two defense-refinement cycles."""
+        """With max_rounds=3, two scientist-response-refinement cycles."""
         with (
             patch(
                 "auto_scientist.agents.critic.query_openai",
@@ -143,7 +143,7 @@ class TestRunDebate:
             patch(
                 "auto_scientist.agents.critic.query_anthropic",
                 new_callable=AsyncMock,
-                side_effect=["Defense R1", "Defense R2"],
+                side_effect=["Scientist R1", "Scientist R2"],
             ) as mock_anthropic,
         ):
             result = await run_debate(**base_kwargs, max_rounds=3)
@@ -151,6 +151,33 @@ class TestRunDebate:
         assert result[0]["critique"] == "Critique R3"
         assert mock_openai.call_count == 3
         assert mock_anthropic.call_count == 2
+
+    @pytest.mark.asyncio
+    async def test_debate_returns_transcript(self, base_kwargs):
+        """Debate returns transcript with all rounds."""
+        with (
+            patch(
+                "auto_scientist.agents.critic.query_openai",
+                new_callable=AsyncMock,
+                side_effect=["Critique R1", "Critique R2"],
+            ),
+            patch(
+                "auto_scientist.agents.critic.query_anthropic",
+                new_callable=AsyncMock,
+                return_value="Scientist response",
+            ),
+        ):
+            result = await run_debate(**base_kwargs, max_rounds=2)
+
+        assert len(result) == 1
+        transcript = result[0]["transcript"]
+        assert len(transcript) == 3  # critic, scientist, critic
+        assert transcript[0]["role"] == "critic"
+        assert transcript[0]["content"] == "Critique R1"
+        assert transcript[1]["role"] == "scientist"
+        assert transcript[1]["content"] == "Scientist response"
+        assert transcript[2]["role"] == "critic"
+        assert transcript[2]["content"] == "Critique R2"
 
     @pytest.mark.asyncio
     async def test_multiple_critics(self, plan):
@@ -169,20 +196,21 @@ class TestRunDebate:
             patch(
                 "auto_scientist.agents.critic.query_anthropic",
                 new_callable=AsyncMock,
-                side_effect=["Defense for OAI", "Defense for Google"],
+                side_effect=["Scientist for OAI", "Scientist for Google"],
             ),
         ):
             result = await run_debate(
                 critic_specs=["openai:gpt-4o", "google:gemini-2.5-pro"],
                 plan=plan,
-                compressed_history="",
                 notebook_content="",
                 max_rounds=2,
             )
 
         assert len(result) == 2
-        assert result[0] == {"model": "openai:gpt-4o", "critique": "OAI refined"}
-        assert result[1] == {"model": "google:gemini-2.5-pro", "critique": "Google refined"}
+        assert result[0]["model"] == "openai:gpt-4o"
+        assert result[0]["critique"] == "OAI refined"
+        assert result[1]["model"] == "google:gemini-2.5-pro"
+        assert result[1]["critique"] == "Google refined"
 
     @pytest.mark.asyncio
     async def test_plan_in_critic_prompt(self, base_kwargs):
@@ -201,8 +229,8 @@ class TestRunDebate:
         assert "Adjusting learning rate" in critic_prompt
 
     @pytest.mark.asyncio
-    async def test_plan_in_defender_prompt(self, base_kwargs):
-        """Defender prompt includes the scientist's plan."""
+    async def test_plan_in_scientist_prompt(self, base_kwargs):
+        """Scientist response prompt includes the plan."""
         with (
             patch(
                 "auto_scientist.agents.critic.query_openai",
@@ -212,14 +240,14 @@ class TestRunDebate:
             patch(
                 "auto_scientist.agents.critic.query_anthropic",
                 new_callable=AsyncMock,
-                return_value="Defense",
+                return_value="Response",
             ) as mock_anthropic,
         ):
             await run_debate(**base_kwargs, max_rounds=2)
 
-        defender_prompt = mock_anthropic.call_args[0][1]
-        assert "Your Plan" in defender_prompt
-        assert "Adjusting learning rate" in defender_prompt
+        scientist_prompt = mock_anthropic.call_args[0][1]
+        assert "Your Plan" in scientist_prompt
+        assert "Adjusting learning rate" in scientist_prompt
 
     @pytest.mark.asyncio
     async def test_criteria_in_critic_prompt(self, base_kwargs):
@@ -237,7 +265,7 @@ class TestRunDebate:
 
     @pytest.mark.asyncio
     async def test_no_analysis_or_script_in_prompts(self, base_kwargs):
-        """Neither the critic nor defender sees analysis JSON or script content."""
+        """Neither the critic nor scientist sees analysis JSON or script content."""
         with (
             patch(
                 "auto_scientist.agents.critic.query_openai",
@@ -247,21 +275,21 @@ class TestRunDebate:
             patch(
                 "auto_scientist.agents.critic.query_anthropic",
                 new_callable=AsyncMock,
-                return_value="Defense",
+                return_value="Response",
             ) as mock_anthropic,
         ):
             await run_debate(**base_kwargs, max_rounds=2)
 
         critic_prompt = mock_openai.call_args_list[0][0][1]
-        defender_prompt = mock_anthropic.call_args[0][1]
+        scientist_prompt = mock_anthropic.call_args[0][1]
 
         # Neither side should see "Latest Analysis" or "Current Script" sections
         assert "Latest Analysis" not in critic_prompt
-        assert "Current Script" not in defender_prompt
+        assert "Current Script" not in scientist_prompt
 
     @pytest.mark.asyncio
     async def test_web_search_enabled(self, base_kwargs):
-        """Critic and defender calls pass web_search=True."""
+        """Critic and scientist calls pass web_search=True."""
         with (
             patch(
                 "auto_scientist.agents.critic.query_openai",
@@ -271,7 +299,7 @@ class TestRunDebate:
             patch(
                 "auto_scientist.agents.critic.query_anthropic",
                 new_callable=AsyncMock,
-                return_value="Defense",
+                return_value="Response",
             ) as mock_anthropic,
         ):
             await run_debate(**base_kwargs, max_rounds=2)
@@ -280,12 +308,12 @@ class TestRunDebate:
         for call in mock_openai.call_args_list:
             assert call.kwargs.get("web_search") is True
 
-        # Defender call should have web_search=True
+        # Scientist call should have web_search=True
         assert mock_anthropic.call_args.kwargs.get("web_search") is True
 
     @pytest.mark.asyncio
     async def test_symmetric_context(self, base_kwargs):
-        """Critic and defender receive the same context (symmetric)."""
+        """Critic and scientist receive the same context (symmetric)."""
         with (
             patch(
                 "auto_scientist.agents.critic.query_openai",
@@ -295,23 +323,44 @@ class TestRunDebate:
             patch(
                 "auto_scientist.agents.critic.query_anthropic",
                 new_callable=AsyncMock,
-                return_value="Defense",
+                return_value="Response",
             ) as mock_anthropic,
         ):
             await run_debate(**base_kwargs, max_rounds=2)
 
         critic_prompt = mock_openai.call_args_list[0][0][1]
-        defender_prompt = mock_anthropic.call_args[0][1]
+        scientist_prompt = mock_anthropic.call_args[0][1]
 
-        # Both should see notebook, history, domain knowledge, and plan
+        # Both should see notebook and domain knowledge
         assert "Lab Notebook" in critic_prompt
-        assert "Lab Notebook" in defender_prompt
-        assert "Experiment History" in critic_prompt
-        assert "Experiment History" in defender_prompt
+        assert "Lab Notebook" in scientist_prompt
 
     @pytest.mark.asyncio
-    async def test_custom_defender_model(self, base_kwargs):
-        """Defender uses the specified model."""
+    async def test_no_compressed_history_in_prompts(self, base_kwargs):
+        """Prompts should not contain compressed history sections."""
+        with (
+            patch(
+                "auto_scientist.agents.critic.query_openai",
+                new_callable=AsyncMock,
+                side_effect=["Critique", "Refined"],
+            ) as mock_openai,
+            patch(
+                "auto_scientist.agents.critic.query_anthropic",
+                new_callable=AsyncMock,
+                return_value="Response",
+            ) as mock_anthropic,
+        ):
+            await run_debate(**base_kwargs, max_rounds=2)
+
+        critic_prompt = mock_openai.call_args_list[0][0][1]
+        scientist_prompt = mock_anthropic.call_args[0][1]
+
+        assert "Experiment History" not in critic_prompt
+        assert "Experiment History" not in scientist_prompt
+
+    @pytest.mark.asyncio
+    async def test_custom_scientist_model(self, base_kwargs):
+        """Scientist uses the specified model."""
         with (
             patch(
                 "auto_scientist.agents.critic.query_openai",
@@ -321,13 +370,13 @@ class TestRunDebate:
             patch(
                 "auto_scientist.agents.critic.query_anthropic",
                 new_callable=AsyncMock,
-                return_value="Defense",
+                return_value="Response",
             ) as mock_anthropic,
         ):
             await run_debate(
                 **base_kwargs,
                 max_rounds=2,
-                defender_model="claude-haiku-4-5-20251001",
+                scientist_model="claude-haiku-4-5-20251001",
             )
 
         assert mock_anthropic.call_args[0][0] == "claude-haiku-4-5-20251001"
@@ -338,7 +387,6 @@ class TestRunDebate:
             await run_debate(
                 critic_specs=["unknown:model"],
                 plan=plan,
-                compressed_history="",
                 notebook_content="",
             )
 
@@ -358,7 +406,6 @@ class TestRunCriticBackwardCompat:
             result = await run_critic(
                 critic_specs=["openai:gpt-4o"],
                 plan=plan,
-                compressed_history="history",
                 notebook_content="notebook",
             )
 

@@ -666,18 +666,19 @@ Does NOT read or write code.">
                 fill="#5a6178" font-size="9">planner</text>
         </g>
 
-        <!-- Critic / Defender -->
+        <!-- Critic / Scientist -->
         <g class="agent-group" data-agent="critic"
-           data-tooltip="Critic / Defender (debate)|Plain API calls (OpenAI/Google/Anthropic). Multi-round: Critic challenges, Defender responds, Critic refines.
+           data-tooltip="Critic / Scientist (debate)|Plain API calls (OpenAI/Google/Anthropic). Multi-round: Critic challenges, Scientist responds, Critic refines.
 
 Both sides get identical context (symmetric).
 Both have web search to verify claims and look up papers.
 Challenges: hypothesis, strategy, success criteria quality.
-Neither side sees analysis JSON or Python code.">
+Neither side sees analysis JSON or Python code.
+After debate, the Scientist revises the plan in a separate call.">
           <rect x="530" y="280" width="185" height="58" rx="10"
                 fill="#0f1525" stroke="#d44e6e" stroke-width="1.5"/>
           <text x="622" y="314" text-anchor="middle"
-                fill="#e8eaf0" font-size="13" font-weight="500">Critic / Defender</text>
+                fill="#e8eaf0" font-size="13" font-weight="500">Critic / Scientist</text>
           <text x="622" y="330" text-anchor="middle"
                 fill="#5a6178" font-size="9">debate</text>
         </g>
@@ -868,21 +869,6 @@ Pulse oximetry measures peripheral oxygen saturation (SpO2) using light absorpti
                 fill="#4e8fd4" font-size="10" opacity="0.7">domain knowledge</text>
         </g>
 
-        <!-- Compressed History -->
-        <g class="artifact-node" data-artifact="history"
-           data-tooltip="compressed history|One-line summaries of all past iterations. Built by the orchestrator from version entries.
-
-Example:
-v01: Initial power-law model, R2=0.82, 2/5 criteria pass
-v02: Added gamma kernel sensor model, R2=0.93, 4/5 criteria pass, gamma at upper bound
-v03: Widened gamma bounds [0.8, 4.0], relaxed prior, R2=0.95, gamma=2.4 interior, 7/8 pass
-v04: Bi-exponential PaO2 for long holds, R2=0.97, 5/5 pass">
-          <rect x="712" y="518" width="148" height="32" rx="6"
-                fill="rgba(78,143,212,0.06)" stroke="#4e8fd4" stroke-width="1" stroke-opacity="0.3" stroke-dasharray="4 3"/>
-          <text x="786" y="539" text-anchor="middle"
-                fill="#4e8fd4" font-size="10" opacity="0.7">compressed history</text>
-        </g>
-
         <!-- Dataset -->
         <g class="artifact-node" data-artifact="dataset"
            data-tooltip="dataset|The raw data provided by the user. Never modified by the framework.
@@ -955,11 +941,6 @@ Grounds the debate in real science rather than hallucinated citations.">
               d="M 510,150 C 520,200 570,250 580,278"
               fill="none" stroke="#4e8fd4" stroke-width="1.5" stroke-dasharray="6 4"
               marker-end="url(#ah-blue)"/>
-        <!-- critique feeds Coder -->
-        <path class="arrow-line" data-agents="coder" data-artifacts="critique"
-              d="M 810,150 C 820,200 845,240 855,278"
-              fill="none" stroke="#4e8fd4" stroke-width="1.5" stroke-dasharray="6 4"
-              marker-end="url(#ah-blue)"/>
         <!-- experiment.py feeds Runner -->
         <path class="arrow-line" data-agents="runner" data-artifacts="script"
               d="M 1070,150 C 1080,200 1100,240 1105,278"
@@ -1017,11 +998,6 @@ Grounds the debate in real science rather than hallucinated citations.">
               d="M 580,518 C 640,440 840,380 860,340"
               fill="none" stroke="#4e8fd4" stroke-width="1" stroke-opacity="0.4" stroke-dasharray="4 3"
               marker-end="url(#ah-blue-dim)"/>
-        <!-- Compressed history → Critic -->
-        <path class="arrow-line" data-agents="critic" data-artifacts="history"
-              d="M 760,518 C 740,460 660,380 650,340"
-              fill="none" stroke="#4e8fd4" stroke-width="1" stroke-opacity="0.4" stroke-dasharray="4 3"
-              marker-end="url(#ah-blue-dim)"/>
         <!-- Dataset → Runner -->
         <path class="arrow-line" data-agents="runner" data-artifacts="dataset"
               d="M 1098,518 C 1098,450 1110,380 1115,340"
@@ -1045,11 +1021,6 @@ Grounds the debate in real science rather than hallucinated citations.">
         <path class="arrow-line" data-agents="scientist" data-artifacts="notebook"
               d="M 367,338 C 367,420 310,480 297,516"
               fill="none" stroke="#d4a24e" stroke-width="1.5" marker-end="url(#ah-amber)"/>
-        <!-- Orchestrator builds compressed history (shown from Runner) -->
-        <path class="arrow-line" data-agents="runner" data-artifacts="history"
-              d="M 1117,338 C 1100,420 820,480 786,516"
-              fill="none" stroke="#d4a24e" stroke-width="1.2" stroke-opacity="0.5" marker-end="url(#ah-amber)"/>
-
         <!-- =============== FLOW PARTICLES =============== -->
         <!-- Particle on the loop arrow -->
         <circle r="3" fill="#8e6ed4" opacity="0.8" class="flow-dot"
@@ -1252,25 +1223,25 @@ Grounds the debate in real science rather than hallucinated citations.">
       </div>
     </div>
 
-    <!-- Critic / Defender -->
+    <!-- Critic / Scientist Debate -->
     <div class="agent-card critic">
       <div class="agent-header">
         <div class="agent-icon">&#x2694;</div>
         <div>
-          <div class="agent-name">Critic &amp; Defender</div>
+          <div class="agent-name">Critic &amp; Scientist</div>
           <div class="agent-role">Multi-round debate. Symmetric context, web search.</div>
         </div>
       </div>
       <div class="agent-detail">
         Plain API calls (OpenAI/Google/Anthropic). Critic challenges the plan,
-        Defender responds, Critic refines. Both sides see identical information.
+        Scientist responds, Critic refines. Both sides see identical information.
+        After debate, the Scientist revises the plan in a separate structured call.
       </div>
       <div class="data-section">
         <div class="data-section-label reads">reads (both sides, symmetric)</div>
         <div class="data-tags">
           <span class="data-tag read">plan JSON</span>
           <span class="data-tag read">lab notebook</span>
-          <span class="data-tag read">compressed history</span>
           <span class="data-tag read">domain knowledge</span>
           <span class="data-tag capability">web search</span>
         </div>
@@ -1278,7 +1249,8 @@ Grounds the debate in real science rather than hallucinated citations.">
       <div class="data-section">
         <div class="data-section-label writes">produces</div>
         <div class="data-tags">
-          <span class="data-tag write">final critique</span>
+          <span class="data-tag write">debate transcript</span>
+          <span class="data-tag write">revised plan JSON</span>
         </div>
       </div>
       <div class="boundary-note">
@@ -1302,8 +1274,7 @@ Grounds the debate in real science rather than hallucinated citations.">
       <div class="data-section">
         <div class="data-section-label reads">reads</div>
         <div class="data-tags">
-          <span class="data-tag read">plan JSON</span>
-          <span class="data-tag read">critique</span>
+          <span class="data-tag read">revised plan JSON</span>
           <span class="data-tag read">previous script</span>
           <span class="data-tag read">domain knowledge</span>
         </div>
@@ -1425,7 +1396,7 @@ Grounds the debate in real science rather than hallucinated citations.">
           <td>web only</td>
         </tr>
         <tr>
-          <td class="agent-col">Defender</td>
+          <td class="agent-col">Scientist (debate)</td>
           <td><span class="badge no">no</span></td>
           <td><span class="badge no">no</span></td>
           <td><span class="badge yes">yes</span></td>
@@ -1454,7 +1425,8 @@ Grounds the debate in real science rather than hallucinated citations.">
     <strong>Why these boundaries?</strong>
     The plan already incorporates the analysis, so passing both to the Critic is redundant.
     Code is an implementation detail that only the implementer needs.
-    The Critic and Defender debate strategy on equal footing with symmetric context.
+    The Critic and Scientist debate strategy on equal footing with symmetric context.
+    After the debate, the Scientist revises the plan; the Coder gets only the revised plan.
     results.txt is self-compiled by the experiment script via print statements, removing
     the need for an LLM summarizer.
     <br><br>

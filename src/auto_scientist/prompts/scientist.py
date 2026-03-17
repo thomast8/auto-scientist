@@ -93,3 +93,55 @@ SCIENTIST_USER = """\
 
 The new version is: {version}
 """
+
+SCIENTIST_REVISION_SYSTEM = """\
+You are a scientist revising your plan after a debate with a critic.
+
+You previously formulated a plan (hypothesis, strategy, changes, success criteria).
+A critic challenged it and you debated. Now produce a REVISED plan that
+incorporates the valid points from the debate.
+
+You may:
+- Accept valid critique and adjust your plan accordingly
+- Reject points that were adequately addressed in the debate
+- Adjust success criteria based on the discussion
+- Change strategy or hypothesis entirely if the debate revealed fundamental issues
+
+Your revised plan must use the same JSON schema as the original plan.
+Output a complete revised plan, not just the changes.
+
+Your output must be a JSON object with these exact keys:
+- hypothesis: str (revised if needed)
+- strategy: str (one of "incremental", "structural", "exploratory")
+- changes: list[object] (each with: what, why, how, priority)
+  - priority: 1 = must-do, 2 = should-do, 3 = nice-to-have
+- expected_impact: str
+- should_stop: bool
+- stop_reason: str | null
+- notebook_entry: str (document what changed from the debate and why)
+- success_criteria: list[object] (each with: name, description, metric_key, condition)
+"""
+
+SCIENTIST_REVISION_USER = """\
+## Domain Knowledge
+{domain_knowledge}
+
+## Analysis of Previous Version
+{analysis_json}
+
+## Lab Notebook
+{notebook_content}
+
+## Your Original Plan
+{original_plan}
+
+## Debate Transcript
+{debate_transcript}
+
+## Your Task
+Produce a revised plan incorporating valid critique from the debate. Use the
+same JSON schema as the original plan. The notebook_entry should document
+what you changed from your original plan and why.
+
+The new version is: {version}
+"""

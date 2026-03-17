@@ -178,7 +178,6 @@ class Orchestrator:
         if self.state.iteration % self.synthesis_interval != 0:
             return
 
-        from auto_scientist.history import build_compressed_history
         from auto_scientist.synthesis import run_synthesis
 
         notebook_path = self.output_dir / "lab_notebook.md"
@@ -186,14 +185,12 @@ class Orchestrator:
             return
 
         notebook_content = notebook_path.read_text()
-        compressed_history = build_compressed_history(self.state)
         domain_knowledge = self.config.domain_knowledge if self.config else ""
 
         print("  SYNTHESIS: condensing notebook")
         try:
             self._notebook_override = await run_synthesis(
                 notebook_content=notebook_content,
-                compressed_history=compressed_history,
                 domain_knowledge=domain_knowledge,
             )
             print("  SYNTHESIS: done")
@@ -202,7 +199,7 @@ class Orchestrator:
             self._notebook_override = None
 
     async def _run_iteration(self) -> None:
-        """Run one iteration: synthesize, analyze, plan, critique, implement, run, evaluate."""
+        """Run one iteration of the pipeline."""
         self.state.iteration += 1
         print(f"\n{'='*60}")
         print(f"ITERATION {self.state.iteration}")
@@ -224,28 +221,32 @@ class Orchestrator:
             return
 
         # Step 4: Critic debates the Scientist's plan
-        critique = await self._run_critic(plan)
+        debate_result = await self._run_debate(plan)
 
-        # Step 5: Coder implements (plan + critique refinements)
-        new_script = await self._run_coder(plan, critique)
+        # Step 5: Scientist revises plan based on debate
+        revised_plan = await self._run_scientist_revision(plan, debate_result, analysis)
 
-        # Step 6: Validate (syntax check)
+        # Step 6: Coder implements the revised plan (or original if no revision)
+        final_plan = revised_plan or plan
+        new_script = await self._run_coder(final_plan)
+
+        # Step 7: Validate (syntax check)
         if new_script:
             valid = await self._validate_script(new_script)
             if not valid:
                 self.state.record_failure()
                 return
 
-        # Step 7: Run
+        # Step 8: Run
         run_result = await self._run_experiment(new_script)
 
-        # Step 8: Evaluate
+        # Step 9: Evaluate
         version = f"v{self.state.iteration:02d}"
         version_entry = VersionEntry(
             version=version,
             iteration=self.state.iteration,
             script_path=str(new_script),
-            hypothesis=plan.get("hypothesis", "") if plan else "",
+            hypothesis=final_plan.get("hypothesis", "") if final_plan else "",
         )
         self._evaluate(run_result, version_entry)
         self.state.record_version(version_entry)
@@ -332,40 +333,76 @@ class Orchestrator:
             print(f"  PLAN: error - {e}")
             return None
 
-    async def _run_critic(self, plan: dict | None) -> str | None:
-        """Send plan to critic model(s) for debate."""
+    async def _run_debate(self, plan: dict | None) -> list[dict[str, Any]] | None:
+        """Send plan to critic model(s) for debate with the Scientist."""
         if not self.critic_models or plan is None:
-            print("  CRITIQUE: skipped (no critics configured or no plan)")
+            print("  DEBATE: skipped (no critics configured or no plan)")
             return None
 
         from auto_scientist.agents.critic import run_debate
-        from auto_scientist.history import build_compressed_history
 
-        compressed_history = build_compressed_history(self.state)
         notebook_content = self._notebook_content()
         domain_knowledge = self.config.domain_knowledge if self.config else ""
 
         n_critics = len(self.critic_models)
-        print(f"  CRITIQUE: debating with {n_critics} critic(s), "
-              f"{self.debate_rounds} round(s)")
+        print(f"  DEBATE: {n_critics} critic(s), {self.debate_rounds} round(s)")
         critiques = await run_debate(
             critic_specs=self.critic_models,
             plan=plan,
-            compressed_history=compressed_history,
             notebook_content=notebook_content,
             domain_knowledge=domain_knowledge,
             max_rounds=self.debate_rounds,
         )
 
-        # Combine all critiques into a single string for the Coder
-        parts = []
-        for entry in critiques:
-            parts.append(f"### Critique from {entry['model']}\n\n{entry['critique']}")
-        combined = "\n\n---\n\n".join(parts)
-        print(f"  CRITIQUE: received {len(critiques)} critique(s)")
-        return combined
+        print(f"  DEBATE: received {len(critiques)} critique(s)")
+        return critiques
 
-    async def _run_coder(self, plan: dict | None, critique: str | None) -> Path | None:
+    async def _run_scientist_revision(
+        self,
+        plan: dict | None,
+        debate_result: list[dict[str, Any]] | None,
+        analysis: dict | None,
+    ) -> dict[str, Any] | None:
+        """Scientist revises plan based on debate."""
+        if plan is None or not debate_result:
+            print("  REVISE: skipped (no plan or no debate)")
+            return None
+
+        from auto_scientist.agents.scientist import run_scientist_revision
+
+        version = f"v{self.state.iteration:02d}"
+        notebook_path = self.output_dir / "lab_notebook.md"
+        domain_knowledge = self.config.domain_knowledge if self.config else ""
+
+        # Combine transcripts from all critics
+        all_transcript: list[dict[str, str]] = []
+        for entry in debate_result:
+            all_transcript.append({"role": "critic", "content": f"[{entry['model']}]"})
+            all_transcript.extend(entry.get("transcript", []))
+
+        print("  REVISE: scientist revising plan after debate")
+        try:
+            revised = await run_scientist_revision(
+                original_plan=plan,
+                debate_transcript=all_transcript,
+                analysis=analysis or {},
+                notebook_path=notebook_path,
+                version=version,
+                domain_knowledge=domain_knowledge,
+            )
+
+            # Write revised notebook entry
+            if revised.get("notebook_entry"):
+                with notebook_path.open("a") as f:
+                    f.write(revised["notebook_entry"] + "\n\n---\n\n")
+
+            print(f"  REVISE: strategy={revised.get('strategy', '?')}")
+            return revised
+        except Exception as e:
+            print(f"  REVISE: error - {e}, using original plan")
+            return None
+
+    async def _run_coder(self, plan: dict | None) -> Path | None:
         """Invoke the Coder agent to implement the plan."""
         from auto_scientist.agents.coder import run_coder
 
@@ -384,11 +421,6 @@ class Orchestrator:
 
         data_path = self.state.data_path or ""
         deps = self.config.experiment_dependencies if self.config else []
-
-        # Inject critique into plan for the Coder if available
-        if critique:
-            plan = dict(plan)  # shallow copy to avoid mutating the original
-            plan["critique_feedback"] = critique
 
         print(f"  IMPLEMENT: coder writing {version}")
         try:

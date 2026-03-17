@@ -1,16 +1,17 @@
-"""Critic: multi-model critique dispatcher with optional debate loop.
+"""Critic: multi-model critique dispatcher with Scientist debate loop.
 
 Plain API call (OpenAI/Google/Anthropic SDK), no agent tools needed.
-Input: scientist's plan + lab notebook + compressed history + domain knowledge.
-Output: free-text critique with challenges, alternative hypotheses, suggestions.
+Input: scientist's plan + lab notebook + domain knowledge.
+Output: critique with challenges, alternative hypotheses, suggestions,
+plus the full debate transcript.
 
-Neither the Critic nor the Defender sees the analysis JSON or Python code.
-The plan already incorporates the analysis; passing both is redundant.
-Both sides get symmetric context (equal footing).
+Neither the Critic nor the Scientist (during debate) sees the analysis JSON
+or Python code. The plan already incorporates the analysis; passing both is
+redundant. Both sides get symmetric context (equal footing).
 
-When debate rounds > 1, a lightweight defender (Claude via API) responds to
-each critique before the critic refines. The Coder only receives the
-final refined critique from each model.
+When debate rounds > 1, the Scientist responds to each critique before the
+critic refines. After the debate, the Scientist revision step produces a
+revised plan (handled by the orchestrator, not this module).
 """
 
 import json
@@ -51,33 +52,31 @@ async def _query_critic(provider: str, model: str, prompt: str) -> str:
 async def run_debate(
     critic_specs: list[str],
     plan: dict[str, Any],
-    compressed_history: str,
     notebook_content: str,
     domain_knowledge: str = "",
     max_rounds: int = 2,
-    defender_model: str = "claude-sonnet-4-6",
-) -> list[dict[str, str]]:
+    scientist_model: str = "claude-sonnet-4-6",
+) -> list[dict[str, Any]]:
     """Run a multi-round critic-scientist debate for each critic model.
 
-    Round 1: critic produces initial critique (same as single-pass).
-    Rounds 2+: defender responds, then critic refines.
-    Only the final critique per model is returned.
+    Round 1: critic produces initial critique.
+    Rounds 2+: scientist responds, then critic refines.
+    Returns the final critique per model plus the full debate transcript.
 
-    Both Critic and Defender receive symmetric context: the plan, notebook,
-    compressed history, and domain knowledge. Neither sees the analysis JSON
-    or experiment scripts.
+    Both Critic and Scientist receive symmetric context: the plan, notebook,
+    and domain knowledge. Neither sees the analysis JSON or experiment scripts.
 
     Args:
         critic_specs: List of critic specs (e.g., ['openai:gpt-4o']).
         plan: Scientist's plan dict (hypothesis, strategy, changes).
-        compressed_history: Compact history summary for context.
         notebook_content: Current lab notebook content.
         domain_knowledge: Domain-specific context.
         max_rounds: Number of critique rounds (1 = no debate, 2 = default).
-        defender_model: Anthropic model used for the defender.
+        scientist_model: Anthropic model used for the Scientist's debate responses.
 
     Returns:
-        List of dicts with keys 'model' and 'critique'.
+        List of dicts with keys 'model', 'critique', and 'transcript'.
+        transcript is a list of {"role": "critic"|"scientist", "content": str}.
     """
     if not critic_specs:
         return []
@@ -85,37 +84,43 @@ async def run_debate(
     critiques = []
     for spec in critic_specs:
         provider, model = parse_critic_spec(spec)
+        transcript: list[dict[str, str]] = []
 
         # Round 1: initial critique
         critic_prompt = _build_critic_prompt(
-            plan, compressed_history, notebook_content, domain_knowledge
+            plan, notebook_content, domain_knowledge
         )
         critique_text = await _query_critic(provider, model, critic_prompt)
+        transcript.append({"role": "critic", "content": critique_text})
 
-        # Rounds 2+: defender responds, critic refines
+        # Rounds 2+: scientist responds, critic refines
         for _ in range(1, max_rounds):
-            defense = await query_anthropic(
-                defender_model,
-                _build_defender_prompt(
+            scientist_response = await query_anthropic(
+                scientist_model,
+                _build_scientist_response_prompt(
                     plan=plan,
                     notebook_content=notebook_content,
-                    compressed_history=compressed_history,
                     domain_knowledge=domain_knowledge,
                     critique=critique_text,
                 ),
                 web_search=True,
             )
+            transcript.append({"role": "scientist", "content": scientist_response})
             refinement_prompt = _build_critic_refinement_prompt(
                 plan=plan,
-                compressed_history=compressed_history,
                 notebook_content=notebook_content,
                 domain_knowledge=domain_knowledge,
                 critique=critique_text,
-                defense=defense,
+                defense=scientist_response,
             )
             critique_text = await _query_critic(provider, model, refinement_prompt)
+            transcript.append({"role": "critic", "content": critique_text})
 
-        critiques.append({"model": spec, "critique": critique_text})
+        critiques.append({
+            "model": spec,
+            "critique": critique_text,
+            "transcript": transcript,
+        })
 
     return critiques
 
@@ -123,10 +128,9 @@ async def run_debate(
 async def run_critic(
     critic_specs: list[str],
     plan: dict[str, Any],
-    compressed_history: str,
     notebook_content: str,
     domain_knowledge: str = "",
-) -> list[dict[str, str]]:
+) -> list[dict[str, Any]]:
     """Single-pass critique (backward-compatible wrapper).
 
     Equivalent to run_debate with max_rounds=1.
@@ -134,7 +138,6 @@ async def run_critic(
     return await run_debate(
         critic_specs=critic_specs,
         plan=plan,
-        compressed_history=compressed_history,
         notebook_content=notebook_content,
         domain_knowledge=domain_knowledge,
         max_rounds=1,
@@ -143,7 +146,6 @@ async def run_critic(
 
 def _build_critic_prompt(
     plan: dict[str, Any],
-    compressed_history: str,
     notebook_content: str,
     domain_knowledge: str,
 ) -> str:
@@ -156,9 +158,6 @@ def _build_critic_prompt(
         "",
         "## Domain Knowledge",
         domain_knowledge or "(none provided)",
-        "",
-        "## Experiment History",
-        compressed_history or "(no history yet)",
         "",
         "## Lab Notebook",
         notebook_content or "(empty)",
@@ -183,17 +182,16 @@ def _build_critic_prompt(
     return "\n".join(parts)
 
 
-def _build_defender_prompt(
+def _build_scientist_response_prompt(
     plan: dict[str, Any],
     notebook_content: str,
-    compressed_history: str,
     domain_knowledge: str,
     critique: str,
 ) -> str:
-    """Build the prompt for the scientist-defender responding to a critique."""
+    """Build the prompt for the Scientist responding to a critique during debate."""
     parts = [
-        "You are the scientist who formulated the plan for the next experiment.",
-        "A critic has reviewed your plan. Respond to their critique:",
+        "You are the scientist who formulated this plan. A critic has reviewed it.",
+        "Respond to their critique:",
         "- Defend choices that are well-motivated (explain your reasoning).",
         "- Acknowledge valid points and suggest how to address them.",
         "- Clarify any misunderstandings the critic may have about your plan.",
@@ -202,9 +200,6 @@ def _build_defender_prompt(
         "",
         "## Domain Knowledge",
         domain_knowledge or "(none provided)",
-        "",
-        "## Experiment History",
-        compressed_history or "(no history yet)",
         "",
         "## Lab Notebook",
         notebook_content or "(empty)",
@@ -224,28 +219,24 @@ def _build_defender_prompt(
 
 def _build_critic_refinement_prompt(
     plan: dict[str, Any],
-    compressed_history: str,
     notebook_content: str,
     domain_knowledge: str,
     critique: str,
     defense: str,
 ) -> str:
-    """Build the prompt for a critic to refine after seeing the defense."""
+    """Build the prompt for a critic to refine after seeing the scientist's response."""
     parts = [
         "You are a scientific critic reviewing an autonomous experiment.",
         "You previously critiqued the scientist's plan. The scientist has responded.",
-        "Now refine your critique in light of their defense:",
+        "Now refine your critique in light of their response:",
         "- Drop points that the scientist adequately addressed.",
-        "- Sharpen points where their defense was weak or evasive.",
+        "- Sharpen points where their response was weak or evasive.",
         "- Add new observations prompted by their response.",
         "- Produce a final, actionable critique.",
         "You have web search available to verify any new claims.",
         "",
         "## Domain Knowledge",
         domain_knowledge or "(none provided)",
-        "",
-        "## Experiment History",
-        compressed_history or "(no history yet)",
         "",
         "## Lab Notebook",
         notebook_content or "(empty)",
@@ -256,17 +247,17 @@ def _build_critic_refinement_prompt(
         "## Your Original Critique",
         critique,
         "",
-        "## Scientist's Defense",
+        "## Scientist's Response",
         defense,
         "",
         "## Your Task",
-        "Produce a refined, final critique. This should be self-contained",
-        "(the coder will only see this version, not the debate history).",
+        "Produce a refined, final critique. This should be self-contained.",
         "Cover the same categories as before:",
         "1. Challenges to the proposed hypothesis and strategy",
         "2. Alternative hypotheses",
         "3. Specific concerns about the planned changes",
         "4. Whether a different strategy type is needed",
-        "5. Concerns about feasibility or expected impact",
+        "5. Whether the success criteria are appropriate",
+        "6. Concerns about feasibility or expected impact",
     ]
     return "\n".join(parts)

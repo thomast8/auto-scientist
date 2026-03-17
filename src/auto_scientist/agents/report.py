@@ -8,7 +8,6 @@ from pathlib import Path
 
 from claude_agent_sdk import ClaudeAgentOptions, ResultMessage, query
 
-from auto_scientist.history import build_compressed_history
 from auto_scientist.prompts.report import REPORT_SYSTEM, REPORT_USER
 from auto_scientist.state import ExperimentState
 
@@ -29,7 +28,6 @@ async def run_report(
         Path to the generated report file.
     """
     notebook_content = notebook_path.read_text() if notebook_path.exists() else "(no notebook)"
-    compressed_history = build_compressed_history(state)
     report_path = output_dir / "report.md"
 
     user_prompt = REPORT_USER.format(
@@ -39,7 +37,6 @@ async def run_report(
         best_version=state.best_version or "none",
         best_score=state.best_score,
         notebook_content=notebook_content,
-        compressed_history=compressed_history,
         report_path=str(report_path),
     )
 

@@ -46,9 +46,6 @@ REPORT_USER = """\
 ## Lab Notebook
 {notebook_content}
 
-## Compressed History
-{compressed_history}
-
 ## Instructions
 1. Use Glob to find the best version's directory, then Read its results file
    and script to understand the best model in detail

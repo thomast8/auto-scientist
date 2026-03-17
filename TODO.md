@@ -6,6 +6,7 @@
 
 ## Completed
 
+- [x] Debate restructuring: Scientist replaces Defender, critique flows back to Scientist for revision, compressed history removed - 2026-03-17
 - [x] Per-iteration success criteria: Scientist defines testable predictions, Coder evaluates in script, Analyst reports both tiers - 2026-03-14
 - [x] Periodic investigation synthesis (condense notebook every N iterations) - 2026-03-13
 - [x] Web search for Critic and Defender (OpenAI, Google, Anthropic) - 2026-03-13

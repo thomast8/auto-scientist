@@ -16,7 +16,12 @@ from claude_agent_sdk import (
     query,
 )
 
-from auto_scientist.prompts.scientist import SCIENTIST_SYSTEM, SCIENTIST_USER
+from auto_scientist.prompts.scientist import (
+    SCIENTIST_REVISION_SYSTEM,
+    SCIENTIST_REVISION_USER,
+    SCIENTIST_SYSTEM,
+    SCIENTIST_USER,
+)
 
 # JSON schema for structured output
 SCIENTIST_PLAN_SCHEMA = {
@@ -136,3 +141,84 @@ async def run_scientist(
         raw = "\n".join(lines)
 
     return json.loads(raw)
+
+
+def _parse_json_response(raw: str, label: str) -> dict[str, Any]:
+    """Parse JSON from a response, handling markdown fencing."""
+    raw = raw.strip()
+    if raw.startswith("```"):
+        lines = raw.split("\n")
+        lines = [line for line in lines if not line.strip().startswith("```")]
+        raw = "\n".join(lines)
+    return json.loads(raw)
+
+
+async def run_scientist_revision(
+    original_plan: dict[str, Any],
+    debate_transcript: list[dict[str, str]],
+    analysis: dict[str, Any],
+    notebook_path: Path,
+    version: str,
+    domain_knowledge: str = "",
+) -> dict[str, Any]:
+    """Revise the plan after a critic debate.
+
+    Args:
+        original_plan: The initial plan that was debated.
+        debate_transcript: List of {"role": "critic"|"scientist", "content": str}.
+        analysis: Structured analysis JSON from the Analyst.
+        notebook_path: Path to the lab notebook.
+        version: Version string.
+        domain_knowledge: Domain-specific context.
+
+    Returns:
+        Revised plan dict (same schema as the initial plan).
+    """
+    notebook_path = Path(notebook_path)
+    notebook_content = notebook_path.read_text() if notebook_path.exists() else ""
+
+    # Format debate transcript
+    transcript_parts = []
+    for entry in debate_transcript:
+        role = entry["role"].capitalize()
+        transcript_parts.append(f"### {role}\n{entry['content']}")
+    transcript_text = "\n\n".join(transcript_parts)
+
+    user_prompt = SCIENTIST_REVISION_USER.format(
+        domain_knowledge=domain_knowledge or "(no domain knowledge provided)",
+        analysis_json=(
+            json.dumps(analysis, indent=2) if analysis else "(no analysis)"
+        ),
+        notebook_content=notebook_content or "(empty notebook)",
+        original_plan=json.dumps(original_plan, indent=2),
+        debate_transcript=transcript_text or "(no debate - critique was skipped)",
+        version=version,
+    )
+
+    options = ClaudeAgentOptions(
+        system_prompt=SCIENTIST_REVISION_SYSTEM,
+        allowed_tools=[],
+        max_turns=1,
+        output_format={"type": "json_schema", "schema": SCIENTIST_PLAN_SCHEMA},
+    )
+
+    result_text = ""
+    assistant_texts: list[str] = []
+
+    async for message in query(prompt=user_prompt, options=options):
+        if isinstance(message, ResultMessage):
+            if message.result:
+                result_text = message.result
+        elif isinstance(message, AssistantMessage):
+            for block in message.content:
+                if isinstance(block, TextBlock):
+                    assistant_texts.append(block.text)
+
+    raw = result_text
+    if not raw:
+        raw = "\n".join(assistant_texts)
+
+    if not raw:
+        raise RuntimeError("Scientist revision returned no output")
+
+    return _parse_json_response(raw, "Scientist revision")
