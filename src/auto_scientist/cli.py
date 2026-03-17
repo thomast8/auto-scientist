@@ -94,7 +94,7 @@ def run(
     state = ExperimentState(
         domain=domain or "auto",
         goal=goal,
-        phase="discovery",
+        phase="ingestion",
         schedule=schedule,
         data_path=data_abs,
     )
