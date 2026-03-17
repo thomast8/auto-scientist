@@ -10,10 +10,10 @@ from auto_scientist.state import ExperimentState, VersionEntry
 
 
 class Orchestrator:
-    """Drives the Discovery -> Iteration -> Report pipeline.
+    """Drives the Ingestion -> Discovery -> Iteration -> Report pipeline.
 
     State machine phases:
-        DISCOVERY -> ANALYZE -> PLAN -> STOP_CHECK -> CRITIQUE ->
+        INGESTION -> DISCOVERY -> ANALYZE -> PLAN -> STOP_CHECK -> CRITIQUE ->
         IMPLEMENT -> VALIDATE -> RUN -> EVALUATE -> ANALYZE (loop) or STOP
     """
 
@@ -46,6 +46,24 @@ class Orchestrator:
         """Execute the full orchestration loop."""
         self.output_dir.mkdir(parents=True, exist_ok=True)
         state_path = self.output_dir / "state.json"
+
+        # Phase 0: Ingestion
+        if self.state.phase == "ingestion":
+            self.state.raw_data_path = self.state.data_path
+            self.state.save(state_path)
+
+            canonical_data_dir = await self._run_ingestion()
+
+            self.state.data_path = str(canonical_data_dir)
+            self.data_path = canonical_data_dir
+
+            if self.config:
+                data_dir_str = str(canonical_data_dir.resolve())
+                if data_dir_str not in self.config.protected_paths:
+                    self.config.protected_paths.append(data_dir_str)
+
+            self.state.phase = "discovery"
+            self.state.save(state_path)
 
         # Phase 1: Discovery
         if self.state.phase == "discovery":
@@ -80,6 +98,31 @@ class Orchestrator:
             self.state.save(state_path)
 
         print(f"Experiment completed. Final state saved to {state_path}")
+
+    async def _run_ingestion(self) -> Path:
+        """Phase 0: Canonicalize raw data into experiments/data/."""
+        from auto_scientist.agents.ingestor import run_ingestor
+
+        # On resume, use raw_data_path (original); on fresh run, use data_path
+        source_path = (
+            Path(self.state.raw_data_path)
+            if self.state.raw_data_path
+            else self.data_path
+        )
+        if source_path is None:
+            raise ValueError(
+                "Cannot run ingestion without a data path. "
+                "Provide --data when starting a new experiment."
+            )
+
+        print("INGESTION phase: canonicalizing raw data")
+        canonical_data_dir = await run_ingestor(
+            raw_data_path=source_path,
+            output_dir=self.output_dir,
+            goal=self.state.goal,
+            interactive=self.interactive,
+        )
+        return canonical_data_dir
 
     async def _run_discovery(self) -> None:
         """Phase 1: Explore data, research domain, design first model."""
