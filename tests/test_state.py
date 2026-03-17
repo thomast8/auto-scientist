@@ -91,3 +91,21 @@ class TestExperimentState:
         data = json.loads(tmp_state_path.read_text())
         assert isinstance(data, dict)
         assert data["domain"] == "test"
+
+    def test_raw_data_path_field(self):
+        state = ExperimentState(domain="test", goal="g", raw_data_path="/raw/data.csv")
+        assert state.raw_data_path == "/raw/data.csv"
+
+    def test_raw_data_path_defaults_to_none(self):
+        state = ExperimentState(domain="test", goal="g")
+        assert state.raw_data_path is None
+
+    def test_default_phase_is_ingestion(self):
+        state = ExperimentState(domain="test", goal="g")
+        assert state.phase == "ingestion"
+
+    def test_raw_data_path_roundtrip(self, tmp_state_path):
+        state = ExperimentState(domain="test", goal="g", raw_data_path="/raw/data.csv")
+        state.save(tmp_state_path)
+        loaded = ExperimentState.load(tmp_state_path)
+        assert loaded.raw_data_path == "/raw/data.csv"

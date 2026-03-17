@@ -23,7 +23,7 @@ class ExperimentState(BaseModel):
 
     domain: str
     goal: str
-    phase: str = "discovery"  # discovery, iteration, report, stopped
+    phase: str = "ingestion"  # ingestion, discovery, iteration, report, stopped
     iteration: int = 0
     versions: list[VersionEntry] = Field(default_factory=list)
     dead_ends: list[str] = Field(default_factory=list)
@@ -32,6 +32,7 @@ class ExperimentState(BaseModel):
     schedule: str | None = None
     consecutive_failures: int = 0
     data_path: str | None = None
+    raw_data_path: str | None = None
     config_path: str | None = None
 
     def save(self, path: Path) -> None:
