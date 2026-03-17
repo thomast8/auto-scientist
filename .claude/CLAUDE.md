@@ -4,7 +4,9 @@
 Autonomous scientific modelling framework. Given a dataset and problem statement, the system discovers, iterates, and refines models through an LLM-driven loop. See `docs/architecture.md` for the full spec.
 
 ## Architecture Summary
-Three-phase pipeline: Discovery -> Iteration -> Report.
+Four-phase pipeline: Ingestion -> Discovery -> Iteration -> Report.
+
+0. **Ingestor** (canonicalizer): inspects raw data, asks human for clarification (interactive mode), produces canonical dataset. Uses Bash tools.
 
 Iteration loop (four agents):
 1. **Analyst** (observer): reads results + plots, outputs structured JSON. No recommendations.
@@ -12,7 +14,7 @@ Iteration loop (four agents):
 3. **Critic** (challenger): multi-round debate with the Scientist. Both have web search. Symmetric context (plan + notebook + domain knowledge). No analysis JSON, no script.
 4. **Coder** (implementer): only agent that reads/writes Python code. Follows the revised plan.
 
-Orchestrator flow: [Synthesis] -> Analyst -> Scientist (plan) -> stop check -> Critic ↔ Scientist (debate) -> Scientist (revise) -> Coder -> Validate -> Run -> Evaluate
+Orchestrator flow: Ingest (interactive) -> [Synthesis] -> Analyst -> Scientist (plan) -> stop check -> Critic ↔ Scientist (debate) -> Scientist (revise) -> Coder -> Validate -> Run -> Evaluate
 
 ### Success Criteria (two tiers)
 - **Top-level** (from Discovery/config): define when the investigation is done
@@ -30,10 +32,11 @@ Orchestrator flow: [Synthesis] -> Analyst -> Scientist (plan) -> stop check -> C
 - `models/*.py`: OpenAI/Google/Anthropic wrappers with optional `web_search=True`
 - `agents/critic.py`: `run_debate()` orchestrates multi-round critic-scientist loop
 - `agents/scientist.py`: `run_scientist()` for initial plan, `run_scientist_revision()` for post-debate revision
+- `agents/ingestor.py`: `run_ingestor()` canonicalizes raw data into experiments/data/
 
 ## Key Directories
 - `src/auto_scientist/` - Core framework code
-- `src/auto_scientist/agents/` - Agent implementations (discovery, analyst, scientist, critic, coder, report)
+- `src/auto_scientist/agents/` - Agent implementations (ingestor, discovery, analyst, scientist, critic, coder, report)
 - `src/auto_scientist/prompts/` - Prompt templates for each agent
 - `src/auto_scientist/models/` - LLM API client wrappers (with web search support)
 - `domains/` - Domain-specific configs, prompts, and seed data
@@ -55,3 +58,4 @@ Orchestrator flow: [Synthesis] -> Analyst -> Scientist (plan) -> stop check -> C
 - State is persisted as JSON via Pydantic models
 - Experiment scripts must be self-contained (no framework imports)
 - Prompts must be domain-agnostic (no ML/model-fitting specific language at framework level)
+- `docs/pipeline-visualizer.html` is the canonical pipeline visualization. Update it whenever agent roles, data flow, artifacts, or information boundaries change. It contains an interactive SVG diagram with hover-to-highlight, agent cards, an information boundary matrix, and tooltips with example content for every element.

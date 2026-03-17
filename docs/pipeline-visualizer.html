@@ -580,6 +580,10 @@
   </div>
 
   <div class="flow-strip">
+    <span class="step" style="color:var(--accent-cyan)">Ingestor</span>
+    <span class="arrow">&rarr;</span>
+    <span class="step">Discovery</span>
+    <span class="arrow">&rarr;</span>
     <span class="step optional">[Synthesis]</span>
     <span class="arrow">&rarr;</span>
     <span class="step">Analyst</span>
@@ -871,15 +875,16 @@ Pulse oximetry measures peripheral oxygen saturation (SpO2) using light absorpti
 
         <!-- Dataset -->
         <g class="artifact-node" data-artifact="dataset"
-           data-tooltip="dataset|The raw data provided by the user. Never modified by the framework.
+           data-tooltip="dataset|Canonical dataset produced by the Ingestor from raw user data. Stored in experiments/data/. Never modified after ingestion.
+
+The Ingestor inspects raw input (any format), canonicalizes it (CSV, SQLite, or Parquet), and writes it here. Original raw data is preserved unchanged.
 
 Example (SpO2):
 SQLite database with tables:
 - breath_holds (hold_id, lung_volume, start_time, end_time)
 - spo2_readings (timestamp, spo2, heart_rate, hold_id)
 
-6 breath-holds, 1-Hz sampling, ~1200 data points total.
-The experiment script loads this directly (e.g., sqlite3, pandas).">
+6 breath-holds, 1-Hz sampling, ~1200 data points total.">
           <rect x="1058" y="518" width="80" height="32" rx="6"
                 fill="rgba(142,110,212,0.06)" stroke="#8e6ed4" stroke-width="1" stroke-opacity="0.3" stroke-dasharray="4 3"/>
           <text x="1098" y="539" text-anchor="middle"
@@ -1156,6 +1161,40 @@ Grounds the debate in real science rather than hallucinated citations.">
 
   <div class="agents-grid">
 
+    <!-- Ingestor -->
+    <div class="agent-card ingestor" style="border-color: rgba(78,197,212,0.25);">
+      <div class="agent-header">
+        <div class="agent-icon">&#x1F4E5;</div>
+        <div>
+          <div class="agent-name">Ingestor</div>
+          <div class="agent-role">Phase 0. Canonicalizes raw data before Discovery.</div>
+        </div>
+      </div>
+      <div class="agent-detail">
+        Uses <code>query()</code> with Bash, Read, Write, Glob, Grep.
+        In interactive mode, also uses AskUserQuestion for human clarification.
+        Runs once before the iteration loop.
+      </div>
+      <div class="data-section">
+        <div class="data-section-label reads">reads</div>
+        <div class="data-tags">
+          <span class="data-tag read">raw data (file/dir)</span>
+          <span class="data-tag read">goal</span>
+        </div>
+      </div>
+      <div class="data-section">
+        <div class="data-section-label writes">produces</div>
+        <div class="data-tags">
+          <span class="data-tag write">canonical dataset</span>
+          <span class="data-tag write">ingest.py</span>
+          <span class="data-tag write">notebook entry</span>
+        </div>
+      </div>
+      <div class="boundary-note" style="color: var(--accent-cyan); border-color: rgba(78,197,212,0.15);">
+        Never modifies original data. Outputs to experiments/data/.
+      </div>
+    </div>
+
     <!-- Analyst -->
     <div class="agent-card analyst">
       <div class="agent-header">
@@ -1371,6 +1410,14 @@ Grounds the debate in real science rather than hallucinated citations.">
         </tr>
       </thead>
       <tbody>
+        <tr>
+          <td class="agent-col">Ingestor</td>
+          <td><span class="badge no">no</span></td>
+          <td><span class="badge no">no</span></td>
+          <td><span class="badge yes">writes</span></td>
+          <td><span class="badge no">no</span></td>
+          <td>Bash, Read, Write, Glob, Grep (+AskUserQuestion in interactive)</td>
+        </tr>
         <tr>
           <td class="agent-col">Analyst</td>
           <td><span class="badge no">no</span></td>
