@@ -1,0 +1,81 @@
+"""Ingestor agent: Phase 0 data canonicalization.
+
+Uses claude_code_sdk for a persistent session (may need multi-round human Q&A).
+Tools: Bash (data inspection, conversion), Read/Write, Glob, Grep.
+When interactive: also AskUserQuestion.
+Produces: canonical dataset in {output_dir}/data/.
+"""
+
+from pathlib import Path
+
+from claude_code_sdk import (
+    AssistantMessage,
+    ClaudeCodeOptions,
+    ResultMessage,
+    TextBlock,
+    query,
+)
+
+from auto_scientist.prompts.ingestor import INGESTOR_SYSTEM, INGESTOR_USER
+
+
+async def run_ingestor(
+    raw_data_path: Path,
+    output_dir: Path,
+    goal: str,
+    interactive: bool = False,
+) -> Path:
+    """Inspect raw data and produce a canonical dataset.
+
+    Args:
+        raw_data_path: Path to raw data file or directory.
+        output_dir: Experiment output directory (experiments/).
+        goal: The user's modelling goal.
+        interactive: If True, agent can ask user questions.
+
+    Returns:
+        Path to the canonical data directory (output_dir/data/).
+    """
+    data_dir = output_dir / "data"
+    data_dir.mkdir(parents=True, exist_ok=True)
+    notebook_path = output_dir / "lab_notebook.md"
+
+    tools = ["Bash", "Read", "Write", "Glob", "Grep"]
+    if interactive:
+        tools.append("AskUserQuestion")
+
+    mode = "interactive" if interactive else "autonomous"
+
+    options = ClaudeCodeOptions(
+        system_prompt=INGESTOR_SYSTEM,
+        allowed_tools=tools,
+        max_turns=30,
+        permission_mode="acceptEdits",
+        cwd=output_dir,
+    )
+
+    prompt = INGESTOR_USER.format(
+        raw_data_path=str(raw_data_path.resolve()),
+        goal=goal,
+        data_dir=str(data_dir),
+        notebook_path=str(notebook_path),
+        mode=mode,
+    )
+
+    async for msg in query(prompt=prompt, options=options):
+        if isinstance(msg, AssistantMessage):
+            for block in msg.content:
+                if isinstance(block, TextBlock):
+                    print(f"  [ingestor] {block.text[:200]}")
+        elif isinstance(msg, ResultMessage):
+            pass
+
+    # Verify something was produced in data_dir
+    data_files = list(data_dir.iterdir())
+    output_files = [f for f in data_files if f.name != "ingest.py"]
+    if not output_files:
+        raise FileNotFoundError(
+            f"Ingestor agent did not produce any data files in {data_dir}"
+        )
+
+    return data_dir
