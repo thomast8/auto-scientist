@@ -1,43 +1,46 @@
 # Discovery Agent Refactoring - Design Spec
 
 **Date**: 2026-03-18
-**Goal**: Separate exploration from code generation in the Discovery agent, enforcing the architecture's information boundary principle.
+**Goal**: Separate exploration from code generation in the Discovery agent, enforcing the architecture's information boundary principle. Also remove the `--domain` path (pre-loaded domain config) pending a redesign.
 
 ## Problem
 
 In auto-discovery mode (no `--domain`), the Discovery agent currently does everything in a single session: explores data, writes the domain config, writes the lab notebook, AND writes the v00 experiment script. This violates the architecture's information boundary principle where only the Coder agent should write Python experiment code.
 
-The domain-config path in the orchestrator already does it correctly: it delegates v00 script creation to the Coder. The auto-discovery path needs to follow the same pattern, but with the Scientist producing the plan rather than a hardcoded synthetic plan.
+Additionally, the `--domain` path (pre-loaded domain config) uses a hardcoded synthetic plan instead of the Scientist. Rather than fixing both paths now, the domain-config path is removed entirely to be rethought later. Only auto-discovery mode is supported.
 
 ## Design
 
 ### Flow Change
 
-**Before (auto-discovery):**
+**Before:**
 ```
 Discovery -> [config + notebook + v00 script]
 ```
 
-**After (auto-discovery):**
+**After:**
 ```
 Discovery -> [config + notebook]
 Scientist -> [v00 plan from notebook + domain knowledge]
 Coder -> [v00 script from plan]
 ```
 
-**Before (domain-config):**
-```
-Config loaded -> synthetic hardcoded plan -> Coder -> [v00 script]
-```
+### Change 1: Remove `--domain` CLI Flag and Domain-Config Path
 
-**After (domain-config):**
-```
-Config loaded -> Scientist -> [v00 plan] -> Coder -> [v00 script]
-```
+**`src/auto_scientist/cli.py`:**
+- Remove `--domain` option from the `run` command
+- Remove `load_domain_config()` function
+- Remove `config` parameter from `Orchestrator()` construction
+- The `resume` command also stops reloading domain configs (the config is already persisted in state via `config_path`)
 
-Both paths converge: config source (Discovery or pre-loaded) -> Scientist plans v00 -> Coder implements v00.
+**`src/auto_scientist/orchestrator.py`:**
+- Remove `config` parameter from `__init__`
+- Remove the `if self.config is not None` branch in `_run_discovery()` (the entire domain-config path)
+- `_run_discovery()` always runs the auto-discovery flow: Discovery -> Scientist -> Coder
 
-### Change 1: Discovery Agent - Remove Script Generation
+**Note**: The `domains/` directory and domain config files stay in the repo. They're just not loadable via CLI for now.
+
+### Change 2: Discovery Agent - Remove Script Generation
 
 **`src/auto_scientist/agents/discovery.py`:**
 - Return type changes from `tuple[DomainConfig, Path]` to `DomainConfig`
@@ -51,72 +54,59 @@ Both paths converge: config source (Discovery or pre-loaded) -> Scientist plans 
 - Renumber remaining steps: Explore (1), Design (2), Notebook (3), Config (4)
 - Remove references to script file paths and script requirements from the prompt
 
-### Change 2: Orchestrator - Wire Discovery -> Scientist -> Coder
+### Change 3: Orchestrator - Wire Discovery -> Scientist -> Coder
 
 **`src/auto_scientist/orchestrator.py` - `_run_discovery()` method:**
 
-The auto-discovery path becomes:
-
 ```python
-# Auto-discovery mode
-config = await run_discovery(state, data_path, output_dir, interactive, model)
-self.config = config
-self.state.config_path = str(self.output_dir / "domain_config.json")
+async def _run_discovery(self) -> None:
+    from auto_scientist.agents.discovery import run_discovery
+    from auto_scientist.agents.scientist import run_scientist
+    from auto_scientist.agents.coder import run_coder
+
+    notebook_path = self.output_dir / "lab_notebook.md"
+
+    # Step 1: Discovery explores data, writes config + notebook
+    print("DISCOVERY phase: exploring dataset and designing first approach")
+    self.config = await run_discovery(
+        state=self.state,
+        data_path=self.data_path,
+        output_dir=self.output_dir,
+        interactive=self.interactive,
+        model=self.model,
+    )
+    self.state.config_path = str(self.output_dir / "domain_config.json")
+
+    # Step 2: Scientist plans v00 from notebook + domain knowledge
+    print("DISCOVERY phase: scientist planning v00")
+    plan = await run_scientist(
+        analysis={},
+        notebook_path=notebook_path,
+        version="v00",
+        domain_knowledge=self.config.domain_knowledge,
+        model=self.model,
+    )
+
+    # Append scientist's notebook entry
+    with notebook_path.open("a") as f:
+        f.write(plan["notebook_entry"] + "\n---\n\n")
+
+    # Step 3: Coder implements v00
+    print("DISCOVERY phase: coder writing v00")
+    script_path = await run_coder(
+        plan=plan,
+        previous_script=Path("nonexistent"),
+        output_dir=self.output_dir,
+        version="v00",
+        domain_knowledge=self.config.domain_knowledge,
+        data_path=self.state.data_path or "",
+        experiment_dependencies=self.config.experiment_dependencies,
+        model=self.model,
+    )
+
+    # Run and evaluate v00 (unchanged from current code)
+    ...
 ```
-
-Then both paths (auto-discovery and domain-config) converge into shared code:
-
-```python
-notebook_path = self.output_dir / "lab_notebook.md"
-
-# Scientist plans v00 from notebook + domain knowledge
-plan = await run_scientist(
-    analysis={},
-    notebook_path=notebook_path,
-    version="v00",
-    domain_knowledge=config.domain_knowledge,
-    model=self.model,
-)
-
-# Append notebook entry
-with notebook_path.open("a") as f:
-    f.write(plan["notebook_entry"] + "\n---\n\n")
-
-# Coder implements v00
-script_path = await run_coder(
-    plan=plan,
-    previous_script=Path("nonexistent"),
-    output_dir=output_dir,
-    version="v00",
-    domain_knowledge=config.domain_knowledge,
-    data_path=state.data_path or "",
-    experiment_dependencies=config.experiment_dependencies,
-    model=self.model,
-)
-```
-
-### Change 3: Domain-Config Path Uses Scientist
-
-The existing domain-config path in `_run_discovery()` currently creates a hardcoded synthetic plan dict. This is replaced with a `run_scientist()` call, making both paths identical after the config is obtained.
-
-The hardcoded synthetic plan is removed. However, the domain-config path still needs to create the initial notebook skeleton (Goal + Domain header) before calling the Scientist, since Discovery doesn't run in this path. In auto-discovery mode, the Discovery agent creates the notebook as part of its exploration.
-
-```python
-if self.config is not None:
-    # Domain-config path: create notebook skeleton (Discovery doesn't run)
-    if not notebook_path.exists():
-        notebook_path.write_text(
-            f"# Lab Notebook\n\n## Goal\n{self.state.goal}\n\n"
-            f"## Domain\n{self.config.name}: {self.config.description}\n\n---\n\n"
-        )
-else:
-    # Auto-discovery path: Discovery creates notebook + config
-    self.config = await run_discovery(...)
-
-# Both paths converge: Scientist -> Coder (shared code below)
-```
-
-Note: `v00/` directory creation is also removed from the orchestrator since `run_coder()` already handles it (coder.py:102-103).
 
 ### Change 4: Minor Scientist Prompt Tweak
 
@@ -149,7 +139,8 @@ The Scientist's existing `run_scientist()` function handles the v00 case:
 | `src/auto_scientist/agents/discovery.py` | Remove script generation, change return type |
 | `src/auto_scientist/prompts/discovery.py` | Remove Step 3, refocus Step 2 |
 | `src/auto_scientist/prompts/scientist.py` | Update first-iteration guidance (v01 -> v00, results -> notebook) |
-| `src/auto_scientist/orchestrator.py` | Rewire `_run_discovery()` for both paths |
+| `src/auto_scientist/orchestrator.py` | Remove domain-config path, wire Discovery -> Scientist -> Coder |
+| `src/auto_scientist/cli.py` | Remove `--domain` flag and `load_domain_config()` |
 | `tests/test_discovery.py` | Update assertions for new return type, remove script verification tests |
 | `docs/architecture.md` | Remove "first experiment script" from Discovery produces list |
 | `docs/pipeline-visualizer.html` | Update data flow to show Discovery -> Scientist -> Coder for v00 |
@@ -159,5 +150,5 @@ The Scientist's existing `run_scientist()` function handles the v00 case:
 - [ ] Unit: Discovery returns `DomainConfig` only (no script path)
 - [ ] Unit: Orchestrator calls Scientist then Coder after Discovery
 - [ ] Integration: auto-discovery mode produces v00 via Scientist -> Coder pipeline
-- [ ] Integration: domain-config mode produces v00 via Scientist -> Coder pipeline
 - [ ] Verify: information boundary holds (Discovery never writes `.py` files)
+- [ ] Verify: `--domain` flag is gone from CLI help
