@@ -61,8 +61,8 @@ Before planning forward, reflect on the investigation arc:
 Then describe your hypothesis, strategy, and planned changes for the next
 iteration.
 
-On the first iteration (v01), there is no prior arc to reflect on. Focus on
-your initial assessment of the baseline results and your forward plan.
+On the first iteration (v00), there is no prior arc to reflect on. Focus on
+the exploration findings in the notebook and your forward plan.
 
 Good retrospection is concrete and specific to the domain:
   "v03 was a dead end: adding sensor delay sounded physiologically correct,
