@@ -1,0 +1,167 @@
+"""Tests for the Analyst agent."""
+
+import json
+from unittest.mock import MagicMock, patch
+
+import pytest
+
+from auto_scientist.agents.analyst import _format_success_criteria, run_analyst
+from auto_scientist.config import SuccessCriterion
+
+
+class TestFormatSuccessCriteria:
+    """Tests for the pure helper function."""
+
+    def test_empty_list(self):
+        assert _format_success_criteria([]) == "(no success criteria defined)"
+
+    def test_target_min_only(self):
+        sc = SuccessCriterion(name="acc", description="accuracy", metric_key="acc", target_min=0.9)
+        result = _format_success_criteria([sc])
+        assert ">= 0.9" in result
+        assert "REQUIRED" in result
+
+    def test_target_max_only(self):
+        sc = SuccessCriterion(name="loss", description="loss", metric_key="loss", target_max=0.1)
+        result = _format_success_criteria([sc])
+        assert "<= 0.1" in result
+
+    def test_both_bounds(self):
+        sc = SuccessCriterion(
+            name="f1", description="f1 score", metric_key="f1",
+            target_min=0.8, target_max=1.0,
+        )
+        result = _format_success_criteria([sc])
+        assert "[0.8, 1.0]" in result
+
+    def test_optional_label(self):
+        sc = SuccessCriterion(
+            name="extra", description="extra metric", metric_key="extra",
+            required=False,
+        )
+        result = _format_success_criteria([sc])
+        assert "optional" in result
+
+    def test_multiple_criteria_numbered(self):
+        criteria = [
+            SuccessCriterion(name="a", description="da", metric_key="a"),
+            SuccessCriterion(name="b", description="db", metric_key="b"),
+        ]
+        result = _format_success_criteria(criteria)
+        assert result.startswith("1.")
+        assert "2." in result
+
+
+class TestRunAnalyst:
+    """Tests for the agent runner, mocking the claude_agent_sdk query."""
+
+    @pytest.mark.asyncio
+    @patch("auto_scientist.agents.analyst.query")
+    async def test_returns_parsed_json(self, mock_query, tmp_path):
+        analysis = {
+            "success_score": 75,
+            "criteria_results": [],
+            "key_metrics": {"rmse": 0.5},
+            "improvements": ["better"],
+            "regressions": [],
+            "observations": ["noted"],
+            "iteration_criteria_results": [],
+        }
+
+        from auto_scientist.agents.analyst import ResultMessage
+        result_msg = MagicMock(spec=ResultMessage)
+        result_msg.result = json.dumps(analysis)
+
+        async def fake_query(**kwargs):
+            yield result_msg
+
+        mock_query.side_effect = fake_query
+
+        results_path = tmp_path / "results.txt"
+        results_path.write_text("rmse: 0.5")
+        notebook_path = tmp_path / "notebook.md"
+        notebook_path.write_text("# Notebook")
+
+        result = await run_analyst(
+            results_path=results_path,
+            plot_paths=[],
+            notebook_path=notebook_path,
+        )
+
+        assert result["success_score"] == 75
+        assert result["key_metrics"]["rmse"] == 0.5
+
+    @pytest.mark.asyncio
+    @patch("auto_scientist.agents.analyst.query")
+    async def test_handles_markdown_fenced_json(self, mock_query, tmp_path):
+        analysis = {
+            "success_score": 50, "criteria_results": [], "key_metrics": {},
+            "improvements": [], "regressions": [], "observations": [],
+            "iteration_criteria_results": [],
+        }
+        fenced = f"```json\n{json.dumps(analysis)}\n```"
+
+        from auto_scientist.agents.analyst import ResultMessage
+        result_msg = MagicMock(spec=ResultMessage)
+        result_msg.result = fenced
+
+        async def fake_query(**kwargs):
+            yield result_msg
+
+        mock_query.side_effect = fake_query
+
+        results_path = tmp_path / "results.txt"
+        results_path.write_text("data")
+        notebook_path = tmp_path / "notebook.md"
+
+        result = await run_analyst(
+            results_path=results_path, plot_paths=[], notebook_path=notebook_path,
+        )
+        assert result["success_score"] == 50
+
+    @pytest.mark.asyncio
+    @patch("auto_scientist.agents.analyst.query")
+    async def test_raises_on_empty_output(self, mock_query, tmp_path):
+        from auto_scientist.agents.analyst import ResultMessage
+        result_msg = MagicMock(spec=ResultMessage)
+        result_msg.result = ""
+
+        async def fake_query(**kwargs):
+            yield result_msg
+
+        mock_query.side_effect = fake_query
+
+        results_path = tmp_path / "results.txt"
+        results_path.write_text("data")
+        notebook_path = tmp_path / "notebook.md"
+
+        with pytest.raises(RuntimeError, match="returned no output"):
+            await run_analyst(
+                results_path=results_path, plot_paths=[], notebook_path=notebook_path,
+            )
+
+    @pytest.mark.asyncio
+    @patch("auto_scientist.agents.analyst.query")
+    async def test_missing_results_file_uses_fallback(self, mock_query, tmp_path):
+        analysis = {
+            "success_score": 0, "criteria_results": [], "key_metrics": {},
+            "improvements": [], "regressions": [], "observations": [],
+            "iteration_criteria_results": [],
+        }
+
+        from auto_scientist.agents.analyst import ResultMessage
+        result_msg = MagicMock(spec=ResultMessage)
+        result_msg.result = json.dumps(analysis)
+
+        async def fake_query(**kwargs):
+            yield result_msg
+
+        mock_query.side_effect = fake_query
+
+        results_path = tmp_path / "nonexistent.txt"
+        notebook_path = tmp_path / "notebook.md"
+
+        result = await run_analyst(
+            results_path=results_path, plot_paths=[], notebook_path=notebook_path,
+        )
+        assert result["success_score"] == 0

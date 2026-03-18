@@ -43,8 +43,8 @@ The script MUST print structured results to stdout. Include:
 
    SUCCESS CRITERIA
    ----------------
-   1. {name}: PASS ({measured_value})
-   2. {name}: FAIL ({measured_value}, expected {condition})
+   1. {{name}}: PASS ({{measured_value}})
+   2. {{name}}: FAIL ({{measured_value}}, expected {{condition}})
 
    Score: X/Y PASS, Z FAIL
 
