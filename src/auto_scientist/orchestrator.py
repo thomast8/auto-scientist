@@ -28,7 +28,6 @@ class Orchestrator:
         max_consecutive_failures: int = 5,
         debate_rounds: int = 2,
         config: DomainConfig | None = None,
-        synthesis_interval: int = 0,
     ):
         self.state = state
         self.data_path = data_path
@@ -39,8 +38,6 @@ class Orchestrator:
         self.max_consecutive_failures = max_consecutive_failures
         self.debate_rounds = debate_rounds
         self.config = config
-        self.synthesis_interval = synthesis_interval
-        self._notebook_override: str | None = None  # set by synthesis
 
     async def run(self) -> None:
         """Execute the full orchestration loop."""
@@ -208,38 +205,9 @@ class Orchestrator:
         self.state.record_version(version_entry)
 
     def _notebook_content(self) -> str:
-        """Return notebook content, using synthesis override if available."""
-        if self._notebook_override:
-            return self._notebook_override
+        """Return notebook content."""
         notebook_path = self.output_dir / "lab_notebook.md"
         return notebook_path.read_text() if notebook_path.exists() else ""
-
-    async def _run_synthesis(self) -> None:
-        """Condense the notebook if synthesis interval is reached."""
-        if self.synthesis_interval <= 0:
-            return
-        if self.state.iteration % self.synthesis_interval != 0:
-            return
-
-        from auto_scientist.synthesis import run_synthesis
-
-        notebook_path = self.output_dir / "lab_notebook.md"
-        if not notebook_path.exists():
-            return
-
-        notebook_content = notebook_path.read_text()
-        domain_knowledge = self.config.domain_knowledge if self.config else ""
-
-        print("  SYNTHESIS: condensing notebook")
-        try:
-            self._notebook_override = await run_synthesis(
-                notebook_content=notebook_content,
-                domain_knowledge=domain_knowledge,
-            )
-            print("  SYNTHESIS: done")
-        except Exception as e:
-            print(f"  SYNTHESIS: error - {e}")
-            self._notebook_override = None
 
     async def _run_iteration(self) -> None:
         """Run one iteration of the pipeline."""
@@ -247,9 +215,6 @@ class Orchestrator:
         print(f"\n{'='*60}")
         print(f"ITERATION {self.state.iteration}")
         print(f"{'='*60}")
-
-        # Step 0: Periodic synthesis (condense notebook every N iterations)
-        await self._run_synthesis()
 
         # Step 1: Analyst observes latest results
         analysis = await self._run_analyst()
@@ -294,8 +259,6 @@ class Orchestrator:
         self._evaluate(run_result, version_entry)
         self.state.record_version(version_entry)
 
-        # Reset synthesis override for next iteration
-        self._notebook_override = None
 
     async def _run_analyst(self) -> dict[str, Any] | None:
         """Invoke the Analyst agent on latest results + plots."""

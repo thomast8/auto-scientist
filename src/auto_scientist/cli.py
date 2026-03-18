@@ -63,12 +63,6 @@ def cli():
     type=click.Path(),
     help="Output directory for experiments",
 )
-@click.option(
-    "--synthesis-interval",
-    default=0,
-    type=int,
-    help="Condense notebook every N iterations (0 = disabled)",
-)
 def run(
     data: str,
     goal: str,
@@ -79,7 +73,6 @@ def run(
     interactive: bool,
     debate_rounds: int,
     output_dir: str,
-    synthesis_interval: int,
 ):
     """Run autonomous scientific investigation from raw data."""
     critic_list = [c.strip() for c in critics.split(",") if c.strip()] if critics else []
@@ -108,7 +101,6 @@ def run(
         interactive=interactive,
         debate_rounds=debate_rounds,
         config=config,
-        synthesis_interval=synthesis_interval,
     )
 
     asyncio.run(orchestrator.run())
