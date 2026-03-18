@@ -51,7 +51,7 @@ All prompts will follow these rules (provided by the team):
 
 ## Deliverables
 
-### Files to rewrite (7 prompt files):
+### Files to rewrite (6 existing prompt files):
 1. `src/auto_scientist/prompts/analyst.py` - ANALYST_SYSTEM, ANALYST_USER
 2. `src/auto_scientist/prompts/scientist.py` - SCIENTIST_SYSTEM, SCIENTIST_USER, SCIENTIST_REVISION_SYSTEM, SCIENTIST_REVISION_USER
 3. `src/auto_scientist/prompts/coder.py` - CODER_SYSTEM, CODER_USER, CODER_NO_PREVIOUS, CODER_HAS_PREVIOUS
@@ -168,7 +168,7 @@ AGENT_USER = """\
 7. Write a notebook entry as a continuous narrative under `## {version} - [Brief Title]`
 8. Set should_stop=true when all required criteria pass, or when stagnation persists after structural changes
 
-**Examples (4, covering all strategy types + stop + v00):**
+**Examples (5, covering all strategy types + stop + v00):**
 1. Incremental: crop yield prediction, adjusting soil sampling depth. Previous iteration was an incremental improvement. Criteria are specific numeric thresholds.
 2. Structural: traffic flow analysis, switching from regression to simulation. Previous iteration was a dead end with structural reasoning for why.
 3. Exploratory: weather prediction, abandoning physics model for data-driven approach after stagnation.
@@ -373,9 +373,14 @@ Each example uses a different domain to demonstrate that the framework is genera
 
 ## Testing
 
-- Existing tests in `tests/test_critic.py` verify information boundaries (no analysis or script in prompts, no compressed history). These must still pass after the rewrite.
+- Existing tests in `tests/test_critic.py` verify information boundaries (no analysis or script in prompts, no compressed history). Some tests assert specific markdown heading strings (e.g., `"Scientist's Plan"`, `"Your Plan"`, `"Lab Notebook"`) that will change with the XML migration. These tests must be updated to match the new XML tag names.
+- Update `tests/test_critic.py` as part of the deliverables: adjust string assertions to match new XML tags while preserving the information boundary checks.
 - Run `uv run pytest` to verify no regressions.
 - Manual review of each prompt against the standards checklist.
+
+### Principle: Tool-Using Agents Skip Few-Shot Examples
+
+Tool-using agents that produce files rather than structured JSON (Coder, Discovery, Ingestor, Report) do not receive few-shot examples. Their instructions are procedural and their output formats are specified concretely (file templates, stdout format). Few-shot examples are reserved for agents that must produce structured JSON output (Analyst, Scientist, Scientist Revision) where format compliance is critical.
 
 ## Out of Scope
 
