@@ -12,8 +12,8 @@ import json
 from pathlib import Path
 from typing import Any
 
-from claude_agent_sdk import (
-    ClaudeAgentOptions,
+from claude_code_sdk import (
+    ClaudeCodeOptions,
     PermissionResultAllow,
     PermissionResultDeny,
     ResultMessage,
@@ -131,7 +131,7 @@ async def run_coder(
         version=version,
     )
 
-    options = ClaudeAgentOptions(
+    options = ClaudeCodeOptions(
         system_prompt=system_prompt,
         allowed_tools=["Read", "Write", "Edit", "Bash", "Glob", "Grep"],
         max_turns=30,

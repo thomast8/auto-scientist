@@ -53,7 +53,7 @@ class TestFormatSuccessCriteria:
 
 
 class TestRunAnalyst:
-    """Tests for the agent runner, mocking the claude_agent_sdk query."""
+    """Tests for the agent runner, mocking the claude_code_sdk query."""
 
     @pytest.mark.asyncio
     @patch("auto_scientist.agents.analyst.query")

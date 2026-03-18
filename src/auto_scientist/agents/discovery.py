@@ -9,9 +9,9 @@ Produces: domain config (success criteria, metric definitions), first experiment
 import json
 from pathlib import Path
 
-from claude_agent_sdk import (
+from claude_code_sdk import (
     AssistantMessage,
-    ClaudeAgentOptions,
+    ClaudeCodeOptions,
     ClaudeSDKClient,
     ResultMessage,
     TextBlock,
@@ -52,7 +52,7 @@ async def run_discovery(
     if interactive:
         tools.append("AskUserQuestion")
 
-    options = ClaudeAgentOptions(
+    options = ClaudeCodeOptions(
         system_prompt=DISCOVERY_SYSTEM,
         allowed_tools=tools,
         max_turns=30,

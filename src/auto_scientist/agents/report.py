@@ -6,7 +6,7 @@ first to final version, key insights, and recommendations for future work.
 
 from pathlib import Path
 
-from claude_agent_sdk import ClaudeAgentOptions, ResultMessage, query
+from claude_code_sdk import ClaudeCodeOptions, ResultMessage, query
 
 from auto_scientist.prompts.report import REPORT_SYSTEM, REPORT_USER
 from auto_scientist.state import ExperimentState
@@ -40,7 +40,7 @@ async def run_report(
         report_path=str(report_path),
     )
 
-    options = ClaudeAgentOptions(
+    options = ClaudeCodeOptions(
         system_prompt=REPORT_SYSTEM,
         allowed_tools=["Read", "Write", "Glob"],
         max_turns=10,

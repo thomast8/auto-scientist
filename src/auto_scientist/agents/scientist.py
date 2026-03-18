@@ -8,9 +8,9 @@ import json
 from pathlib import Path
 from typing import Any
 
-from claude_agent_sdk import (
+from claude_code_sdk import (
     AssistantMessage,
-    ClaudeAgentOptions,
+    ClaudeCodeOptions,
     ResultMessage,
     TextBlock,
     query,
@@ -106,11 +106,17 @@ async def run_scientist(
         version=version,
     )
 
-    options = ClaudeAgentOptions(
-        system_prompt=SCIENTIST_SYSTEM,
+    json_instruction = (
+        "\n\n## Output Format\n"
+        "You MUST respond with ONLY valid JSON matching the schema below.\n"
+        "No markdown fencing. No explanation. No other text.\n\n"
+        f"Schema:\n{json.dumps(SCIENTIST_PLAN_SCHEMA, indent=2)}"
+    )
+
+    options = ClaudeCodeOptions(
+        system_prompt=SCIENTIST_SYSTEM + json_instruction,
         allowed_tools=[],
         max_turns=1,
-        output_format={"type": "json_schema", "schema": SCIENTIST_PLAN_SCHEMA},
     )
 
     result_text = ""
@@ -195,11 +201,17 @@ async def run_scientist_revision(
         version=version,
     )
 
-    options = ClaudeAgentOptions(
-        system_prompt=SCIENTIST_REVISION_SYSTEM,
+    json_instruction = (
+        "\n\n## Output Format\n"
+        "You MUST respond with ONLY valid JSON matching the schema below.\n"
+        "No markdown fencing. No explanation. No other text.\n\n"
+        f"Schema:\n{json.dumps(SCIENTIST_PLAN_SCHEMA, indent=2)}"
+    )
+
+    options = ClaudeCodeOptions(
+        system_prompt=SCIENTIST_REVISION_SYSTEM + json_instruction,
         allowed_tools=[],
         max_turns=1,
-        output_format={"type": "json_schema", "schema": SCIENTIST_PLAN_SCHEMA},
     )
 
     result_text = ""

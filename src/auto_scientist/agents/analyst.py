@@ -11,9 +11,9 @@ import json
 from pathlib import Path
 from typing import Any
 
-from claude_agent_sdk import (
+from claude_code_sdk import (
     AssistantMessage,
-    ClaudeAgentOptions,
+    ClaudeCodeOptions,
     ResultMessage,
     TextBlock,
     query,
@@ -127,13 +127,19 @@ async def run_analyst(
         plot_list=plot_list,
     )
 
-    options = ClaudeAgentOptions(
-        system_prompt=ANALYST_SYSTEM,
+    json_instruction = (
+        "\n\n## Output Format\n"
+        "You MUST respond with ONLY valid JSON matching the schema below.\n"
+        "No markdown fencing. No explanation. No other text.\n\n"
+        f"Schema:\n{json.dumps(ANALYST_SCHEMA, indent=2)}"
+    )
+
+    options = ClaudeCodeOptions(
+        system_prompt=ANALYST_SYSTEM + json_instruction,
         allowed_tools=["Read", "Glob"],
         max_turns=5,
         permission_mode="default",
         cwd=results_path.parent,
-        output_format={"type": "json_schema", "schema": ANALYST_SCHEMA},
     )
 
     result_text = ""
