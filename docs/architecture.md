@@ -27,7 +27,8 @@ The user has been manually iterating on SpO2 models (v5.x to v7.x, 18 versions) 
 ```
 Phase 1: DISCOVERY (autonomous, one-time)
   User provides: dataset path + problem statement
-  System: explores data, researches domain, designs first approach, writes v1 script
+  System: explores data, researches domain, designs first approach
+  Discovery -> Scientist (plans v00) -> Coder (implements v00)
 
 Phase 2: ITERATION (autonomous loop)
   [0] Synthesis (optional, every N iterations)
@@ -95,8 +96,10 @@ The Critic and Scientist debate strategy on equal footing with symmetric context
 
 **Discovery Agent** (Phase 1):
 - Uses `ClaudeSDKClient` for persistent session (exploratory, may need multiple queries)
-- Tools: Bash (data exploration, stats, plots), WebSearch (literature), Read/Write
-- Produces: domain config (success criteria, metric definitions), first experiment script, lab notebook entry #0
+- Tools: Bash (data exploration, stats, plots), Read/Write, Glob, Grep
+- Produces: domain config (success criteria, metric definitions), lab notebook entry #0
+- Does NOT write experiment scripts (the Scientist plans, the Coder implements)
+- After Discovery, the Scientist plans v00 from the notebook findings, then the Coder implements it
 - In `--interactive` mode, uses AskUserQuestion to clarify with the user
 
 **Analyst Agent** (Phase 2, step 1):
