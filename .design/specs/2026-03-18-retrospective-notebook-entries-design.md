@@ -22,7 +22,7 @@ This is a prompt-only change. No new agents, no schema changes, no pipeline modi
 
 ### Files Modified
 
-- `src/auto_scientist/prompts/scientist.py`: Expand the "Lab Notebook Entry" section in `SCIENTIST_SYSTEM` to include retrospective guidance. Also update the revision prompt's notebook_entry instruction (`SCIENTIST_REVISION_SYSTEM` line 121) for consistency.
+- `src/auto_scientist/prompts/scientist.py`: Expand the "Lab Notebook Entry" section in `SCIENTIST_SYSTEM` to include retrospective guidance. Also update the `notebook_entry` instruction in `SCIENTIST_REVISION_SYSTEM` for consistency.
 
 ### What Does NOT Change
 
@@ -44,12 +44,15 @@ To guidance that asks the Scientist to:
 - Reflect on the arc before planning forward. Label the previous iteration's outcome: breakthrough (changed understanding), incremental (refined approach), or dead end (abandoned direction). For dead ends, explain the structural reason with hindsight.
 - Note diagnostic indicators relevant to the domain. These are signs of investigation health: parameter identifiability, model adequacy, convergence behavior, whether improvements are genuine or artifacts of overfitting/compensation.
 - Then plan forward with hypothesis, strategy, and changes as before.
+- On the first iteration (v01), skip the arc reflection since there's only the baseline to work from. Focus on the initial assessment of the baseline results and the forward plan.
 
 The entry should read as a continuous narrative, not three separate sections with headers. The format stays `## {version} - [Brief Title]` followed by prose.
 
+The prompt should include a short domain-agnostic example of good retrospection to anchor the quality bar. Examples must avoid domain-specific language per project convention.
+
 ### Revision Prompt
 
-The revision prompt (`SCIENTIST_REVISION_SYSTEM`) currently says the notebook_entry should "document what changed from the debate and why." This stays, but adds: also update the arc reflection if the debate changed the assessment of where the investigation stands (e.g., what was thought to be a breakthrough is actually a dead end).
+The revision prompt (`SCIENTIST_REVISION_SYSTEM`) currently says the notebook_entry should "document what changed from the debate and why." This stays, but adds: also update the arc reflection if the debate changed the assessment of where the investigation stands (e.g., what was thought to be a breakthrough is actually a dead end). The revision entry should NOT repeat the same arc reflection and diagnostics from the initial entry; it focuses on what the debate changed.
 
 ## Risks
 
