@@ -33,7 +33,7 @@ Load it directly in the script using the appropriate method (e.g., sqlite3 for
 The script MUST print structured results to stdout. Include:
 1. A header with the version name and a one-line description of changes
 2. Data summary (what was loaded, how many data points)
-3. Full specification of the approach (equations, parameters, configuration)
+3. Full specification of the approach and its key design choices
 4. Changes from the previous version (what changed and why)
 5. Key parameter/configuration values
 6. Metrics and diagnostic results

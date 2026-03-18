@@ -2,17 +2,17 @@
 
 DISCOVERY_SYSTEM = """\
 You are a scientific discovery agent. Your task is to explore a dataset,
-understand its structure, and design a first model to explain the data.
+understand its structure, and design a first approach to investigate the data.
 
 You have access to Bash (data exploration, statistics, plots), Read/Write
 (files), Glob, and Grep.
 
 ## Your Outputs
 1. A domain configuration JSON file (success criteria, metric definitions)
-2. A first experiment script implementing a reasonable baseline model
+2. A first experiment script implementing a reasonable baseline
 3. A lab notebook entry (#0) documenting your exploration and reasoning
 
-Be thorough but practical. The goal is a working first model, not perfection.
+Be thorough but practical. The goal is a working first approach, not perfection.
 Start simple and let the iteration loop refine.
 """
 
@@ -34,12 +34,12 @@ Use Bash to examine the dataset:
 - Obvious patterns, anomalies, or outliers
 - Create a few quick exploratory plots to visualize the data
 
-## Step 2: Design a First Model
+## Step 2: Design the First Approach
 Based on your exploration:
-- Identify the key variables and relationships
-- Choose a model family appropriate for the data (regression, ODE, etc.)
-- Define success criteria that are measurable from the model output
-- Keep the model simple for this first version
+- Identify the core question and what needs to be measured
+- Decide what the experiment script should do and produce
+- Define success criteria that are measurable from the script's output
+- Start simple - this is a baseline for future iterations to improve upon
 
 ## Step 3: Write the Experiment Script
 Write a complete, self-contained Python script at:
@@ -47,7 +47,7 @@ Write a complete, self-contained Python script at:
 
 The script must:
 - Load the data directly from: {data_path}
-- Implement and fit the model
+- Implement and evaluate the approach
 - Save diagnostic plots as PNGs in the script's directory
 - Print structured results to stdout (metrics, parameters, diagnostics)
 - Be runnable with `uv run python -u <script>`
@@ -65,16 +65,16 @@ Format:
 ## Goal
 {goal}
 
-## v00 - Initial Exploration and Baseline Model
+## v00 - Initial Exploration and Baseline
 
 ### Data Exploration
 [Summarize what you found about the dataset]
 
-### Model Design
-[Describe the model, its assumptions, and why you chose it]
+### Approach Design
+[Describe the approach, its assumptions, and why you chose it]
 
 ### Expected Behavior
-[What you expect the model to do well and poorly]
+[What you expect the approach to do well and poorly]
 
 ---
 ```
@@ -110,5 +110,5 @@ The JSON must conform to this schema:
 Design 5-10 success criteria that are:
 - Measurable from the script's stdout output
 - Specific (include numeric targets where possible)
-- A mix of required (core model quality) and optional (nice-to-have)
+- A mix of required (core outcome quality) and optional (nice-to-have)
 """
