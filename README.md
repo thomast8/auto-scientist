@@ -1,12 +1,12 @@
 # Auto-Scientist
 
-Autonomous scientific modelling framework. Provide a dataset and problem statement, and the system discovers, iterates, and refines models through an LLM-driven loop.
+Autonomous scientific investigation framework. Provide a dataset and problem statement, and the system discovers, iterates, and refines approaches through an LLM-driven loop.
 
 ## How It Works
 
-1. **Discovery**: Explores your data, researches the domain, and designs a first model
+1. **Discovery**: Explores your data, researches the domain, and designs a first approach
 2. **Iteration**: Runs an autonomous loop of analyze -> critique -> implement -> run
-3. **Report**: Generates a final summary of the best model and key insights
+3. **Report**: Generates a final summary of the best approach and key insights
 
 The system uses Claude (via claude-code-sdk) as the primary scientist, with optional multi-round critic-scientist debate (GPT, Gemini, or any supported model critiques; Claude defends; critic refines).
 
@@ -19,7 +19,7 @@ uv sync
 # Run from raw data
 auto-scientist run \
   --data ./my_data.csv \
-  --goal "Model the relationship between X and Y" \
+  --goal "Investigate the relationship between X and Y" \
   --max-iterations 20
 
 # With multi-model critique (2-round debate by default)

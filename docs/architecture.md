@@ -1,10 +1,10 @@
-# Auto-Scientist: Autonomous Scientific Modelling Framework
+# Auto-Scientist: Autonomous Scientific Investigation Framework
 
 ## Context
 
 The user has been manually iterating on SpO2 models (v5.x to v7.x, 18 versions) through a cycle of: run experiment, analyze results, hypothesize changes, implement, repeat. Each iteration involves a ~2500-line Python script, ~500-line results file, and diagnostic plots. The manual process also involved cross-pollinating ideas between Claude and GPT (Claude implements/reports, GPT critiques/proposes, Claude responds and implements).
 
-**Goal**: Build a general-purpose autonomous scientific modelling framework where the user provides a dataset and problem statement, and the system autonomously discovers, iterates, and refines models. SpO2 is the first domain and test case: reproduce the manual v5 to v7 journey starting from just the raw data. This is a **new standalone repo**.
+**Goal**: Build a general-purpose autonomous scientific investigation framework where the user provides a dataset and problem statement, and the system autonomously discovers, iterates, and refines approaches. SpO2 is the first domain and test case: reproduce the manual v5 to v7 journey starting from just the raw data. This is a **new standalone repo**.
 
 **Key design decisions**:
 - Fully autonomous by default (optional interactive mode)
@@ -27,7 +27,7 @@ The user has been manually iterating on SpO2 models (v5.x to v7.x, 18 versions) 
 ```
 Phase 1: DISCOVERY (autonomous, one-time)
   User provides: dataset path + problem statement
-  System: explores data, researches domain, designs first model, writes v1 script
+  System: explores data, researches domain, designs first approach, writes v1 script
 
 Phase 2: ITERATION (autonomous loop)
   [0] Synthesis (optional, every N iterations)
@@ -72,7 +72,7 @@ Phase 2: ITERATION (autonomous loop)
   Loop back to [1]
 
 Phase 3: REPORT (one-time)
-  Generates final summary: best model, journey, recommendations
+  Generates final summary: best approach, journey, recommendations
 ```
 
 ### Information Boundaries
@@ -149,7 +149,7 @@ The Critic and Scientist debate strategy on equal footing with symmetric context
 - Runs: domain-configured command (e.g., `uv run python -u {script_path}`)
 - Captures: stdout to results file, checks for output plots
 - `results.txt` is compiled by the experiment script itself via print statements.
-  The Coder writes scripts that print structured output (model spec, parameters,
+  The Coder writes scripts that print structured output (approach spec, parameters,
   metrics, diagnostics, success criteria). No LLM post-processing needed.
 - Timeout: configurable (default 120 min)
 - Syntax validation before run: `python -m py_compile`
@@ -175,7 +175,7 @@ DISCOVERY -> [SYNTHESIS] -> ANALYZE -> PLAN -> STOP_CHECK -> CRITIQUE
 
 A markdown file (`experiments/lab_notebook.md`) maintained by the orchestrator. The Scientist writes the notebook entry as part of its plan, and the orchestrator appends it to the file.
 
-The notebook is a **strategic journal**: hypothesis, reasoning, key lessons, dead ends. It is NOT a copy of the model spec or results. That lives in `results.txt`.
+The notebook is a **strategic journal**: hypothesis, reasoning, key lessons, dead ends. It is NOT a copy of the approach spec or results. That lives in `results.txt`.
 
 ### Periodic Investigation Synthesis
 
@@ -219,7 +219,7 @@ auto-scientist/
       synthesis.py                   # Periodic notebook condensation
       agents/
         __init__.py
-        discovery.py                 # Phase 1: data exploration + first model
+        discovery.py                 # Phase 1: data exploration + first approach
         analyst.py                   # Phase 2: results + plots -> structured JSON
         scientist.py                 # Phase 2: analysis -> hypothesis + plan
         critic.py                    # Phase 2: multi-model critique of plan
@@ -336,7 +336,7 @@ class ExperimentState(BaseModel):
 # Fully autonomous from raw data (the primary use case)
 auto-scientist run \
   --data ./my_data.csv \
-  --goal "Model the relationship between X and Y with a physically grounded model" \
+  --goal "Investigate the relationship between X and Y with a physically grounded approach" \
   --max-iterations 20 \
   --critics openai:gpt-4o,google:gemini-2.5-pro \
   --debate-rounds 2 \

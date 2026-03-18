@@ -629,6 +629,10 @@
                   markerWidth="8" markerHeight="6" orient="auto-start-reverse">
             <path d="M0,0 L10,4 L0,8 Z" fill="#8e6ed4"/>
           </marker>
+          <marker id="ah-cyan" viewBox="0 0 10 8" refX="10" refY="4"
+                  markerWidth="8" markerHeight="6" orient="auto-start-reverse">
+            <path d="M0,0 L10,4 L0,8 Z" fill="#4ec5d4"/>
+          </marker>
 
           <!-- Glow filters -->
           <filter id="glow-amber" x="-30%" y="-30%" width="160%" height="160%">
@@ -722,11 +726,11 @@ Timeout: configurable (default 120 min).">
         <g class="artifact-node" data-artifact="results"
            data-tooltip="results.txt|Self-compiled by the experiment script via print(). Example:
 
-v03 Results: Bi-exponential Decay Model
+v03 Results: Bi-exponential Decay
 ========================================
 1. DATA RECAP
    Subject: single subject, 4 breath-holds used
-2. FULL MODEL
+2. FULL SPECIFICATION
    PaO2(t) = A*exp(-t/tau1) + B*exp(-t/tau2)
 3. RESULTS
    R2=0.987, RMSE=1.23
@@ -844,7 +848,7 @@ These are separate from per-iteration criteria (which the Scientist defines each
 
         <!-- Lab Notebook -->
         <g class="artifact-node" data-artifact="notebook"
-           data-tooltip="lab notebook|Strategic journal written by the Scientist. Records hypothesis, reasoning, and dead ends. Not a copy of model specs.
+           data-tooltip="lab notebook|Strategic journal written by the Scientist. Records hypothesis, reasoning, and dead ends. Not a copy of approach specs.
 
 Example:
 ## v03 - Bi-exponential PaO2 decay
@@ -1043,10 +1047,27 @@ Grounds the debate in real science rather than hallucinated citations.">
         <circle r="2.5" fill="#d4a24e" opacity="0.9" class="flow-dot"
                 style="offset-path: path('M 920,280 C 920,230 1051,190 1051,152'); animation-duration: 2s; animation-delay: 1.8s;"/>
 
+        <!-- =============== INGESTOR (Phase 0, feeds dataset) =============== -->
+        <g class="agent-group" data-agent="ingestor"
+           data-tooltip="Ingestor (Phase 0)|Runs once before the iteration loop. Inspects raw user data, canonicalizes it (CSV/SQLite/Parquet), and writes to experiments/data/.
+
+Uses query() with Bash, Read, Write, Glob, Grep. In interactive mode also AskUserQuestion. max_turns: 30.
+Never modifies original data. Logs assumptions to the lab notebook.">
+          <rect x="1190" y="518" width="120" height="32" rx="6"
+                fill="rgba(78,197,212,0.08)" stroke="#4ec5d4" stroke-width="1" stroke-opacity="0.5"/>
+          <text x="1250" y="539" text-anchor="middle"
+                fill="#4ec5d4" font-size="10">Ingestor</text>
+        </g>
+        <!-- Arrow: Ingestor produces dataset -->
+        <path class="arrow-line" data-agents="ingestor" data-artifacts="dataset"
+              d="M 1190,534 L 1140,534"
+              fill="none" stroke="#4ec5d4" stroke-width="1.5"
+              marker-end="url(#ah-cyan)"/>
+
         <!-- =============== PRE-SET LABELS =============== -->
         <text x="95" y="562" text-anchor="middle" fill="#5a6178" font-size="7" opacity="0.5">pre-set</text>
         <text x="540" y="562" text-anchor="middle" fill="#5a6178" font-size="7" opacity="0.5">pre-set</text>
-        <text x="1098" y="562" text-anchor="middle" fill="#5a6178" font-size="7" opacity="0.5">pre-set</text>
+        <text x="1250" y="562" text-anchor="middle" fill="#4ec5d4" font-size="7" opacity="0.5">phase 0</text>
 
         <!-- =============== SECTION LABELS =============== -->
         <text x="20" y="100" fill="#5a6178" font-size="9" font-weight="500"
@@ -1340,7 +1361,7 @@ Grounds the debate in real science rather than hallucinated citations.">
       </div>
       <div class="agent-detail">
         Runs <code>uv run python -u {script_path}</code>. Captures stdout to results.txt.
-        The script itself prints structured output (model spec, parameters, metrics).
+        The script itself prints structured output (approach spec, parameters, metrics).
       </div>
       <div class="data-section">
         <div class="data-section-label reads">reads</div>
@@ -1478,7 +1499,7 @@ Grounds the debate in real science rather than hallucinated citations.">
     the need for an LLM summarizer.
     <br><br>
     <strong>Lab notebook</strong> is a strategic journal (hypothesis, reasoning, dead ends),
-    not a copy of model specs or detailed results. That detail lives in results.txt.
+    not a copy of approach specs or detailed results. That detail lives in results.txt.
   </div>
 
 </div>

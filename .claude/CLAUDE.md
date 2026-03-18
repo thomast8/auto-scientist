@@ -1,7 +1,7 @@
 # Auto-Scientist
 
 ## Project Overview
-Autonomous scientific modelling framework. Given a dataset and problem statement, the system discovers, iterates, and refines models through an LLM-driven loop. See `docs/architecture.md` for the full spec.
+Autonomous scientific investigation framework. Given a dataset and problem statement, the system discovers, iterates, and refines approaches through an LLM-driven loop. See `docs/architecture.md` for the full spec.
 
 ## Architecture Summary
 Four-phase pipeline: Ingestion -> Discovery -> Iteration -> Report.

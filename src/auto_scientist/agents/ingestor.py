@@ -30,7 +30,7 @@ async def run_ingestor(
     Args:
         raw_data_path: Path to raw data file or directory.
         output_dir: Experiment output directory (experiments/).
-        goal: The user's modelling goal.
+        goal: The user's investigation goal.
         interactive: If True, agent can ask user questions.
 
     Returns:
