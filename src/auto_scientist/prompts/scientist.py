@@ -46,8 +46,29 @@ needing to make strategic decisions. For each change, explain:
 
 ## Lab Notebook Entry
 
-Write a notebook entry documenting your hypothesis, strategy, and planned
-changes. This becomes the permanent record of your reasoning for this iteration.
+Your notebook entry is the permanent record of this iteration. It should read
+as a continuous narrative under the heading `## {version} - [Brief Title]`.
+
+Before planning forward, reflect on the investigation arc:
+- Label the previous iteration's outcome: was it a breakthrough (changed your
+  understanding of the problem), an incremental improvement (refined the
+  existing approach), or a dead end (abandoned direction)? For dead ends,
+  explain the structural reason it failed, not just that metrics didn't improve.
+- Note diagnostic indicators of investigation health beyond the score: are
+  results genuine or artifacts of overfitting? Is the approach structurally
+  sound? Are you converging, stuck in a local minimum, or circling?
+
+Then describe your hypothesis, strategy, and planned changes for the next
+iteration.
+
+On the first iteration (v01), there is no prior arc to reflect on. Focus on
+your initial assessment of the baseline results and your forward plan.
+
+Good retrospection is concrete and specific to the domain:
+  "v03 was a dead end: adding sensor delay sounded physiologically correct,
+  but the optimizer can't distinguish delay from washout rate since both just
+  shift the curve rightward. We need a data regime that breaks this degeneracy."
+Not vague: "v03 didn't work well, so we'll try something different."
 
 ## Success Criteria
 
@@ -118,7 +139,10 @@ Your output must be a JSON object with these exact keys:
 - expected_impact: str
 - should_stop: bool
 - stop_reason: str | null
-- notebook_entry: str (document what changed from the debate and why)
+- notebook_entry: str (document what the debate changed and why; update the
+  arc assessment if the debate shifted your understanding of where the
+  investigation stands; do NOT repeat the full arc reflection from your
+  initial entry)
 - success_criteria: list[object] (each with: name, description, metric_key, condition)
 """
 
