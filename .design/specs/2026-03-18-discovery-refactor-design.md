@@ -99,7 +99,24 @@ script_path = await run_coder(
 
 The existing domain-config path in `_run_discovery()` currently creates a hardcoded synthetic plan dict. This is replaced with a `run_scientist()` call, making both paths identical after the config is obtained.
 
-The hardcoded synthetic plan and the manual notebook entry creation are removed.
+The hardcoded synthetic plan is removed. However, the domain-config path still needs to create the initial notebook skeleton (Goal + Domain header) before calling the Scientist, since Discovery doesn't run in this path. In auto-discovery mode, the Discovery agent creates the notebook as part of its exploration.
+
+```python
+if self.config is not None:
+    # Domain-config path: create notebook skeleton (Discovery doesn't run)
+    if not notebook_path.exists():
+        notebook_path.write_text(
+            f"# Lab Notebook\n\n## Goal\n{self.state.goal}\n\n"
+            f"## Domain\n{self.config.name}: {self.config.description}\n\n---\n\n"
+        )
+else:
+    # Auto-discovery path: Discovery creates notebook + config
+    self.config = await run_discovery(...)
+
+# Both paths converge: Scientist -> Coder (shared code below)
+```
+
+Note: `v00/` directory creation is also removed from the orchestrator since `run_coder()` already handles it (coder.py:102-103).
 
 ### Change 4: Minor Scientist Prompt Tweak
 
