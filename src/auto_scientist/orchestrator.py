@@ -125,7 +125,7 @@ class Orchestrator:
         return canonical_data_dir
 
     async def _run_discovery(self) -> None:
-        """Phase 1: Explore data, research domain, design first model."""
+        """Phase 1: Explore data, research domain, design first approach."""
         from auto_scientist.agents.coder import run_coder
         from auto_scientist.agents.discovery import run_discovery
 
@@ -186,7 +186,7 @@ class Orchestrator:
             )
         else:
             # Auto-discovery mode
-            print("DISCOVERY phase: exploring dataset and building first model")
+            print("DISCOVERY phase: exploring dataset and designing first approach")
             self.config, script_path = await run_discovery(
                 state=self.state,
                 data_path=self.data_path,
@@ -202,7 +202,7 @@ class Orchestrator:
             version="v00",
             iteration=0,
             script_path=str(script_path),
-            hypothesis="Initial model from discovery phase",
+            hypothesis="Initial approach from discovery phase",
         )
         self._evaluate(run_result, version_entry)
         self.state.record_version(version_entry)

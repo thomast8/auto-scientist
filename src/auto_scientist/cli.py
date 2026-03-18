@@ -36,12 +36,12 @@ def load_domain_config(name: str) -> DomainConfig:
 
 @click.group()
 def cli():
-    """Auto-Scientist: Autonomous scientific modelling framework."""
+    """Auto-Scientist: Autonomous scientific investigation framework."""
 
 
 @cli.command()
 @click.option("--data", required=True, type=click.Path(exists=True), help="Path to dataset")
-@click.option("--goal", required=True, help="Problem statement / modelling goal")
+@click.option("--goal", required=True, help="Problem statement / investigation goal")
 @click.option("--domain", default=None, help="Domain name (e.g., 'spo2'). Auto-detected if omitted")
 @click.option("--max-iterations", default=20, help="Maximum iteration count")
 @click.option(
@@ -81,7 +81,7 @@ def run(
     output_dir: str,
     synthesis_interval: int,
 ):
-    """Run autonomous scientific modelling from raw data."""
+    """Run autonomous scientific investigation from raw data."""
     critic_list = [c.strip() for c in critics.split(",") if c.strip()] if critics else []
 
     # Load domain config if a domain name is specified
