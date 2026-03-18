@@ -235,7 +235,7 @@
   .agent-card.critic .agent-icon { background: var(--accent-rose-dim); color: var(--accent-rose); }
   .agent-card.coder .agent-icon { background: var(--accent-green-dim); color: var(--accent-green); }
   .agent-card.runner .agent-icon { background: var(--accent-violet-dim); color: var(--accent-violet); }
-  .agent-card.synthesis .agent-icon { background: var(--accent-cyan-dim); color: var(--accent-cyan); }
+
 
   .agent-name {
     font-family: 'Instrument Serif', serif;
@@ -281,9 +281,6 @@
   .agent-card.coder .data-section-label.writes { color: var(--accent-amber); }
   .agent-card.runner .data-section-label.reads { color: var(--accent-blue); }
   .agent-card.runner .data-section-label.writes { color: var(--accent-amber); }
-  .agent-card.synthesis .data-section-label.reads { color: var(--accent-blue); }
-  .agent-card.synthesis .data-section-label.writes { color: var(--accent-amber); }
-
   .data-tags {
     display: flex;
     flex-wrap: wrap;
@@ -583,8 +580,6 @@
     <span class="step" style="color:var(--accent-cyan)">Ingestor</span>
     <span class="arrow">&rarr;</span>
     <span class="step">Discovery</span>
-    <span class="arrow">&rarr;</span>
-    <span class="step optional">[Synthesis]</span>
     <span class="arrow">&rarr;</span>
     <span class="step">Analyst</span>
     <span class="arrow">&rarr;</span>
@@ -1379,38 +1374,6 @@ Never modifies original data. Logs assumptions to the lab notebook.">
       </div>
       <div class="boundary-note" style="color: var(--accent-violet); border-color: rgba(142,110,212,0.15);">
         results.txt compiled by the script itself via print(), no LLM post-processing
-      </div>
-    </div>
-
-    <!-- Synthesis -->
-    <div class="agent-card synthesis">
-      <div class="agent-header">
-        <div class="agent-icon">&#x1F4D6;</div>
-        <div>
-          <div class="agent-name">Synthesis</div>
-          <div class="agent-role">Optional. Condenses notebook every N iterations.</div>
-        </div>
-      </div>
-      <div class="agent-detail">
-        Plain Anthropic API call. Produces a concise narrative (~30-50% of original).
-        Replaces raw notebook in prompts; raw file stays on disk untouched.
-      </div>
-      <div class="data-section">
-        <div class="data-section-label reads">reads</div>
-        <div class="data-tags">
-          <span class="data-tag read">lab notebook (full)</span>
-          <span class="data-tag read">compressed history</span>
-          <span class="data-tag read">domain knowledge</span>
-        </div>
-      </div>
-      <div class="data-section">
-        <div class="data-section-label writes">produces</div>
-        <div class="data-tags">
-          <span class="data-tag write">condensed narrative</span>
-        </div>
-      </div>
-      <div class="boundary-note" style="color: var(--accent-cyan); border-color: rgba(78,197,212,0.15);">
-        Enabled via --synthesis-interval N (default: disabled)
       </div>
     </div>
 

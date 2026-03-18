@@ -14,7 +14,7 @@ Iteration loop (four agents):
 3. **Critic** (challenger): multi-round debate with the Scientist. Both have web search. Symmetric context (plan + notebook + domain knowledge). No analysis JSON, no script.
 4. **Coder** (implementer): only agent that reads/writes Python code. Follows the revised plan.
 
-Orchestrator flow: Ingest (interactive) -> [Synthesis] -> Analyst -> Scientist (plan) -> stop check -> Critic ↔ Scientist (debate) -> Scientist (revise) -> Coder -> Validate -> Run -> Evaluate
+Orchestrator flow: Ingest (interactive) -> Analyst -> Scientist (plan) -> stop check -> Critic ↔ Scientist (debate) -> Scientist (revise) -> Coder -> Validate -> Run -> Evaluate
 
 ### Success Criteria (two tiers)
 - **Top-level** (from Discovery/config): define when the investigation is done
@@ -28,7 +28,6 @@ Orchestrator flow: Ingest (interactive) -> [Synthesis] -> Analyst -> Scientist (
 - results.txt is compiled by the script itself (print statements), no LLM post-processing
 
 ### Key Components
-- `synthesis.py`: plain API call, condenses notebook every N iterations (`--synthesis-interval`)
 - `models/*.py`: OpenAI/Google/Anthropic wrappers with optional `web_search=True`
 - `agents/critic.py`: `run_debate()` orchestrates multi-round critic-scientist loop
 - `agents/scientist.py`: `run_scientist()` for initial plan, `run_scientist_revision()` for post-debate revision

@@ -164,11 +164,10 @@ DISCOVERY -> [SYNTHESIS] -> ANALYZE -> PLAN -> STOP_CHECK -> CRITIQUE
                                                                 |
                                                              IMPLEMENT -> VALIDATE -> RUN -> EVALUATE
                                                                                                 |
-                                                                                    [SYNTHESIS] -> ANALYZE (loop)
+                                                                                    ANALYZE (loop)
                                                                                     or STOP
 ```
 
-`SYNTHESIS` = optional, runs every N iterations (configurable via `--synthesis-interval`).
 `VALIDATE` = syntax check on generated script. If fails, re-invoke Coder with error (max 3 retries).
 
 ### Lab Notebook
@@ -176,12 +175,6 @@ DISCOVERY -> [SYNTHESIS] -> ANALYZE -> PLAN -> STOP_CHECK -> CRITIQUE
 A markdown file (`experiments/lab_notebook.md`) maintained by the orchestrator. The Scientist writes the notebook entry as part of its plan, and the orchestrator appends it to the file.
 
 The notebook is a **strategic journal**: hypothesis, reasoning, key lessons, dead ends. It is NOT a copy of the approach spec or results. That lives in `results.txt`.
-
-### Periodic Investigation Synthesis
-
-After 10+ iterations, the notebook can become bloated. The synthesis step (plain Anthropic API call) condenses the full notebook + compressed history into a concise narrative (~30-50% of original). The synthesis replaces the raw notebook in agent prompts for that iteration; the raw notebook file stays on disk untouched.
-
-Configurable via `--synthesis-interval N` (default 0 = disabled).
 
 ### Compressed History (for Critic)
 
@@ -216,7 +209,6 @@ auto-scientist/
       runner.py                      # Subprocess experiment runner
       history.py                     # Compressed history builder
       scheduler.py                   # Time-window scheduling logic
-      synthesis.py                   # Periodic notebook condensation
       agents/
         __init__.py
         discovery.py                 # Phase 1: data exploration + first approach
@@ -340,7 +332,6 @@ auto-scientist run \
   --max-iterations 20 \
   --critics openai:gpt-4o,google:gemini-2.5-pro \
   --debate-rounds 2 \
-  --synthesis-interval 5 \
   --schedule "22:00-06:00"
 
 # Resume after crash, pause, or overnight stop
