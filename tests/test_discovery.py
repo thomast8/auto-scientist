@@ -37,13 +37,10 @@ class TestRunDiscovery:
             "data_paths": ["data.csv"],
         }
         config_path.write_text(json.dumps(config_data))
-        script_path = tmp_path / "v00" / "experiment.py"
-        script_path.parent.mkdir(parents=True, exist_ok=True)
-        script_path.write_text("print('hello')")
 
         state = ExperimentState(domain="auto", goal="test goal")
 
-        config, script = await run_discovery(
+        config = await run_discovery(
             state=state, data_path=tmp_path / "data.csv",
             output_dir=tmp_path, interactive=True,
         )
@@ -74,29 +71,3 @@ class TestRunDiscovery:
                 output_dir=tmp_path,
             )
 
-    @pytest.mark.asyncio
-    @patch("auto_scientist.agents.discovery.ClaudeSDKClient")
-    async def test_missing_script_raises(self, mock_client_cls, tmp_path):
-        mock_client = AsyncMock()
-        mock_client_cls.return_value.__aenter__ = AsyncMock(return_value=mock_client)
-        mock_client_cls.return_value.__aexit__ = AsyncMock(return_value=False)
-        mock_client.query = AsyncMock()
-
-        async def empty_iter():
-            return
-            yield
-
-        mock_client.receive_response = MagicMock(return_value=empty_iter())
-
-        # Create config but not the script
-        config_path = tmp_path / "domain_config.json"
-        config_data = {"name": "test", "description": "desc", "data_paths": []}
-        config_path.write_text(json.dumps(config_data))
-
-        state = ExperimentState(domain="auto", goal="test goal")
-
-        with pytest.raises(FileNotFoundError, match="experiment script"):
-            await run_discovery(
-                state=state, data_path=tmp_path / "data.csv",
-                output_dir=tmp_path,
-            )

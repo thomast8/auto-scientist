@@ -1,9 +1,8 @@
-"""Discovery agent: Phase 1 data exploration and first model generation.
+"""Discovery agent: Phase 1 data exploration and domain configuration.
 
 Uses ClaudeSDKClient for persistent session (exploratory, may need multiple queries).
 Tools: Bash (data exploration, stats, plots), Read/Write, Glob, Grep.
-Produces: domain config (success criteria, metric definitions), first experiment script,
-          lab notebook entry #0.
+Produces: domain config (success criteria, metric definitions), lab notebook entry #0.
 """
 
 import json
@@ -27,24 +26,24 @@ async def run_discovery(
     data_path: Path,
     output_dir: Path,
     interactive: bool = False,
-) -> tuple[DomainConfig, Path]:
-    """Explore data, research domain, and produce the first experiment script.
+    model: str | None = None,
+) -> DomainConfig:
+    """Explore data and produce a domain configuration.
 
-    Uses a multi-turn session: explores the dataset then designs and writes
-    the first experiment script based on findings.
+    Uses a multi-turn session to explore the dataset, understand its structure,
+    and create a domain config with success criteria. Does NOT write experiment
+    scripts (that's the Coder's job).
 
     Args:
         state: Current experiment state.
         data_path: Path to the dataset.
         output_dir: Directory for experiment outputs.
         interactive: If True, allows the agent to ask the user questions.
+        model: Optional model override.
 
     Returns:
-        Tuple of (domain config, path to first script).
+        Domain configuration discovered from data exploration.
     """
-    version_dir = output_dir / "v00"
-    version_dir.mkdir(parents=True, exist_ok=True)
-    script_path = version_dir / "experiment.py"
     notebook_path = output_dir / "lab_notebook.md"
     config_path = output_dir / "domain_config.json"
 
@@ -58,6 +57,7 @@ async def run_discovery(
         max_turns=30,
         permission_mode="acceptEdits",
         cwd=output_dir,
+        model=model,
     )
 
     prompt = DISCOVERY_USER.format(
@@ -65,8 +65,6 @@ async def run_discovery(
         goal=state.goal,
         domain_knowledge="(No pre-existing domain knowledge - you are discovering this.)",
         output_dir=str(output_dir),
-        version_dir="v00",
-        script_name="experiment.py",
         notebook_path=str(notebook_path),
         config_path=str(config_path),
     )
@@ -77,7 +75,6 @@ async def run_discovery(
             if isinstance(msg, AssistantMessage):
                 for block in msg.content:
                     if isinstance(block, TextBlock):
-                        # Print first 200 chars of each text block for progress
                         print(f"  [discovery] {block.text[:200]}")
             elif isinstance(msg, ResultMessage):
                 pass
@@ -90,10 +87,4 @@ async def run_discovery(
     config_data = json.loads(config_path.read_text())
     config = DomainConfig.model_validate(config_data)
 
-    # Verify script was created
-    if not script_path.exists():
-        raise FileNotFoundError(
-            f"Discovery agent did not create experiment script at {script_path}"
-        )
-
-    return config, script_path
+    return config
