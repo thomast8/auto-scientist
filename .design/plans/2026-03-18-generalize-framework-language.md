@@ -2,7 +2,7 @@
 
 **Goal:** Replace ML/model-fitting terminology with domain-agnostic investigation language across all prompts, docs, and configs.
 
-**Architecture:** Pure text replacement across 14 files (no logic changes). The framework's code and data models are already general; only the human-facing strings need updating.
+**Architecture:** Pure text replacement across 12 files (no logic changes). The framework's code and data models are already general; only the human-facing strings need updating. Domain-specific files (e.g., SpO2) are left untouched - they should use their own domain language.
 
 **Tech Stack:** Python string constants, Markdown docs, HTML, TOML
 
@@ -125,37 +125,7 @@ git commit -m "refactor: generalize core prompt language from ML to domain-agnos
 
 ---
 
-### Task 2: Generalize SpO2 domain files
-
-**Files:**
-- Modify: `domains/spo2/config.py`
-- Modify: `domains/spo2/prompts.py`
-
-- [ ] **Step 1: Update spo2 config.py**
-
-In `SPO2_CONFIG` description:
-```
-"Model SpO2 dynamics"  ->  "Explain SpO2 dynamics"
-```
-
-- [ ] **Step 2: Update spo2 prompts.py**
-
-```
-"### Model Structure (evolved through v5-v7)"  ->  "### Approach Structure (evolved through v5-v7)"
-"Fit a latent SaO2 shape"  ->  "Estimate a latent SaO2 shape"
-"fit a Severinghaus ODC model to the apnea-only data"  ->  "identify Severinghaus ODC parameters from the apnea-only data"
-```
-
-- [ ] **Step 3: Commit**
-
-```bash
-git add domains/spo2/config.py domains/spo2/prompts.py
-git commit -m "refactor: generalize SpO2 domain language to physics framing"
-```
-
----
-
-### Task 3: Generalize framework identity (code files)
+### Task 2: Generalize framework identity (code files)
 
 **Files:**
 - Modify: `src/auto_scientist/orchestrator.py`
@@ -213,7 +183,7 @@ git commit -m "refactor: generalize framework identity from modelling to investi
 
 ---
 
-### Task 4: Generalize documentation
+### Task 3: Generalize documentation
 
 **Files:**
 - Modify: `docs/architecture.md`
@@ -269,7 +239,7 @@ git commit -m "docs: generalize documentation language from modelling to investi
 
 ---
 
-### Task 5: Verify completeness
+### Task 4: Verify completeness
 
 - [ ] **Step 1: Run full test suite**
 

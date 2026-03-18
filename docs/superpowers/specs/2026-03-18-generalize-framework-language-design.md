@@ -119,18 +119,7 @@ No other structural changes needed. The Coder prompt is already quite generic.
 
 No changes needed. The Analyst prompt is already fully generic - it observes results, evaluates criteria, and reports facts.
 
-#### 6. `domains/spo2/config.py`
-
-- Description: "Model SpO2 dynamics during voluntary breath-holds using a two-stage approach: sensor calibration (latent SaO2 + gamma kernel) then physiology (Severinghaus ODC)." -> "Explain SpO2 dynamics during voluntary breath-holds using a two-stage approach: sensor calibration (latent SaO2 + gamma kernel) then physiology (Severinghaus ODC)."
-  - "Model" -> "Explain" in the description opening
-
-#### 7. `domains/spo2/prompts.py`
-
-- "### Model Structure (evolved through v5-v7)" -> "### Approach Structure (evolved through v5-v7)"
-- "**Stage A (Sensor Calibration)**: Fit a latent SaO2 shape" -> "**Stage A (Sensor Calibration)**: Estimate a latent SaO2 shape"
-- "fit a Severinghaus ODC model to the apnea-only data" -> "identify Severinghaus ODC parameters from the apnea-only data"
-
-#### 8. `docs/architecture.md`
+#### 6. `docs/architecture.md`
 
 - Title: "Autonomous Scientific Modelling Framework" -> "Autonomous Scientific Investigation Framework"
 - "general-purpose autonomous scientific modelling framework" -> "general-purpose autonomous scientific investigation framework"
@@ -139,13 +128,13 @@ No changes needed. The Analyst prompt is already fully generic - it observes res
 - "first experiment script" -> keep as-is (experiment is neutral)
 - "Initial model from discovery phase" (in orchestrator.py) -> "Initial approach from discovery phase"
 
-#### 9. `src/auto_scientist/orchestrator.py`
+#### 7. `src/auto_scientist/orchestrator.py`
 
 - Line 206: `hypothesis="Initial model from discovery phase"` -> `hypothesis="Initial approach from discovery phase"`
 - Line 128: docstring "design first model" -> "design first approach"
 - Line 189: print "exploring dataset and building first model" -> "exploring dataset and designing first approach"
 
-#### 10. `docs/pipeline-visualizer.html`
+#### 8. `docs/pipeline-visualizer.html`
 
 - "Bi-exponential Decay Model" -> "Bi-exponential Decay" (this is example content in a tooltip, remove the generic "Model" suffix)
 - "FULL MODEL" -> "FULL SPECIFICATION"
@@ -153,26 +142,26 @@ No changes needed. The Analyst prompt is already fully generic - it observes res
 - "model spec, parameters, metrics" -> "approach spec, parameters, metrics"
 - "not a copy of model specs or detailed results" -> "not a copy of approach specs or detailed results"
 
-#### 11. `src/auto_scientist/cli.py`
+#### 9. `src/auto_scientist/cli.py`
 
 - "Autonomous scientific modelling framework." -> "Autonomous scientific investigation framework."
 - "modelling goal" -> "investigation goal"
 - "Run autonomous scientific modelling from raw data." -> "Run autonomous scientific investigation from raw data."
 
-#### 12. `src/auto_scientist/__init__.py`
+#### 10. `src/auto_scientist/__init__.py`
 
 - "Autonomous scientific modelling framework." -> "Autonomous scientific investigation framework."
 
-#### 13. `pyproject.toml`
+#### 11. `pyproject.toml`
 
 - description: "Autonomous scientific modelling framework" -> "Autonomous scientific investigation framework"
 - "LLM-driven model discovery, iteration, and refinement" -> "LLM-driven discovery, iteration, and refinement"
 
-#### 14. `README.md`
+#### 12. `README.md`
 
 - Apply the terminology shift table throughout: "modelling" -> "investigation", "models" -> "approaches", "first model" -> "first approach", "best model" -> "best approach"
 
-#### 15. `.claude/CLAUDE.md`
+#### 13. `.claude/CLAUDE.md`
 
 - Project overview: "Autonomous scientific modelling framework" -> "Autonomous scientific investigation framework"
 - "discovers, iterates, and refines models" -> "discovers, iterates, and refines approaches"
@@ -182,6 +171,7 @@ No changes needed. The Analyst prompt is already fully generic - it observes res
 - **Architecture:** The pipeline (Ingest -> Discovery -> Iteration -> Report), agent roles, and information boundaries are already general.
 - **State machine and data models:** `ExperimentState`, `DomainConfig`, `VersionEntry` are domain-agnostic.
 - **Agent implementations:** The Python code in `agents/` uses neutral language.
+- **Domain-specific files:** e.g., `domains/spo2/` - these use "model" because SpO2 genuinely IS about model fitting. Domain configs carry domain-specific language; the framework prompts should not.
 - **Ingestor, Analyst, and Critic prompts:** Already general enough.
 - **The word "experiment":** This is appropriate - every investigation runs experiment scripts.
 - **"model" referring to LLM models:** e.g., `critic_models` in orchestrator.py refers to language models, not scientific models. These stay as-is.
@@ -189,8 +179,7 @@ No changes needed. The Analyst prompt is already fully generic - it observes res
 
 ## Risks
 
-- **SpO2 domain breakage:** Changing SpO2 prompts/config language could affect agent behavior for this specific domain. Low risk since we're only changing descriptions, not metrics or criteria.
-- **Scope creep:** Easy to start rewriting prompts beyond what's needed. Stick to the specific changes listed.
+- **Scope creep:** Easy to start rewriting prompts beyond what's needed. Stick to the specific changes listed. Do NOT touch domain-specific files.
 
 ## Verification
 
