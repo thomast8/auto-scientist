@@ -17,21 +17,18 @@ def base_state():
 
 
 @pytest.fixture
-def config():
-    return DomainConfig(
-        name="test", description="Test domain", data_paths=["data.csv"],
-        domain_knowledge="test knowledge",
-    )
-
-
-@pytest.fixture
-def orchestrator(base_state, tmp_path, config):
-    return Orchestrator(
+def orchestrator(base_state, tmp_path):
+    o = Orchestrator(
         state=base_state,
         data_path=tmp_path / "data.csv",
         output_dir=tmp_path / "experiments",
-        config=config,
     )
+    # Set config directly for tests that need it (normally set by _run_discovery)
+    o.config = DomainConfig(
+        name="test", description="Test domain", data_paths=["data.csv"],
+        domain_knowledge="test knowledge",
+    )
+    return o
 
 
 class TestOrchestratorInit:
@@ -136,11 +133,11 @@ class TestPhaseTransitions:
             domain="test", goal="g", phase="iteration",
             iteration=20,
         )
-        config = DomainConfig(name="t", description="d", data_paths=[])
         o = Orchestrator(
             state=state, data_path=tmp_path, output_dir=tmp_path,
-            max_iterations=20, config=config,
+            max_iterations=20,
         )
+        o.config = DomainConfig(name="t", description="d", data_paths=[])
 
         with patch.object(o, "_run_report", new_callable=AsyncMock):
             await o.run()
@@ -153,11 +150,11 @@ class TestPhaseTransitions:
             domain="test", goal="g", phase="iteration",
             consecutive_failures=5,
         )
-        config = DomainConfig(name="t", description="d", data_paths=[])
         o = Orchestrator(
             state=state, data_path=tmp_path, output_dir=tmp_path,
-            max_consecutive_failures=5, config=config,
+            max_consecutive_failures=5,
         )
+        o.config = DomainConfig(name="t", description="d", data_paths=[])
 
         with patch.object(o, "_run_report", new_callable=AsyncMock):
             await o.run()
@@ -170,17 +167,79 @@ class TestPhaseTransitions:
             domain="test", goal="g", phase="iteration",
             iteration=20,
         )
-        config = DomainConfig(name="t", description="d", data_paths=[])
         o = Orchestrator(
             state=state, data_path=tmp_path, output_dir=tmp_path,
-            max_iterations=20, config=config,
+            max_iterations=20,
         )
+        o.config = DomainConfig(name="t", description="d", data_paths=[])
 
         with patch.object(o, "_run_report", new_callable=AsyncMock) as mock_report:
             await o.run()
 
         mock_report.assert_called_once()
         assert state.phase == "stopped"
+
+
+class TestRunDiscovery:
+    @pytest.mark.asyncio
+    @patch("auto_scientist.agents.coder.run_coder", new_callable=AsyncMock)
+    @patch("auto_scientist.agents.scientist.run_scientist", new_callable=AsyncMock)
+    @patch("auto_scientist.agents.discovery.run_discovery", new_callable=AsyncMock)
+    async def test_discovery_scientist_coder_sequence(
+        self, mock_discovery, mock_scientist, mock_coder, tmp_path,
+    ):
+        """Discovery -> Scientist -> Coder flow for v00."""
+        output_dir = tmp_path / "experiments"
+        output_dir.mkdir(parents=True, exist_ok=True)
+
+        config = DomainConfig(
+            name="test", description="d", data_paths=[],
+            domain_knowledge="test knowledge",
+            experiment_dependencies=["numpy"],
+        )
+        mock_discovery.return_value = config
+
+        plan = {
+            "hypothesis": "test hypothesis",
+            "strategy": "exploratory",
+            "notebook_entry": "## v00 - Test\nTest entry.",
+            "changes": [],
+            "should_stop": False,
+            "success_criteria": [],
+        }
+        mock_scientist.return_value = plan
+
+        script_path = output_dir / "v00" / "experiment.py"
+        script_path.parent.mkdir(parents=True, exist_ok=True)
+        script_path.write_text("print('hello')")
+        mock_coder.return_value = script_path
+
+        state = ExperimentState(
+            domain="auto", goal="test goal", phase="discovery",
+            data_path=str(tmp_path / "data.csv"),
+        )
+        o = Orchestrator(
+            state=state, data_path=tmp_path / "data.csv", output_dir=output_dir,
+        )
+
+        with patch.object(o, "_run_experiment", new_callable=AsyncMock,
+                          return_value=RunResult(success=True, stdout="ok")):
+            await o._run_discovery()
+
+        # Verify call sequence
+        mock_discovery.assert_called_once()
+        mock_scientist.assert_called_once()
+        assert mock_scientist.call_args.kwargs["analysis"] == {}
+        assert mock_scientist.call_args.kwargs["version"] == "v00"
+        mock_coder.assert_called_once()
+
+        # Verify config was set
+        assert o.config == config
+
+        # Verify notebook entry was appended
+        notebook = output_dir / "lab_notebook.md"
+        assert notebook.exists()
+        assert "## v00 - Test" in notebook.read_text()
 
 
 class TestRunIteration:

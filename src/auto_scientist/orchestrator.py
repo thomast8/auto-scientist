@@ -27,7 +27,7 @@ class Orchestrator:
         interactive: bool = False,
         max_consecutive_failures: int = 5,
         debate_rounds: int = 2,
-        config: DomainConfig | None = None,
+        model: str | None = None,
     ):
         self.state = state
         self.data_path = data_path
@@ -37,12 +37,22 @@ class Orchestrator:
         self.interactive = interactive
         self.max_consecutive_failures = max_consecutive_failures
         self.debate_rounds = debate_rounds
-        self.config = config
+        self.config: DomainConfig | None = None
+        self.model = model
 
     async def run(self) -> None:
         """Execute the full orchestration loop."""
         self.output_dir.mkdir(parents=True, exist_ok=True)
         state_path = self.output_dir / "state.json"
+
+        model_label = self.model or "(SDK default)"
+        print(f"Auto-Scientist starting")
+        print(f"  Model:      {model_label}")
+        print(f"  Output:     {self.output_dir}")
+        print(f"  Goal:       {self.state.goal[:80]}{'...' if len(self.state.goal) > 80 else ''}")
+        if self.critic_models:
+            print(f"  Critics:    {', '.join(self.critic_models)}")
+        print()
 
         # Phase 0: Ingestion
         if self.state.phase == "ingestion":
@@ -53,11 +63,6 @@ class Orchestrator:
 
             self.state.data_path = str(canonical_data_dir)
             self.data_path = canonical_data_dir
-
-            if self.config:
-                data_dir_str = str(canonical_data_dir.resolve())
-                if data_dir_str not in self.config.protected_paths:
-                    self.config.protected_paths.append(data_dir_str)
 
             self.state.phase = "discovery"
             self.state.save(state_path)
@@ -118,79 +123,73 @@ class Orchestrator:
             output_dir=self.output_dir,
             goal=self.state.goal,
             interactive=self.interactive,
+            model=self.model,
         )
+
+        # Summary
+        data_files = sorted(canonical_data_dir.iterdir())
+        print(f"\nINGESTION complete:")
+        for f in data_files:
+            print(f"  {f}")
+        print()
+
         return canonical_data_dir
 
     async def _run_discovery(self) -> None:
-        """Phase 1: Explore data, research domain, design first approach."""
+        """Phase 1: Explore data, plan first approach, implement v00.
+
+        Flow: Discovery (explore + config) -> Scientist (plan v00) -> Coder (implement v00)
+        """
         from auto_scientist.agents.coder import run_coder
         from auto_scientist.agents.discovery import run_discovery
+        from auto_scientist.agents.scientist import run_scientist
 
         notebook_path = self.output_dir / "lab_notebook.md"
 
-        if self.config is not None:
-            # Pre-loaded domain config: use Coder to write the first script
-            print("DISCOVERY phase: using pre-loaded domain config")
-            version_dir = self.output_dir / "v00"
-            version_dir.mkdir(parents=True, exist_ok=True)
+        # Step 1: Discovery explores data, writes config + notebook
+        print("DISCOVERY phase: exploring dataset and designing first approach")
+        self.config = await run_discovery(
+            state=self.state,
+            data_path=self.data_path,
+            output_dir=self.output_dir,
+            interactive=self.interactive,
+            model=self.model,
+        )
+        self.state.config_path = str(self.output_dir / "domain_config.json")
 
-            # Create initial lab notebook
-            if not notebook_path.exists():
-                notebook_path.write_text(
-                    f"# Lab Notebook\n\n"
-                    f"## Goal\n{self.state.goal}\n\n"
-                    f"## Domain\n{self.config.name}: {self.config.description}\n\n"
-                    f"---\n\n"
-                )
+        # Add canonical data dir to protected paths
+        if self.data_path:
+            data_dir_str = str(self.data_path.resolve())
+            if data_dir_str not in self.config.protected_paths:
+                self.config.protected_paths.append(data_dir_str)
 
-            # Create a synthetic initial plan for the Coder
-            initial_plan = {
-                "hypothesis": "Baseline approach based on domain knowledge",
-                "strategy": "exploratory",
-                "changes": [
-                    {
-                        "what": "Create initial experiment from scratch",
-                        "why": "First iteration, need a baseline to iterate from",
-                        "how": (
-                            "Design a simple baseline based on the domain knowledge"
-                            " and goal. Start simple."
-                        ),
-                        "priority": 1,
-                    }
-                ],
-                "expected_impact": "Establish a baseline for future iterations",
-                "should_stop": False,
-                "stop_reason": None,
-                "notebook_entry": (
-                    "## v00 - Initial Baseline\n\n"
-                    "Baseline approach from domain config.\n"
-                ),
-            }
+        # Step 2: Scientist plans v00 from notebook + domain knowledge
+        print("DISCOVERY phase: scientist planning v00")
+        plan = await run_scientist(
+            analysis={},
+            notebook_path=notebook_path,
+            version="v00",
+            domain_knowledge=self.config.domain_knowledge,
+            model=self.model,
+        )
 
-            # Write the notebook entry
+        # Append scientist's notebook entry
+        if plan.get("notebook_entry"):
             with notebook_path.open("a") as f:
-                f.write(initial_plan["notebook_entry"] + "\n---\n\n")
+                f.write(plan["notebook_entry"] + "\n---\n\n")
 
-            # Use Coder agent to write the first script
-            script_path = await run_coder(
-                plan=initial_plan,
-                previous_script=Path("nonexistent"),  # No previous script
-                output_dir=self.output_dir,
-                version="v00",
-                domain_knowledge=self.config.domain_knowledge,
-                data_path=self.state.data_path or "",
-                experiment_dependencies=self.config.experiment_dependencies,
-            )
-        else:
-            # Auto-discovery mode
-            print("DISCOVERY phase: exploring dataset and designing first approach")
-            self.config, script_path = await run_discovery(
-                state=self.state,
-                data_path=self.data_path,
-                output_dir=self.output_dir,
-                interactive=self.interactive,
-            )
-            self.state.config_path = str(self.output_dir / "domain_config.json")
+        # Step 3: Coder implements v00
+        print("DISCOVERY phase: coder writing v00")
+        script_path = await run_coder(
+            plan=plan,
+            previous_script=Path("nonexistent"),
+            output_dir=self.output_dir,
+            version="v00",
+            domain_knowledge=self.config.domain_knowledge,
+            data_path=self.state.data_path or "",
+            experiment_dependencies=self.config.experiment_dependencies,
+            model=self.model,
+        )
 
         # Run and evaluate the initial script
         print("DISCOVERY phase: running initial experiment (v00)")
@@ -199,10 +198,29 @@ class Orchestrator:
             version="v00",
             iteration=0,
             script_path=str(script_path),
-            hypothesis="Initial approach from discovery phase",
+            hypothesis=plan.get("hypothesis", "Initial approach from discovery phase"),
         )
         self._evaluate(run_result, version_entry)
         self.state.record_version(version_entry)
+
+        # Summary
+        version_dir = script_path.parent
+        output_files = sorted(version_dir.iterdir())
+        print(f"\nDISCOVERY complete:")
+        print(f"  Script:   {script_path}")
+        config_path = self.output_dir / "domain_config.json"
+        if config_path.exists():
+            n_criteria = len(self.config.success_criteria)
+            print(f"  Config:   {config_path} ({n_criteria} success criteria)")
+        if notebook_path.exists():
+            print(f"  Notebook: {notebook_path}")
+        artifacts = [f for f in output_files if f.suffix in (".png", ".txt", ".json")]
+        if artifacts:
+            print(f"  Outputs:")
+            for f in artifacts:
+                print(f"    {f}")
+        print(f"  Status:   {version_entry.status}")
+        print()
 
     def _notebook_content(self) -> str:
         """Return notebook content."""
@@ -259,6 +277,22 @@ class Orchestrator:
         self._evaluate(run_result, version_entry)
         self.state.record_version(version_entry)
 
+        # Iteration summary
+        version_dir = new_script.parent if new_script else None
+        print(f"\nITERATION {self.state.iteration} complete:")
+        if new_script:
+            print(f"  Script:     {new_script}")
+        print(f"  Status:     {version_entry.status}")
+        if version_entry.score is not None:
+            print(f"  Score:      {version_entry.score}")
+        print(f"  Best:       {self.state.best_version} (score {self.state.best_score})")
+        if version_dir and version_dir.exists():
+            artifacts = sorted(f for f in version_dir.iterdir() if f.suffix in (".png", ".txt", ".json"))
+            if artifacts:
+                print(f"  Outputs:")
+                for f in artifacts:
+                    print(f"    {f}")
+
 
     async def _run_analyst(self) -> dict[str, Any] | None:
         """Invoke the Analyst agent on latest results + plots."""
@@ -292,6 +326,7 @@ class Orchestrator:
                 notebook_path=notebook_path,
                 domain_knowledge=domain_knowledge,
                 success_criteria=success_criteria,
+                model=self.model,
             )
             # Update latest version score
             if "success_score" in analysis:
@@ -325,6 +360,7 @@ class Orchestrator:
                 notebook_path=notebook_path,
                 version=version,
                 domain_knowledge=domain_knowledge,
+                model=self.model,
             )
 
             # Write the notebook entry from the plan
@@ -395,6 +431,7 @@ class Orchestrator:
                 notebook_path=notebook_path,
                 version=version,
                 domain_knowledge=domain_knowledge,
+                model=self.model,
             )
 
             # Write revised notebook entry
@@ -438,6 +475,7 @@ class Orchestrator:
                 domain_knowledge=domain_knowledge,
                 data_path=data_path,
                 experiment_dependencies=deps,
+                model=self.model,
             )
             print(f"  IMPLEMENT: created {new_script}")
             return new_script
@@ -539,6 +577,7 @@ class Orchestrator:
                 state=self.state,
                 notebook_path=notebook_path,
                 output_dir=self.output_dir,
+                model=self.model,
             )
             print(f"REPORT: written to {report_path}")
         except Exception as e:
