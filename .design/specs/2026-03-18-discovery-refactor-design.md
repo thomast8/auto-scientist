@@ -64,9 +64,11 @@ self.config = config
 self.state.config_path = str(self.output_dir / "domain_config.json")
 ```
 
-Then both paths (auto-discovery and domain-config) converge into:
+Then both paths (auto-discovery and domain-config) converge into shared code:
 
 ```python
+notebook_path = self.output_dir / "lab_notebook.md"
+
 # Scientist plans v00 from notebook + domain knowledge
 plan = await run_scientist(
     analysis={},
@@ -99,17 +101,27 @@ The existing domain-config path in `_run_discovery()` currently creates a hardco
 
 The hardcoded synthetic plan and the manual notebook entry creation are removed.
 
-### Why This Works Without New Prompts
+### Change 4: Minor Scientist Prompt Tweak
 
-The Scientist's existing prompt already handles the v00 case:
-- `run_scientist()` already formats empty analysis as `"(no analysis yet - first iteration)"`
-- The system prompt says: "On the first iteration (v01), there is no prior arc to reflect on. Focus on your initial assessment of the baseline results and your forward plan."
-- The Scientist receives the notebook (which contains Discovery's exploration findings) and domain knowledge, giving it enough context to plan a baseline approach.
+The Scientist system prompt currently says: "On the first iteration (v01), there is no prior arc to reflect on. Focus on your initial assessment of the baseline results and your forward plan."
+
+This needs two small fixes now that the Scientist handles v00:
+1. Change "(v01)" to "(v00)" since the Scientist now plans the very first version
+2. Change "baseline results" to "the exploration findings in the notebook" since at v00 there are no results yet, only the Discovery agent's notebook entry
+
+This is a one-line wording change in `SCIENTIST_SYSTEM`, not a new prompt or function.
+
+### Why This Works Without New Functions
+
+The Scientist's existing `run_scientist()` function handles the v00 case:
+- It already formats empty analysis as `"(no analysis yet - first iteration)"`
+- The Scientist receives the notebook (which contains Discovery's exploration findings) and domain knowledge, giving it enough context to plan a baseline approach
+- The plan JSON schema is the same regardless of version
 
 ### What Doesn't Change
 
-- `run_scientist()`, `run_coder()` - no modifications
-- Scientist and Coder prompts - no modifications
+- `run_scientist()`, `run_coder()` functions - no modifications
+- Coder prompts - no modifications
 - The iteration loop - no changes
 - Tests for Scientist, Coder, iteration pipeline - no changes
 
@@ -119,9 +131,11 @@ The Scientist's existing prompt already handles the v00 case:
 |---|---|
 | `src/auto_scientist/agents/discovery.py` | Remove script generation, change return type |
 | `src/auto_scientist/prompts/discovery.py` | Remove Step 3, refocus Step 2 |
+| `src/auto_scientist/prompts/scientist.py` | Update first-iteration guidance (v01 -> v00, results -> notebook) |
 | `src/auto_scientist/orchestrator.py` | Rewire `_run_discovery()` for both paths |
-| `tests/test_discovery.py` | Update assertions for new return type (if exists) |
-| `docs/architecture.md` | Update Discovery agent description |
+| `tests/test_discovery.py` | Update assertions for new return type, remove script verification tests |
+| `docs/architecture.md` | Remove "first experiment script" from Discovery produces list |
+| `docs/pipeline-visualizer.html` | Update data flow to show Discovery -> Scientist -> Coder for v00 |
 
 ### Test Plan
 
