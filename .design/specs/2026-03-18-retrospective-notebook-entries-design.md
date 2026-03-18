@@ -18,18 +18,27 @@ Each notebook entry should flow naturally through three layers:
 
 ## Scope
 
-This is a prompt-only change. No new agents, no schema changes, no pipeline modifications.
+Two changes: enrich the Scientist's notebook entries with retrospective narrative, and remove the synthesis module (now redundant).
 
 ### Files Modified
 
 - `src/auto_scientist/prompts/scientist.py`: Expand the "Lab Notebook Entry" section in `SCIENTIST_SYSTEM` to include retrospective guidance. Also update the `notebook_entry` instruction in `SCIENTIST_REVISION_SYSTEM` for consistency.
+- `src/auto_scientist/synthesis.py`: Delete entirely.
+- `src/auto_scientist/orchestrator.py`: Remove `synthesis_interval` parameter, `_notebook_override` field, `_run_synthesis()` method, the synthesis call in `_run_iteration()`, and the override reset. Simplify `_notebook_content()` to just read the file directly.
+- `src/auto_scientist/cli.py`: Remove `--synthesis-interval` CLI option.
+- Documentation (`docs/architecture.md`, `docs/pipeline-visualizer.html`, `.claude/CLAUDE.md`): Remove synthesis references.
+
+### Why Remove Synthesis
+
+Synthesis was periodic notebook compression to manage context limits. Two things make it unnecessary:
+1. Modern context windows (1M tokens for Opus/Gemini, 200K for Sonnet) can hold even very long notebooks comfortably.
+2. Retrospective entries are self-compressing: each entry reflects on the full arc, so the latest entry naturally distills the accumulated understanding. The synthesis module would be doing redundant work.
 
 ### What Does NOT Change
 
 - The `notebook_entry` field stays a `str` in the output schema - no structural change
 - The notebook file format stays as accumulating markdown
 - No changes to who reads the notebook (Analyst, Scientist, Critic, Report agent all continue as-is)
-- No changes to synthesis.py (it compresses the notebook regardless of entry richness)
 
 ## Design Details
 
@@ -56,7 +65,7 @@ The revision prompt (`SCIENTIST_REVISION_SYSTEM`) currently says the notebook_en
 
 ## Risks
 
-- **Longer notebook entries** could push context limits faster. Mitigation: synthesis.py already handles this by compressing the notebook periodically. Richer entries actually give synthesis better material to work with.
+- **Longer notebook entries** without synthesis could grow context usage over many iterations. In practice, even 100 iterations at 2000 tokens/entry is 200K tokens, well within modern context windows. If this ever becomes a problem, it can be addressed by the model selection for the Scientist, not by a separate compression step.
 - **Scientist might produce generic reflections** ("we are making progress"). Mitigation: the prompt guidance should emphasize concrete, domain-specific observations over vague summaries. The examples in the prompt should model what good retrospection looks like.
 
 ## Success Criteria
@@ -64,4 +73,5 @@ The revision prompt (`SCIENTIST_REVISION_SYSTEM`) currently says the notebook_en
 - Notebook entries include backward-looking narrative, not just forward-looking plans
 - Dead ends are explained with structural reasoning, not just "metrics didn't improve"
 - The investigation arc is visible when reading the notebook sequentially
-- No changes to the pipeline, schema, or agent boundaries
+- Synthesis module cleanly removed with no orphaned references
+- No changes to agent boundaries or output schemas
