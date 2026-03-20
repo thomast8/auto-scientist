@@ -72,8 +72,11 @@ async def run_ingestor(
     async for msg in safe_query(prompt=prompt, options=options):
         if isinstance(msg, AssistantMessage):
             for block in msg.content:
-                if isinstance(block, TextBlock) and message_buffer is not None:
-                    message_buffer.append(block.text)
+                if isinstance(block, TextBlock):
+                    if message_buffer is not None:
+                        message_buffer.append(block.text)
+                    else:
+                        print(f"  [ingestor] {block.text[:200]}")
 
     # Verify something was produced in data_dir
     data_files = list(data_dir.iterdir())
