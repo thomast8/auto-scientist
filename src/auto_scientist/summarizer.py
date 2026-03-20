@@ -18,8 +18,14 @@ T = TypeVar("T")
 
 logger = logging.getLogger(__name__)
 
-PROGRESS_PREFIX = "Reply with ONE sentence, max 15 words. What is the agent doing right now?"
-FINAL_PREFIX = "Reply with ONE sentence, max 15 words. What did the agent accomplish?"
+PROGRESS_PREFIX = (
+    "Reply with ONE sentence, max 15 words. "
+    "Use present participle (-ing) voice: 'Inspecting...', 'Writing...', 'Computing...'."
+)
+FINAL_PREFIX = (
+    "Reply with ONE sentence, max 15 words. "
+    "Use past tense: 'Ingested...', 'Wrote...', 'Computed...'."
+)
 
 SUMMARY_PROMPTS: dict[str, str] = {
     "Ingestor": (

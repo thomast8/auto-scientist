@@ -263,8 +263,10 @@ class Orchestrator:
         except Exception as e:
             err_str = str(e).lower()
             if "auth" in err_str or "api key" in err_str or "api_key" in err_str:
-                logger.debug("SUMMARY: auth error, disabling summaries")
+                print(f"  SUMMARY: auth error, disabling summaries: {e}")
                 self._summaries_disabled = True
+            else:
+                print(f"  SUMMARY: error in {agent_name}: {e}")
             # Fall back to direct call
             return await coro_fn(message_buffer)
 
