@@ -85,6 +85,17 @@ class TestEvaluate:
         assert orchestrator.state.consecutive_failures == 0
         assert entry.results_path == str(results_path)
 
+    def test_success_no_results_file(self, orchestrator, tmp_path):
+        result = RunResult(success=True, stdout="output", return_code=0)
+        script_path = tmp_path / "experiments" / "v01" / "experiment.py"
+        script_path.parent.mkdir(parents=True, exist_ok=True)
+        script_path.write_text("print('ok')")
+
+        entry = VersionEntry(version="v01", iteration=1, script_path=str(script_path))
+        orchestrator._evaluate(result, entry)
+        assert entry.status == "completed"
+        assert entry.results_path is None
+
 
 class TestNotebookContent:
     def test_returns_content_when_exists(self, orchestrator, tmp_path):
@@ -317,6 +328,55 @@ class TestIteration0:
         assert orchestrator.state.iteration == 1
 
 
+class TestParseCriterion:
+    def test_greater_than(self, orchestrator):
+        raw = {"name": "acc", "description": "d", "metric_key": "acc", "condition": "> 0.95"}
+        sc = Orchestrator._parse_criterion(raw)
+        assert sc.target_min == 0.95
+        assert sc.target_max is None
+
+    def test_less_than(self, orchestrator):
+        raw = {"name": "err", "description": "d", "metric_key": "err", "condition": "< 500"}
+        sc = Orchestrator._parse_criterion(raw)
+        assert sc.target_max == 500.0
+        assert sc.target_min is None
+
+    def test_greater_equal(self, orchestrator):
+        raw = {"name": "r2", "description": "d", "metric_key": "r2", "condition": ">= 0.9"}
+        sc = Orchestrator._parse_criterion(raw)
+        assert sc.target_min == 0.9
+
+    def test_less_equal(self, orchestrator):
+        raw = {"name": "err", "description": "d", "metric_key": "err", "condition": "<= 10"}
+        sc = Orchestrator._parse_criterion(raw)
+        assert sc.target_max == 10.0
+
+    def test_invalid_condition_no_targets(self, orchestrator):
+        raw = {"name": "x", "description": "d", "metric_key": "x", "condition": "between 0 and 1"}
+        sc = Orchestrator._parse_criterion(raw)
+        assert sc.target_min is None
+        assert sc.target_max is None
+
+    def test_empty_condition(self, orchestrator):
+        raw = {"name": "x", "description": "d", "metric_key": "x", "condition": ""}
+        sc = Orchestrator._parse_criterion(raw)
+        assert sc.target_min is None
+        assert sc.target_max is None
+
+    def test_missing_condition_key(self, orchestrator):
+        raw = {"name": "x", "description": "d", "metric_key": "x"}
+        sc = Orchestrator._parse_criterion(raw)
+        assert sc.target_min is None
+        assert sc.target_max is None
+
+    def test_preserves_name_description(self, orchestrator):
+        raw = {"name": "Accuracy", "description": "Model accuracy", "metric_key": "acc", "condition": "> 0.9"}
+        sc = Orchestrator._parse_criterion(raw)
+        assert sc.name == "Accuracy"
+        assert sc.description == "Model accuracy"
+        assert sc.metric_key == "acc"
+
+
 class TestApplyCriteriaUpdates:
     """Test _apply_criteria_updates with various plan shapes."""
 
@@ -367,6 +427,73 @@ class TestApplyCriteriaUpdates:
         orchestrator._apply_criteria_updates(plan)
         assert orchestrator.state.success_criteria is None
         assert len(orchestrator.state.criteria_history) == 0
+
+    def test_top_level_takes_priority_over_revision(self, orchestrator):
+        orchestrator.state.iteration = 1
+        plan = {
+            "top_level_criteria": [
+                {"name": "A", "description": "d", "metric_key": "a", "condition": "> 0.9"},
+            ],
+            "criteria_revision": {
+                "changes": "ignored",
+                "revised_criteria": [
+                    {"name": "B", "description": "d", "metric_key": "b", "condition": "< 1"},
+                ],
+            },
+        }
+        orchestrator._apply_criteria_updates(plan)
+        assert len(orchestrator.state.success_criteria) == 1
+        assert orchestrator.state.success_criteria[0].name == "A"
+        assert orchestrator.state.criteria_history[0].action == "defined"
+
+    def test_empty_top_level_list_no_update(self, orchestrator):
+        orchestrator.state.success_criteria = None
+        plan = {"top_level_criteria": []}
+        orchestrator._apply_criteria_updates(plan)
+        assert orchestrator.state.success_criteria is None
+
+    def test_revision_with_empty_revised_list(self, orchestrator):
+        orchestrator.state.success_criteria = [
+            SuccessCriterion(name="X", description="d", metric_key="x", target_min=0.5),
+        ]
+        plan = {
+            "criteria_revision": {
+                "changes": "Cleared all criteria",
+                "revised_criteria": [],
+            },
+        }
+        orchestrator.state.iteration = 2
+        orchestrator._apply_criteria_updates(plan)
+        assert orchestrator.state.success_criteria == []
+
+    def test_criteria_history_records_defined_action(self, orchestrator):
+        orchestrator.state.iteration = 1
+        plan = {
+            "top_level_criteria": [
+                {"name": "A", "description": "d", "metric_key": "a", "condition": "> 0.9"},
+            ],
+        }
+        orchestrator._apply_criteria_updates(plan)
+        assert len(orchestrator.state.criteria_history) == 1
+        assert orchestrator.state.criteria_history[0].action == "defined"
+        assert orchestrator.state.criteria_history[0].iteration == 1
+
+    def test_criteria_history_records_revised_action(self, orchestrator):
+        orchestrator.state.success_criteria = [
+            SuccessCriterion(name="A", description="d", metric_key="a", target_min=0.9),
+        ]
+        orchestrator.state.iteration = 3
+        plan = {
+            "criteria_revision": {
+                "changes": "Lowered target",
+                "revised_criteria": [
+                    {"name": "A", "description": "d", "metric_key": "a", "condition": "> 0.8"},
+                ],
+            },
+        }
+        orchestrator._apply_criteria_updates(plan)
+        assert orchestrator.state.criteria_history[0].action == "revised"
+        assert orchestrator.state.criteria_history[0].iteration == 3
 
     def test_condition_parsing_less_than(self, orchestrator):
         plan = {
@@ -529,3 +656,63 @@ class TestRunIteration:
             await orchestrator._run_iteration_body()
 
         mock_debate.assert_called_once_with(plan)
+
+    @pytest.mark.asyncio
+    async def test_domain_knowledge_updated_from_analysis(self, orchestrator, tmp_path):
+        orchestrator.output_dir.mkdir(parents=True, exist_ok=True)
+        orchestrator.state.phase = "iteration"
+        orchestrator.state.iteration = 0
+        orchestrator.state.domain_knowledge = ""
+
+        analysis = {
+            "success_score": None,
+            "domain_knowledge": "Sensor data with temperature readings",
+        }
+        plan = {"should_stop": False, "hypothesis": "explore"}
+        script_path = tmp_path / "experiments" / "v00" / "experiment.py"
+        script_path.parent.mkdir(parents=True, exist_ok=True)
+        script_path.write_text("print('hi')")
+        run_result = RunResult(success=True, stdout="ok", return_code=0)
+
+        with (
+            patch.object(orchestrator, "_run_analyst", new_callable=AsyncMock,
+                          return_value=analysis),
+            patch.object(orchestrator, "_run_scientist_plan", new_callable=AsyncMock,
+                          return_value=plan),
+            patch.object(orchestrator, "_run_coder", new_callable=AsyncMock,
+                          return_value=script_path),
+            patch.object(orchestrator, "_validate_script", new_callable=AsyncMock,
+                          return_value=True),
+            patch.object(orchestrator, "_run_experiment", new_callable=AsyncMock,
+                          return_value=run_result),
+            patch.object(orchestrator, "_apply_criteria_updates"),
+        ):
+            await orchestrator._run_iteration_body()
+
+        assert orchestrator.state.domain_knowledge == "Sensor data with temperature readings"
+
+    @pytest.mark.asyncio
+    async def test_should_stop_transitions_to_report(self, orchestrator, tmp_path):
+        orchestrator.output_dir.mkdir(parents=True, exist_ok=True)
+        orchestrator.state.phase = "iteration"
+        orchestrator.state.iteration = 1
+        orchestrator.state.versions = [
+            VersionEntry(
+                version="v00", iteration=0, script_path="/tmp/s.py",
+                results_path=str(tmp_path / "results.txt"),
+            ),
+        ]
+        (tmp_path / "results.txt").write_text("data")
+
+        plan = {"should_stop": True, "stop_reason": "criteria met"}
+
+        with (
+            patch.object(orchestrator, "_run_analyst", new_callable=AsyncMock,
+                          return_value={}),
+            patch.object(orchestrator, "_run_scientist_plan", new_callable=AsyncMock,
+                          return_value=plan),
+            patch.object(orchestrator, "_apply_criteria_updates"),
+        ):
+            await orchestrator._run_iteration_body()
+
+        assert orchestrator.state.phase == "report"
