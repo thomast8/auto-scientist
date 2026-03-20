@@ -44,7 +44,7 @@ class TestDomainConfig:
 
     def test_defaults(self):
         dc = DomainConfig(name="t", description="d", data_paths=[])
-        assert dc.run_command == "uv run python -u {script_path}"
+        assert dc.run_command == "uv run {script_path}"
         assert dc.run_cwd == "."
         assert dc.run_timeout_minutes == 120
         assert dc.version_prefix == "v"

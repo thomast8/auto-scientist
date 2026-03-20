@@ -128,3 +128,92 @@ class TestResumeCommand:
         call_kwargs = mock_orch.call_args.kwargs
         assert call_kwargs["state"].domain == "auto"
         assert "config" not in call_kwargs
+
+
+class TestNextOutputDirExtended:
+    def test_three_sequential_increments(self, tmp_path):
+        base = tmp_path / "experiments"
+        base.mkdir()
+        (base / "state.json").write_text("{}")
+
+        d1 = tmp_path / "experiments_001"
+        d1.mkdir()
+        (d1 / "state.json").write_text("{}")
+
+        d2 = tmp_path / "experiments_002"
+        d2.mkdir()
+        (d2 / "state.json").write_text("{}")
+
+        assert _next_output_dir(base) == tmp_path / "experiments_003"
+
+
+class TestRunCommandOptions:
+    @patch("auto_scientist.cli.asyncio.run")
+    @patch("auto_scientist.cli.Orchestrator")
+    def test_passes_max_iterations(self, mock_orch, mock_async_run, tmp_path):
+        data_file = tmp_path / "data.csv"
+        data_file.write_text("a,b\n1,2\n")
+
+        runner = CliRunner()
+        runner.invoke(cli, [
+            "run", "--data", str(data_file), "--goal", "test",
+            "--max-iterations", "10",
+        ])
+        call_kwargs = mock_orch.call_args.kwargs
+        assert call_kwargs["max_iterations"] == 10
+
+    @patch("auto_scientist.cli.asyncio.run")
+    @patch("auto_scientist.cli.Orchestrator")
+    def test_passes_schedule(self, mock_orch, mock_async_run, tmp_path):
+        data_file = tmp_path / "data.csv"
+        data_file.write_text("a,b\n1,2\n")
+
+        runner = CliRunner()
+        runner.invoke(cli, [
+            "run", "--data", str(data_file), "--goal", "test",
+            "--schedule", "22:00-06:00",
+        ])
+        call_kwargs = mock_orch.call_args.kwargs
+        assert call_kwargs["state"].schedule == "22:00-06:00"
+
+    @patch("auto_scientist.cli.asyncio.run")
+    @patch("auto_scientist.cli.Orchestrator")
+    def test_passes_critics(self, mock_orch, mock_async_run, tmp_path):
+        data_file = tmp_path / "data.csv"
+        data_file.write_text("a,b\n1,2\n")
+
+        runner = CliRunner()
+        runner.invoke(cli, [
+            "run", "--data", str(data_file), "--goal", "test",
+            "--critics", "openai:gpt-4o,google:gemini-2.0-flash",
+        ])
+        call_kwargs = mock_orch.call_args.kwargs
+        assert call_kwargs["critic_models"] == ["openai:gpt-4o", "google:gemini-2.0-flash"]
+
+    @patch("auto_scientist.cli.asyncio.run")
+    @patch("auto_scientist.cli.Orchestrator")
+    def test_passes_debate_rounds(self, mock_orch, mock_async_run, tmp_path):
+        data_file = tmp_path / "data.csv"
+        data_file.write_text("a,b\n1,2\n")
+
+        runner = CliRunner()
+        runner.invoke(cli, [
+            "run", "--data", str(data_file), "--goal", "test",
+            "--debate-rounds", "3",
+        ])
+        call_kwargs = mock_orch.call_args.kwargs
+        assert call_kwargs["debate_rounds"] == 3
+
+    @patch("auto_scientist.cli.asyncio.run")
+    @patch("auto_scientist.cli.Orchestrator")
+    def test_no_stream_flag(self, mock_orch, mock_async_run, tmp_path):
+        data_file = tmp_path / "data.csv"
+        data_file.write_text("a,b\n1,2\n")
+
+        runner = CliRunner()
+        runner.invoke(cli, [
+            "run", "--data", str(data_file), "--goal", "test",
+            "--no-stream",
+        ])
+        call_kwargs = mock_orch.call_args.kwargs
+        assert call_kwargs["stream"] is False

@@ -192,6 +192,74 @@ class TestCriteriaRevision:
         assert loaded.criteria_history[0].action == "defined"
 
 
+class TestVersionEntry:
+    def test_defaults(self):
+        entry = VersionEntry(version="v01", iteration=1, script_path="/tmp/s.py")
+        assert entry.results_path is None
+        assert entry.score == 0
+        assert entry.hypothesis == ""
+        assert entry.status == "pending"
+
+    def test_serialization_roundtrip(self):
+        entry = VersionEntry(
+            version="v03", iteration=3, script_path="/tmp/s.py",
+            results_path="/tmp/r.txt", score=85,
+            hypothesis="Test hypothesis", status="completed",
+        )
+        json_str = entry.model_dump_json()
+        loaded = VersionEntry.model_validate_json(json_str)
+        assert loaded.version == "v03"
+        assert loaded.score == 85
+        assert loaded.status == "completed"
+        assert loaded.hypothesis == "Test hypothesis"
+
+    def test_all_statuses(self):
+        for status in ["pending", "running", "completed", "failed", "crashed"]:
+            entry = VersionEntry(
+                version="v01", iteration=1, script_path="/tmp/s.py",
+                status=status,
+            )
+            assert entry.status == status
+
+
+class TestExperimentStateExtended:
+    def test_record_version_zero_score_no_update(self):
+        state = ExperimentState(domain="test", goal="g")
+        state.record_version(VersionEntry(version="v1", iteration=1, script_path="a", score=5))
+        assert state.best_score == 5
+        state.record_version(VersionEntry(version="v2", iteration=2, script_path="b", score=0))
+        assert state.best_version == "v1"
+        assert state.best_score == 5
+
+    def test_record_version_equal_score_no_update(self):
+        state = ExperimentState(domain="test", goal="g")
+        state.record_version(VersionEntry(version="v1", iteration=1, script_path="a", score=5))
+        state.record_version(VersionEntry(version="v2", iteration=2, script_path="b", score=5))
+        assert state.best_version == "v1"
+
+    def test_should_stop_custom_max(self):
+        state = ExperimentState(domain="test", goal="g")
+        state.record_failure()
+        assert state.should_stop_on_failures(1)
+
+    def test_multiple_versions_tracked(self):
+        state = ExperimentState(domain="test", goal="g")
+        for i in range(5):
+            state.record_version(
+                VersionEntry(version=f"v{i:02d}", iteration=i, script_path=f"s{i}.py", score=i),
+            )
+        assert len(state.versions) == 5
+        assert state.best_version == "v04"
+        assert state.best_score == 4
+
+    def test_dead_ends_persistence(self, tmp_path):
+        state = ExperimentState(domain="test", goal="g", dead_ends=["v01", "v03"])
+        path = tmp_path / "state.json"
+        state.save(path)
+        loaded = ExperimentState.load(path)
+        assert loaded.dead_ends == ["v01", "v03"]
+
+
 class TestDiscoveryPhaseMigration:
     def test_discovery_phase_migrates_to_iteration(self, tmp_path):
         """Loading state with phase='discovery' should migrate to phase='iteration', iteration=0."""

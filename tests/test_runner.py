@@ -90,3 +90,68 @@ class TestRunExperiment:
         assert result.success
         assert any("result.txt" in f for f in result.output_files)
         assert any("plot.png" in f for f in result.output_files)
+
+    @pytest.mark.asyncio
+    async def test_empty_file_valid_syntax(self, tmp_path):
+        script = tmp_path / "empty.py"
+        script.write_text("")
+        valid, error = validate_syntax(script)
+        assert valid
+
+    @pytest.mark.asyncio
+    async def test_stderr_captured(self, tmp_path):
+        script = tmp_path / "stderr.py"
+        script.write_text("import sys\nsys.stderr.write('warning message')\n")
+        result = await run_experiment(
+            script_path=script,
+            command_template=f"python {{script_path}}",
+            cwd=str(tmp_path),
+        )
+        assert result.success
+        assert "warning message" in result.stderr
+
+    @pytest.mark.asyncio
+    async def test_csv_output_discovered(self, tmp_path):
+        script = tmp_path / "csv_out.py"
+        script.write_text(
+            "from pathlib import Path\n"
+            f"Path('{tmp_path}/data.csv').write_text('a,b\\n1,2\\n')\n"
+        )
+        result = await run_experiment(
+            script_path=script,
+            command_template=f"python {{script_path}}",
+            cwd=str(tmp_path),
+        )
+        assert result.success
+        assert any("data.csv" in f for f in result.output_files)
+
+    @pytest.mark.asyncio
+    async def test_nonexistent_script_fails(self, tmp_path):
+        script = tmp_path / "nonexistent.py"
+        result = await run_experiment(
+            script_path=script,
+            command_template=f"python {{script_path}}",
+            cwd=str(tmp_path),
+        )
+        assert not result.success
+
+
+class TestRunResult:
+    def test_default_fields(self):
+        r = RunResult(success=True)
+        assert r.stdout == ""
+        assert r.stderr == ""
+        assert r.return_code == -1
+        assert r.timed_out is False
+        assert r.output_files == []
+
+    def test_all_fields(self):
+        r = RunResult(
+            success=True, stdout="out", stderr="err",
+            return_code=0, timed_out=False,
+            output_files=["a.txt", "b.png"],
+        )
+        assert r.stdout == "out"
+        assert r.stderr == "err"
+        assert r.return_code == 0
+        assert r.output_files == ["a.txt", "b.png"]
