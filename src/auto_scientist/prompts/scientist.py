@@ -26,7 +26,20 @@ see or write code.
    Note: are results genuine or overfitting artifacts? Converging,
    stuck, or circling?
 
-   On v00, there is no prior arc. Focus on exploration findings.
+   When analysis is empty (first encounter with the data), plan a
+   thorough data exploration: compute distributions, check for missing
+   values, calculate correlations, establish baselines. There is nothing
+   to hypothesize about yet; the goal is understanding.
+
+   When no top-level success criteria have been established and you have
+   analysis results, define 5-10 top_level_criteria with measurable
+   targets based on what the data analysis revealed. These are
+   investigation-wide goals that the Analyst evaluates on every
+   subsequent iteration.
+
+   When top-level criteria exist but evidence shows they are unrealistic
+   or wrong, you may propose revisions via criteria_revision. Include
+   the justification in your notebook entry.
 
 3. Formulate a hypothesis about what to change and why.
 
@@ -289,86 +302,152 @@ patterns are discontinuous across weather regimes.",
 
 <example>
 <input>
-Domain: acoustic anomaly detection in industrial equipment
-Analysis: (none, this is v00)
-Notebook: v00 exploration: 48kHz audio from 6 pump stations,
-  2400 samples (2000 normal, 400 anomalous, 5:1 imbalance).
-  Anomalous pumps show excess energy in 2-8kHz band.
-  SNR varies across stations.
+Domain: (no domain knowledge yet)
+Analysis: (empty, first encounter with the data)
+Notebook: (empty, first iteration)
+Success criteria: (none defined)
 </input>
 <reasoning>
-First iteration. Exploration found clear spectral differences in
-2-8kHz band. Reasonable first approach: spectral feature extraction
-plus simple classifier. Use MFCCs and spectral centroid with
-random forest. Address class imbalance.
+No analysis, no criteria, no notebook. This is the first iteration.
+Plan a thorough data exploration to understand what we are working
+with before forming any hypotheses.
 </reasoning>
 <output>
 {{
-  "hypothesis": "Spectral features (MFCCs + centroid/bandwidth) \
-with a random forest will detect anomalous pumps via the 2-8kHz \
-energy pattern found in exploration.",
-  "strategy": "structural",
+  "hypothesis": "Data exploration to establish baselines and \
+identify patterns before forming hypotheses.",
+  "strategy": "exploratory",
   "changes": [
     {{
-      "what": "Extract MFCC features from audio segments",
-      "why": "MFCCs compress frequency info; 2-8kHz anomaly \
-should appear in mid-range coefficients",
-      "how": "13 MFCCs, 25ms windows, 10ms hop, averaged \
-per sample",
+      "what": "Compute summary statistics for all columns",
+      "why": "Need to understand data distributions and ranges",
+      "how": "Mean, std, min, max, quartiles for numeric columns; \
+value counts for categorical",
       "priority": 1
     }},
     {{
-      "what": "Add spectral centroid and bandwidth",
-      "why": "2-8kHz excess energy shifts centroid upward",
-      "how": "Compute per segment, add to MFCC feature vector",
+      "what": "Check for missing values and data quality",
+      "why": "Missing data affects all downstream analysis",
+      "how": "Count nulls per column, check for duplicates and \
+outliers",
       "priority": 1
     }},
     {{
-      "what": "Train random forest with balanced weights",
-      "why": "5:1 imbalance means naive 83% from all-normal",
-      "how": "class_weight='balanced', n_estimators=100, \
-5-fold stratified CV",
+      "what": "Compute pairwise correlations",
+      "why": "Identify relationships between variables",
+      "how": "Correlation matrix, scatter plots for high-correlation \
+pairs",
       "priority": 1
     }},
     {{
-      "what": "Evaluate per-station",
-      "why": "Different noise floors may affect features",
-      "how": "Report accuracy and F1 per station",
+      "what": "Generate diagnostic plots",
+      "why": "Visual inspection reveals patterns statistics miss",
+      "how": "Histograms, scatter matrix, time series if temporal",
       "priority": 2
     }}
   ],
-  "expected_impact": "Anomalous-class F1 above 0.7.",
+  "expected_impact": "Baseline understanding of the dataset.",
   "should_stop": false,
   "stop_reason": null,
-  "notebook_entry": "## v01 - Spectral feature baseline\\n\\n\
-First iteration. Anomalous pumps show excess 2-8kHz energy. \
-2400 samples, 5:1 imbalance.\\n\\nApproach: MFCCs + centroid \
-with balanced random forest. Key risk: SNR varies across \
-stations.",
-  "success_criteria": [
+  "notebook_entry": "## v00 - Data exploration\\n\\nFirst iteration. \
+No prior results or criteria. Goal: understand the data before \
+forming hypotheses.\\n\\nPlan: compute distributions, check data \
+quality, correlations, and diagnostic plots.",
+  "success_criteria": []
+}}
+</output>
+</example>
+
+<example>
+<input>
+Domain: Physiological sensor dataset with 200 rows, columns x
+  (float, evenly spaced 0-10) and y (float, range -2.7 to 9.8)
+Analysis: success_score=null, observations=["200 rows, 2 float \
+  columns", "x evenly spaced 0-10", "y range -2.7 to 9.8", \
+  "no missing values"]
+Notebook: v00 exploration found 200 data points, x is linspace,
+  y follows a smooth curve with some noise
+Success criteria: (none defined)
+</input>
+<reasoning>
+Rich analysis from exploration, no criteria yet. Data looks like
+a function y=f(x) with noise. Need to define top-level criteria
+for the investigation and plan the first real hypothesis. The
+smooth curve with noise suggests polynomial or spline fitting.
+</reasoning>
+<output>
+{{
+  "hypothesis": "A polynomial fit will capture the underlying \
+function y=f(x) visible in the exploration, with the noise \
+as additive residuals.",
+  "strategy": "structural",
+  "changes": [
     {{
-      "name": "Anomalous F1 above 0.7",
-      "description": "Detect anomalies, not just majority",
-      "metric_key": "anomalous_f1",
-      "condition": "> 0.7"
+      "what": "Fit polynomials of degrees 2 through 6",
+      "why": "Exploration shows smooth curve; polynomial is \
+simplest parametric model",
+      "how": "np.polyfit for each degree, compute R-squared \
+and RMSE on held-out 20% test set",
+      "priority": 1
     }},
     {{
-      "name": "Accuracy above 85%",
-      "description": "Beat all-normal baseline (83%)",
-      "metric_key": "accuracy",
+      "what": "Select degree by cross-validation",
+      "why": "Avoid overfitting with too-high degree",
+      "how": "5-fold CV, pick degree with lowest mean test RMSE",
+      "priority": 1
+    }},
+    {{
+      "what": "Plot fit vs data and residuals",
+      "why": "Visual check for systematic patterns in residuals",
+      "how": "Scatter plot with fitted curve, residual histogram",
+      "priority": 2
+    }}
+  ],
+  "expected_impact": "R-squared above 0.9 on test set.",
+  "should_stop": false,
+  "stop_reason": null,
+  "notebook_entry": "## v01 - Polynomial fitting\\n\\nExploration \
+(v00) found 200 points with x in [0,10] and y in [-2.7, 9.8]. \
+The data follows a smooth curve with additive noise.\\n\\nFirst \
+hypothesis: polynomial fit. Testing degrees 2-6 with CV.",
+  "success_criteria": [
+    {{
+      "name": "R-squared above 0.85",
+      "description": "Initial fit should explain most variance",
+      "metric_key": "r_squared",
       "condition": "> 0.85"
     }},
     {{
-      "name": "No station below 60% F1",
-      "description": "Generalize across stations",
-      "metric_key": "min_station_f1",
-      "condition": "> 0.6"
+      "name": "Residuals approximately normal",
+      "description": "No systematic pattern in residuals",
+      "metric_key": "residual_normality_p",
+      "condition": "> 0.05"
+    }}
+  ],
+  "top_level_criteria": [
+    {{
+      "name": "Final R-squared above 0.95",
+      "description": "Investigation goal: accurate function recovery",
+      "metric_key": "r_squared",
+      "condition": "> 0.95"
     }},
     {{
-      "name": "False positive rate below 15%",
-      "description": "Too many false alarms = unusable",
-      "metric_key": "false_positive_rate",
-      "condition": "< 0.15"
+      "name": "RMSE below 0.5",
+      "description": "Prediction error within noise level",
+      "metric_key": "rmse",
+      "condition": "< 0.5"
+    }},
+    {{
+      "name": "Residuals independent of x",
+      "description": "No systematic bias across input range",
+      "metric_key": "residual_x_correlation",
+      "condition": "< 0.1"
+    }},
+    {{
+      "name": "Model generalizes to held-out data",
+      "description": "Train-test performance gap is small",
+      "metric_key": "train_test_gap_pct",
+      "condition": "< 10"
     }}
   ]
 }}
@@ -444,8 +523,18 @@ should_stop: true if investigation should end.
 stop_reason: why stopping (null if should_stop is false).
 notebook_entry: markdown to append to lab notebook.
 success_criteria: 3-8 testable predictions of the hypothesis.
+top_level_criteria: (optional) investigation-wide goals, defined when
+  analysis is available but no top-level criteria exist yet.
+criteria_revision: (optional) revisions to existing top-level criteria,
+  with justification.
 
 Fallback rules:
+- Exploration iteration (no analysis, no criteria): top_level_criteria and
+  criteria_revision are omitted; success_criteria may be empty
+- Criteria definition iteration (has analysis, no criteria): top_level_criteria
+  is populated; criteria_revision is omitted
+- Normal iteration (has criteria): top_level_criteria is omitted;
+  criteria_revision is present only if revising
 - First iteration with no analysis: plan from notebook findings
 - No domain_knowledge: plan from data patterns alone
 - Script crash: plan must address the crash first
@@ -463,6 +552,7 @@ a continuous narrative.
 SCIENTIST_USER = """\
 <context>
 <domain_knowledge>{domain_knowledge}</domain_knowledge>
+<success_criteria>{success_criteria}</success_criteria>
 <notebook>{notebook_content}</notebook>
 </context>
 

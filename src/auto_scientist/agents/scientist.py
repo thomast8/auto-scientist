@@ -16,6 +16,7 @@ from claude_code_sdk import (
     query,
 )
 
+from auto_scientist.config import SuccessCriterion
 from auto_scientist.prompts.scientist import (
     SCIENTIST_REVISION_SYSTEM,
     SCIENTIST_REVISION_USER,
@@ -59,6 +60,39 @@ SCIENTIST_PLAN_SCHEMA = {
                 "required": ["name", "description", "metric_key", "condition"],
             },
         },
+        "top_level_criteria": {
+            "type": "array",
+            "items": {
+                "type": "object",
+                "properties": {
+                    "name": {"type": "string"},
+                    "description": {"type": "string"},
+                    "metric_key": {"type": "string"},
+                    "condition": {"type": "string"},
+                },
+                "required": ["name", "description", "metric_key", "condition"],
+            },
+        },
+        "criteria_revision": {
+            "type": "object",
+            "properties": {
+                "changes": {"type": "string"},
+                "revised_criteria": {
+                    "type": "array",
+                    "items": {
+                        "type": "object",
+                        "properties": {
+                            "name": {"type": "string"},
+                            "description": {"type": "string"},
+                            "metric_key": {"type": "string"},
+                            "condition": {"type": "string"},
+                        },
+                        "required": ["name", "description", "metric_key", "condition"],
+                    },
+                },
+            },
+            "required": ["changes", "revised_criteria"],
+        },
     },
     "required": [
         "hypothesis",
@@ -73,11 +107,32 @@ SCIENTIST_PLAN_SCHEMA = {
 }
 
 
+def _format_criteria_for_prompt(criteria: list[SuccessCriterion] | None) -> str:
+    """Format existing success criteria for injection into the Scientist prompt."""
+    if not criteria:
+        return "(no top-level success criteria defined yet)"
+    lines = []
+    for i, c in enumerate(criteria, 1):
+        target = ""
+        if c.target_min is not None and c.target_max is not None:
+            target = f"[{c.target_min}, {c.target_max}]"
+        elif c.target_min is not None:
+            target = f">= {c.target_min}"
+        elif c.target_max is not None:
+            target = f"<= {c.target_max}"
+        required = "REQUIRED" if c.required else "optional"
+        lines.append(
+            f"{i}. [{required}] {c.name} (metric: {c.metric_key}, {target}): {c.description}"
+        )
+    return "\n".join(lines)
+
+
 async def run_scientist(
     analysis: dict[str, Any],
     notebook_path: Path,
     version: str,
     domain_knowledge: str = "",
+    success_criteria: list[SuccessCriterion] | None = None,
     model: str | None = None,
 ) -> dict[str, Any]:
     """Formulate hypothesis and plan based on analysis.
@@ -90,10 +145,13 @@ async def run_scientist(
         notebook_path: Path to the lab notebook (read for context).
         version: Version string for the new experiment (e.g., 'v01').
         domain_knowledge: Domain-specific context.
+        success_criteria: Existing top-level criteria (None if not yet defined).
+        model: Model override.
 
     Returns:
         Structured plan dict with keys: hypothesis, strategy, changes,
         expected_impact, should_stop, stop_reason, notebook_entry.
+        Optionally: top_level_criteria, criteria_revision.
     """
     notebook_path = Path(notebook_path)
     notebook_content = notebook_path.read_text() if notebook_path.exists() else ""
@@ -104,6 +162,7 @@ async def run_scientist(
             json.dumps(analysis, indent=2) if analysis else "(no analysis yet - first iteration)"
         ),
         notebook_content=notebook_content or "(empty notebook - first iteration)",
+        success_criteria=_format_criteria_for_prompt(success_criteria),
         version=version,
     )
 

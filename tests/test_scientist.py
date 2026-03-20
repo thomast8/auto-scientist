@@ -10,6 +10,7 @@ from auto_scientist.agents.scientist import (
     run_scientist,
     run_scientist_revision,
 )
+from auto_scientist.config import SuccessCriterion
 
 
 class TestParseJsonResponse:
@@ -135,6 +136,178 @@ class TestRunScientist:
         await run_scientist(analysis={}, notebook_path=notebook_path, version="v01")
 
         assert captured_options["options"].allowed_tools == []
+
+
+class TestRunScientistExploration:
+    """Empty analysis + no criteria -> exploration plan."""
+
+    @pytest.mark.asyncio
+    @patch("auto_scientist.agents.scientist.query")
+    async def test_exploration_plan(self, mock_query, tmp_path):
+        exploration_plan = {
+            "hypothesis": "Data exploration to establish baselines and identify patterns",
+            "strategy": "exploratory",
+            "changes": [
+                {"what": "Compute distributions", "why": "Understand data shape",
+                 "how": "Histograms and summary stats", "priority": 1},
+            ],
+            "expected_impact": "Baseline understanding of the dataset",
+            "should_stop": False,
+            "stop_reason": None,
+            "notebook_entry": "## v00 - Data exploration",
+            "success_criteria": [],
+        }
+
+        from auto_scientist.agents.scientist import ResultMessage
+        result_msg = MagicMock(spec=ResultMessage)
+        result_msg.result = json.dumps(exploration_plan)
+
+        async def fake_query(**kwargs):
+            yield result_msg
+
+        mock_query.side_effect = fake_query
+
+        notebook_path = tmp_path / "notebook.md"
+        result = await run_scientist(
+            analysis={},
+            notebook_path=notebook_path,
+            version="v00",
+        )
+        assert result["strategy"] == "exploratory"
+        assert "top_level_criteria" not in result or not result.get("top_level_criteria")
+
+
+class TestRunScientistCriteriaDefinition:
+    """Rich analysis + no criteria -> plan includes top_level_criteria."""
+
+    @pytest.mark.asyncio
+    @patch("auto_scientist.agents.scientist.query")
+    async def test_defines_criteria(self, mock_query, tmp_path):
+        plan_with_criteria = {
+            "hypothesis": "Polynomial fit will model the observed pattern",
+            "strategy": "structural",
+            "changes": [
+                {"what": "Fit polynomial", "why": "Data shows curve",
+                 "how": "np.polyfit degree 2-5", "priority": 1},
+            ],
+            "expected_impact": "R-squared above 0.9",
+            "should_stop": False,
+            "stop_reason": None,
+            "notebook_entry": "## v01 - First hypothesis",
+            "success_criteria": [
+                {"name": "R-squared", "description": "Fit quality",
+                 "metric_key": "r_squared", "condition": "> 0.9"},
+            ],
+            "top_level_criteria": [
+                {"name": "Final R-squared", "description": "Investigation goal",
+                 "metric_key": "r_squared", "condition": "> 0.95"},
+            ],
+        }
+
+        from auto_scientist.agents.scientist import ResultMessage
+        result_msg = MagicMock(spec=ResultMessage)
+        result_msg.result = json.dumps(plan_with_criteria)
+
+        async def fake_query(**kwargs):
+            yield result_msg
+
+        mock_query.side_effect = fake_query
+
+        notebook_path = tmp_path / "notebook.md"
+        notebook_path.write_text("# Notebook\n## v00 exploration results")
+
+        result = await run_scientist(
+            analysis={"success_score": None, "observations": ["200 rows, polynomial shape"]},
+            notebook_path=notebook_path,
+            version="v01",
+        )
+        assert "top_level_criteria" in result
+        assert len(result["top_level_criteria"]) == 1
+        assert result["top_level_criteria"][0]["condition"] == "> 0.95"
+
+
+class TestRunScientistCriteriaRevision:
+    """Existing criteria -> plan may include criteria_revision."""
+
+    @pytest.mark.asyncio
+    @patch("auto_scientist.agents.scientist.query")
+    async def test_revises_criteria(self, mock_query, tmp_path):
+        plan_with_revision = {
+            "hypothesis": "Lower target is more realistic given noise",
+            "strategy": "incremental",
+            "changes": [
+                {"what": "Add regularization", "why": "Reduce overfitting",
+                 "how": "L2 penalty", "priority": 1},
+            ],
+            "expected_impact": "Stable R-squared around 0.90",
+            "should_stop": False,
+            "stop_reason": None,
+            "notebook_entry": "## v03 - Adjusting targets",
+            "success_criteria": [
+                {"name": "R-squared", "description": "Fit quality",
+                 "metric_key": "r_squared", "condition": "> 0.85"},
+            ],
+            "criteria_revision": {
+                "changes": "Lowered R-squared target from 0.95 to 0.90 because noise floor limits achievable accuracy",
+                "revised_criteria": [
+                    {"name": "Final R-squared", "description": "Investigation goal",
+                     "metric_key": "r_squared", "condition": "> 0.90"},
+                ],
+            },
+        }
+
+        from auto_scientist.agents.scientist import ResultMessage
+        result_msg = MagicMock(spec=ResultMessage)
+        result_msg.result = json.dumps(plan_with_revision)
+
+        async def fake_query(**kwargs):
+            yield result_msg
+
+        mock_query.side_effect = fake_query
+
+        notebook_path = tmp_path / "notebook.md"
+        notebook_path.write_text("# Notebook")
+
+        existing_criteria = [
+            SuccessCriterion(name="Final R-squared", description="goal",
+                             metric_key="r_squared", target_min=0.95),
+        ]
+        result = await run_scientist(
+            analysis={"success_score": 75},
+            notebook_path=notebook_path,
+            version="v03",
+            success_criteria=existing_criteria,
+        )
+        assert "criteria_revision" in result
+        assert result["criteria_revision"]["revised_criteria"][0]["condition"] == "> 0.90"
+
+    @pytest.mark.asyncio
+    @patch("auto_scientist.agents.scientist.query")
+    async def test_accepts_success_criteria_param(self, mock_query, tmp_path):
+        """run_scientist should accept a success_criteria parameter."""
+        from auto_scientist.agents.scientist import ResultMessage
+        result_msg = MagicMock(spec=ResultMessage)
+        result_msg.result = json.dumps(SAMPLE_PLAN)
+
+        captured_prompt = {}
+
+        async def fake_query(**kwargs):
+            captured_prompt["prompt"] = kwargs.get("prompt", "")
+            yield result_msg
+
+        mock_query.side_effect = fake_query
+
+        notebook_path = tmp_path / "notebook.md"
+        criteria = [
+            SuccessCriterion(name="acc", description="accuracy",
+                             metric_key="accuracy", target_min=0.9),
+        ]
+        await run_scientist(
+            analysis={}, notebook_path=notebook_path, version="v02",
+            success_criteria=criteria,
+        )
+        # Criteria should appear in the prompt
+        assert "accuracy" in captured_prompt["prompt"]
 
 
 class TestRunScientistRevision:
