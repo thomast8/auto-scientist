@@ -15,8 +15,10 @@ bias and lets the critic form a fresh assessment each round.
 """
 
 import json
+from collections.abc import Callable
 from typing import Any
 
+from auto_scientist.console import stream_separator
 from auto_scientist.models.anthropic_client import query_anthropic
 from auto_scientist.models.google_client import query_google
 from auto_scientist.models.openai_client import query_openai
@@ -43,14 +45,20 @@ def parse_critic_spec(spec: str) -> tuple[str, str]:
     return parts[0], parts[1]
 
 
-async def _query_critic(provider: str, model: str, prompt: str) -> str:
+async def _query_critic(
+    provider: str,
+    model: str,
+    prompt: str,
+    *,
+    on_token: Callable[[str], None] | None = None,
+) -> str:
     """Dispatch a prompt to the appropriate provider with web search enabled."""
     if provider == "openai":
-        return await query_openai(model, prompt, web_search=True)
+        return await query_openai(model, prompt, web_search=True, on_token=on_token)
     elif provider == "google":
-        return await query_google(model, prompt, web_search=True)
+        return await query_google(model, prompt, web_search=True, on_token=on_token)
     elif provider == "anthropic":
-        return await query_anthropic(model, prompt, web_search=True)
+        return await query_anthropic(model, prompt, web_search=True, on_token=on_token)
     else:
         raise ValueError(f"Unknown critic provider: {provider!r}")
 
@@ -62,6 +70,7 @@ async def run_debate(
     domain_knowledge: str = "",
     max_rounds: int = 2,
     scientist_model: str = "claude-sonnet-4-6",
+    on_token_factory: Callable[[str], Callable[[str], None]] | None = None,
 ) -> list[dict[str, Any]]:
     """Run a multi-round critic-scientist debate for each critic model.
 
@@ -96,11 +105,18 @@ async def run_debate(
         critic_prompt = _build_critic_prompt(
             plan, notebook_content, domain_knowledge
         )
-        critique_text = await _query_critic(provider, model, critic_prompt)
+        on_token = on_token_factory(f"Critic ({spec}) round 1") if on_token_factory else None
+        critique_text = await _query_critic(provider, model, critic_prompt, on_token=on_token)
+        if on_token:
+            stream_separator()
         transcript.append({"role": "critic", "content": critique_text})
 
         # Rounds 2+: scientist responds, then critic critiques again (stateless)
-        for _ in range(1, max_rounds):
+        for round_num in range(1, max_rounds):
+            on_token = (
+                on_token_factory(f"Scientist round {round_num}")
+                if on_token_factory else None
+            )
             scientist_response = await query_anthropic(
                 scientist_model,
                 _build_scientist_debate_prompt(
@@ -110,7 +126,10 @@ async def run_debate(
                     critique=critique_text,
                 ),
                 web_search=True,
+                on_token=on_token,
             )
+            if on_token:
+                stream_separator()
             transcript.append({"role": "scientist", "content": scientist_response})
 
             # Stateless: critic gets the defense but not their own prior critique
@@ -118,7 +137,13 @@ async def run_debate(
                 plan, notebook_content, domain_knowledge,
                 scientist_defense=scientist_response,
             )
-            critique_text = await _query_critic(provider, model, critic_prompt)
+            on_token = (
+                on_token_factory(f"Critic ({spec}) round {round_num + 1}")
+                if on_token_factory else None
+            )
+            critique_text = await _query_critic(provider, model, critic_prompt, on_token=on_token)
+            if on_token:
+                stream_separator()
             transcript.append({"role": "critic", "content": critique_text})
 
         critiques.append({

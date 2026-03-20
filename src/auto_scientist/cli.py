@@ -54,6 +54,11 @@ def cli():
     default=None,
     help="Claude model for agents (e.g., 'claude-sonnet-4-6'). Uses SDK default if omitted.",
 )
+@click.option(
+    "--no-stream",
+    is_flag=True,
+    help="Disable live token streaming during debate phase",
+)
 def run(
     data: str,
     goal: str,
@@ -64,6 +69,7 @@ def run(
     debate_rounds: int,
     output_dir: str,
     model: str | None,
+    no_stream: bool,
 ):
     """Run autonomous scientific investigation from raw data."""
     critic_list = [c.strip() for c in critics.split(",") if c.strip()] if critics else []
@@ -91,6 +97,7 @@ def run(
         interactive=interactive,
         debate_rounds=debate_rounds,
         model=model,
+        stream=not no_stream,
     )
 
     asyncio.run(orchestrator.run())

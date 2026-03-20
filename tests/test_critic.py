@@ -391,6 +391,78 @@ class TestRunDebate:
             )
 
 
+class TestRunDebateStreaming:
+    @pytest.mark.asyncio
+    async def test_on_token_factory_called_with_labels(self, base_kwargs):
+        """Factory is called with correct labels for critic and scientist."""
+        labels_seen = []
+
+        def factory(label):
+            labels_seen.append(label)
+            return lambda token: None
+
+        with (
+            patch(
+                "auto_scientist.agents.critic.query_openai",
+                new_callable=AsyncMock,
+                side_effect=["Critique R1", "Critique R2"],
+            ),
+            patch(
+                "auto_scientist.agents.critic.query_anthropic",
+                new_callable=AsyncMock,
+                return_value="Scientist response",
+            ),
+        ):
+            await run_debate(**base_kwargs, max_rounds=2, on_token_factory=factory)
+
+        assert len(labels_seen) == 3  # critic R1, scientist R1, critic R2
+        assert "Critic" in labels_seen[0]
+        assert "Scientist" in labels_seen[1]
+        assert "Critic" in labels_seen[2]
+
+    @pytest.mark.asyncio
+    async def test_on_token_passed_to_model_clients(self, base_kwargs):
+        """The callback from factory is passed as on_token to model clients."""
+        def mock_callback(token):
+            pass
+
+        def factory(label):
+            return mock_callback
+
+        with (
+            patch(
+                "auto_scientist.agents.critic.query_openai",
+                new_callable=AsyncMock,
+                return_value="Critique",
+            ) as mock_openai,
+            patch(
+                "auto_scientist.agents.critic.query_anthropic",
+                new_callable=AsyncMock,
+                return_value="Response",
+            ) as mock_anthropic,
+        ):
+            await run_debate(**base_kwargs, max_rounds=2, on_token_factory=factory)
+
+        # Verify on_token was passed to both model clients
+        for call in mock_openai.call_args_list:
+            assert call.kwargs.get("on_token") is mock_callback
+        assert mock_anthropic.call_args.kwargs.get("on_token") is mock_callback
+
+    @pytest.mark.asyncio
+    async def test_no_factory_passes_none(self, base_kwargs):
+        """Without a factory, on_token=None is passed (or not passed)."""
+        with (
+            patch(
+                "auto_scientist.agents.critic.query_openai",
+                new_callable=AsyncMock,
+                return_value="Critique",
+            ) as mock_openai,
+        ):
+            await run_debate(**base_kwargs, max_rounds=1)
+
+        assert mock_openai.call_args.kwargs.get("on_token") is None
+
+
 class TestRunCriticBackwardCompat:
     @pytest.mark.asyncio
     async def test_run_critic_calls_run_debate_with_rounds_1(self, plan):

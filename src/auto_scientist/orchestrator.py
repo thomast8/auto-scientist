@@ -28,6 +28,7 @@ class Orchestrator:
         max_consecutive_failures: int = 5,
         debate_rounds: int = 2,
         model: str | None = None,
+        stream: bool = True,
     ):
         self.state = state
         self.data_path = data_path
@@ -39,6 +40,7 @@ class Orchestrator:
         self.debate_rounds = debate_rounds
         self.config: DomainConfig | None = None
         self.model = model
+        self.stream = stream
 
     async def run(self) -> None:
         """Execute the full orchestration loop."""
@@ -386,6 +388,10 @@ class Orchestrator:
         notebook_content = self._notebook_content()
         domain_knowledge = self.config.domain_knowledge if self.config else ""
 
+        from auto_scientist.console import make_stream_printer
+
+        factory = make_stream_printer if self.stream else None
+
         n_critics = len(self.critic_models)
         print(f"  DEBATE: {n_critics} critic(s), {self.debate_rounds} round(s)")
         critiques = await run_debate(
@@ -394,6 +400,7 @@ class Orchestrator:
             notebook_content=notebook_content,
             domain_knowledge=domain_knowledge,
             max_rounds=self.debate_rounds,
+            on_token_factory=factory,
         )
 
         print(f"  DEBATE: received {len(critiques)} critique(s)")
