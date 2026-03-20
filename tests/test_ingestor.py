@@ -128,3 +128,72 @@ class TestRunIngestorValidation:
 
         with pytest.raises(FileNotFoundError, match="did not produce any data files"):
             await run_ingestor(raw_data, output_dir, "test goal")
+
+
+class TestRunIngestorOptions:
+    @pytest.mark.asyncio
+    @patch("auto_scientist.agents.ingestor.safe_query")
+    async def test_options(self, mock_query, tmp_path):
+        raw_data = tmp_path / "data.csv"
+        raw_data.write_text("a,b\n1,2\n")
+        output_dir = tmp_path / "experiments"
+        output_dir.mkdir()
+        data_dir = output_dir / "data"
+        data_dir.mkdir()
+        (data_dir / "output.csv").write_text("a,b\n1,2\n")
+
+        mock_query.return_value = AsyncMock(
+            __aiter__=lambda self: self,
+            __anext__=AsyncMock(side_effect=StopAsyncIteration),
+        )
+
+        await run_ingestor(raw_data, output_dir, "test goal")
+
+        call_kwargs = mock_query.call_args
+        options = call_kwargs.kwargs["options"]
+        assert options.max_turns == 30
+        assert options.permission_mode == "acceptEdits"
+
+    @pytest.mark.asyncio
+    @patch("auto_scientist.agents.ingestor.safe_query")
+    async def test_goal_in_prompt(self, mock_query, tmp_path):
+        raw_data = tmp_path / "data.csv"
+        raw_data.write_text("a,b\n1,2\n")
+        output_dir = tmp_path / "experiments"
+        output_dir.mkdir()
+        data_dir = output_dir / "data"
+        data_dir.mkdir()
+        (data_dir / "output.csv").write_text("a,b\n1,2\n")
+
+        mock_query.return_value = AsyncMock(
+            __aiter__=lambda self: self,
+            __anext__=AsyncMock(side_effect=StopAsyncIteration),
+        )
+
+        await run_ingestor(raw_data, output_dir, "predict oxygen levels")
+
+        call_kwargs = mock_query.call_args
+        prompt = call_kwargs.kwargs["prompt"]
+        assert "predict oxygen levels" in prompt
+
+    @pytest.mark.asyncio
+    @patch("auto_scientist.agents.ingestor.safe_query")
+    async def test_model_override(self, mock_query, tmp_path):
+        raw_data = tmp_path / "data.csv"
+        raw_data.write_text("a,b\n1,2\n")
+        output_dir = tmp_path / "experiments"
+        output_dir.mkdir()
+        data_dir = output_dir / "data"
+        data_dir.mkdir()
+        (data_dir / "output.csv").write_text("a,b\n1,2\n")
+
+        mock_query.return_value = AsyncMock(
+            __aiter__=lambda self: self,
+            __anext__=AsyncMock(side_effect=StopAsyncIteration),
+        )
+
+        await run_ingestor(raw_data, output_dir, "test goal", model="claude-haiku-4-5-20251001")
+
+        call_kwargs = mock_query.call_args
+        options = call_kwargs.kwargs["options"]
+        assert options.model == "claude-haiku-4-5-20251001"

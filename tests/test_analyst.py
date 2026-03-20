@@ -282,3 +282,105 @@ class TestRunAnalyst:
             results_path=results_path, plot_paths=[], notebook_path=notebook_path,
         )
         assert result["success_score"] == 0
+
+    def test_no_targets_no_target_text(self):
+        sc = SuccessCriterion(name="x", description="d", metric_key="x")
+        result = _format_success_criteria([sc])
+        assert ">=" not in result
+        assert "<=" not in result
+
+    @pytest.mark.asyncio
+    @patch("auto_scientist.agents.analyst.query")
+    async def test_fallback_to_assistant_text(self, mock_query, tmp_path):
+        analysis = {
+            "success_score": 42, "criteria_results": [], "key_metrics": {},
+            "improvements": [], "regressions": [], "observations": [],
+            "iteration_criteria_results": [],
+        }
+
+        from auto_scientist.agents.analyst import AssistantMessage, ResultMessage, TextBlock
+
+        result_msg = MagicMock(spec=ResultMessage)
+        result_msg.result = ""
+
+        assistant_msg = MagicMock(spec=AssistantMessage)
+        text_block = MagicMock(spec=TextBlock)
+        text_block.text = json.dumps(analysis)
+        assistant_msg.content = [text_block]
+
+        async def fake_query(**kwargs):
+            yield assistant_msg
+            yield result_msg
+
+        mock_query.side_effect = fake_query
+
+        results_path = tmp_path / "results.txt"
+        results_path.write_text("data")
+        notebook_path = tmp_path / "notebook.md"
+
+        result = await run_analyst(
+            results_path=results_path, plot_paths=[], notebook_path=notebook_path,
+        )
+        assert result["success_score"] == 42
+
+    @pytest.mark.asyncio
+    @patch("auto_scientist.agents.analyst.query")
+    async def test_iteration0_uses_data_dir(self, mock_query, tmp_path):
+        analysis = {
+            "success_score": None, "criteria_results": [], "key_metrics": {},
+            "improvements": [], "regressions": [], "observations": [],
+            "iteration_criteria_results": [],
+        }
+
+        from auto_scientist.agents.analyst import ResultMessage
+        result_msg = MagicMock(spec=ResultMessage)
+        result_msg.result = json.dumps(analysis)
+
+        captured_prompt = {}
+
+        async def fake_query(**kwargs):
+            captured_prompt["prompt"] = kwargs.get("prompt", "")
+            yield result_msg
+
+        mock_query.side_effect = fake_query
+
+        data_dir = tmp_path / "data"
+        data_dir.mkdir()
+        (data_dir / "sample.csv").write_text("x,y\n1,2\n")
+        notebook_path = tmp_path / "notebook.md"
+
+        await run_analyst(
+            results_path=None, plot_paths=[], notebook_path=notebook_path,
+            data_dir=data_dir,
+        )
+        assert "<data_directory>" in captured_prompt["prompt"]
+
+    @pytest.mark.asyncio
+    @patch("auto_scientist.agents.analyst.query")
+    async def test_options_configuration(self, mock_query, tmp_path):
+        from auto_scientist.agents.analyst import ResultMessage
+        result_msg = MagicMock(spec=ResultMessage)
+        result_msg.result = json.dumps({
+            "success_score": 50, "criteria_results": [], "key_metrics": {},
+            "improvements": [], "regressions": [], "observations": [],
+            "iteration_criteria_results": [],
+        })
+
+        captured_opts = {}
+
+        async def fake_query(**kwargs):
+            captured_opts.update(kwargs)
+            yield result_msg
+
+        mock_query.side_effect = fake_query
+
+        results_path = tmp_path / "results.txt"
+        results_path.write_text("data")
+        notebook_path = tmp_path / "notebook.md"
+
+        await run_analyst(
+            results_path=results_path, plot_paths=[], notebook_path=notebook_path,
+        )
+        opts = captured_opts["options"]
+        assert opts.allowed_tools == ["Read", "Glob"]
+        assert opts.max_turns == 5

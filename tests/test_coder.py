@@ -115,3 +115,104 @@ class TestRunCoder:
         # Should contain the "no previous" / "from scratch" text
         prompt_lower = captured_prompt["prompt"].lower()
         assert "first experiment" in prompt_lower or "from scratch" in prompt_lower or "no previous" in prompt_lower
+
+    @pytest.mark.asyncio
+    @patch("auto_scientist.agents.coder.query")
+    async def test_write_subdirectory_allowed(self, mock_query, tmp_path):
+        from auto_scientist.agents.coder import ResultMessage
+        result_msg = MagicMock(spec=ResultMessage)
+
+        async def fake_query(**kwargs):
+            script_path = tmp_path / "v01" / "experiment.py"
+            script_path.parent.mkdir(parents=True, exist_ok=True)
+            script_path.write_text("print('nested')")
+            yield result_msg
+
+        mock_query.side_effect = fake_query
+
+        result = await run_coder(
+            plan={"hypothesis": "test", "changes": []},
+            previous_script=tmp_path / "nonexistent" / "experiment.py",
+            output_dir=tmp_path, version="v01",
+        )
+        assert result == tmp_path / "v01" / "experiment.py"
+
+    @pytest.mark.asyncio
+    @patch("auto_scientist.agents.coder.query")
+    async def test_options_configuration(self, mock_query, tmp_path):
+        from auto_scientist.agents.coder import ResultMessage
+        result_msg = MagicMock(spec=ResultMessage)
+
+        captured_opts = {}
+
+        async def fake_query(**kwargs):
+            captured_opts.update(kwargs)
+            script_path = tmp_path / "v01" / "experiment.py"
+            script_path.parent.mkdir(parents=True, exist_ok=True)
+            script_path.write_text("print('test')")
+            yield result_msg
+
+        mock_query.side_effect = fake_query
+
+        await run_coder(
+            plan={"hypothesis": "test", "changes": []},
+            previous_script=tmp_path / "nonexistent" / "experiment.py",
+            output_dir=tmp_path, version="v01",
+        )
+        opts = captured_opts["options"]
+        assert opts.allowed_tools == ["Read", "Write", "Edit", "Bash", "Glob", "Grep"]
+        assert opts.max_turns == 30
+        assert opts.permission_mode == "acceptEdits"
+
+    @pytest.mark.asyncio
+    @patch("auto_scientist.agents.coder.query")
+    async def test_deps_in_prompt(self, mock_query, tmp_path):
+        from auto_scientist.agents.coder import ResultMessage
+        result_msg = MagicMock(spec=ResultMessage)
+
+        captured_opts = {}
+
+        async def fake_query(**kwargs):
+            captured_opts.update(kwargs)
+            script_path = tmp_path / "v01" / "experiment.py"
+            script_path.parent.mkdir(parents=True, exist_ok=True)
+            script_path.write_text("print('test')")
+            yield result_msg
+
+        mock_query.side_effect = fake_query
+
+        await run_coder(
+            plan={"hypothesis": "test", "changes": []},
+            previous_script=tmp_path / "nonexistent" / "experiment.py",
+            output_dir=tmp_path, version="v01",
+            experiment_dependencies=["pandas", "scikit-learn"],
+        )
+        system = captured_opts["options"].system_prompt
+        assert "pandas" in system
+        assert "scikit-learn" in system
+
+    @pytest.mark.asyncio
+    @patch("auto_scientist.agents.coder.query")
+    async def test_default_deps_in_prompt(self, mock_query, tmp_path):
+        from auto_scientist.agents.coder import ResultMessage
+        result_msg = MagicMock(spec=ResultMessage)
+
+        captured_opts = {}
+
+        async def fake_query(**kwargs):
+            captured_opts.update(kwargs)
+            script_path = tmp_path / "v01" / "experiment.py"
+            script_path.parent.mkdir(parents=True, exist_ok=True)
+            script_path.write_text("print('test')")
+            yield result_msg
+
+        mock_query.side_effect = fake_query
+
+        await run_coder(
+            plan={"hypothesis": "test", "changes": []},
+            previous_script=tmp_path / "nonexistent" / "experiment.py",
+            output_dir=tmp_path, version="v01",
+        )
+        system = captured_opts["options"].system_prompt
+        assert "numpy" in system
+        assert "matplotlib" in system

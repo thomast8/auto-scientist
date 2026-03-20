@@ -90,3 +90,50 @@ class TestRunReport:
         assert "predict oxygen levels" in prompt
         assert "v07" in prompt
         assert "92" in prompt
+
+    @pytest.mark.asyncio
+    @patch("auto_scientist.agents.report.safe_query")
+    async def test_options_configuration(self, mock_query, tmp_path):
+        from auto_scientist.agents.report import ResultMessage
+        result_msg = MagicMock(spec=ResultMessage)
+
+        captured_opts = {}
+
+        async def fake_query(**kwargs):
+            captured_opts.update(kwargs)
+            (tmp_path / "report.md").write_text("# Report")
+            yield result_msg
+
+        mock_query.side_effect = fake_query
+
+        state = ExperimentState(domain="test", goal="test goal")
+        notebook_path = tmp_path / "lab_notebook.md"
+        notebook_path.write_text("# Notebook")
+
+        await run_report(state=state, notebook_path=notebook_path, output_dir=tmp_path)
+
+        opts = captured_opts["options"]
+        assert opts.allowed_tools == ["Read", "Write", "Glob"]
+        assert opts.max_turns == 10
+        assert opts.permission_mode == "acceptEdits"
+
+    @pytest.mark.asyncio
+    @patch("auto_scientist.agents.report.safe_query")
+    async def test_missing_notebook_fallback(self, mock_query, tmp_path):
+        from auto_scientist.agents.report import ResultMessage
+        result_msg = MagicMock(spec=ResultMessage)
+
+        captured_prompt = {}
+
+        async def fake_query(**kwargs):
+            captured_prompt["prompt"] = kwargs.get("prompt", "")
+            (tmp_path / "report.md").write_text("# Report")
+            yield result_msg
+
+        mock_query.side_effect = fake_query
+
+        state = ExperimentState(domain="test", goal="test goal")
+        notebook_path = tmp_path / "nonexistent_notebook.md"
+
+        await run_report(state=state, notebook_path=notebook_path, output_dir=tmp_path)
+        assert "(no notebook)" in captured_prompt["prompt"]
