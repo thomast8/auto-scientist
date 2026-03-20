@@ -4,9 +4,15 @@ Provides LLM-generated summaries of agent output during and after each
 pipeline step. Used by the orchestrator when --summary-model is set.
 """
 
+import asyncio
 import logging
+from collections.abc import Callable, Coroutine
+from typing import Any, TypeVar
 
+from auto_scientist.console import print_summary
 from auto_scientist.models.openai_client import query_openai
+
+T = TypeVar("T")
 
 logger = logging.getLogger(__name__)
 
@@ -109,3 +115,80 @@ async def summarize_results(
     except Exception:
         logger.debug("SUMMARY: error summarizing results")
         return ""
+
+
+async def run_with_summaries(
+    coro_fn: Callable[..., Coroutine[Any, Any, T]],
+    agent_name: str,
+    summary_model: str,
+    message_buffer: list[str],
+    interval: int | float = 15,
+) -> T:
+    """Run an agent coroutine with periodic live summaries.
+
+    Launches a concurrent polling task that every `interval` seconds:
+    1. Snapshots new entries in message_buffer since last poll
+    2. Sends them to the summary model with a progress prompt
+    3. Prints the result via print_summary
+
+    When the coroutine completes, prints a final summary of all output.
+
+    Args:
+        coro_fn: Callable that accepts message_buffer and returns a coroutine.
+        agent_name: Agent name for prompt selection and display.
+        summary_model: OpenAI model for summarization.
+        message_buffer: Shared list that the agent appends text to.
+        interval: Seconds between periodic polls.
+
+    Returns:
+        The result of the agent coroutine.
+    """
+    last_summarized_index = 0
+    elapsed = 0
+
+    async def poll_loop():
+        nonlocal last_summarized_index, elapsed
+        while True:
+            await asyncio.sleep(interval)
+            elapsed += interval
+
+            # Only summarize new content
+            if len(message_buffer) <= last_summarized_index:
+                continue
+
+            new_content = "\n".join(message_buffer[last_summarized_index:])
+            last_summarized_index = len(message_buffer)
+
+            try:
+                summary = await summarize_agent_output(
+                    agent_name, new_content, summary_model, progress=True,
+                )
+                if summary:
+                    label = f"{int(elapsed)}s"
+                    print_summary(agent_name, summary, label=label)
+            except Exception:
+                logger.debug(f"SUMMARY: error during periodic poll for {agent_name}")
+
+    poll_task = asyncio.create_task(poll_loop())
+    try:
+        result = await coro_fn(message_buffer)
+    finally:
+        poll_task.cancel()
+        try:
+            await poll_task
+        except asyncio.CancelledError:
+            pass
+
+        # Final summary of all output
+        if message_buffer:
+            try:
+                full_output = "\n".join(message_buffer)
+                summary = await summarize_agent_output(
+                    agent_name, full_output, summary_model, progress=False,
+                )
+                if summary:
+                    print_summary(agent_name, summary, label="done")
+            except Exception:
+                logger.debug(f"SUMMARY: error during final summary for {agent_name}")
+
+    return result
