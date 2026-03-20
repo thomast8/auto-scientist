@@ -4,7 +4,9 @@ import os
 from unittest.mock import patch
 
 from auto_scientist.console import (
+    BLUE,
     CYAN,
+    GREEN,
     MAGENTA,
     YELLOW,
     _color_for_label,
@@ -22,6 +24,15 @@ class TestColorForLabel:
 
     def test_coder_gets_magenta(self):
         assert _color_for_label("Coder") == MAGENTA
+
+    def test_analyst_gets_green(self):
+        assert _color_for_label("Analyst iteration 1") == GREEN
+
+    def test_ingestor_gets_green(self):
+        assert _color_for_label("Ingestor") == GREEN
+
+    def test_report_gets_blue(self):
+        assert _color_for_label("Report generation") == BLUE
 
     def test_unknown_falls_back_to_cyan(self):
         assert _color_for_label("Unknown agent") == CYAN

@@ -64,3 +64,64 @@ class TestDomainConfig:
     def test_no_domain_knowledge_field(self):
         """DomainConfig should not have domain_knowledge (moved to ExperimentState)."""
         assert "domain_knowledge" not in DomainConfig.model_fields
+
+
+class TestSuccessCriterionSerialization:
+    def test_roundtrip(self):
+        sc = SuccessCriterion(
+            name="acc", description="accuracy", metric_key="accuracy",
+            target_min=0.8, target_max=1.0, required=False,
+        )
+        json_str = sc.model_dump_json()
+        loaded = SuccessCriterion.model_validate_json(json_str)
+        assert loaded.name == "acc"
+        assert loaded.target_min == 0.8
+        assert loaded.target_max == 1.0
+        assert loaded.required is False
+
+    def test_negative_target_values(self):
+        sc = SuccessCriterion(
+            name="err", description="error", metric_key="error",
+            target_min=-1.0, target_max=-0.5,
+        )
+        assert sc.target_min == -1.0
+        assert sc.target_max == -0.5
+
+
+class TestDomainConfigSerialization:
+    def test_roundtrip(self):
+        dc = DomainConfig(
+            name="test", description="Test domain",
+            data_paths=["a.csv", "b.csv"],
+            run_command="python {script_path}",
+            protected_paths=["src/"],
+            experiment_dependencies=["numpy"],
+        )
+        json_str = dc.model_dump_json()
+        loaded = DomainConfig.model_validate_json(json_str)
+        assert loaded.name == "test"
+        assert loaded.data_paths == ["a.csv", "b.csv"]
+        assert loaded.run_command == "python {script_path}"
+        assert loaded.protected_paths == ["src/"]
+        assert loaded.experiment_dependencies == ["numpy"]
+
+    def test_custom_run_command(self):
+        dc = DomainConfig(
+            name="t", description="d", data_paths=[],
+            run_command="python3 -u {script_path}",
+        )
+        assert dc.run_command == "python3 -u {script_path}"
+
+    def test_protected_paths_list(self):
+        dc = DomainConfig(
+            name="t", description="d", data_paths=[],
+            protected_paths=["src/", "data/"],
+        )
+        assert dc.protected_paths == ["src/", "data/"]
+
+    def test_experiment_dependencies_list(self):
+        dc = DomainConfig(
+            name="t", description="d", data_paths=[],
+            experiment_dependencies=["numpy", "scipy"],
+        )
+        assert dc.experiment_dependencies == ["numpy", "scipy"]

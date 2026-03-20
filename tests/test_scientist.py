@@ -6,6 +6,7 @@ from unittest.mock import MagicMock, patch
 import pytest
 
 from auto_scientist.agents.scientist import (
+    _format_criteria_for_prompt,
     _parse_json_response,
     run_scientist,
     run_scientist_revision,
@@ -37,6 +38,51 @@ class TestParseJsonResponse:
     def test_whitespace_stripped(self):
         result = _parse_json_response('  \n{"key": "value"}\n  ', "test")
         assert result == {"key": "value"}
+
+
+class TestFormatCriteriaForPrompt:
+    def test_none_returns_placeholder(self):
+        result = _format_criteria_for_prompt(None)
+        assert "no top-level success criteria" in result
+
+    def test_empty_list_returns_placeholder(self):
+        result = _format_criteria_for_prompt([])
+        assert "no top-level success criteria" in result
+
+    def test_target_min_only(self):
+        sc = SuccessCriterion(name="acc", description="accuracy", metric_key="acc", target_min=0.9)
+        result = _format_criteria_for_prompt([sc])
+        assert ">= 0.9" in result
+
+    def test_target_max_only(self):
+        sc = SuccessCriterion(name="loss", description="low loss", metric_key="loss", target_max=0.1)
+        result = _format_criteria_for_prompt([sc])
+        assert "<= 0.1" in result
+
+    def test_both_bounds(self):
+        sc = SuccessCriterion(
+            name="f1", description="f1 score", metric_key="f1",
+            target_min=0.8, target_max=1.0,
+        )
+        result = _format_criteria_for_prompt([sc])
+        assert "[0.8, 1.0]" in result
+
+    def test_required_vs_optional_labels(self):
+        req = SuccessCriterion(name="a", description="d", metric_key="a", required=True)
+        opt = SuccessCriterion(name="b", description="d", metric_key="b", required=False)
+        result = _format_criteria_for_prompt([req, opt])
+        assert "REQUIRED" in result
+        assert "optional" in result
+
+    def test_multiple_numbered(self):
+        criteria = [
+            SuccessCriterion(name=f"c{i}", description="d", metric_key=f"c{i}")
+            for i in range(3)
+        ]
+        result = _format_criteria_for_prompt(criteria)
+        assert result.startswith("1.")
+        assert "2." in result
+        assert "3." in result
 
 
 SAMPLE_PLAN = {

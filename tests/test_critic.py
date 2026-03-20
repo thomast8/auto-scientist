@@ -5,6 +5,7 @@ from unittest.mock import AsyncMock, patch
 import pytest
 
 from auto_scientist.agents.critic import (
+    _build_critic_prompt,
     parse_critic_spec,
     run_critic,
     run_debate,
@@ -12,22 +13,53 @@ from auto_scientist.agents.critic import (
 
 
 class TestParseCriticSpec:
-    def test_valid_spec(self):
+    def test_valid_openai(self):
         assert parse_critic_spec("openai:gpt-4o") == ("openai", "gpt-4o")
-        assert parse_critic_spec("google:gemini-2.5-pro") == ("google", "gemini-2.5-pro")
+
+    def test_valid_google(self):
+        assert parse_critic_spec("google:gemini-2.0-flash") == ("google", "gemini-2.0-flash")
+
+    def test_valid_anthropic(self):
         assert parse_critic_spec("anthropic:claude-sonnet-4-6") == (
             "anthropic",
             "claude-sonnet-4-6",
         )
 
-    def test_invalid_spec(self):
-        with pytest.raises(ValueError, match="Invalid critic spec"):
-            parse_critic_spec("no-colon")
-
-    def test_spec_with_multiple_colons(self):
-        provider, model = parse_critic_spec("openai:ft:gpt-4o:custom")
+    def test_model_with_colons(self):
+        provider, model = parse_critic_spec("openai:ft:gpt-4o:org:id")
         assert provider == "openai"
-        assert model == "ft:gpt-4o:custom"
+        assert model == "ft:gpt-4o:org:id"
+
+    def test_no_colon_raises(self):
+        with pytest.raises(ValueError, match="Invalid critic spec"):
+            parse_critic_spec("gpt4o")
+
+    def test_empty_string_raises(self):
+        with pytest.raises(ValueError):
+            parse_critic_spec("")
+
+
+class TestBuildCriticPrompt:
+    def test_includes_plan_json(self):
+        plan = {"hypothesis": "test plan"}
+        prompt = _build_critic_prompt(plan, "", "")
+        assert "test plan" in prompt
+        assert "<plan>" in prompt
+
+    def test_empty_defense_no_tag(self):
+        prompt = _build_critic_prompt({"h": "p"}, "", "", scientist_defense="")
+        assert "<scientist_defense>" not in prompt
+
+    def test_with_defense_includes_tag(self):
+        prompt = _build_critic_prompt(
+            {"h": "p"}, "", "", scientist_defense="I disagree because...",
+        )
+        assert "<scientist_defense>" in prompt
+        assert "I disagree because..." in prompt
+
+    def test_fallback_for_empty_values(self):
+        prompt = _build_critic_prompt({"h": "p"}, "", "")
+        assert "(empty)" in prompt or "(none provided)" in prompt
 
 
 @pytest.fixture

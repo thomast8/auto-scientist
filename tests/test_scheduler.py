@@ -1,10 +1,11 @@
 """Tests for time-window scheduling logic."""
 
 from datetime import datetime, time
+from unittest.mock import AsyncMock, patch
 
 import pytest
 
-from auto_scientist.scheduler import is_within_window, parse_schedule, seconds_until_window
+from auto_scientist.scheduler import is_within_window, parse_schedule, seconds_until_window, wait_for_window
 
 
 class TestParseSchedule:
@@ -30,6 +31,15 @@ class TestParseSchedule:
     def test_single_time(self):
         with pytest.raises(ValueError):
             parse_schedule("22:00")
+
+    def test_empty_string_raises(self):
+        with pytest.raises(ValueError):
+            parse_schedule("")
+
+    def test_midnight_boundary(self):
+        start, end = parse_schedule("00:00-23:59")
+        assert start == time(0, 0)
+        assert end == time(23, 59)
 
 
 class TestIsWithinWindow:
@@ -72,3 +82,25 @@ class TestSecondsUntilWindow:
         now = datetime(2026, 1, 1, 23, 0)
         secs = seconds_until_window(now, time(22, 0))
         assert secs == pytest.approx(23 * 3600, abs=1)  # ~23 hours
+
+    def test_one_minute_window(self):
+        now = datetime(2026, 1, 1, 10, 30)
+        assert is_within_window(now, time(10, 30), time(10, 31))
+        assert not is_within_window(
+            datetime(2026, 1, 1, 10, 32), time(10, 30), time(10, 31),
+        )
+
+
+class TestWaitForWindow:
+    @pytest.mark.asyncio
+    async def test_none_schedule_returns_immediately(self):
+        await wait_for_window(None)
+
+    @pytest.mark.asyncio
+    @patch("auto_scientist.scheduler.asyncio.sleep", new_callable=AsyncMock)
+    @patch("auto_scientist.scheduler.datetime")
+    async def test_inside_window_no_sleep(self, mock_dt, mock_sleep):
+        mock_dt.now.return_value = datetime(2026, 1, 1, 23, 0)
+        # parse_schedule uses time.fromisoformat, not datetime, so no issue
+        await wait_for_window("22:00-06:00")
+        mock_sleep.assert_not_called()
