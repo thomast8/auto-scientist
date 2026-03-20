@@ -6,7 +6,9 @@ first to final version, key insights, and recommendations for future work.
 
 from pathlib import Path
 
-from claude_code_sdk import ClaudeCodeOptions, ResultMessage, query
+from claude_code_sdk import ClaudeCodeOptions, ResultMessage
+
+from auto_scientist.sdk_utils import safe_query
 
 from auto_scientist.prompts.report import REPORT_SYSTEM, REPORT_USER
 from auto_scientist.state import ExperimentState
@@ -16,6 +18,7 @@ async def run_report(
     state: ExperimentState,
     notebook_path: Path,
     output_dir: Path,
+    model: str | None = None,
 ) -> Path:
     """Generate the final experiment report.
 
@@ -46,9 +49,10 @@ async def run_report(
         max_turns=10,
         permission_mode="acceptEdits",
         cwd=output_dir,
+        model=model,
     )
 
-    async for message in query(prompt=user_prompt, options=options):
+    async for message in safe_query(prompt=user_prompt, options=options):
         if isinstance(message, ResultMessage):
             pass  # Agent is done
 

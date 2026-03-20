@@ -4,10 +4,6 @@
 
 - [ ] Redis + Celery integration: Redis for state store (replace JSON), LLM response caching, pub/sub progress events; Celery (with Redis as broker) for experiment runner tasks and critic fan-out via group/chord; Docker Compose for infrastructure (Redis, Celery worker, Flower monitoring); graceful degradation to current local-only mode when infra not running
 
-## In Progress
-
-- [ ] Discovery phase customizing downstream agent prompts based on what it learns about the problem domain
-
 ## Completed
 
 - [x] Retrospective notebook entries: Scientist reflects on investigation arc (breakthroughs, dead ends, diagnostic indicators) alongside forward-looking plans; synthesis module removed (redundant with 1M context windows + self-compressing retrospective entries) - 2026-03-18

@@ -83,6 +83,7 @@ async def run_coder(
     domain_knowledge: str = "",
     data_path: str = "",
     experiment_dependencies: list[str] | None = None,
+    model: str | None = None,
 ) -> Path:
     """Implement the scientist's plan as a runnable experiment script.
 
@@ -138,6 +139,7 @@ async def run_coder(
         permission_mode="acceptEdits",
         cwd=output_dir,
         can_use_tool=_make_permission_callback(output_dir),
+        model=model,
     )
 
     async for message in query(prompt=user_prompt, options=options):

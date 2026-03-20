@@ -78,6 +78,7 @@ async def run_scientist(
     notebook_path: Path,
     version: str,
     domain_knowledge: str = "",
+    model: str | None = None,
 ) -> dict[str, Any]:
     """Formulate hypothesis and plan based on analysis.
 
@@ -117,6 +118,7 @@ async def run_scientist(
         system_prompt=SCIENTIST_SYSTEM + json_instruction,
         allowed_tools=[],
         max_turns=1,
+        model=model,
     )
 
     result_text = ""
@@ -166,6 +168,7 @@ async def run_scientist_revision(
     notebook_path: Path,
     version: str,
     domain_knowledge: str = "",
+    model: str | None = None,
 ) -> dict[str, Any]:
     """Revise the plan after a critic debate.
 
@@ -212,6 +215,7 @@ async def run_scientist_revision(
         system_prompt=SCIENTIST_REVISION_SYSTEM + json_instruction,
         allowed_tools=[],
         max_turns=1,
+        model=model,
     )
 
     result_text = ""

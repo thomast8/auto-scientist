@@ -95,6 +95,7 @@ async def run_analyst(
     notebook_path: Path,
     domain_knowledge: str = "",
     success_criteria: list[SuccessCriterion] | None = None,
+    model: str | None = None,
 ) -> dict[str, Any]:
     """Analyze experiment results and produce structured observation.
 
@@ -140,6 +141,7 @@ async def run_analyst(
         max_turns=5,
         permission_mode="default",
         cwd=results_path.parent,
+        model=model,
     )
 
     result_text = ""

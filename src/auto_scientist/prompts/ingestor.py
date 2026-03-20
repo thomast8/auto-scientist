@@ -23,8 +23,20 @@ before full conversion
   - Parquet: large single-table datasets (over ~100MB)
 - If the data is already in a clean, usable format, recognize that and copy \
 it through with minimal transformation
-- The conversion script must be self-contained and runnable with \
-`uv run python -u ingest.py`
+- The conversion script must include PEP 723 inline script metadata and be \
+runnable with `uv run ingest.py` (NOT `uv run python -u`)
+- Prefer stdlib modules (csv, sqlite3, json, pathlib, struct) for data handling. \
+Only add external dependencies (pandas, openpyxl, etc.) when stdlib genuinely \
+cannot handle the format (e.g., Excel, Parquet)
+- Any external dependencies MUST be declared in the inline metadata block:
+  ```python
+  # /// script
+  # requires-python = ">=3.11"
+  # dependencies = ["pandas", "openpyxl"]
+  # ///
+  ```
+- If no external dependencies are needed, still include the metadata header \
+with an empty dependencies list
 
 ## Interactive vs Autonomous
 - When in interactive mode: ask the human about anything ambiguous (column \

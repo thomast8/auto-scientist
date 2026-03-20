@@ -15,7 +15,7 @@ def test_run_report_is_async():
 
 class TestRunReport:
     @pytest.mark.asyncio
-    @patch("auto_scientist.agents.report.query")
+    @patch("auto_scientist.agents.report.safe_query")
     async def test_creates_report_at_expected_path(self, mock_query, tmp_path):
         from auto_scientist.agents.report import ResultMessage
         result_msg = MagicMock(spec=ResultMessage)
@@ -42,7 +42,7 @@ class TestRunReport:
         assert result == tmp_path / "report.md"
 
     @pytest.mark.asyncio
-    @patch("auto_scientist.agents.report.query")
+    @patch("auto_scientist.agents.report.safe_query")
     async def test_raises_when_report_not_created(self, mock_query, tmp_path):
         from auto_scientist.agents.report import ResultMessage
         result_msg = MagicMock(spec=ResultMessage)
@@ -61,7 +61,7 @@ class TestRunReport:
             )
 
     @pytest.mark.asyncio
-    @patch("auto_scientist.agents.report.query")
+    @patch("auto_scientist.agents.report.safe_query")
     async def test_prompt_includes_state_fields(self, mock_query, tmp_path):
         from auto_scientist.agents.report import ResultMessage
         result_msg = MagicMock(spec=ResultMessage)

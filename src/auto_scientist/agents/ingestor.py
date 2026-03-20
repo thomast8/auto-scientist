@@ -13,8 +13,9 @@ from claude_code_sdk import (
     ClaudeCodeOptions,
     ResultMessage,
     TextBlock,
-    query,
 )
+
+from auto_scientist.sdk_utils import safe_query
 
 from auto_scientist.prompts.ingestor import INGESTOR_SYSTEM, INGESTOR_USER
 
@@ -24,6 +25,7 @@ async def run_ingestor(
     output_dir: Path,
     goal: str,
     interactive: bool = False,
+    model: str | None = None,
 ) -> Path:
     """Inspect raw data and produce a canonical dataset.
 
@@ -52,6 +54,7 @@ async def run_ingestor(
         max_turns=30,
         permission_mode="acceptEdits",
         cwd=output_dir,
+        model=model,
     )
 
     prompt = INGESTOR_USER.format(
@@ -62,7 +65,7 @@ async def run_ingestor(
         mode=mode,
     )
 
-    async for msg in query(prompt=prompt, options=options):
+    async for msg in safe_query(prompt=prompt, options=options):
         if isinstance(msg, AssistantMessage):
             for block in msg.content:
                 if isinstance(block, TextBlock):

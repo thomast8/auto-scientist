@@ -9,6 +9,18 @@ from auto_scientist.orchestrator import Orchestrator
 from auto_scientist.state import ExperimentState
 
 
+def _next_output_dir(base: Path) -> Path:
+    """If *base* already contains a state.json, return base_001, base_002, etc."""
+    if not (base / "state.json").exists():
+        return base
+    seq = 1
+    while True:
+        candidate = base.parent / f"{base.name}_{seq:03d}"
+        if not (candidate / "state.json").exists():
+            return candidate
+        seq += 1
+
+
 @click.group()
 def cli():
     """Auto-Scientist: Autonomous scientific investigation framework."""
@@ -58,6 +70,10 @@ def run(
 
     data_abs = str(Path(data).resolve())
 
+    resolved_output = _next_output_dir(Path(output_dir))
+    if resolved_output != Path(output_dir):
+        click.echo(f"Previous run detected in {output_dir}/. Using {resolved_output}/ instead.")
+
     state = ExperimentState(
         domain="auto",
         goal=goal,
@@ -69,7 +85,7 @@ def run(
     orchestrator = Orchestrator(
         state=state,
         data_path=Path(data),
-        output_dir=Path(output_dir),
+        output_dir=resolved_output,
         max_iterations=max_iterations,
         critic_models=critic_list,
         interactive=interactive,
