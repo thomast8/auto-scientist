@@ -5,6 +5,8 @@ from pathlib import Path
 
 from pydantic import BaseModel, Field
 
+from auto_scientist.config import SuccessCriterion
+
 
 class VersionEntry(BaseModel):
     """Record of a single experiment version."""
@@ -18,12 +20,21 @@ class VersionEntry(BaseModel):
     status: str = "pending"  # pending, running, completed, failed, crashed
 
 
+class CriteriaRevision(BaseModel):
+    """Audit trail entry for when top-level success criteria are defined or revised."""
+
+    iteration: int
+    action: str  # "defined" | "revised"
+    changes: str  # What changed and why
+    criteria_snapshot: list[SuccessCriterion]
+
+
 class ExperimentState(BaseModel):
     """Full state of an experiment run, persisted to JSON after every phase transition."""
 
     domain: str
     goal: str
-    phase: str = "ingestion"  # ingestion, discovery, iteration, report, stopped
+    phase: str = "ingestion"  # ingestion, iteration, report, stopped
     iteration: int = 0
     versions: list[VersionEntry] = Field(default_factory=list)
     dead_ends: list[str] = Field(default_factory=list)
@@ -34,6 +45,9 @@ class ExperimentState(BaseModel):
     data_path: str | None = None
     raw_data_path: str | None = None
     config_path: str | None = None
+    success_criteria: list[SuccessCriterion] | None = None
+    domain_knowledge: str = ""
+    criteria_history: list[CriteriaRevision] = Field(default_factory=list)
 
     def save(self, path: Path) -> None:
         """Persist state to JSON file."""
@@ -42,8 +56,12 @@ class ExperimentState(BaseModel):
 
     @classmethod
     def load(cls, path: Path) -> "ExperimentState":
-        """Load state from JSON file."""
+        """Load state from JSON file, migrating legacy formats."""
         data = json.loads(path.read_text())
+        # Migrate legacy "discovery" phase to "iteration"
+        if data.get("phase") == "discovery":
+            data["phase"] = "iteration"
+            data.setdefault("iteration", 0)
         return cls.model_validate(data)
 
     def record_version(self, entry: VersionEntry) -> None:

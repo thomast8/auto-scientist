@@ -15,7 +15,11 @@ class SuccessCriterion(BaseModel):
 
 
 class DomainConfig(BaseModel):
-    """Configuration for a specific scientific domain."""
+    """Operational configuration for a specific scientific domain.
+
+    Contains only runtime/infrastructure settings. Scientific concerns
+    (success_criteria, domain_knowledge) live in ExperimentState.
+    """
 
     name: str
     description: str
@@ -24,7 +28,5 @@ class DomainConfig(BaseModel):
     run_cwd: str = "."
     run_timeout_minutes: int = 120
     version_prefix: str = "v"
-    success_criteria: list[SuccessCriterion] = Field(default_factory=list)
-    domain_knowledge: str = ""
     protected_paths: list[str] = Field(default_factory=list)
     experiment_dependencies: list[str] = Field(default_factory=list)

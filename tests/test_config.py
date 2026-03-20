@@ -48,20 +48,19 @@ class TestDomainConfig:
         assert dc.run_cwd == "."
         assert dc.run_timeout_minutes == 120
         assert dc.version_prefix == "v"
-        assert dc.success_criteria == []
-        assert dc.domain_knowledge == ""
         assert dc.protected_paths == []
         assert dc.experiment_dependencies == []
+        assert not hasattr(dc, "success_criteria") or "success_criteria" not in dc.model_fields
+        assert not hasattr(dc, "domain_knowledge") or "domain_knowledge" not in dc.model_fields
 
     def test_missing_required_field_raises(self):
         with pytest.raises(ValidationError):
             DomainConfig(name="t")  # missing description and data_paths
 
-    def test_with_success_criteria(self):
-        sc = SuccessCriterion(name="a", description="b", metric_key="c")
-        dc = DomainConfig(
-            name="t", description="d", data_paths=[],
-            success_criteria=[sc],
-        )
-        assert len(dc.success_criteria) == 1
-        assert dc.success_criteria[0].name == "a"
+    def test_no_success_criteria_field(self):
+        """DomainConfig should not have success_criteria (moved to ExperimentState)."""
+        assert "success_criteria" not in DomainConfig.model_fields
+
+    def test_no_domain_knowledge_field(self):
+        """DomainConfig should not have domain_knowledge (moved to ExperimentState)."""
+        assert "domain_knowledge" not in DomainConfig.model_fields

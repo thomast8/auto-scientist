@@ -2,9 +2,12 @@
 
 Copy this file and modify for your domain. See domains/spo2/config.py for a
 complete real-world example.
+
+Note: success_criteria and domain_knowledge are defined adaptively by the
+Scientist during the iteration loop and stored in ExperimentState.
 """
 
-from auto_scientist.config import DomainConfig, SuccessCriterion
+from auto_scientist.config import DomainConfig
 
 EXAMPLE_CONFIG = DomainConfig(
     name="example",
@@ -14,15 +17,5 @@ EXAMPLE_CONFIG = DomainConfig(
     run_cwd=".",
     run_timeout_minutes=30,
     version_prefix="v",
-    success_criteria=[
-        SuccessCriterion(
-            name="example criterion",
-            description="What this criterion measures",
-            metric_key="your_metric",
-            target_min=0.0,
-            target_max=1.0,
-        ),
-    ],
-    domain_knowledge="Domain-specific context injected into agent prompts.",
     protected_paths=["path/to/data/"],
 )

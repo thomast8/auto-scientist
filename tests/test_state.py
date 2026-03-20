@@ -5,7 +5,8 @@ from pathlib import Path
 
 import pytest
 
-from auto_scientist.state import ExperimentState, VersionEntry
+from auto_scientist.config import SuccessCriterion
+from auto_scientist.state import CriteriaRevision, ExperimentState, VersionEntry
 
 
 @pytest.fixture
@@ -109,3 +110,100 @@ class TestExperimentState:
         state.save(tmp_state_path)
         loaded = ExperimentState.load(tmp_state_path)
         assert loaded.raw_data_path == "/raw/data.csv"
+
+    def test_success_criteria_defaults_to_none(self):
+        state = ExperimentState(domain="test", goal="g")
+        assert state.success_criteria is None
+
+    def test_domain_knowledge_defaults_to_empty(self):
+        state = ExperimentState(domain="test", goal="g")
+        assert state.domain_knowledge == ""
+
+    def test_criteria_history_defaults_to_empty(self):
+        state = ExperimentState(domain="test", goal="g")
+        assert state.criteria_history == []
+
+    def test_success_criteria_roundtrip(self, tmp_state_path):
+        criteria = [
+            SuccessCriterion(
+                name="acc", description="accuracy", metric_key="accuracy",
+                target_min=0.9,
+            ),
+        ]
+        state = ExperimentState(domain="test", goal="g", success_criteria=criteria)
+        state.save(tmp_state_path)
+        loaded = ExperimentState.load(tmp_state_path)
+        assert len(loaded.success_criteria) == 1
+        assert loaded.success_criteria[0].name == "acc"
+        assert loaded.success_criteria[0].target_min == 0.9
+
+    def test_domain_knowledge_roundtrip(self, tmp_state_path):
+        state = ExperimentState(domain="test", goal="g", domain_knowledge="test knowledge")
+        state.save(tmp_state_path)
+        loaded = ExperimentState.load(tmp_state_path)
+        assert loaded.domain_knowledge == "test knowledge"
+
+
+class TestCriteriaRevision:
+    def test_construct(self):
+        criteria = [
+            SuccessCriterion(name="a", description="b", metric_key="c"),
+        ]
+        rev = CriteriaRevision(
+            iteration=1,
+            action="defined",
+            changes="Initial criteria definition",
+            criteria_snapshot=criteria,
+        )
+        assert rev.iteration == 1
+        assert rev.action == "defined"
+        assert len(rev.criteria_snapshot) == 1
+
+    def test_serialize_deserialize_roundtrip(self, tmp_path):
+        criteria = [
+            SuccessCriterion(name="a", description="b", metric_key="c", target_min=0.5),
+        ]
+        rev = CriteriaRevision(
+            iteration=2,
+            action="revised",
+            changes="Lowered target",
+            criteria_snapshot=criteria,
+        )
+        path = tmp_path / "rev.json"
+        path.write_text(rev.model_dump_json(indent=2))
+        loaded = CriteriaRevision.model_validate_json(path.read_text())
+        assert loaded.iteration == 2
+        assert loaded.action == "revised"
+        assert loaded.criteria_snapshot[0].target_min == 0.5
+
+    def test_criteria_history_roundtrip(self, tmp_path):
+        criteria = [SuccessCriterion(name="a", description="b", metric_key="c")]
+        rev = CriteriaRevision(
+            iteration=1, action="defined", changes="Initial",
+            criteria_snapshot=criteria,
+        )
+        state = ExperimentState(
+            domain="test", goal="g", criteria_history=[rev],
+        )
+        state_path = tmp_path / "state.json"
+        state.save(state_path)
+        loaded = ExperimentState.load(state_path)
+        assert len(loaded.criteria_history) == 1
+        assert loaded.criteria_history[0].action == "defined"
+
+
+class TestDiscoveryPhaseMigration:
+    def test_discovery_phase_migrates_to_iteration(self, tmp_path):
+        """Loading state with phase='discovery' should migrate to phase='iteration', iteration=0."""
+        state_path = tmp_path / "state.json"
+        data = {
+            "domain": "test",
+            "goal": "test goal",
+            "phase": "discovery",
+            "iteration": 0,
+            "versions": [],
+        }
+        state_path.write_text(json.dumps(data))
+        loaded = ExperimentState.load(state_path)
+        assert loaded.phase == "iteration"
+        assert loaded.iteration == 0
