@@ -18,14 +18,8 @@ T = TypeVar("T")
 
 logger = logging.getLogger(__name__)
 
-PROGRESS_PREFIX = (
-    "The agent is currently working. Based on the output so far, "
-    "summarize what the agent is currently doing in 1-2 sentences."
-)
-FINAL_PREFIX = (
-    "The agent has finished. Based on the full output, "
-    "summarize what the agent accomplished in 1-2 sentences."
-)
+PROGRESS_PREFIX = "Summarize what the agent is currently doing in ONE short sentence (under 20 words)."
+FINAL_PREFIX = "Summarize what the agent accomplished in ONE short sentence (under 20 words)."
 
 SUMMARY_PROMPTS: dict[str, str] = {
     "Ingestor": (
@@ -76,7 +70,7 @@ async def _query_summary(model: str, instructions: str, input_text: str) -> str:
         model=model,
         instructions=instructions,
         input=input_text,
-        max_output_tokens=150,
+        max_output_tokens=60,
     )
     return response.output_text or ""
 

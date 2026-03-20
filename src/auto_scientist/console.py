@@ -100,11 +100,11 @@ def stream_separator() -> None:
 
 
 def print_summary(agent_name: str, summary: str, label: str = "") -> None:
-    """Print a formatted summary line for an agent.
+    """Print a single-line formatted summary for an agent step.
 
     Args:
         agent_name: Agent name (used for color lookup).
-        summary: Summary text to print.
+        summary: Summary text (expected to be short, one sentence).
         label: Optional label like "15s", "done", or "" (for results).
     """
     if not summary:
@@ -113,24 +113,16 @@ def print_summary(agent_name: str, summary: str, label: str = "") -> None:
     use_color = _use_color()
     color = AGENT_COLORS.get(agent_name, CYAN)
 
-    # Truncate at 300 chars
-    if len(summary) > 300:
-        summary = summary[:300]
+    # Clean up: collapse whitespace, strip to one line
+    summary = " ".join(summary.split())
+    if len(summary) > 120:
+        summary = summary[:117] + "..."
 
     prefix = f"  > [{label}] " if label else "  > "
-
-    continuation = "  > "
-
-    # Wrap text
-    wrapped = textwrap.fill(
-        summary,
-        width=70,
-        initial_indent=prefix,
-        subsequent_indent=continuation,
-    )
+    line = f"{prefix}{summary}"
 
     if use_color:
-        sys.stdout.write(f"{color}{wrapped}{RESET}\n")
+        sys.stdout.write(f"{color}{line}{RESET}\n")
     else:
-        sys.stdout.write(f"{wrapped}\n")
+        sys.stdout.write(f"{line}\n")
     sys.stdout.flush()

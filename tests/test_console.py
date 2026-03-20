@@ -99,17 +99,14 @@ class TestPrintSummary:
         # No brackets when label is empty (check without ANSI codes)
         assert "[" not in captured.out
 
-    def test_wraps_long_lines(self, capsys):
+    def test_truncates_long_text(self, capsys):
         long_text = "x" * 150
         print_summary("Analyst", long_text, label="done")
         captured = capsys.readouterr()
         lines = captured.out.strip().split("\n")
-        # Should have wrapped into multiple lines
-        assert len(lines) > 1
-        # Continuation lines should start with >
-        for line in lines[1:]:
-            stripped = line.lstrip()
-            assert stripped.startswith(">")
+        # Should be a single line, truncated with ...
+        assert len(lines) == 1
+        assert "..." in captured.out
 
     def test_uses_agent_color(self, capsys):
         print_summary("Analyst", "test summary", label="done")

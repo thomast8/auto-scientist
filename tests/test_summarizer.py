@@ -128,16 +128,16 @@ class TestSummarizeAgentOutput:
     async def test_uses_progress_prefix(self, mock_query):
         mock_query.return_value = "in progress"
         await summarize_agent_output("Analyst", "data", "gpt-4o-mini", progress=True)
-        prompt_arg = mock_query.call_args[0][1]
-        assert "currently" in prompt_arg.lower() or "doing" in prompt_arg.lower()
+        instructions_arg = mock_query.call_args[0][1]
+        assert "currently" in instructions_arg.lower()
 
     @pytest.mark.asyncio
     @patch("auto_scientist.summarizer._query_summary", new_callable=AsyncMock)
     async def test_uses_final_prefix(self, mock_query):
         mock_query.return_value = "done"
         await summarize_agent_output("Analyst", "data", "gpt-4o-mini", progress=False)
-        prompt_arg = mock_query.call_args[0][1]
-        assert "accomplish" in prompt_arg.lower() or "did" in prompt_arg.lower()
+        instructions_arg = mock_query.call_args[0][1]
+        assert "accomplish" in instructions_arg.lower()
 
 
 class TestSummarizeResults:
