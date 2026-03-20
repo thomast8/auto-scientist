@@ -195,7 +195,7 @@ class TestRunCoder:
 class TestCoderMessageBuffer:
     @pytest.mark.asyncio
     @patch("auto_scientist.agents.coder.query")
-    async def test_populates_message_buffer(self, mock_query, tmp_path):
+    async def test_populates_message_buffer_with_text(self, mock_query, tmp_path):
         from claude_code_sdk import AssistantMessage, ResultMessage, TextBlock
 
         assistant_msg = MagicMock(spec=AssistantMessage)
@@ -220,5 +220,36 @@ class TestCoderMessageBuffer:
             output_dir=tmp_path, version="v01",
             message_buffer=buf,
         )
-        assert len(buf) == 1
-        assert "Writing experiment script..." in buf[0]
+        assert any("Writing experiment script..." in entry for entry in buf)
+
+    @pytest.mark.asyncio
+    @patch("auto_scientist.agents.coder.query")
+    async def test_populates_message_buffer_with_tool_use(self, mock_query, tmp_path):
+        from claude_code_sdk import AssistantMessage, ResultMessage, ToolUseBlock
+
+        tool_block = MagicMock(spec=ToolUseBlock)
+        tool_block.name = "Write"
+        tool_block.input = {"file_path": "/tmp/experiment.py", "content": "print('hi')"}
+
+        assistant_msg = MagicMock(spec=AssistantMessage)
+        assistant_msg.content = [tool_block]
+        result_msg = MagicMock(spec=ResultMessage)
+
+        async def fake_query(**kwargs):
+            script_path = tmp_path / "v01" / "experiment.py"
+            script_path.parent.mkdir(parents=True, exist_ok=True)
+            script_path.write_text("print('hi')")
+            yield assistant_msg
+            yield result_msg
+
+        mock_query.side_effect = fake_query
+
+        buf: list[str] = []
+        await run_coder(
+            plan={"hypothesis": "test", "changes": []},
+            previous_script=tmp_path / "nonexistent" / "experiment.py",
+            output_dir=tmp_path, version="v01",
+            message_buffer=buf,
+        )
+        assert len(buf) >= 1
+        assert any("Write" in entry for entry in buf)

@@ -21,6 +21,7 @@ from claude_code_sdk import (
 
 from auto_scientist.config import SuccessCriterion
 from auto_scientist.prompts.analyst import ANALYST_SYSTEM, ANALYST_USER
+from auto_scientist.sdk_utils import append_block_to_buffer
 
 # JSON schema for structured output
 ANALYST_SCHEMA = {
@@ -192,8 +193,8 @@ async def run_analyst(
             for block in message.content:
                 if isinstance(block, TextBlock):
                     assistant_texts.append(block.text)
-                    if message_buffer is not None:
-                        message_buffer.append(block.text)
+                if message_buffer is not None:
+                    append_block_to_buffer(block, message_buffer)
 
     # Parse the result - prefer ResultMessage.result, fallback to assistant text
     raw = result_text

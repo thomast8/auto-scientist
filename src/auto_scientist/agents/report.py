@@ -6,10 +6,10 @@ first to final version, key insights, and recommendations for future work.
 
 from pathlib import Path
 
-from claude_code_sdk import AssistantMessage, ClaudeCodeOptions, ResultMessage, TextBlock
+from claude_code_sdk import AssistantMessage, ClaudeCodeOptions, ResultMessage
 
 from auto_scientist.prompts.report import REPORT_SYSTEM, REPORT_USER
-from auto_scientist.sdk_utils import safe_query
+from auto_scientist.sdk_utils import append_block_to_buffer, safe_query
 from auto_scientist.state import ExperimentState
 
 
@@ -54,9 +54,9 @@ async def run_report(
 
     async for message in safe_query(prompt=user_prompt, options=options):
         if isinstance(message, AssistantMessage):
-            for block in message.content:
-                if isinstance(block, TextBlock) and message_buffer is not None:
-                    message_buffer.append(block.text)
+            if message_buffer is not None:
+                for block in message.content:
+                    append_block_to_buffer(block, message_buffer)
         elif isinstance(message, ResultMessage):
             pass  # Agent is done
 

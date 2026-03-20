@@ -21,6 +21,8 @@ if "claude_code_sdk" not in sys.modules:
     )
     mock_sdk.ResultMessage = type("ResultMessage", (), {})
     mock_sdk.TextBlock = type("TextBlock", (), {})
+    mock_sdk.ToolUseBlock = type("ToolUseBlock", (), {})
+    mock_sdk.ToolResultBlock = type("ToolResultBlock", (), {})
     mock_sdk.ToolPermissionContext = type("ToolPermissionContext", (), {})
     mock_sdk.query = MagicMock()
 

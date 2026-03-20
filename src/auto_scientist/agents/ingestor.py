@@ -15,7 +15,7 @@ from claude_code_sdk import (
 )
 
 from auto_scientist.prompts.ingestor import INGESTOR_SYSTEM, INGESTOR_USER
-from auto_scientist.sdk_utils import safe_query
+from auto_scientist.sdk_utils import append_block_to_buffer, safe_query
 
 
 async def run_ingestor(
@@ -72,11 +72,10 @@ async def run_ingestor(
     async for msg in safe_query(prompt=prompt, options=options):
         if isinstance(msg, AssistantMessage):
             for block in msg.content:
-                if isinstance(block, TextBlock):
-                    if message_buffer is not None:
-                        message_buffer.append(block.text)
-                    else:
-                        print(f"  [ingestor] {block.text[:200]}")
+                if message_buffer is not None:
+                    append_block_to_buffer(block, message_buffer)
+                elif isinstance(block, TextBlock):
+                    print(f"  [ingestor] {block.text[:200]}")
 
     # Verify something was produced in data_dir
     data_files = list(data_dir.iterdir())

@@ -16,7 +16,6 @@ from claude_code_sdk import (
     AssistantMessage,
     ClaudeCodeOptions,
     ResultMessage,
-    TextBlock,
     query,
 )
 
@@ -26,6 +25,7 @@ from auto_scientist.prompts.coder import (
     CODER_SYSTEM,
     CODER_USER,
 )
+from auto_scientist.sdk_utils import append_block_to_buffer
 
 
 async def run_coder(
@@ -87,9 +87,9 @@ async def run_coder(
 
     async for message in query(prompt=user_prompt, options=options):
         if isinstance(message, AssistantMessage):
-            for block in message.content:
-                if isinstance(block, TextBlock) and message_buffer is not None:
-                    message_buffer.append(block.text)
+            if message_buffer is not None:
+                for block in message.content:
+                    append_block_to_buffer(block, message_buffer)
         elif isinstance(message, ResultMessage):
             pass  # Agent is done
 

@@ -43,6 +43,29 @@ _client_mod.parse_message = _tolerant_parse_message  # type: ignore[assignment]
 # ---------------------------------------------------------------------------
 # Public helper
 # ---------------------------------------------------------------------------
+def append_block_to_buffer(block: Any, buffer: list[str]) -> None:
+    """Append a content block's text to a message buffer.
+
+    Handles TextBlock (text), ToolUseBlock (tool name + truncated input),
+    and ToolResultBlock (truncated output). Silently skips unknown types.
+    """
+    from claude_code_sdk import TextBlock, ToolResultBlock, ToolUseBlock
+
+    if isinstance(block, TextBlock):
+        buffer.append(block.text)
+    elif isinstance(block, ToolUseBlock):
+        input_str = str(block.input)
+        if len(input_str) > 200:
+            input_str = input_str[:200] + "..."
+        buffer.append(f"[Tool: {block.name}] {input_str}")
+    elif isinstance(block, ToolResultBlock):
+        content = str(block.content) if block.content else ""
+        if len(content) > 200:
+            content = content[:200] + "..."
+        prefix = "[Error] " if block.is_error else "[Result] "
+        buffer.append(f"{prefix}{content}")
+
+
 async def safe_query(
     prompt: str, options: ClaudeCodeOptions
 ) -> AsyncIterator[Message]:

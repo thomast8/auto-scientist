@@ -201,6 +201,40 @@ class TestRunIngestorMessageBuffer:
         assert "[ingestor]" not in captured.out
 
 
+class TestRunIngestorToolBlockBuffer:
+    @pytest.mark.asyncio
+    @patch("auto_scientist.agents.ingestor.safe_query")
+    async def test_tool_use_captured_in_buffer(self, mock_query, tmp_path):
+        from claude_code_sdk import AssistantMessage, ResultMessage, ToolUseBlock
+
+        raw_data = tmp_path / "data.csv"
+        raw_data.write_text("a,b\n1,2\n")
+        output_dir = tmp_path / "experiments"
+        output_dir.mkdir()
+        data_dir = output_dir / "data"
+        data_dir.mkdir()
+        (data_dir / "output.csv").write_text("a,b\n1,2\n")
+
+        tool_block = MagicMock(spec=ToolUseBlock)
+        tool_block.name = "Bash"
+        tool_block.input = {"command": "head -5 data.csv"}
+
+        assistant_msg = MagicMock(spec=AssistantMessage)
+        assistant_msg.content = [tool_block]
+        result_msg = MagicMock(spec=ResultMessage)
+
+        async def fake_query(**kwargs):
+            yield assistant_msg
+            yield result_msg
+
+        mock_query.side_effect = fake_query
+
+        buf: list[str] = []
+        await run_ingestor(raw_data, output_dir, "test goal", message_buffer=buf)
+        assert len(buf) >= 1
+        assert any("Bash" in entry for entry in buf)
+
+
 class TestRunIngestorOptions:
     @pytest.mark.asyncio
     @patch("auto_scientist.agents.ingestor.safe_query")
