@@ -60,7 +60,7 @@ All prompts will follow these rules (provided by the team):
 6. `src/auto_scientist/prompts/report.py` - REPORT_SYSTEM, REPORT_USER
 
 ### Files to create (1 new file):
-7. `src/auto_scientist/prompts/critic.py` - CRITIC_SYSTEM, CRITIC_USER, CRITIC_REFINEMENT_SYSTEM, CRITIC_REFINEMENT_USER, SCIENTIST_DEBATE_SYSTEM, SCIENTIST_DEBATE_USER
+7. `src/auto_scientist/prompts/critic.py` - CRITIC_SYSTEM, CRITIC_USER, SCIENTIST_DEBATE_SYSTEM, SCIENTIST_DEBATE_USER (no separate refinement prompt; round 2+ reuses CRITIC with defense appended)
 
 ### Files to modify (1 agent file):
 8. `src/auto_scientist/agents/critic.py` - Replace inline prompt building with imports from `prompts/critic.py`
@@ -310,7 +310,15 @@ What it SHOULD include:
 
 ### 8. Critic Prompts (NEW: prompts/critic.py)
 
-Three prompt pairs extracted from agents/critic.py:
+Two prompt pairs extracted from agents/critic.py. The previous design had three (initial critique, scientist response, critic refinement). The refinement prompt is removed: round 2+ critics are stateless.
+
+**Design rationale:** A stateful refinement prompt anchors the critic to their prior positions. They spend effort defending their original take rather than forming a fresh assessment. By reusing the same CRITIC prompt with the scientist's defense appended as additional context, the critic:
+- Approaches each round with a fresh perspective
+- May notice issues they missed the first time
+- Evaluates the defense on its merits without ego-driven anchoring
+- Can raise entirely different concerns
+
+The scientist's defense is self-contained (it quotes and addresses each critique point), so the critic can understand what was challenged without seeing their own prior output.
 
 #### CRITIC_SYSTEM / CRITIC_USER
 **Role:** "You are a scientific critique system. You challenge experiment plans, propose alternative hypotheses, and identify blind spots. You have web search available to verify claims and look up relevant methods."
@@ -323,6 +331,12 @@ Three prompt pairs extracted from agents/critic.py:
 5. Evaluate feasibility and expected impact
 6. Use web search to verify scientific claims and check methods
 
+**User prompt has two variants:**
+- Round 1: plan + notebook + domain knowledge (no defense)
+- Round 2+: plan + notebook + domain knowledge + scientist's defense (appended in a `<scientist_defense>` section)
+
+Both variants use the same system prompt. The user prompt includes the defense when available, but the critic is not told it is "refining" anything. It simply critiques the plan, now with additional context about how the scientist justified their choices.
+
 **Examples:** None (free-form critique, not structured JSON).
 
 #### SCIENTIST_DEBATE_SYSTEM / SCIENTIST_DEBATE_USER
@@ -334,20 +348,11 @@ Three prompt pairs extracted from agents/critic.py:
 3. Clarify misunderstandings about the plan
 4. Be concise and substantive; focus on the most important points
 
-#### CRITIC_REFINEMENT_SYSTEM / CRITIC_REFINEMENT_USER
-**Role:** "You are a scientific critique system refining your critique after hearing the scientist's defense."
-
-**Instructions:**
-1. Drop points the scientist adequately addressed
-2. Sharpen points where the defense was weak or evasive
-3. Add new observations prompted by the defense
-4. Produce a final, self-contained, actionable critique
-
 ## Agent File Changes
 
 ### agents/critic.py
 
-Replace the three `_build_*_prompt` functions with imports from `prompts/critic.py`. The functions become thin wrappers that format the template strings with the dynamic content (plan JSON, notebook, domain knowledge, prior critique, defense).
+Replace the three `_build_*_prompt` functions with two: one for the critic (handles both round 1 and round 2+ by conditionally including the scientist's defense) and one for the scientist's debate response. Import templates from `prompts/critic.py`. Remove `_build_critic_refinement_prompt` entirely.
 
 Current:
 ```python
