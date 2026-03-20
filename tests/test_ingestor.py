@@ -57,6 +57,61 @@ class TestRunIngestorToolSelection:
         assert "AskUserQuestion" not in options.allowed_tools
 
 
+class TestRunIngestorConfigPath:
+    """Verify config_path parameter is accepted and forwarded to the prompt."""
+
+    @pytest.mark.asyncio
+    @patch("auto_scientist.agents.ingestor.safe_query")
+    async def test_accepts_config_path_param(self, mock_query, tmp_path):
+        """run_ingestor should accept a config_path parameter."""
+        raw_data = tmp_path / "data.csv"
+        raw_data.write_text("a,b\n1,2\n")
+        output_dir = tmp_path / "experiments"
+        output_dir.mkdir()
+        data_dir = output_dir / "data"
+        data_dir.mkdir()
+        (data_dir / "output.csv").write_text("a,b\n1,2\n")
+
+        mock_query.return_value = AsyncMock(
+            __aiter__=lambda self: self,
+            __anext__=AsyncMock(side_effect=StopAsyncIteration),
+        )
+
+        config_path = output_dir / "domain_config.json"
+        await run_ingestor(
+            raw_data, output_dir, "test goal",
+            config_path=config_path,
+        )
+        mock_query.assert_called_once()
+
+    @pytest.mark.asyncio
+    @patch("auto_scientist.agents.ingestor.safe_query")
+    async def test_config_path_in_prompt(self, mock_query, tmp_path):
+        """When config_path is provided, it should appear in the prompt."""
+        raw_data = tmp_path / "data.csv"
+        raw_data.write_text("a,b\n1,2\n")
+        output_dir = tmp_path / "experiments"
+        output_dir.mkdir()
+        data_dir = output_dir / "data"
+        data_dir.mkdir()
+        (data_dir / "output.csv").write_text("a,b\n1,2\n")
+
+        mock_query.return_value = AsyncMock(
+            __aiter__=lambda self: self,
+            __anext__=AsyncMock(side_effect=StopAsyncIteration),
+        )
+
+        config_path = output_dir / "domain_config.json"
+        await run_ingestor(
+            raw_data, output_dir, "test goal",
+            config_path=config_path,
+        )
+
+        call_kwargs = mock_query.call_args
+        prompt = call_kwargs.kwargs["prompt"]
+        assert str(config_path) in prompt
+
+
 class TestRunIngestorValidation:
     """Verify error handling when agent produces no output."""
 

@@ -25,6 +25,7 @@ async def run_ingestor(
     output_dir: Path,
     goal: str,
     interactive: bool = False,
+    config_path: Path | None = None,
     model: str | None = None,
 ) -> Path:
     """Inspect raw data and produce a canonical dataset.
@@ -34,6 +35,7 @@ async def run_ingestor(
         output_dir: Experiment output directory (experiments/).
         goal: The user's investigation goal.
         interactive: If True, agent can ask user questions.
+        config_path: Where to write the domain config JSON.
 
     Returns:
         Path to the canonical data directory (output_dir/data/).
@@ -57,11 +59,14 @@ async def run_ingestor(
         model=model,
     )
 
+    config_path_str = str(config_path) if config_path else "(not requested)"
+
     prompt = INGESTOR_USER.format(
         raw_data_path=str(raw_data_path.resolve()),
         goal=goal,
         data_dir=str(data_dir),
         notebook_path=str(notebook_path),
+        config_path=config_path_str,
         mode=mode,
     )
 

@@ -59,6 +59,20 @@ analysis. You write a conversion script for auditability.
 
 7. Present a final summary: input received, output produced, structural
    decisions made.
+
+8. If a config path is provided, write a domain configuration JSON file at
+   that path with operational settings for the experiment runner:
+   - name: short lowercase name derived from the goal
+   - description: one-line description of the domain
+   - data_paths: paths to the canonical data files you just created
+   - run_command: "uv run python -u {script_path}" (default)
+   - run_cwd: "." (default)
+   - run_timeout_minutes: 120 (default, adjust for large datasets)
+   - protected_paths: the canonical data directory (experiments must not
+     modify it)
+   - experiment_dependencies: Python packages likely needed based on the data
+     format (e.g., pandas for CSV, scipy for numerical work, matplotlib for
+     plots)
 </instructions>
 
 <scope_boundary>
@@ -70,7 +84,7 @@ You must stay within these boundaries:
 - Record structural assumptions ("assumed x is independent variable based on
   column order and spacing pattern")
 
-Leave these for the Discovery agent, which runs after you:
+Leave these for the Analyst and Scientist agents that run after you:
 - Scientific observations about patterns or trends in the data
 - Noise characterization or distribution analysis
 - Hypotheses about what generated the data
@@ -106,5 +120,6 @@ Output locations:
 - Canonical data directory: {data_dir}
 - Conversion script: {data_dir}/ingest.py
 - Lab notebook: {notebook_path}
+- Domain config: {config_path}
 </task>
 """
