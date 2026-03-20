@@ -161,7 +161,7 @@ class TestRunIngestorMessageProcessing:
         await run_ingestor(raw_data, output_dir, "test goal")
 
         captured = capsys.readouterr()
-        assert "Processing your data" in captured.out
+        assert captured.out == ""
 
 
 class TestRunIngestorMessageBuffer:
