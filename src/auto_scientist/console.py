@@ -21,14 +21,14 @@ AGENT_COLORS = {
     "Scientist": CYAN,
     "Analyst": GREEN,
     "Coder": MAGENTA,
-    "Ingestor": GREEN,
+    "Ingestor": RED,
     "Report": BLUE,
     "Debate": YELLOW,
 }
 
 # Map orchestrator step prefixes to agent colors
 STEP_COLORS = {
-    "INGESTION": GREEN,
+    "INGESTION": RED,
     "ANALYZE": GREEN,
     "PLAN": CYAN,
     "DEBATE": YELLOW,
@@ -45,24 +45,30 @@ def _use_color() -> bool:
     return "NO_COLOR" not in os.environ
 
 
-def print_step(message: str) -> None:
+def print_step(message: str, *, color: str | None = None) -> None:
     """Print a pipeline status message with color based on its prefix.
 
     Recognizes prefixes like "ANALYZE:", "PLAN:", "ITERATION 3", etc.
     Falls back to plain print when NO_COLOR is set or no prefix matches.
+
+    Pass ``color`` explicitly to override prefix-based detection.
     """
     if not _use_color():
         print(message)
         return
 
-    stripped = message.lstrip()
-    for prefix, color in STEP_COLORS.items():
-        if stripped.startswith(prefix):
-            sys.stdout.write(f"{color}{message}{RESET}\n")
-            sys.stdout.flush()
-            return
+    if color is None:
+        stripped = message.lstrip()
+        for prefix, c in STEP_COLORS.items():
+            if stripped.startswith(prefix):
+                color = c
+                break
 
-    print(message)
+    if color:
+        sys.stdout.write(f"{color}{message}{RESET}\n")
+        sys.stdout.flush()
+    else:
+        print(message)
 
 
 def _color_for_label(label: str) -> str:

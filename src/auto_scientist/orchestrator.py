@@ -7,7 +7,7 @@ from pathlib import Path
 from typing import Any
 
 from auto_scientist.config import DomainConfig, SuccessCriterion
-from auto_scientist.console import print_step, print_summary
+from auto_scientist.console import STEP_COLORS, print_step, print_summary
 from auto_scientist.runner import RunResult
 from auto_scientist.scheduler import wait_for_window
 from auto_scientist.state import CriteriaRevision, ExperimentState, VersionEntry
@@ -150,7 +150,7 @@ class Orchestrator:
         data_files = sorted(canonical_data_dir.iterdir())
         print_step("\nINGESTION complete:")
         for f in data_files:
-            print_step(f"  {f}")
+            print_step(f"  {f}", color=STEP_COLORS["INGESTION"])
         print()
 
         return canonical_data_dir

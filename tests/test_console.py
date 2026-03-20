@@ -8,6 +8,7 @@ from auto_scientist.console import (
     CYAN,
     GREEN,
     MAGENTA,
+    RED,
     YELLOW,
     _color_for_label,
     make_stream_printer,
@@ -29,8 +30,8 @@ class TestColorForLabel:
     def test_analyst_gets_green(self):
         assert _color_for_label("Analyst iteration 1") == GREEN
 
-    def test_ingestor_gets_green(self):
-        assert _color_for_label("Ingestor") == GREEN
+    def test_ingestor_gets_red(self):
+        assert _color_for_label("Ingestor") == RED
 
     def test_report_gets_blue(self):
         assert _color_for_label("Report generation") == BLUE
