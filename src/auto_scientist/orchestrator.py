@@ -1,19 +1,21 @@
 """Main orchestration loop and state machine."""
 
+import json
+import re
 from pathlib import Path
 from typing import Any
 
-from auto_scientist.config import DomainConfig
+from auto_scientist.config import DomainConfig, SuccessCriterion
 from auto_scientist.runner import RunResult
 from auto_scientist.scheduler import wait_for_window
-from auto_scientist.state import ExperimentState, VersionEntry
+from auto_scientist.state import CriteriaRevision, ExperimentState, VersionEntry
 
 
 class Orchestrator:
-    """Drives the Ingestion -> Discovery -> Iteration -> Report pipeline.
+    """Drives the Ingestion -> Iteration -> Report pipeline.
 
     State machine phases:
-        INGESTION -> DISCOVERY -> ANALYZE -> PLAN -> STOP_CHECK -> CRITIQUE ->
+        INGESTION -> ANALYZE -> PLAN -> STOP_CHECK -> (DEBATE) ->
         IMPLEMENT -> VALIDATE -> RUN -> EVALUATE -> ANALYZE (loop) or STOP
     """
 
@@ -66,16 +68,17 @@ class Orchestrator:
             self.state.data_path = str(canonical_data_dir)
             self.data_path = canonical_data_dir
 
-            self.state.phase = "discovery"
-            self.state.save(state_path)
+            # Load config if produced by ingestor
+            config_path = self.output_dir / "domain_config.json"
+            if config_path.exists():
+                config_data = json.loads(config_path.read_text())
+                self.config = DomainConfig.model_validate(config_data)
+                self.state.config_path = str(config_path)
 
-        # Phase 1: Discovery
-        if self.state.phase == "discovery":
-            await self._run_discovery()
             self.state.phase = "iteration"
             self.state.save(state_path)
 
-        # Phase 2: Iteration loop
+        # Phase 1: Unified iteration loop
         while self.state.phase == "iteration":
             if self.state.iteration >= self.max_iterations:
                 print(f"Reached max iterations ({self.max_iterations}). Stopping.")
@@ -92,10 +95,10 @@ class Orchestrator:
             # Schedule check
             await wait_for_window(self.state.schedule)
 
-            await self._run_iteration()
+            await self._run_iteration_body()
             self.state.save(state_path)
 
-        # Phase 3: Report
+        # Phase 2: Report
         if self.state.phase == "report":
             await self._run_report()
             self.state.phase = "stopped"
@@ -119,12 +122,15 @@ class Orchestrator:
                 "Provide --data when starting a new experiment."
             )
 
+        config_path = self.output_dir / "domain_config.json"
+
         print("INGESTION phase: canonicalizing raw data")
         canonical_data_dir = await run_ingestor(
             raw_data_path=source_path,
             output_dir=self.output_dir,
             goal=self.state.goal,
             interactive=self.interactive,
+            config_path=config_path,
             model=self.model,
         )
 
@@ -137,110 +143,25 @@ class Orchestrator:
 
         return canonical_data_dir
 
-    async def _run_discovery(self) -> None:
-        """Phase 1: Explore data, plan first approach, implement v00.
-
-        Flow: Discovery (explore + config) -> Scientist (plan v00) -> Coder (implement v00)
-        """
-        from auto_scientist.agents.coder import run_coder
-        from auto_scientist.agents.discovery import run_discovery
-        from auto_scientist.agents.scientist import run_scientist
-
-        notebook_path = self.output_dir / "lab_notebook.md"
-
-        # Step 1: Discovery explores data, writes config + notebook
-        print("DISCOVERY phase: exploring dataset and designing first approach")
-        self.config = await run_discovery(
-            state=self.state,
-            data_path=self.data_path,
-            output_dir=self.output_dir,
-            interactive=self.interactive,
-            model=self.model,
-        )
-        self.state.config_path = str(self.output_dir / "domain_config.json")
-
-        # Add canonical data dir to protected paths
-        if self.data_path:
-            data_dir_str = str(self.data_path.resolve())
-            if data_dir_str not in self.config.protected_paths:
-                self.config.protected_paths.append(data_dir_str)
-
-        # Step 2: Scientist plans v00 from notebook + domain knowledge
-        print("DISCOVERY phase: scientist planning v00")
-        plan = await run_scientist(
-            analysis={},
-            notebook_path=notebook_path,
-            version="v00",
-            domain_knowledge=self.config.domain_knowledge,
-            model=self.model,
-        )
-
-        # Append scientist's notebook entry
-        if plan.get("notebook_entry"):
-            with notebook_path.open("a") as f:
-                f.write(plan["notebook_entry"] + "\n---\n\n")
-
-        # Step 3: Coder implements v00
-        print("DISCOVERY phase: coder writing v00")
-        script_path = await run_coder(
-            plan=plan,
-            previous_script=Path("nonexistent"),
-            output_dir=self.output_dir,
-            version="v00",
-            domain_knowledge=self.config.domain_knowledge,
-            data_path=self.state.data_path or "",
-            experiment_dependencies=self.config.experiment_dependencies,
-            model=self.model,
-        )
-
-        # Run and evaluate the initial script
-        print("DISCOVERY phase: running initial experiment (v00)")
-        run_result = await self._run_experiment(script_path)
-        version_entry = VersionEntry(
-            version="v00",
-            iteration=0,
-            script_path=str(script_path),
-            hypothesis=plan.get("hypothesis", "Initial approach from discovery phase"),
-        )
-        self._evaluate(run_result, version_entry)
-        self.state.record_version(version_entry)
-
-        # Summary
-        version_dir = script_path.parent
-        output_files = sorted(version_dir.iterdir())
-        print(f"\nDISCOVERY complete:")
-        print(f"  Script:   {script_path}")
-        config_path = self.output_dir / "domain_config.json"
-        if config_path.exists():
-            n_criteria = len(self.config.success_criteria)
-            print(f"  Config:   {config_path} ({n_criteria} success criteria)")
-        if notebook_path.exists():
-            print(f"  Notebook: {notebook_path}")
-        artifacts = [f for f in output_files if f.suffix in (".png", ".txt", ".json")]
-        if artifacts:
-            print(f"  Outputs:")
-            for f in artifacts:
-                print(f"    {f}")
-        print(f"  Status:   {version_entry.status}")
-        print()
-
-    def _notebook_content(self) -> str:
-        """Return notebook content."""
-        notebook_path = self.output_dir / "lab_notebook.md"
-        return notebook_path.read_text() if notebook_path.exists() else ""
-
-    async def _run_iteration(self) -> None:
-        """Run one iteration of the pipeline."""
-        self.state.iteration += 1
+    async def _run_iteration_body(self) -> None:
+        """Run one iteration of the pipeline (inlined, not _run_iteration)."""
         print(f"\n{'='*60}")
         print(f"ITERATION {self.state.iteration}")
         print(f"{'='*60}")
 
-        # Step 1: Analyst observes latest results
+        # Step 1: Analyst observes latest results (or raw data on iteration 0)
         analysis = await self._run_analyst()
+
+        # Apply domain_knowledge from Analyst if present
+        if analysis and analysis.get("domain_knowledge"):
+            self.state.domain_knowledge = analysis["domain_knowledge"]
 
         # Step 2: Scientist plans next iteration
         plan = await self._run_scientist_plan(analysis)
+
+        # Apply criteria updates from Scientist if present
+        if plan:
+            self._apply_criteria_updates(plan)
 
         # Step 3: Check if Scientist recommends stopping
         if plan and plan.get("should_stop"):
@@ -248,27 +169,28 @@ class Orchestrator:
             self.state.phase = "report"
             return
 
-        # Step 4: Critic debates the Scientist's plan
-        debate_result = await self._run_debate(plan)
+        # Step 4: Debate (skip on iteration 0, nothing to challenge)
+        final_plan = plan
+        if self.state.iteration > 0:
+            debate_result = await self._run_debate(plan)
+            revised_plan = await self._run_scientist_revision(plan, debate_result, analysis)
+            final_plan = revised_plan or plan
 
-        # Step 5: Scientist revises plan based on debate
-        revised_plan = await self._run_scientist_revision(plan, debate_result, analysis)
-
-        # Step 6: Coder implements the revised plan (or original if no revision)
-        final_plan = revised_plan or plan
+        # Step 5: Coder implements the plan
         new_script = await self._run_coder(final_plan)
 
-        # Step 7: Validate (syntax check)
+        # Step 6: Validate (syntax check)
         if new_script:
             valid = await self._validate_script(new_script)
             if not valid:
                 self.state.record_failure()
+                self.state.iteration += 1
                 return
 
-        # Step 8: Run
+        # Step 7: Run
         run_result = await self._run_experiment(new_script)
 
-        # Step 9: Evaluate
+        # Step 8: Evaluate
         version = f"v{self.state.iteration:02d}"
         version_entry = VersionEntry(
             version=version,
@@ -295,18 +217,49 @@ class Orchestrator:
                 for f in artifacts:
                     print(f"    {f}")
 
+        # Increment at end of loop body
+        self.state.iteration += 1
+
+    def _notebook_content(self) -> str:
+        """Return notebook content."""
+        notebook_path = self.output_dir / "lab_notebook.md"
+        return notebook_path.read_text() if notebook_path.exists() else ""
+
+    async def _run_analyst_initial(self) -> dict[str, Any] | None:
+        """Iteration 0: analyze raw canonical data instead of experiment results."""
+        from auto_scientist.agents.analyst import run_analyst
+
+        notebook_path = self.output_dir / "lab_notebook.md"
+        domain_knowledge = self.state.domain_knowledge
+
+        print(f"  ANALYZE: initial data characterization")
+        try:
+            analysis = await run_analyst(
+                results_path=None,
+                plot_paths=[],
+                notebook_path=notebook_path,
+                domain_knowledge=domain_knowledge,
+                success_criteria=self.state.success_criteria,
+                data_dir=self.data_path,
+                model=self.model,
+            )
+            print(f"  ANALYZE: data characterization complete")
+            return analysis
+        except Exception as e:
+            print(f"  ANALYZE: error - {e}")
+            return None
 
     async def _run_analyst(self) -> dict[str, Any] | None:
         """Invoke the Analyst agent on latest results + plots."""
         from auto_scientist.agents.analyst import run_analyst
 
         if not self.state.versions:
-            print("  ANALYZE: skipped (no previous versions)")
-            return None
+            # Iteration 0: analyze raw data instead of experiment results
+            return await self._run_analyst_initial()
 
         latest = self.state.versions[-1]
         notebook_path = self.output_dir / "lab_notebook.md"
-        domain_knowledge = self.config.domain_knowledge if self.config else ""
+        domain_knowledge = self.state.domain_knowledge
 
         # Find results file
         results_path = Path(latest.results_path) if latest.results_path else None
@@ -318,7 +271,7 @@ class Orchestrator:
         version_dir = Path(latest.script_path).parent
         plot_paths = sorted(version_dir.glob("*.png"))
 
-        success_criteria = self.config.success_criteria if self.config else []
+        success_criteria = self.state.success_criteria or []
 
         print(f"  ANALYZE: analyzing {latest.version} ({len(plot_paths)} plots)")
         try:
@@ -331,7 +284,7 @@ class Orchestrator:
                 model=self.model,
             )
             # Update latest version score
-            if "success_score" in analysis:
+            if "success_score" in analysis and analysis["success_score"] is not None:
                 latest.score = analysis["success_score"]
                 # Update best tracking
                 if latest.score > self.state.best_score:
@@ -347,13 +300,9 @@ class Orchestrator:
         """Invoke the Scientist agent to formulate a plan."""
         from auto_scientist.agents.scientist import run_scientist
 
-        if not self.state.versions:
-            print("  PLAN: skipped (no previous versions)")
-            return None
-
         version = f"v{self.state.iteration:02d}"
         notebook_path = self.output_dir / "lab_notebook.md"
-        domain_knowledge = self.config.domain_knowledge if self.config else ""
+        domain_knowledge = self.state.domain_knowledge
 
         print(f"  PLAN: scientist planning {version}")
         try:
@@ -362,6 +311,7 @@ class Orchestrator:
                 notebook_path=notebook_path,
                 version=version,
                 domain_knowledge=domain_knowledge,
+                success_criteria=self.state.success_criteria,
                 model=self.model,
             )
 
@@ -386,7 +336,7 @@ class Orchestrator:
         from auto_scientist.agents.critic import run_debate
 
         notebook_content = self._notebook_content()
-        domain_knowledge = self.config.domain_knowledge if self.config else ""
+        domain_knowledge = self.state.domain_knowledge
 
         from auto_scientist.console import make_stream_printer
 
@@ -421,7 +371,7 @@ class Orchestrator:
 
         version = f"v{self.state.iteration:02d}"
         notebook_path = self.output_dir / "lab_notebook.md"
-        domain_knowledge = self.config.domain_knowledge if self.config else ""
+        domain_knowledge = self.state.domain_knowledge
 
         # Combine transcripts from all critics
         all_transcript: list[dict[str, str]] = []
@@ -460,17 +410,17 @@ class Orchestrator:
             print("  IMPLEMENT: skipped (no plan)")
             return None
 
-        if not self.state.versions:
-            print("  IMPLEMENT: skipped (no previous versions)")
-            return None
-
         version = f"v{self.state.iteration:02d}"
-        latest = self.state.versions[-1]
-        previous_script = Path(latest.script_path)
-        domain_knowledge = self.config.domain_knowledge if self.config else ""
-
+        domain_knowledge = self.state.domain_knowledge
         data_path = self.state.data_path or ""
         deps = self.config.experiment_dependencies if self.config else []
+
+        # On iteration 0 (no previous versions), use a nonexistent path
+        if self.state.versions:
+            latest = self.state.versions[-1]
+            previous_script = Path(latest.script_path)
+        else:
+            previous_script = Path("nonexistent")
 
         print(f"  IMPLEMENT: coder writing {version}")
         try:
@@ -490,6 +440,61 @@ class Orchestrator:
             print(f"  IMPLEMENT: error - {e}")
             self.state.record_failure()
             return None
+
+    def _apply_criteria_updates(self, plan: dict[str, Any]) -> None:
+        """Check Scientist plan for top_level_criteria or criteria_revision, update state."""
+        if plan.get("top_level_criteria"):
+            criteria = [
+                self._parse_criterion(c) for c in plan["top_level_criteria"]
+            ]
+            self.state.success_criteria = criteria
+            self.state.criteria_history.append(
+                CriteriaRevision(
+                    iteration=self.state.iteration,
+                    action="defined",
+                    changes="Initial criteria definition",
+                    criteria_snapshot=criteria,
+                )
+            )
+
+        elif plan.get("criteria_revision"):
+            rev = plan["criteria_revision"]
+            criteria = [
+                self._parse_criterion(c) for c in rev.get("revised_criteria", [])
+            ]
+            self.state.success_criteria = criteria
+            self.state.criteria_history.append(
+                CriteriaRevision(
+                    iteration=self.state.iteration,
+                    action="revised",
+                    changes=rev.get("changes", ""),
+                    criteria_snapshot=criteria,
+                )
+            )
+
+    @staticmethod
+    def _parse_criterion(raw: dict[str, Any]) -> SuccessCriterion:
+        """Parse a criterion dict from Scientist output into SuccessCriterion."""
+        target_min = None
+        target_max = None
+        condition = raw.get("condition", "")
+
+        # Parse condition string: "> 0.95", "< 500", ">= 0.9", "<= 10"
+        match = re.match(r"^\s*([<>]=?)\s*([\d.]+)\s*$", condition)
+        if match:
+            op, val = match.group(1), float(match.group(2))
+            if op in (">", ">="):
+                target_min = val
+            elif op in ("<", "<="):
+                target_max = val
+
+        return SuccessCriterion(
+            name=raw["name"],
+            description=raw.get("description", ""),
+            metric_key=raw.get("metric_key", ""),
+            target_min=target_min,
+            target_max=target_max,
+        )
 
     async def _validate_script(self, script_path: Path) -> bool:
         """Syntax-check the generated script."""
@@ -573,7 +578,7 @@ class Orchestrator:
             version_entry.results_path = str(results_path)
 
     async def _run_report(self) -> None:
-        """Phase 3: Generate final summary report."""
+        """Phase 2: Generate final summary report."""
         from auto_scientist.agents.report import run_report
 
         notebook_path = self.output_dir / "lab_notebook.md"
