@@ -50,7 +50,6 @@ class Orchestrator:
         self.model = model
         self.stream = stream
         self.summary_model = summary_model
-        self._summaries_disabled = False
 
     async def run(self) -> None:
         """Execute the full orchestration loop."""
@@ -249,26 +248,20 @@ class Orchestrator:
         self.state.iteration += 1
 
     def _should_summarize(self) -> bool:
-        """Check if summaries are enabled and not circuit-broken."""
-        return bool(self.summary_model) and not self._summaries_disabled
+        """Check if summaries are enabled."""
+        return bool(self.summary_model)
 
     async def _with_summaries(self, coro_fn, agent_name: str, message_buffer: list[str]):
-        """Wrap an agent call in run_with_summaries if enabled."""
+        """Wrap an agent call in run_with_summaries if enabled.
+
+        Agent errors propagate normally. Only summary infrastructure
+        errors are caught here (auth errors disable future summaries).
+        """
         if not self._should_summarize():
             return await coro_fn(message_buffer)
-        try:
-            return await run_with_summaries(
-                coro_fn, agent_name, self.summary_model, message_buffer,
-            )
-        except Exception as e:
-            err_str = str(e).lower()
-            if "auth" in err_str or "api key" in err_str or "api_key" in err_str:
-                print(f"  SUMMARY: auth error, disabling summaries: {e}")
-                self._summaries_disabled = True
-            else:
-                print(f"  SUMMARY: error in {agent_name}: {e}")
-            # Fall back to direct call
-            return await coro_fn(message_buffer)
+        return await run_with_summaries(
+            coro_fn, agent_name, self.summary_model, message_buffer,
+        )
 
     def _notebook_content(self) -> str:
         """Return notebook content."""

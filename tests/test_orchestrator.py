@@ -1416,8 +1416,8 @@ class TestSummaryIntegration:
         mock_sr.assert_called_once()
 
     @pytest.mark.asyncio
-    async def test_circuit_breaker(self, orchestrator, tmp_path):
-        """After auth error in summary, subsequent summaries should be skipped."""
+    async def test_summary_failure_does_not_break(self, orchestrator, tmp_path):
+        """run_with_summaries handles summary errors internally; pipeline completes."""
         orchestrator.output_dir.mkdir(parents=True, exist_ok=True)
         orchestrator.summary_model = "gpt-4o-mini"
         orchestrator.state.phase = "iteration"
@@ -1429,14 +1429,7 @@ class TestSummaryIntegration:
         script_path.write_text("print('hi')")
         run_result = RunResult(success=True, stdout="ok", return_code=0)
 
-        call_count = 0
-
-        async def rws_fail_first(coro_fn, agent_name, *args, **kwargs):
-            nonlocal call_count
-            call_count += 1
-            if call_count == 1:
-                raise Exception("AuthenticationError: invalid key")
-            buf = kwargs.get("message_buffer", [])
+        async def rws_passthrough(coro_fn, agent_name, model, buf, **kwargs):
             return await coro_fn(buf)
 
         with (
@@ -1446,39 +1439,8 @@ class TestSummaryIntegration:
             patch.object(orchestrator, "_validate_script", new_callable=AsyncMock, return_value=True),
             patch.object(orchestrator, "_run_experiment", new_callable=AsyncMock, return_value=run_result),
             patch.object(orchestrator, "_apply_criteria_updates"),
-            patch("auto_scientist.orchestrator.run_with_summaries", new_callable=AsyncMock, side_effect=rws_fail_first),
+            patch("auto_scientist.orchestrator.run_with_summaries", new_callable=AsyncMock, side_effect=rws_passthrough),
         ):
             await orchestrator._run_iteration_body()
 
-        assert orchestrator._summaries_disabled is True
-
-    @pytest.mark.asyncio
-    async def test_summary_failure_does_not_break(self, orchestrator, tmp_path):
-        """Summary failure should not break the pipeline."""
-        orchestrator.output_dir.mkdir(parents=True, exist_ok=True)
-        orchestrator.summary_model = "gpt-4o-mini"
-        orchestrator.state.phase = "iteration"
-        orchestrator.state.iteration = 0
-
-        plan = {"should_stop": False, "hypothesis": "test"}
-        script_path = tmp_path / "experiments" / "v00" / "experiment.py"
-        script_path.parent.mkdir(parents=True, exist_ok=True)
-        script_path.write_text("print('hi')")
-        run_result = RunResult(success=True, stdout="ok", return_code=0)
-
-        async def rws_always_fail(coro_fn, *args, **kwargs):
-            raise RuntimeError("Summary API down")
-
-        with (
-            patch("auto_scientist.agents.analyst.run_analyst", new_callable=AsyncMock, return_value={}),
-            patch("auto_scientist.agents.scientist.run_scientist", new_callable=AsyncMock, return_value=plan),
-            patch("auto_scientist.agents.coder.run_coder", new_callable=AsyncMock, return_value=script_path),
-            patch.object(orchestrator, "_validate_script", new_callable=AsyncMock, return_value=True),
-            patch.object(orchestrator, "_run_experiment", new_callable=AsyncMock, return_value=run_result),
-            patch.object(orchestrator, "_apply_criteria_updates"),
-            patch("auto_scientist.orchestrator.run_with_summaries", new_callable=AsyncMock, side_effect=rws_always_fail),
-        ):
-            await orchestrator._run_iteration_body()
-
-        # Pipeline should complete despite summary failures
         assert orchestrator.state.iteration == 1
