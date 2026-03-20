@@ -29,7 +29,7 @@ class TestSummaryPrompts:
 
 class TestSummarizeAgentOutput:
     @pytest.mark.asyncio
-    @patch("auto_scientist.summarizer.query_openai", new_callable=AsyncMock)
+    @patch("auto_scientist.summarizer._query_summary", new_callable=AsyncMock)
     async def test_ingestor_prompt(self, mock_query):
         mock_query.return_value = "Processing files"
         await summarize_agent_output("Ingestor", "raw output", "gpt-4o-mini")
@@ -37,7 +37,7 @@ class TestSummarizeAgentOutput:
         assert "Ingestor" in prompt_arg or "files" in prompt_arg.lower() or "transform" in prompt_arg.lower()
 
     @pytest.mark.asyncio
-    @patch("auto_scientist.summarizer.query_openai", new_callable=AsyncMock)
+    @patch("auto_scientist.summarizer._query_summary", new_callable=AsyncMock)
     async def test_analyst_prompt(self, mock_query):
         mock_query.return_value = "Key metrics found"
         await summarize_agent_output("Analyst", "analysis data", "gpt-4o-mini")
@@ -45,7 +45,7 @@ class TestSummarizeAgentOutput:
         assert "metric" in prompt_arg.lower() or "finding" in prompt_arg.lower()
 
     @pytest.mark.asyncio
-    @patch("auto_scientist.summarizer.query_openai", new_callable=AsyncMock)
+    @patch("auto_scientist.summarizer._query_summary", new_callable=AsyncMock)
     async def test_scientist_prompt(self, mock_query):
         mock_query.return_value = "Hypothesis formed"
         await summarize_agent_output("Scientist", "plan data", "gpt-4o-mini")
@@ -53,7 +53,7 @@ class TestSummarizeAgentOutput:
         assert "hypothes" in prompt_arg.lower() or "strategy" in prompt_arg.lower()
 
     @pytest.mark.asyncio
-    @patch("auto_scientist.summarizer.query_openai", new_callable=AsyncMock)
+    @patch("auto_scientist.summarizer._query_summary", new_callable=AsyncMock)
     async def test_scientist_revision_prompt(self, mock_query):
         mock_query.return_value = "Plan revised"
         await summarize_agent_output("Scientist Revision", "revision data", "gpt-4o-mini")
@@ -61,7 +61,7 @@ class TestSummarizeAgentOutput:
         assert "chang" in prompt_arg.lower() or "revis" in prompt_arg.lower()
 
     @pytest.mark.asyncio
-    @patch("auto_scientist.summarizer.query_openai", new_callable=AsyncMock)
+    @patch("auto_scientist.summarizer._query_summary", new_callable=AsyncMock)
     async def test_debate_prompt(self, mock_query):
         mock_query.return_value = "Challenge identified"
         await summarize_agent_output("Debate", "debate text", "gpt-4o-mini")
@@ -69,7 +69,7 @@ class TestSummarizeAgentOutput:
         assert "challeng" in prompt_arg.lower() or "position" in prompt_arg.lower()
 
     @pytest.mark.asyncio
-    @patch("auto_scientist.summarizer.query_openai", new_callable=AsyncMock)
+    @patch("auto_scientist.summarizer._query_summary", new_callable=AsyncMock)
     async def test_coder_prompt(self, mock_query):
         mock_query.return_value = "Writing script"
         await summarize_agent_output("Coder", "code output", "gpt-4o-mini")
@@ -77,7 +77,7 @@ class TestSummarizeAgentOutput:
         assert "approach" in prompt_arg.lower() or "code" in prompt_arg.lower()
 
     @pytest.mark.asyncio
-    @patch("auto_scientist.summarizer.query_openai", new_callable=AsyncMock)
+    @patch("auto_scientist.summarizer._query_summary", new_callable=AsyncMock)
     async def test_results_prompt(self, mock_query):
         mock_query.return_value = "Key outcomes"
         await summarize_agent_output("Results", "results text", "gpt-4o-mini")
@@ -85,7 +85,7 @@ class TestSummarizeAgentOutput:
         assert "metric" in prompt_arg.lower() or "outcome" in prompt_arg.lower()
 
     @pytest.mark.asyncio
-    @patch("auto_scientist.summarizer.query_openai", new_callable=AsyncMock)
+    @patch("auto_scientist.summarizer._query_summary", new_callable=AsyncMock)
     async def test_report_prompt(self, mock_query):
         mock_query.return_value = "Report summary"
         await summarize_agent_output("Report", "report text", "gpt-4o-mini")
@@ -93,21 +93,21 @@ class TestSummarizeAgentOutput:
         assert "finding" in prompt_arg.lower() or "result" in prompt_arg.lower()
 
     @pytest.mark.asyncio
-    @patch("auto_scientist.summarizer.query_openai", new_callable=AsyncMock)
-    async def test_max_tokens_150(self, mock_query):
+    @patch("auto_scientist.summarizer._query_summary", new_callable=AsyncMock)
+    async def test_passes_model(self, mock_query):
         mock_query.return_value = "summary"
         await summarize_agent_output("Analyst", "data", "gpt-4o-mini")
-        assert mock_query.call_args.kwargs["max_tokens"] == 150
+        assert mock_query.call_args[0][0] == "gpt-4o-mini"
 
     @pytest.mark.asyncio
-    @patch("auto_scientist.summarizer.query_openai", new_callable=AsyncMock)
+    @patch("auto_scientist.summarizer._query_summary", new_callable=AsyncMock)
     async def test_returns_response(self, mock_query):
         mock_query.return_value = "the summary"
         result = await summarize_agent_output("Analyst", "data", "gpt-4o-mini")
         assert result == "the summary"
 
     @pytest.mark.asyncio
-    @patch("auto_scientist.summarizer.query_openai", new_callable=AsyncMock)
+    @patch("auto_scientist.summarizer._query_summary", new_callable=AsyncMock)
     async def test_exception_returns_empty(self, mock_query):
         mock_query.side_effect = RuntimeError("API error")
         result = await summarize_agent_output("Analyst", "data", "gpt-4o-mini")
@@ -124,7 +124,7 @@ class TestSummarizeAgentOutput:
         assert result == ""
 
     @pytest.mark.asyncio
-    @patch("auto_scientist.summarizer.query_openai", new_callable=AsyncMock)
+    @patch("auto_scientist.summarizer._query_summary", new_callable=AsyncMock)
     async def test_uses_progress_prefix(self, mock_query):
         mock_query.return_value = "in progress"
         await summarize_agent_output("Analyst", "data", "gpt-4o-mini", progress=True)
@@ -132,7 +132,7 @@ class TestSummarizeAgentOutput:
         assert "currently" in prompt_arg.lower() or "doing" in prompt_arg.lower()
 
     @pytest.mark.asyncio
-    @patch("auto_scientist.summarizer.query_openai", new_callable=AsyncMock)
+    @patch("auto_scientist.summarizer._query_summary", new_callable=AsyncMock)
     async def test_uses_final_prefix(self, mock_query):
         mock_query.return_value = "done"
         await summarize_agent_output("Analyst", "data", "gpt-4o-mini", progress=False)
@@ -142,7 +142,7 @@ class TestSummarizeAgentOutput:
 
 class TestSummarizeResults:
     @pytest.mark.asyncio
-    @patch("auto_scientist.summarizer.query_openai", new_callable=AsyncMock)
+    @patch("auto_scientist.summarizer._query_summary", new_callable=AsyncMock)
     async def test_prompt_focuses_on_metrics(self, mock_query):
         mock_query.return_value = "R2=0.82"
         await summarize_results("R2=0.82, RMSE=0.15", "gpt-4o-mini")
@@ -150,25 +150,25 @@ class TestSummarizeResults:
         assert "numeric" in prompt_arg.lower() or "outcome" in prompt_arg.lower()
 
     @pytest.mark.asyncio
-    @patch("auto_scientist.summarizer.query_openai", new_callable=AsyncMock)
+    @patch("auto_scientist.summarizer._query_summary", new_callable=AsyncMock)
     async def test_returns_response(self, mock_query):
         mock_query.return_value = "good results"
         result = await summarize_results("R2=0.82", "gpt-4o-mini")
         assert result == "good results"
 
     @pytest.mark.asyncio
-    @patch("auto_scientist.summarizer.query_openai", new_callable=AsyncMock)
+    @patch("auto_scientist.summarizer._query_summary", new_callable=AsyncMock)
     async def test_exception_returns_empty(self, mock_query):
         mock_query.side_effect = RuntimeError("API error")
         result = await summarize_results("data", "gpt-4o-mini")
         assert result == ""
 
     @pytest.mark.asyncio
-    @patch("auto_scientist.summarizer.query_openai", new_callable=AsyncMock)
-    async def test_max_tokens_150(self, mock_query):
+    @patch("auto_scientist.summarizer._query_summary", new_callable=AsyncMock)
+    async def test_passes_model(self, mock_query):
         mock_query.return_value = "summary"
         await summarize_results("data", "gpt-4o-mini")
-        assert mock_query.call_args.kwargs["max_tokens"] == 150
+        assert mock_query.call_args[0][0] == "gpt-4o-mini"
 
 
 class TestRunWithSummaries:

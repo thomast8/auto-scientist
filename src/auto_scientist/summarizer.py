@@ -10,8 +10,9 @@ import logging
 from collections.abc import Callable, Coroutine
 from typing import Any, TypeVar
 
+from openai import AsyncOpenAI
+
 from auto_scientist.console import print_summary
-from auto_scientist.models.openai_client import query_openai
 
 T = TypeVar("T")
 
@@ -68,6 +69,18 @@ SUMMARY_PROMPTS: dict[str, str] = {
 }
 
 
+async def _query_summary(model: str, instructions: str, input_text: str) -> str:
+    """Call the OpenAI Responses API for a short summary."""
+    client = AsyncOpenAI()
+    response = await client.responses.create(
+        model=model,
+        instructions=instructions,
+        input=input_text,
+        max_output_tokens=150,
+    )
+    return response.output_text or ""
+
+
 async def summarize_agent_output(
     agent_name: str,
     output: str | None,
@@ -93,10 +106,10 @@ async def summarize_agent_output(
         fallback = "Summarize the following agent output in 1-2 sentences."
         instruction = SUMMARY_PROMPTS.get(agent_name, fallback)
         prefix = PROGRESS_PREFIX if progress else FINAL_PREFIX
-        prompt = f"{instruction}\n\n{prefix}\n\nAgent output:\n{output}"
-        return await query_openai(model, prompt, max_tokens=150)
-    except Exception:
-        logger.debug(f"SUMMARY: error summarizing {agent_name} output")
+        instructions = f"{instruction}\n\n{prefix}"
+        return await _query_summary(model, instructions, f"Agent output:\n{output}")
+    except Exception as e:
+        print(f"  SUMMARY: error summarizing {agent_name}: {e}")
         return ""
 
 
@@ -118,10 +131,10 @@ async def summarize_results(
 
     try:
         instruction = SUMMARY_PROMPTS["Results"]
-        prompt = f"{instruction}\n\n{FINAL_PREFIX}\n\nResults:\n{results_text}"
-        return await query_openai(model, prompt, max_tokens=150)
-    except Exception:
-        logger.debug("SUMMARY: error summarizing results")
+        instructions = f"{instruction}\n\n{FINAL_PREFIX}"
+        return await _query_summary(model, instructions, f"Results:\n{results_text}")
+    except Exception as e:
+        print(f"  SUMMARY: error summarizing results: {e}")
         return ""
 
 
@@ -174,8 +187,8 @@ async def run_with_summaries(
                 if summary:
                     label = f"{int(elapsed)}s"
                     print_summary(agent_name, summary, label=label)
-            except Exception:
-                logger.debug(f"SUMMARY: error during periodic poll for {agent_name}")
+            except Exception as e:
+                print(f"  SUMMARY: periodic poll error for {agent_name}: {e}")
 
     poll_task = asyncio.create_task(poll_loop())
     try:
@@ -194,7 +207,7 @@ async def run_with_summaries(
                 )
                 if summary:
                     print_summary(agent_name, summary, label="done")
-            except Exception:
-                logger.debug(f"SUMMARY: error during final summary for {agent_name}")
+            except Exception as e:
+                print(f"  SUMMARY: final summary error for {agent_name}: {e}")
 
     return result
