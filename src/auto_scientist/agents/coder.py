@@ -14,10 +14,7 @@ from typing import Any
 
 from claude_code_sdk import (
     ClaudeCodeOptions,
-    PermissionResultAllow,
-    PermissionResultDeny,
     ResultMessage,
-    ToolPermissionContext,
     query,
 )
 
@@ -27,53 +24,6 @@ from auto_scientist.prompts.coder import (
     CODER_SYSTEM,
     CODER_USER,
 )
-
-# Commands that should be blocked in Bash
-_BLOCKED_BASH_PATTERNS = [
-    "rm -rf",
-    "git push",
-    "git reset",
-    "sudo ",
-    "chmod ",
-    "curl ",
-    "wget ",
-    "pip install",
-    "uv add",
-]
-
-
-def _make_permission_callback(output_dir: Path):
-    """Create a permission callback that restricts writes to safe locations."""
-    output_dir_str = str(output_dir.resolve())
-
-    async def permission_callback(
-        tool_name: str,
-        input_data: dict,
-        context: ToolPermissionContext,
-    ) -> PermissionResultAllow | PermissionResultDeny:
-        if tool_name in ("Write", "Edit"):
-            file_path = input_data.get("file_path", "")
-            resolved = str(Path(file_path).resolve())
-            if resolved.startswith(output_dir_str):
-                return PermissionResultAllow()
-            return PermissionResultDeny(
-                message=f"Write blocked: {file_path} is outside the experiments directory"
-            )
-
-        if tool_name == "Bash":
-            command = input_data.get("command", "")
-            for pattern in _BLOCKED_BASH_PATTERNS:
-                if pattern in command:
-                    return PermissionResultDeny(
-                        message=f"Blocked dangerous command pattern: {pattern}"
-                    )
-            return PermissionResultAllow()
-
-        # Read, Glob, Grep - always allowed
-        return PermissionResultAllow()
-
-    return permission_callback
-
 
 async def run_coder(
     plan: dict[str, Any],
@@ -138,7 +88,6 @@ async def run_coder(
         max_turns=30,
         permission_mode="acceptEdits",
         cwd=output_dir,
-        can_use_tool=_make_permission_callback(output_dir),
         model=model,
     )
 
