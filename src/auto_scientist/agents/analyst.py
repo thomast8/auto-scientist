@@ -168,11 +168,17 @@ async def run_analyst(
         f"Schema:\n{json.dumps(ANALYST_SCHEMA, indent=2)}"
     )
 
+    # Iteration 0 requires active tool use (Glob + Read data files);
+    # normal iterations have results injected in the prompt so tools are optional.
+    # Use acceptEdits when tools are needed to avoid interactive permission prompts.
+    needs_tools = data_dir is not None
+    perm_mode = "acceptEdits" if needs_tools else "default"
+
     options = ClaudeCodeOptions(
         system_prompt=ANALYST_SYSTEM + json_instruction,
         allowed_tools=["Read", "Glob"],
         max_turns=5,
-        permission_mode="default",
+        permission_mode=perm_mode,
         cwd=cwd,
         model=model,
     )
