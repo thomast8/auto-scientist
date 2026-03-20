@@ -190,3 +190,35 @@ class TestRunCoder:
         system = captured_opts["options"].system_prompt
         assert "# /// script" in system
         assert "uv run" in system
+
+
+class TestCoderMessageBuffer:
+    @pytest.mark.asyncio
+    @patch("auto_scientist.agents.coder.query")
+    async def test_populates_message_buffer(self, mock_query, tmp_path):
+        from claude_code_sdk import AssistantMessage, ResultMessage, TextBlock
+
+        assistant_msg = MagicMock(spec=AssistantMessage)
+        text_block = MagicMock(spec=TextBlock)
+        text_block.text = "Writing experiment script..."
+        assistant_msg.content = [text_block]
+        result_msg = MagicMock(spec=ResultMessage)
+
+        async def fake_query(**kwargs):
+            script_path = tmp_path / "v01" / "experiment.py"
+            script_path.parent.mkdir(parents=True, exist_ok=True)
+            script_path.write_text("print('hi')")
+            yield assistant_msg
+            yield result_msg
+
+        mock_query.side_effect = fake_query
+
+        buf: list[str] = []
+        await run_coder(
+            plan={"hypothesis": "test", "changes": []},
+            previous_script=tmp_path / "nonexistent" / "experiment.py",
+            output_dir=tmp_path, version="v01",
+            message_buffer=buf,
+        )
+        assert len(buf) == 1
+        assert "Writing experiment script..." in buf[0]

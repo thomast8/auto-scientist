@@ -134,6 +134,7 @@ async def run_scientist(
     domain_knowledge: str = "",
     success_criteria: list[SuccessCriterion] | None = None,
     model: str | None = None,
+    message_buffer: list[str] | None = None,
 ) -> dict[str, Any]:
     """Formulate hypothesis and plan based on analysis.
 
@@ -191,6 +192,8 @@ async def run_scientist(
             for block in message.content:
                 if isinstance(block, TextBlock):
                     assistant_texts.append(block.text)
+                    if message_buffer is not None:
+                        message_buffer.append(block.text)
 
     # Parse the result - prefer ResultMessage.result, fallback to assistant text
     raw = result_text
@@ -228,6 +231,7 @@ async def run_scientist_revision(
     version: str,
     domain_knowledge: str = "",
     model: str | None = None,
+    message_buffer: list[str] | None = None,
 ) -> dict[str, Any]:
     """Revise the plan after a critic debate.
 
@@ -288,6 +292,8 @@ async def run_scientist_revision(
             for block in message.content:
                 if isinstance(block, TextBlock):
                     assistant_texts.append(block.text)
+                    if message_buffer is not None:
+                        message_buffer.append(block.text)
 
     raw = result_text
     if not raw:

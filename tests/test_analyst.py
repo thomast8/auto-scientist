@@ -283,6 +283,43 @@ class TestRunAnalyst:
         )
         assert result["success_score"] == 0
 
+    @pytest.mark.asyncio
+    @patch("auto_scientist.agents.analyst.query")
+    async def test_populates_message_buffer(self, mock_query, tmp_path):
+        analysis = {
+            "success_score": 50, "criteria_results": [], "key_metrics": {},
+            "improvements": [], "regressions": [], "observations": [],
+            "iteration_criteria_results": [],
+        }
+
+        from auto_scientist.agents.analyst import AssistantMessage, ResultMessage, TextBlock
+
+        assistant_msg = MagicMock(spec=AssistantMessage)
+        text_block = MagicMock(spec=TextBlock)
+        text_block.text = "Analyzing the data..."
+        assistant_msg.content = [text_block]
+
+        result_msg = MagicMock(spec=ResultMessage)
+        result_msg.result = json.dumps(analysis)
+
+        async def fake_query(**kwargs):
+            yield assistant_msg
+            yield result_msg
+
+        mock_query.side_effect = fake_query
+
+        results_path = tmp_path / "results.txt"
+        results_path.write_text("data")
+        notebook_path = tmp_path / "notebook.md"
+
+        buf: list[str] = []
+        await run_analyst(
+            results_path=results_path, plot_paths=[], notebook_path=notebook_path,
+            message_buffer=buf,
+        )
+        assert len(buf) == 1
+        assert "Analyzing the data..." in buf[0]
+
     def test_no_targets_no_target_text(self):
         sc = SuccessCriterion(name="x", description="d", metric_key="x")
         result = _format_success_criteria([sc])
@@ -383,4 +420,4 @@ class TestRunAnalyst:
         )
         opts = captured_opts["options"]
         assert opts.allowed_tools == ["Read", "Glob"]
-        assert opts.max_turns == 5
+        assert opts.max_turns == 30

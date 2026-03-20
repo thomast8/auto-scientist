@@ -6,7 +6,7 @@ first to final version, key insights, and recommendations for future work.
 
 from pathlib import Path
 
-from claude_code_sdk import ClaudeCodeOptions, ResultMessage
+from claude_code_sdk import AssistantMessage, ClaudeCodeOptions, ResultMessage, TextBlock
 
 from auto_scientist.sdk_utils import safe_query
 
@@ -19,6 +19,7 @@ async def run_report(
     notebook_path: Path,
     output_dir: Path,
     model: str | None = None,
+    message_buffer: list[str] | None = None,
 ) -> Path:
     """Generate the final experiment report.
 
@@ -53,7 +54,11 @@ async def run_report(
     )
 
     async for message in safe_query(prompt=user_prompt, options=options):
-        if isinstance(message, ResultMessage):
+        if isinstance(message, AssistantMessage):
+            for block in message.content:
+                if isinstance(block, TextBlock) and message_buffer is not None:
+                    message_buffer.append(block.text)
+        elif isinstance(message, ResultMessage):
             pass  # Agent is done
 
     if not report_path.exists():

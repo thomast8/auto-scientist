@@ -27,6 +27,7 @@ async def run_ingestor(
     interactive: bool = False,
     config_path: Path | None = None,
     model: str | None = None,
+    message_buffer: list[str] | None = None,
 ) -> Path:
     """Inspect raw data and produce a canonical dataset.
 
@@ -74,7 +75,10 @@ async def run_ingestor(
         if isinstance(msg, AssistantMessage):
             for block in msg.content:
                 if isinstance(block, TextBlock):
-                    print(f"  [ingestor] {block.text[:200]}")
+                    if message_buffer is not None:
+                        message_buffer.append(block.text)
+                    else:
+                        print(f"  [ingestor] {block.text[:200]}")
         elif isinstance(msg, ResultMessage):
             pass
 

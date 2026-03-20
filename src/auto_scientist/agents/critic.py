@@ -71,6 +71,7 @@ async def run_debate(
     max_rounds: int = 2,
     scientist_model: str = "claude-sonnet-4-6",
     on_token_factory: Callable[[str], Callable[[str], None]] | None = None,
+    message_buffer: list[str] | None = None,
 ) -> list[dict[str, Any]]:
     """Run a multi-round critic-scientist debate for each critic model.
 
@@ -110,6 +111,8 @@ async def run_debate(
         if on_token:
             stream_separator()
         transcript.append({"role": "critic", "content": critique_text})
+        if message_buffer is not None:
+            message_buffer.append(f"[Critic] {critique_text}")
 
         # Rounds 2+: scientist responds, then critic critiques again (stateless)
         for round_num in range(1, max_rounds):
@@ -131,6 +134,8 @@ async def run_debate(
             if on_token:
                 stream_separator()
             transcript.append({"role": "scientist", "content": scientist_response})
+            if message_buffer is not None:
+                message_buffer.append(f"[Scientist] {scientist_response}")
 
             # Stateless: critic gets the defense but not their own prior critique
             critic_prompt = _build_critic_prompt(
@@ -145,6 +150,8 @@ async def run_debate(
             if on_token:
                 stream_separator()
             transcript.append({"role": "critic", "content": critique_text})
+            if message_buffer is not None:
+                message_buffer.append(f"[Critic] {critique_text}")
 
         critiques.append({
             "model": spec,

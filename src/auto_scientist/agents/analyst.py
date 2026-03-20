@@ -99,6 +99,7 @@ async def run_analyst(
     success_criteria: list[SuccessCriterion] | None = None,
     data_dir: Path | None = None,
     model: str | None = None,
+    message_buffer: list[str] | None = None,
 ) -> dict[str, Any]:
     """Analyze experiment results and produce structured observation.
 
@@ -191,6 +192,8 @@ async def run_analyst(
             for block in message.content:
                 if isinstance(block, TextBlock):
                     assistant_texts.append(block.text)
+                    if message_buffer is not None:
+                        message_buffer.append(block.text)
 
     # Parse the result - prefer ResultMessage.result, fallback to assistant text
     raw = result_text

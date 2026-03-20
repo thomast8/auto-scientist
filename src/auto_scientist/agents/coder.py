@@ -13,8 +13,10 @@ from pathlib import Path
 from typing import Any
 
 from claude_code_sdk import (
+    AssistantMessage,
     ClaudeCodeOptions,
     ResultMessage,
+    TextBlock,
     query,
 )
 
@@ -33,6 +35,7 @@ async def run_coder(
     domain_knowledge: str = "",
     data_path: str = "",
     model: str | None = None,
+    message_buffer: list[str] | None = None,
 ) -> Path:
     """Implement the scientist's plan as a runnable experiment script.
 
@@ -82,7 +85,11 @@ async def run_coder(
     )
 
     async for message in query(prompt=user_prompt, options=options):
-        if isinstance(message, ResultMessage):
+        if isinstance(message, AssistantMessage):
+            for block in message.content:
+                if isinstance(block, TextBlock) and message_buffer is not None:
+                    message_buffer.append(block.text)
+        elif isinstance(message, ResultMessage):
             pass  # Agent is done
 
     # Verify the script was created

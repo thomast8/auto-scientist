@@ -184,6 +184,72 @@ class TestRunScientist:
         assert captured_options["options"].allowed_tools == []
 
 
+class TestRunScientistMessageBuffer:
+    @pytest.mark.asyncio
+    @patch("auto_scientist.agents.scientist.query")
+    async def test_populates_message_buffer(self, mock_query, tmp_path):
+        from auto_scientist.agents.scientist import AssistantMessage, ResultMessage, TextBlock
+
+        assistant_msg = MagicMock(spec=AssistantMessage)
+        text_block = MagicMock(spec=TextBlock)
+        text_block.text = "Planning hypothesis..."
+        assistant_msg.content = [text_block]
+
+        result_msg = MagicMock(spec=ResultMessage)
+        result_msg.result = json.dumps(SAMPLE_PLAN)
+
+        async def fake_query(**kwargs):
+            yield assistant_msg
+            yield result_msg
+
+        mock_query.side_effect = fake_query
+
+        notebook_path = tmp_path / "notebook.md"
+        notebook_path.write_text("# Notebook")
+
+        buf: list[str] = []
+        await run_scientist(
+            analysis={}, notebook_path=notebook_path, version="v01",
+            message_buffer=buf,
+        )
+        assert len(buf) == 1
+        assert "Planning hypothesis..." in buf[0]
+
+    @pytest.mark.asyncio
+    @patch("auto_scientist.agents.scientist.query")
+    async def test_revision_populates_message_buffer(self, mock_query, tmp_path):
+        from auto_scientist.agents.scientist import AssistantMessage, ResultMessage, TextBlock
+
+        assistant_msg = MagicMock(spec=AssistantMessage)
+        text_block = MagicMock(spec=TextBlock)
+        text_block.text = "Revising plan..."
+        assistant_msg.content = [text_block]
+
+        result_msg = MagicMock(spec=ResultMessage)
+        result_msg.result = json.dumps(SAMPLE_PLAN)
+
+        async def fake_query(**kwargs):
+            yield assistant_msg
+            yield result_msg
+
+        mock_query.side_effect = fake_query
+
+        notebook_path = tmp_path / "notebook.md"
+        notebook_path.write_text("# Notebook")
+
+        buf: list[str] = []
+        await run_scientist_revision(
+            original_plan=SAMPLE_PLAN,
+            debate_transcript=[{"role": "critic", "content": "weak"}],
+            analysis={},
+            notebook_path=notebook_path,
+            version="v01",
+            message_buffer=buf,
+        )
+        assert len(buf) == 1
+        assert "Revising plan..." in buf[0]
+
+
 class TestRunScientistExploration:
     """Empty analysis + no criteria -> exploration plan."""
 

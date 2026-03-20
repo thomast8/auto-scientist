@@ -164,6 +164,43 @@ class TestRunIngestorMessageProcessing:
         assert "Processing your data" in captured.out
 
 
+class TestRunIngestorMessageBuffer:
+    @pytest.mark.asyncio
+    @patch("auto_scientist.agents.ingestor.safe_query")
+    async def test_populates_buffer_instead_of_printing(self, mock_query, tmp_path, capsys):
+        """When message_buffer is provided, text goes to buffer, not stdout."""
+        from auto_scientist.agents.ingestor import AssistantMessage, ResultMessage, TextBlock
+
+        raw_data = tmp_path / "data.csv"
+        raw_data.write_text("a,b\n1,2\n")
+        output_dir = tmp_path / "experiments"
+        output_dir.mkdir()
+        data_dir = output_dir / "data"
+        data_dir.mkdir()
+        (data_dir / "output.csv").write_text("a,b\n1,2\n")
+
+        assistant_msg = MagicMock(spec=AssistantMessage)
+        text_block = MagicMock(spec=TextBlock)
+        text_block.text = "Processing your data files..."
+        assistant_msg.content = [text_block]
+
+        result_msg = MagicMock(spec=ResultMessage)
+
+        async def fake_query(**kwargs):
+            yield assistant_msg
+            yield result_msg
+
+        mock_query.side_effect = fake_query
+
+        buf: list[str] = []
+        await run_ingestor(raw_data, output_dir, "test goal", message_buffer=buf)
+
+        assert len(buf) == 1
+        assert "Processing your data" in buf[0]
+        captured = capsys.readouterr()
+        assert "[ingestor]" not in captured.out
+
+
 class TestRunIngestorOptions:
     @pytest.mark.asyncio
     @patch("auto_scientist.agents.ingestor.safe_query")
