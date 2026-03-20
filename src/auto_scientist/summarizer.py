@@ -18,8 +18,8 @@ T = TypeVar("T")
 
 logger = logging.getLogger(__name__)
 
-PROGRESS_PREFIX = "Summarize what the agent is currently doing in ONE short sentence (under 20 words)."
-FINAL_PREFIX = "Summarize what the agent accomplished in ONE short sentence (under 20 words)."
+PROGRESS_PREFIX = "Reply with ONE sentence, max 15 words. What is the agent doing right now?"
+FINAL_PREFIX = "Reply with ONE sentence, max 15 words. What did the agent accomplish?"
 
 SUMMARY_PROMPTS: dict[str, str] = {
     "Ingestor": (

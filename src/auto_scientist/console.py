@@ -115,8 +115,8 @@ def print_summary(agent_name: str, summary: str, label: str = "") -> None:
 
     # Clean up: collapse whitespace, strip to one line
     summary = " ".join(summary.split())
-    if len(summary) > 120:
-        summary = summary[:117] + "..."
+    if len(summary) > 200:
+        summary = summary[:197] + "..."
 
     prefix = f"  > [{label}] " if label else "  > "
     line = f"{prefix}{summary}"

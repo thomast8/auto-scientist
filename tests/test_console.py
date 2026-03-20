@@ -100,11 +100,10 @@ class TestPrintSummary:
         assert "[" not in captured.out
 
     def test_truncates_long_text(self, capsys):
-        long_text = "x" * 150
+        long_text = "x" * 250
         print_summary("Analyst", long_text, label="done")
         captured = capsys.readouterr()
         lines = captured.out.strip().split("\n")
-        # Should be a single line, truncated with ...
         assert len(lines) == 1
         assert "..." in captured.out
 

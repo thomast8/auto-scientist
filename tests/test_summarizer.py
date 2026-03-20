@@ -129,7 +129,7 @@ class TestSummarizeAgentOutput:
         mock_query.return_value = "in progress"
         await summarize_agent_output("Analyst", "data", "gpt-4o-mini", progress=True)
         instructions_arg = mock_query.call_args[0][1]
-        assert "currently" in instructions_arg.lower()
+        assert "doing" in instructions_arg.lower() or "right now" in instructions_arg.lower()
 
     @pytest.mark.asyncio
     @patch("auto_scientist.summarizer._query_summary", new_callable=AsyncMock)
