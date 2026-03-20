@@ -127,9 +127,9 @@ class TestRunDebate:
         scientist_prompt = mock_anthropic.call_args[0][1]
         assert "Initial critique" in scientist_prompt
 
-        # Refinement prompt should contain the scientist's response
-        refinement_prompt = mock_openai.call_args_list[1][0][1]
-        assert "Scientist response" in refinement_prompt
+        # Round 2 critic prompt should contain the scientist's defense
+        round2_prompt = mock_openai.call_args_list[1][0][1]
+        assert "Scientist response" in round2_prompt
 
     @pytest.mark.asyncio
     async def test_three_rounds(self, base_kwargs):
@@ -225,7 +225,7 @@ class TestRunDebate:
             await run_debate(**base_kwargs, max_rounds=1)
 
         critic_prompt = mock_openai.call_args[0][1]
-        assert "Scientist's Plan" in critic_prompt
+        assert "<plan>" in critic_prompt
         assert "Adjusting learning rate" in critic_prompt
 
     @pytest.mark.asyncio
@@ -246,7 +246,7 @@ class TestRunDebate:
             await run_debate(**base_kwargs, max_rounds=2)
 
         scientist_prompt = mock_anthropic.call_args[0][1]
-        assert "Your Plan" in scientist_prompt
+        assert "<plan>" in scientist_prompt
         assert "Adjusting learning rate" in scientist_prompt
 
     @pytest.mark.asyncio
@@ -332,8 +332,8 @@ class TestRunDebate:
         scientist_prompt = mock_anthropic.call_args[0][1]
 
         # Both should see notebook and domain knowledge
-        assert "Lab Notebook" in critic_prompt
-        assert "Lab Notebook" in scientist_prompt
+        assert "<notebook>" in critic_prompt
+        assert "<notebook>" in scientist_prompt
 
     @pytest.mark.asyncio
     async def test_no_compressed_history_in_prompts(self, base_kwargs):
