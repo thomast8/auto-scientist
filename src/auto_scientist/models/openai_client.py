@@ -11,6 +11,7 @@ async def query_openai(
     *,
     web_search: bool = False,
     on_token: Callable[[str], None] | None = None,
+    max_tokens: int = 4096,
 ) -> str:
     """Send a prompt to an OpenAI model and return the response text.
 
@@ -51,7 +52,7 @@ async def query_openai(
         async for chunk in await client.chat.completions.create(
             model=model,
             messages=[{"role": "user", "content": prompt}],
-            max_tokens=4096,
+            max_tokens=max_tokens,
             stream=True,
         ):
             delta = chunk.choices[0].delta.content
@@ -63,6 +64,6 @@ async def query_openai(
     response = await client.chat.completions.create(
         model=model,
         messages=[{"role": "user", "content": prompt}],
-        max_tokens=4096,
+        max_tokens=max_tokens,
     )
     return response.choices[0].message.content or ""

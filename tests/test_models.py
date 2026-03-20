@@ -120,6 +120,55 @@ class TestQueryOpenAI:
         assert result == ""
 
 
+class TestQueryOpenAIMaxTokens:
+    @pytest.mark.asyncio
+    @patch("auto_scientist.models.openai_client.AsyncOpenAI")
+    async def test_custom_max_tokens(self, mock_cls):
+        mock_client = AsyncMock()
+        mock_cls.return_value = mock_client
+        mock_response = MagicMock()
+        mock_response.choices = [MagicMock(message=MagicMock(content="ok"))]
+        mock_client.chat.completions.create.return_value = mock_response
+
+        await query_openai("gpt-4o", "test", max_tokens=150)
+
+        call_kwargs = mock_client.chat.completions.create.call_args.kwargs
+        assert call_kwargs["max_tokens"] == 150
+
+    @pytest.mark.asyncio
+    @patch("auto_scientist.models.openai_client.AsyncOpenAI")
+    async def test_default_max_tokens(self, mock_cls):
+        mock_client = AsyncMock()
+        mock_cls.return_value = mock_client
+        mock_response = MagicMock()
+        mock_response.choices = [MagicMock(message=MagicMock(content="ok"))]
+        mock_client.chat.completions.create.return_value = mock_response
+
+        await query_openai("gpt-4o", "test")
+
+        call_kwargs = mock_client.chat.completions.create.call_args.kwargs
+        assert call_kwargs["max_tokens"] == 4096
+
+    @pytest.mark.asyncio
+    @patch("auto_scientist.models.openai_client.AsyncOpenAI")
+    async def test_custom_max_tokens_streaming(self, mock_cls):
+        mock_client = AsyncMock()
+        mock_cls.return_value = mock_client
+
+        chunk = MagicMock()
+        chunk.choices = [MagicMock(delta=MagicMock(content="ok"))]
+
+        async def fake_stream(**kwargs):
+            yield chunk
+
+        mock_client.chat.completions.create.return_value = fake_stream()
+
+        await query_openai("gpt-4o", "test", max_tokens=200, on_token=lambda t: None)
+
+        call_kwargs = mock_client.chat.completions.create.call_args.kwargs
+        assert call_kwargs["max_tokens"] == 200
+
+
 class TestQueryGoogleStreaming:
     @pytest.mark.asyncio
     @patch("auto_scientist.models.google_client.genai")
