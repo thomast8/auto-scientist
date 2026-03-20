@@ -61,7 +61,6 @@ ANALYST_SCHEMA = {
         "data_summary": {"type": "object"},
     },
     "required": [
-        "success_score",
         "criteria_results",
         "key_metrics",
         "improvements",

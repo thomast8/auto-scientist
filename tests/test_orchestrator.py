@@ -352,23 +352,22 @@ class TestParseCriterion:
         sc = Orchestrator._parse_criterion(raw)
         assert sc.target_max == 10.0
 
-    def test_invalid_condition_no_targets(self, orchestrator):
+    def test_invalid_condition_returns_none(self, orchestrator):
         raw = {"name": "x", "description": "d", "metric_key": "x", "condition": "between 0 and 1"}
-        sc = Orchestrator._parse_criterion(raw)
-        assert sc.target_min is None
-        assert sc.target_max is None
+        assert Orchestrator._parse_criterion(raw) is None
 
-    def test_empty_condition(self, orchestrator):
+    def test_empty_condition_returns_none(self, orchestrator):
         raw = {"name": "x", "description": "d", "metric_key": "x", "condition": ""}
-        sc = Orchestrator._parse_criterion(raw)
-        assert sc.target_min is None
-        assert sc.target_max is None
+        assert Orchestrator._parse_criterion(raw) is None
 
-    def test_missing_condition_key(self, orchestrator):
+    def test_missing_condition_key_returns_none(self, orchestrator):
         raw = {"name": "x", "description": "d", "metric_key": "x"}
-        sc = Orchestrator._parse_criterion(raw)
-        assert sc.target_min is None
-        assert sc.target_max is None
+        assert Orchestrator._parse_criterion(raw) is None
+
+    def test_non_numeric_condition_returns_none(self, orchestrator):
+        raw = {"name": "Normal residuals", "description": "d", "metric_key": "x",
+               "condition": "approximately normal"}
+        assert Orchestrator._parse_criterion(raw) is None
 
     def test_preserves_name_description(self, orchestrator):
         raw = {"name": "Accuracy", "description": "Model accuracy", "metric_key": "acc", "condition": "> 0.9"}
@@ -446,6 +445,27 @@ class TestApplyCriteriaUpdates:
         assert len(orchestrator.state.success_criteria) == 1
         assert orchestrator.state.success_criteria[0].name == "A"
         assert orchestrator.state.criteria_history[0].action == "defined"
+
+    def test_filters_out_unmeasurable_criteria(self, orchestrator):
+        """Criteria without numeric targets should be filtered out."""
+        plan = {
+            "top_level_criteria": [
+                {"name": "RMSE", "description": "low error", "metric_key": "rmse",
+                 "condition": "< 0.5"},
+                {"name": "Normal residuals", "description": "bad", "metric_key": "x",
+                 "condition": "approximately normal"},
+                {"name": "R2", "description": "high fit", "metric_key": "r2",
+                 "condition": "> 0.95"},
+            ],
+        }
+        orchestrator.state.iteration = 1
+        orchestrator._apply_criteria_updates(plan)
+
+        assert len(orchestrator.state.success_criteria) == 2
+        names = [c.name for c in orchestrator.state.success_criteria]
+        assert "RMSE" in names
+        assert "R2" in names
+        assert "Normal residuals" not in names
 
     def test_empty_top_level_list_no_update(self, orchestrator):
         orchestrator.state.success_criteria = None
@@ -779,6 +799,75 @@ class TestRunIteration:
         assert "Outputs:" in captured.out
 
 
+class TestComputeScore:
+    """Test _compute_score deterministic scoring from criteria_results."""
+
+    def test_all_required_pass_returns_100(self):
+        criteria = [
+            SuccessCriterion(name="RMSE", description="d", metric_key="rmse", target_max=0.5, required=True),
+            SuccessCriterion(name="R2", description="d", metric_key="r2", target_min=0.9, required=True),
+        ]
+        results = [
+            {"name": "RMSE", "status": "pass"},
+            {"name": "R2", "status": "pass"},
+        ]
+        assert Orchestrator._compute_score(results, criteria) == 100
+
+    def test_no_required_pass_returns_0(self):
+        criteria = [
+            SuccessCriterion(name="RMSE", description="d", metric_key="rmse", target_max=0.5, required=True),
+            SuccessCriterion(name="R2", description="d", metric_key="r2", target_min=0.9, required=True),
+        ]
+        results = [
+            {"name": "RMSE", "status": "fail"},
+            {"name": "R2", "status": "fail"},
+        ]
+        assert Orchestrator._compute_score(results, criteria) == 0
+
+    def test_mixed_returns_proportional(self):
+        criteria = [
+            SuccessCriterion(name="A", description="d", metric_key="a", target_min=0.5, required=True),
+            SuccessCriterion(name="B", description="d", metric_key="b", target_max=10, required=True),
+            SuccessCriterion(name="C", description="d", metric_key="c", target_min=0.1, required=True),
+        ]
+        results = [
+            {"name": "A", "status": "pass"},
+            {"name": "B", "status": "fail"},
+            {"name": "C", "status": "pass"},
+        ]
+        assert Orchestrator._compute_score(results, criteria) == 67  # round(2/3 * 100)
+
+    def test_optional_criteria_ignored(self):
+        criteria = [
+            SuccessCriterion(name="A", description="d", metric_key="a", target_min=0.5, required=True),
+            SuccessCriterion(name="B", description="d", metric_key="b", target_max=10, required=False),
+        ]
+        results = [
+            {"name": "A", "status": "pass"},
+            {"name": "B", "status": "fail"},
+        ]
+        # Only 1 required, it passes -> 100
+        assert Orchestrator._compute_score(results, criteria) == 100
+
+    def test_no_criteria_returns_0(self):
+        assert Orchestrator._compute_score([], []) == 0
+
+    def test_no_results_returns_0(self):
+        criteria = [
+            SuccessCriterion(name="A", description="d", metric_key="a", target_min=0.5, required=True),
+        ]
+        assert Orchestrator._compute_score([], criteria) == 0
+
+    def test_unable_to_measure_counts_as_fail(self):
+        criteria = [
+            SuccessCriterion(name="A", description="d", metric_key="a", target_min=0.5, required=True),
+        ]
+        results = [
+            {"name": "A", "status": "unable_to_measure"},
+        ]
+        assert Orchestrator._compute_score(results, criteria) == 0
+
+
 class TestRunAnalystInitial:
     @pytest.mark.asyncio
     async def test_calls_run_analyst_with_data_dir(self, orchestrator, tmp_path):
@@ -836,15 +925,21 @@ class TestRunAnalystNormal:
             results_path=str(results_path),
         )
         orchestrator.state.versions = [latest]
+        # Set up criteria so _compute_score can work
+        orchestrator.state.success_criteria = [
+            SuccessCriterion(name="RMSE", description="d", metric_key="rmse", target_max=0.5, required=True),
+        ]
 
         async def fake_analyst(**kwargs):
-            return {"success_score": 90}
+            return {
+                "criteria_results": [{"name": "RMSE", "status": "pass"}],
+            }
 
         with patch("auto_scientist.agents.analyst.run_analyst", side_effect=fake_analyst):
             await orchestrator._run_analyst()
 
-        assert latest.score == 90
-        assert orchestrator.state.best_score == 90
+        assert latest.score == 100
+        assert orchestrator.state.best_score == 100
         assert orchestrator.state.best_version == "v01"
 
     @pytest.mark.asyncio

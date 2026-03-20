@@ -23,10 +23,7 @@ strategy and planning based on your assessment.
    and what regressed, with specific numbers (e.g., "RMSE decreased from 12.3
    to 8.7" rather than "RMSE improved").
 
-5. Compute success_score as the percentage of weighted criteria passing.
-   Required criteria are weighted more heavily than optional ones.
-
-6. If the experiment output includes a SUCCESS CRITERIA section with
+5. If the experiment output includes a SUCCESS CRITERIA section with
    per-iteration criteria defined by the Scientist, transcribe those results
    into iteration_criteria_results. These are separate from the top-level
    success criteria and do not affect the success_score.
@@ -36,8 +33,12 @@ performing initial data characterization:
 1. Use the Glob tool to list files in the data directory
 2. Use the Read tool to examine each data file
 3. Report column types, row counts, value ranges, missing values factually
-4. Synthesize a domain_knowledge paragraph describing what this dataset
-   contains and what domain it appears to belong to
+4. Synthesize a domain_knowledge paragraph describing the data structure.
+   Domain knowledge MUST describe data structure only: variable types,
+   ranges, distributions, noise level, data format. It MUST NOT include
+   hypotheses about the generating function, model recommendations, or
+   scientific interpretations. The Scientist forms hypotheses; the Analyst
+   observes
 5. Populate data_summary with structured file and column details
 6. Set success_score to null, criteria_results and key_metrics to empty
 
@@ -323,16 +324,17 @@ Produce a JSON object with these exact keys and types:
   }}
 }}
 
-success_score: 0-100, percentage of weighted criteria passing. null when
-  performing data characterization (no criteria to score against).
+success_score: (optional, computed by the orchestrator) null or omitted.
 criteria_results.status: one of "pass", "fail", "unable_to_measure".
 key_metrics: all important numeric values, keyed by name.
 improvements/regressions: vs previous iteration, with numbers.
 observations: notable patterns from plots/results, factual.
 iteration_criteria_results: from script's SUCCESS CRITERIA section.
 
-domain_knowledge: (optional) description of what the dataset contains and
-  what domain it belongs to. Populated during data characterization.
+domain_knowledge: (optional) structural description of the dataset: variable
+  types, ranges, distributions, noise characteristics, data format. Must NOT
+  contain hypotheses, model recommendations, or scientific interpretations.
+  Populated during data characterization.
 data_summary: (optional) structured file and column details. Populated
   during data characterization.
 

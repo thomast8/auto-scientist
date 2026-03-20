@@ -139,6 +139,36 @@ class TestRunReport:
         assert "(no notebook)" in captured_prompt["prompt"]
 
 
+class TestReportPath:
+    @pytest.mark.asyncio
+    @patch("auto_scientist.agents.report.safe_query")
+    async def test_prompt_contains_filename_not_full_path(self, mock_query, tmp_path):
+        """The prompt should pass just 'report.md', not the full absolute path."""
+        from auto_scientist.agents.report import ResultMessage
+        result_msg = MagicMock(spec=ResultMessage)
+
+        captured_prompt = {}
+
+        async def fake_query(**kwargs):
+            captured_prompt["prompt"] = kwargs.get("prompt", "")
+            (tmp_path / "report.md").write_text("# Report")
+            yield result_msg
+
+        mock_query.side_effect = fake_query
+
+        state = ExperimentState(domain="test", goal="test goal")
+        notebook_path = tmp_path / "lab_notebook.md"
+        notebook_path.write_text("# Notebook")
+
+        await run_report(state=state, notebook_path=notebook_path, output_dir=tmp_path)
+
+        prompt = captured_prompt["prompt"]
+        # Should contain just the filename, not the full path
+        assert "report.md" in prompt
+        # Should NOT contain the output_dir path joined with report.md
+        assert str(tmp_path / "report.md") not in prompt
+
+
 class TestReportMessageBuffer:
     @pytest.mark.asyncio
     @patch("auto_scientist.agents.report.safe_query")

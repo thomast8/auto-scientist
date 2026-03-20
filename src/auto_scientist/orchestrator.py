@@ -334,14 +334,17 @@ class Orchestrator:
                 )
 
             analysis = await self._with_summaries(_analyst_coro, "Analyst", [])
-            # Update latest version score
-            if "success_score" in analysis and analysis["success_score"] is not None:
-                latest.score = analysis["success_score"]
-                # Update best tracking
-                if latest.score > self.state.best_score:
-                    self.state.best_score = latest.score
-                    self.state.best_version = latest.version
-            print_step(f"  ANALYZE: score={analysis.get('success_score', '?')}")
+            # Compute score deterministically from criteria results
+            score = self._compute_score(
+                analysis.get("criteria_results", []),
+                self.state.success_criteria or [],
+            )
+            latest.score = score
+            # Update best tracking
+            if latest.score > self.state.best_score:
+                self.state.best_score = latest.score
+                self.state.best_version = latest.version
+            print_step(f"  ANALYZE: score={score}")
             return analysis
         except Exception as e:
             print_step(f"  ANALYZE: error - {e}")
@@ -511,7 +514,8 @@ class Orchestrator:
         """Check Scientist plan for top_level_criteria or criteria_revision, update state."""
         if plan.get("top_level_criteria"):
             criteria = [
-                self._parse_criterion(c) for c in plan["top_level_criteria"]
+                c for raw in plan["top_level_criteria"]
+                if (c := self._parse_criterion(raw)) is not None
             ]
             self.state.success_criteria = criteria
             self.state.criteria_history.append(
@@ -526,7 +530,8 @@ class Orchestrator:
         elif plan.get("criteria_revision"):
             rev = plan["criteria_revision"]
             criteria = [
-                self._parse_criterion(c) for c in rev.get("revised_criteria", [])
+                c for raw in rev.get("revised_criteria", [])
+                if (c := self._parse_criterion(raw)) is not None
             ]
             self.state.success_criteria = criteria
             self.state.criteria_history.append(
@@ -539,8 +544,33 @@ class Orchestrator:
             )
 
     @staticmethod
-    def _parse_criterion(raw: dict[str, Any]) -> SuccessCriterion:
-        """Parse a criterion dict from Scientist output into SuccessCriterion."""
+    def _compute_score(
+        criteria_results: list[dict[str, Any]],
+        success_criteria: list[SuccessCriterion],
+    ) -> int:
+        """Compute score deterministically from criteria results.
+
+        Formula: (passing_required / total_required) * 100, rounded to int.
+        Optional criteria are tracked but don't affect the score.
+        """
+        required = [c for c in success_criteria if c.required]
+        if not required:
+            return 0
+
+        # Build a lookup from criteria results by name
+        result_by_name = {r["name"]: r["status"] for r in criteria_results}
+
+        passing = sum(
+            1 for c in required if result_by_name.get(c.name) == "pass"
+        )
+        return round((passing / len(required)) * 100)
+
+    @staticmethod
+    def _parse_criterion(raw: dict[str, Any]) -> SuccessCriterion | None:
+        """Parse a criterion dict from Scientist output into SuccessCriterion.
+
+        Returns None if the criterion has no numeric target (unmeasurable).
+        """
         target_min = None
         target_max = None
         condition = raw.get("condition", "")
@@ -553,6 +583,13 @@ class Orchestrator:
                 target_min = val
             elif op in ("<", "<="):
                 target_max = val
+
+        if target_min is None and target_max is None:
+            logger.warning(
+                f"Rejecting criterion '{raw.get('name', '?')}': "
+                f"no numeric target (condition='{condition}')"
+            )
+            return None
 
         return SuccessCriterion(
             name=raw["name"],

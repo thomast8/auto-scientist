@@ -39,7 +39,11 @@ see or write code.
 
    When top-level criteria exist but evidence shows they are unrealistic
    or wrong, you may propose revisions via criteria_revision. Include
-   the justification in your notebook entry.
+   the justification in your notebook entry. If the Analyst's results
+   show a target is infeasible (e.g., estimated noise floor exceeds the
+   RMSE target, or a metric is structurally bounded), you SHOULD use
+   criteria_revision to propose realistic targets based on evidence.
+   Do not keep iterating against impossible targets.
 
 3. Formulate a hypothesis about what to change and why.
 
@@ -55,7 +59,10 @@ see or write code.
    1 = must-do, 2 = should-do, 3 = nice-to-have
 
 6. Define 3-8 success criteria as concrete, measurable predictions.
+   Every criterion MUST have a numeric condition using >, >=, <, or <=.
+   Criteria without numeric targets will be rejected by the system.
    Good: "RMSE < 500 kg/ha on test set". Bad: "results look good".
+   Bad: "Residuals approximately normal" (no numeric threshold).
 
 7. Write a notebook entry as continuous narrative under
    ## {{version}} - [Brief Title]. Include arc reflection and plan.

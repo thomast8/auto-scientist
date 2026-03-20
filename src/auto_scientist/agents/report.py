@@ -40,7 +40,7 @@ async def run_report(
         best_version=state.best_version or "none",
         best_score=state.best_score,
         notebook_content=notebook_content,
-        report_path=str(report_path),
+        report_path="report.md",
     )
 
     options = ClaudeCodeOptions(
