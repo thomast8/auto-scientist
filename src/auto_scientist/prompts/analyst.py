@@ -31,6 +31,16 @@ strategy and planning based on your assessment.
    into iteration_criteria_results. These are separate from the top-level
    success criteria and do not affect the success_score.
 
+When you receive a data directory instead of experiment results, you are
+performing initial data characterization:
+1. Use the Glob tool to list files in the data directory
+2. Use the Read tool to examine each data file
+3. Report column types, row counts, value ranges, missing values factually
+4. Synthesize a domain_knowledge paragraph describing what this dataset
+   contains and what domain it appears to belong to
+5. Populate data_summary with structured file and column details
+6. Set success_score to null, criteria_results and key_metrics to empty
+
 Report only what you observe. Every claim must reference a specific number from
 the results.
 </instructions>
@@ -226,6 +236,53 @@ yields. Score: 100. Transcribe script SUCCESS CRITERIA.
 }}
 </output>
 </example>
+<example>
+<input>
+Domain: (no domain knowledge yet, data characterization mode)
+Success criteria: (none defined)
+Data directory: experiments/data/ containing sensor_readings.csv
+Results: (none, initial data characterization)
+Plots: (none)
+</input>
+<reasoning>
+Data characterization mode. Read the CSV file: 500 rows, 4 columns
+(timestamp, temperature, humidity, pressure). Timestamp is ISO
+datetime. Temperature float 15.2-38.7C, humidity float 22.0-98.5%,
+pressure float 990.1-1025.3 hPa. 3 missing humidity values. This
+appears to be environmental sensor data. No criteria to score.
+</reasoning>
+<output>
+{{
+  "success_score": null,
+  "criteria_results": [],
+  "key_metrics": {{}},
+  "improvements": [],
+  "regressions": [],
+  "observations": [
+    "1 CSV file: sensor_readings.csv (500 rows, 4 columns)",
+    "columns: timestamp (ISO datetime), temperature (float), humidity (float), pressure (float)",
+    "temperature range: 15.2 to 38.7 C",
+    "humidity range: 22.0 to 98.5%, 3 missing values (rows 112, 245, 389)",
+    "pressure range: 990.1 to 1025.3 hPa, no missing values",
+    "timestamps span 2025-01-01 to 2025-01-21, ~24 readings per day"
+  ],
+  "iteration_criteria_results": [],
+  "domain_knowledge": "Environmental sensor dataset with temperature, humidity, and pressure readings sampled approximately hourly over a 21-day period. Three humidity values are missing.",
+  "data_summary": {{
+    "files": [
+      {{"name": "sensor_readings.csv", "rows": 500, "columns": ["timestamp", "temperature", "humidity", "pressure"]}}
+    ],
+    "total_rows": 500,
+    "column_details": [
+      {{"name": "timestamp", "dtype": "datetime", "min": "2025-01-01T00:00:00", "max": "2025-01-21T23:00:00", "missing": 0}},
+      {{"name": "temperature", "dtype": "float64", "min": 15.2, "max": 38.7, "missing": 0}},
+      {{"name": "humidity", "dtype": "float64", "min": 22.0, "max": 98.5, "missing": 3}},
+      {{"name": "pressure", "dtype": "float64", "min": 990.1, "max": 1025.3, "missing": 0}}
+    ]
+  }}
+}}
+</output>
+</example>
 </examples>
 
 <output_format>
@@ -251,21 +308,37 @@ Produce a JSON object with these exact keys and types:
       "status": str,
       "measured_value": str
     }}
-  ]
+  ],
+  "domain_knowledge": str,
+  "data_summary": {{
+    "files": [{{"name": str, "rows": int, "columns": [str]}}],
+    "total_rows": int,
+    "column_details": [{{"name": str, "dtype": str, "min": any, "max": any, "missing": int}}]
+  }}
 }}
 
-success_score: 0-100, percentage of weighted criteria passing.
+success_score: 0-100, percentage of weighted criteria passing. null when
+  performing data characterization (no criteria to score against).
 criteria_results.status: one of "pass", "fail", "unable_to_measure".
 key_metrics: all important numeric values, keyed by name.
 improvements/regressions: vs previous iteration, with numbers.
 observations: notable patterns from plots/results, factual.
 iteration_criteria_results: from script's SUCCESS CRITERIA section.
 
+domain_knowledge: (optional) description of what the dataset contains and
+  what domain it belongs to. Populated during data characterization.
+data_summary: (optional) structured file and column details. Populated
+  during data characterization.
+
 Fallback rules:
 - No plots: return empty "observations" list
 - No previous iteration: empty "improvements" and "regressions"
 - Metric not found: status "unable_to_measure", measured_value null
 - No SUCCESS CRITERIA section: empty "iteration_criteria_results"
+- No experiment results (data characterization mode): success_score is null,
+  criteria_results and key_metrics are empty, domain_knowledge and data_summary
+  are populated
+- Normal iteration mode: domain_knowledge and data_summary are omitted
 </output_format>
 
 <recap>
@@ -283,17 +356,11 @@ ANALYST_USER = """\
 </context>
 
 <data>
-<results>{results_content}</results>
-<plots>
-Use the Read tool to examine each of these plot files. For each
-plot, describe what you see: trends, patterns, deviations,
-outliers. Extract any numeric values visible in the plots.
-{plot_list}
-</plots>
+{data_section}
 </data>
 
 <task>
 Produce your structured JSON analysis. Ground every claim in
-specific numbers from the results.
+specific numbers from the results or data files.
 </task>
 """

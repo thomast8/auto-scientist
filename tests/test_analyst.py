@@ -142,6 +142,123 @@ class TestRunAnalyst:
 
     @pytest.mark.asyncio
     @patch("auto_scientist.agents.analyst.query")
+    async def test_accepts_data_dir_param(self, mock_query, tmp_path):
+        """run_analyst should accept a data_dir parameter."""
+        analysis = {
+            "success_score": None,
+            "criteria_results": [],
+            "key_metrics": {},
+            "improvements": [],
+            "regressions": [],
+            "observations": ["2 CSV files found"],
+            "iteration_criteria_results": [],
+            "domain_knowledge": "Environmental sensor data",
+            "data_summary": {"files": [], "total_rows": 0},
+        }
+
+        from auto_scientist.agents.analyst import ResultMessage
+        result_msg = MagicMock(spec=ResultMessage)
+        result_msg.result = json.dumps(analysis)
+
+        async def fake_query(**kwargs):
+            yield result_msg
+
+        mock_query.side_effect = fake_query
+
+        data_dir = tmp_path / "data"
+        data_dir.mkdir()
+        (data_dir / "sample.csv").write_text("x,y\n1,2\n")
+        notebook_path = tmp_path / "notebook.md"
+
+        result = await run_analyst(
+            results_path=None,
+            plot_paths=[],
+            notebook_path=notebook_path,
+            data_dir=data_dir,
+        )
+        assert result["success_score"] is None
+        assert result["domain_knowledge"] == "Environmental sensor data"
+
+    @pytest.mark.asyncio
+    @patch("auto_scientist.agents.analyst.query")
+    async def test_data_dir_in_prompt(self, mock_query, tmp_path):
+        """When data_dir is provided, it should appear in the prompt."""
+        analysis = {
+            "success_score": None, "criteria_results": [], "key_metrics": {},
+            "improvements": [], "regressions": [], "observations": [],
+            "iteration_criteria_results": [],
+        }
+
+        from auto_scientist.agents.analyst import ResultMessage
+        result_msg = MagicMock(spec=ResultMessage)
+        result_msg.result = json.dumps(analysis)
+
+        captured_prompt = {}
+
+        async def fake_query(**kwargs):
+            captured_prompt["prompt"] = kwargs.get("prompt", "")
+            yield result_msg
+
+        mock_query.side_effect = fake_query
+
+        data_dir = tmp_path / "data"
+        data_dir.mkdir()
+        (data_dir / "sample.csv").write_text("x,y\n1,2\n")
+        notebook_path = tmp_path / "notebook.md"
+
+        await run_analyst(
+            results_path=None,
+            plot_paths=[],
+            notebook_path=notebook_path,
+            data_dir=data_dir,
+        )
+        assert str(data_dir) in captured_prompt["prompt"]
+
+    @pytest.mark.asyncio
+    @patch("auto_scientist.agents.analyst.query")
+    async def test_iteration0_output_shape(self, mock_query, tmp_path):
+        """Iteration 0 output: success_score null, optional domain_knowledge/data_summary."""
+        analysis = {
+            "success_score": None,
+            "criteria_results": [],
+            "key_metrics": {},
+            "improvements": [],
+            "regressions": [],
+            "observations": ["200 rows, 2 float columns"],
+            "iteration_criteria_results": [],
+            "domain_knowledge": "This dataset contains sensor readings",
+            "data_summary": {
+                "files": [{"name": "data.csv", "rows": 200, "columns": ["x", "y"]}],
+                "total_rows": 200,
+            },
+        }
+
+        from auto_scientist.agents.analyst import ResultMessage
+        result_msg = MagicMock(spec=ResultMessage)
+        result_msg.result = json.dumps(analysis)
+
+        async def fake_query(**kwargs):
+            yield result_msg
+
+        mock_query.side_effect = fake_query
+
+        data_dir = tmp_path / "data"
+        data_dir.mkdir()
+        (data_dir / "data.csv").write_text("x,y\n" + "\n".join(f"{i},{i*2}" for i in range(200)))
+        notebook_path = tmp_path / "notebook.md"
+
+        result = await run_analyst(
+            results_path=None,
+            plot_paths=[],
+            notebook_path=notebook_path,
+            data_dir=data_dir,
+        )
+        assert result["success_score"] is None
+        assert result["domain_knowledge"] == "This dataset contains sensor readings"
+        assert result["data_summary"]["total_rows"] == 200
+
+    @pytest.mark.asyncio
+    @patch("auto_scientist.agents.analyst.query")
     async def test_missing_results_file_uses_fallback(self, mock_query, tmp_path):
         analysis = {
             "success_score": 0, "criteria_results": [], "key_metrics": {},

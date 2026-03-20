@@ -26,7 +26,7 @@ from auto_scientist.prompts.analyst import ANALYST_SYSTEM, ANALYST_USER
 ANALYST_SCHEMA = {
     "type": "object",
     "properties": {
-        "success_score": {"type": "integer", "minimum": 0, "maximum": 100},
+        "success_score": {"type": ["integer", "null"], "minimum": 0, "maximum": 100},
         "criteria_results": {
             "type": "array",
             "items": {
@@ -56,6 +56,8 @@ ANALYST_SCHEMA = {
                 "required": ["name", "status", "measured_value"],
             },
         },
+        "domain_knowledge": {"type": "string"},
+        "data_summary": {"type": "object"},
     },
     "required": [
         "success_score",
@@ -90,42 +92,69 @@ def _format_success_criteria(criteria: list[SuccessCriterion]) -> str:
 
 
 async def run_analyst(
-    results_path: Path,
+    results_path: Path | None,
     plot_paths: list[Path],
     notebook_path: Path,
     domain_knowledge: str = "",
     success_criteria: list[SuccessCriterion] | None = None,
+    data_dir: Path | None = None,
     model: str | None = None,
 ) -> dict[str, Any]:
     """Analyze experiment results and produce structured observation.
 
     Args:
-        results_path: Path to the results text file.
+        results_path: Path to the results text file (None on iteration 0).
         plot_paths: Paths to output plot PNGs (read as images).
         notebook_path: Path to the lab notebook.
         domain_knowledge: Domain-specific context injected into the prompt.
         success_criteria: List of success criteria to evaluate against.
+        data_dir: Path to canonical data directory (set on iteration 0).
+        model: Model override.
 
     Returns:
         Structured dict with keys:
-            success_score: int (0-100)
+            success_score: int | None (None on iteration 0)
             criteria_results: list[dict] (name, measured_value, target, status)
             key_metrics: dict[str, float]
             improvements: list[str]
             regressions: list[str]
             observations: list[str]
+            domain_knowledge: str (optional, iteration 0 only)
+            data_summary: dict (optional, iteration 0 only)
     """
-    results_content = results_path.read_text() if results_path.exists() else "(no results file)"
     notebook_content = notebook_path.read_text() if notebook_path.exists() else "(no notebook)"
 
-    plot_list = "\n".join(f"- {p}" for p in plot_paths) if plot_paths else "(no plots available)"
+    # Build the data section depending on iteration 0 vs normal
+    if data_dir is not None and (results_path is None or not results_path.exists()):
+        data_section = (
+            f"<data_directory>{data_dir}</data_directory>\n"
+            "Use the Glob tool to list files in this directory, then use the Read tool\n"
+            "to examine each data file. Describe the structure of each file factually."
+        )
+        cwd = data_dir
+    else:
+        results_content = (
+            results_path.read_text()
+            if results_path and results_path.exists()
+            else "(no results file)"
+        )
+        plot_list = "\n".join(f"- {p}" for p in plot_paths) if plot_paths else "(no plots available)"
+        data_section = (
+            f"<results>{results_content}</results>\n"
+            "<plots>\n"
+            "Use the Read tool to examine each of these plot files. For each\n"
+            "plot, describe what you see: trends, patterns, deviations,\n"
+            "outliers. Extract any numeric values visible in the plots.\n"
+            f"{plot_list}\n"
+            "</plots>"
+        )
+        cwd = results_path.parent if results_path else notebook_path.parent
 
     user_prompt = ANALYST_USER.format(
         domain_knowledge=domain_knowledge or "(no domain knowledge provided)",
         success_criteria=_format_success_criteria(success_criteria or []),
-        results_content=results_content,
+        data_section=data_section,
         notebook_content=notebook_content,
-        plot_list=plot_list,
     )
 
     json_instruction = (
@@ -140,7 +169,7 @@ async def run_analyst(
         allowed_tools=["Read", "Glob"],
         max_turns=5,
         permission_mode="default",
-        cwd=results_path.parent,
+        cwd=cwd,
         model=model,
     )
 
