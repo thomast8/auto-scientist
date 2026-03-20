@@ -1,14 +1,19 @@
 """Main orchestration loop and state machine."""
 
 import json
+import logging
 import re
 from pathlib import Path
 from typing import Any
 
 from auto_scientist.config import DomainConfig, SuccessCriterion
+from auto_scientist.console import print_step, print_summary
 from auto_scientist.runner import RunResult
 from auto_scientist.scheduler import wait_for_window
 from auto_scientist.state import CriteriaRevision, ExperimentState, VersionEntry
+from auto_scientist.summarizer import run_with_summaries, summarize_results
+
+logger = logging.getLogger(__name__)
 
 
 class Orchestrator:
@@ -31,6 +36,7 @@ class Orchestrator:
         debate_rounds: int = 2,
         model: str | None = None,
         stream: bool = True,
+        summary_model: str | None = None,
     ):
         self.state = state
         self.data_path = data_path
@@ -43,6 +49,8 @@ class Orchestrator:
         self.config: DomainConfig | None = None
         self.model = model
         self.stream = stream
+        self.summary_model = summary_model
+        self._summaries_disabled = False
 
     async def run(self) -> None:
         """Execute the full orchestration loop."""
@@ -124,30 +132,35 @@ class Orchestrator:
 
         config_path = self.output_dir / "domain_config.json"
 
-        print("INGESTION phase: canonicalizing raw data")
-        canonical_data_dir = await run_ingestor(
-            raw_data_path=source_path,
-            output_dir=self.output_dir,
-            goal=self.state.goal,
-            interactive=self.interactive,
-            config_path=config_path,
-            model=self.model,
-        )
+        print_step("INGESTION phase: canonicalizing raw data")
+
+        async def _ingestor_coro(buf):
+            return await run_ingestor(
+                raw_data_path=source_path,
+                output_dir=self.output_dir,
+                goal=self.state.goal,
+                interactive=self.interactive,
+                config_path=config_path,
+                model=self.model,
+                message_buffer=buf,
+            )
+
+        canonical_data_dir = await self._with_summaries(_ingestor_coro, "Ingestor", [])
 
         # Summary
         data_files = sorted(canonical_data_dir.iterdir())
-        print("\nINGESTION complete:")
+        print_step("\nINGESTION complete:")
         for f in data_files:
-            print(f"  {f}")
+            print_step(f"  {f}")
         print()
 
         return canonical_data_dir
 
     async def _run_iteration_body(self) -> None:
         """Run one iteration of the pipeline (inlined, not _run_iteration)."""
-        print(f"\n{'='*60}")
-        print(f"ITERATION {self.state.iteration}")
-        print(f"{'='*60}")
+        print_step(f"\n{'='*60}")
+        print_step(f"ITERATION {self.state.iteration}")
+        print_step(f"{'='*60}")
 
         # Step 1: Analyst observes latest results (or raw data on iteration 0)
         analysis = await self._run_analyst()
@@ -190,6 +203,18 @@ class Orchestrator:
         # Step 7: Run
         run_result = await self._run_experiment(new_script)
 
+        # Results summary
+        if self._should_summarize() and new_script and run_result and run_result.success:
+            results_path = new_script.parent / "results.txt"
+            if results_path.exists():
+                try:
+                    results_text = results_path.read_text()
+                    summary = await summarize_results(results_text, self.summary_model)
+                    if summary:
+                        print_summary("Results", summary)
+                except Exception:
+                    logger.debug("SUMMARY: error summarizing results")
+
         # Step 8: Evaluate
         version = f"v{self.state.iteration:02d}"
         version_entry = VersionEntry(
@@ -203,13 +228,13 @@ class Orchestrator:
 
         # Iteration summary
         version_dir = new_script.parent if new_script else None
-        print(f"\nITERATION {self.state.iteration} complete:")
+        print_step(f"\nITERATION {self.state.iteration} complete:")
         if new_script:
-            print(f"  Script:     {new_script}")
-        print(f"  Status:     {version_entry.status}")
+            print_step(f"  Script:     {new_script}")
+        print_step(f"  Status:     {version_entry.status}")
         if version_entry.score is not None:
-            print(f"  Score:      {version_entry.score}")
-        print(f"  Best:       {self.state.best_version} (score {self.state.best_score})")
+            print_step(f"  Score:      {version_entry.score}")
+        print_step(f"  Best:       {self.state.best_version} (score {self.state.best_score})")
         if version_dir and version_dir.exists():
             suffixes = (".png", ".txt", ".json")
             artifacts = sorted(
@@ -223,6 +248,26 @@ class Orchestrator:
         # Increment at end of loop body
         self.state.iteration += 1
 
+    def _should_summarize(self) -> bool:
+        """Check if summaries are enabled and not circuit-broken."""
+        return bool(self.summary_model) and not self._summaries_disabled
+
+    async def _with_summaries(self, coro_fn, agent_name: str, message_buffer: list[str]):
+        """Wrap an agent call in run_with_summaries if enabled."""
+        if not self._should_summarize():
+            return await coro_fn(message_buffer)
+        try:
+            return await run_with_summaries(
+                coro_fn, agent_name, self.summary_model, message_buffer,
+            )
+        except Exception as e:
+            err_str = str(e).lower()
+            if "auth" in err_str or "api key" in err_str or "api_key" in err_str:
+                logger.debug("SUMMARY: auth error, disabling summaries")
+                self._summaries_disabled = True
+            # Fall back to direct call
+            return await coro_fn(message_buffer)
+
     def _notebook_content(self) -> str:
         """Return notebook content."""
         notebook_path = self.output_dir / "lab_notebook.md"
@@ -235,21 +280,25 @@ class Orchestrator:
         notebook_path = self.output_dir / "lab_notebook.md"
         domain_knowledge = self.state.domain_knowledge
 
-        print("  ANALYZE: initial data characterization")
+        print_step("  ANALYZE: initial data characterization")
         try:
-            analysis = await run_analyst(
-                results_path=None,
-                plot_paths=[],
-                notebook_path=notebook_path,
-                domain_knowledge=domain_knowledge,
-                success_criteria=self.state.success_criteria,
-                data_dir=self.data_path,
-                model=self.model,
-            )
-            print("  ANALYZE: data characterization complete")
+            async def _analyst_coro(buf):
+                return await run_analyst(
+                    results_path=None,
+                    plot_paths=[],
+                    notebook_path=notebook_path,
+                    domain_knowledge=domain_knowledge,
+                    success_criteria=self.state.success_criteria,
+                    data_dir=self.data_path,
+                    model=self.model,
+                    message_buffer=buf,
+                )
+
+            analysis = await self._with_summaries(_analyst_coro, "Analyst", [])
+            print_step("  ANALYZE: data characterization complete")
             return analysis
         except Exception as e:
-            print(f"  ANALYZE: error - {e}")
+            print_step(f"  ANALYZE: error - {e}")
             return None
 
     async def _run_analyst(self) -> dict[str, Any] | None:
@@ -267,7 +316,7 @@ class Orchestrator:
         # Find results file
         results_path = Path(latest.results_path) if latest.results_path else None
         if not results_path or not results_path.exists():
-            print("  ANALYZE: skipped (no results file)")
+            print_step("  ANALYZE: skipped (no results file)")
             return None
 
         # Find plot PNGs in the version directory
@@ -276,16 +325,20 @@ class Orchestrator:
 
         success_criteria = self.state.success_criteria or []
 
-        print(f"  ANALYZE: analyzing {latest.version} ({len(plot_paths)} plots)")
+        print_step(f"  ANALYZE: analyzing {latest.version} ({len(plot_paths)} plots)")
         try:
-            analysis = await run_analyst(
-                results_path=results_path,
-                plot_paths=plot_paths,
-                notebook_path=notebook_path,
-                domain_knowledge=domain_knowledge,
-                success_criteria=success_criteria,
-                model=self.model,
-            )
+            async def _analyst_coro(buf):
+                return await run_analyst(
+                    results_path=results_path,
+                    plot_paths=plot_paths,
+                    notebook_path=notebook_path,
+                    domain_knowledge=domain_knowledge,
+                    success_criteria=success_criteria,
+                    model=self.model,
+                    message_buffer=buf,
+                )
+
+            analysis = await self._with_summaries(_analyst_coro, "Analyst", [])
             # Update latest version score
             if "success_score" in analysis and analysis["success_score"] is not None:
                 latest.score = analysis["success_score"]
@@ -293,10 +346,10 @@ class Orchestrator:
                 if latest.score > self.state.best_score:
                     self.state.best_score = latest.score
                     self.state.best_version = latest.version
-            print(f"  ANALYZE: score={analysis.get('success_score', '?')}")
+            print_step(f"  ANALYZE: score={analysis.get('success_score', '?')}")
             return analysis
         except Exception as e:
-            print(f"  ANALYZE: error - {e}")
+            print_step(f"  ANALYZE: error - {e}")
             return None
 
     async def _run_scientist_plan(self, analysis: dict | None) -> dict[str, Any] | None:
@@ -307,33 +360,37 @@ class Orchestrator:
         notebook_path = self.output_dir / "lab_notebook.md"
         domain_knowledge = self.state.domain_knowledge
 
-        print(f"  PLAN: scientist planning {version}")
+        print_step(f"  PLAN: scientist planning {version}")
         try:
-            plan = await run_scientist(
-                analysis=analysis or {},
-                notebook_path=notebook_path,
-                version=version,
-                domain_knowledge=domain_knowledge,
-                success_criteria=self.state.success_criteria,
-                model=self.model,
-            )
+            async def _scientist_coro(buf):
+                return await run_scientist(
+                    analysis=analysis or {},
+                    notebook_path=notebook_path,
+                    version=version,
+                    domain_knowledge=domain_knowledge,
+                    success_criteria=self.state.success_criteria,
+                    model=self.model,
+                    message_buffer=buf,
+                )
+
+            plan = await self._with_summaries(_scientist_coro, "Scientist", [])
 
             # Write the notebook entry from the plan
             if plan.get("notebook_entry"):
                 with notebook_path.open("a") as f:
                     f.write(plan["notebook_entry"] + "\n\n---\n\n")
 
-            print(f"  PLAN: strategy={plan.get('strategy', '?')}, "
-                  f"changes={len(plan.get('changes', []))}")
+            print_step(f"  PLAN: strategy={plan.get('strategy', '?')}, "
+                       f"changes={len(plan.get('changes', []))}")
             return plan
         except Exception as e:
-            print(f"  PLAN: error - {e}")
+            print_step(f"  PLAN: error - {e}")
             return None
 
     async def _run_debate(self, plan: dict | None) -> list[dict[str, Any]] | None:
         """Send plan to critic model(s) for debate with the Scientist."""
         if not self.critic_models or plan is None:
-            print("  DEBATE: skipped (no critics configured or no plan)")
+            print_step("  DEBATE: skipped (no critics configured or no plan)")
             return None
 
         from auto_scientist.agents.critic import run_debate
@@ -346,17 +403,22 @@ class Orchestrator:
         factory = make_stream_printer if self.stream else None
 
         n_critics = len(self.critic_models)
-        print(f"  DEBATE: {n_critics} critic(s), {self.debate_rounds} round(s)")
-        critiques = await run_debate(
-            critic_specs=self.critic_models,
-            plan=plan,
-            notebook_content=notebook_content,
-            domain_knowledge=domain_knowledge,
-            max_rounds=self.debate_rounds,
-            on_token_factory=factory,
-        )
+        print_step(f"  DEBATE: {n_critics} critic(s), {self.debate_rounds} round(s)")
 
-        print(f"  DEBATE: received {len(critiques)} critique(s)")
+        async def _debate_coro(buf):
+            return await run_debate(
+                critic_specs=self.critic_models,
+                plan=plan,
+                notebook_content=notebook_content,
+                domain_knowledge=domain_knowledge,
+                max_rounds=self.debate_rounds,
+                on_token_factory=factory,
+                message_buffer=buf,
+            )
+
+        critiques = await self._with_summaries(_debate_coro, "Debate", [])
+
+        print_step(f"  DEBATE: received {len(critiques)} critique(s)")
         return critiques
 
     async def _run_scientist_revision(
@@ -367,7 +429,7 @@ class Orchestrator:
     ) -> dict[str, Any] | None:
         """Scientist revises plan based on debate."""
         if plan is None or not debate_result:
-            print("  REVISE: skipped (no plan or no debate)")
+            print_step("  REVISE: skipped (no plan or no debate)")
             return None
 
         from auto_scientist.agents.scientist import run_scientist_revision
@@ -382,27 +444,31 @@ class Orchestrator:
             all_transcript.append({"role": "critic", "content": f"[{entry['model']}]"})
             all_transcript.extend(entry.get("transcript", []))
 
-        print("  REVISE: scientist revising plan after debate")
+        print_step("  REVISE: scientist revising plan after debate")
         try:
-            revised = await run_scientist_revision(
-                original_plan=plan,
-                debate_transcript=all_transcript,
-                analysis=analysis or {},
-                notebook_path=notebook_path,
-                version=version,
-                domain_knowledge=domain_knowledge,
-                model=self.model,
-            )
+            async def _revision_coro(buf):
+                return await run_scientist_revision(
+                    original_plan=plan,
+                    debate_transcript=all_transcript,
+                    analysis=analysis or {},
+                    notebook_path=notebook_path,
+                    version=version,
+                    domain_knowledge=domain_knowledge,
+                    model=self.model,
+                    message_buffer=buf,
+                )
+
+            revised = await self._with_summaries(_revision_coro, "Scientist Revision", [])
 
             # Write revised notebook entry
             if revised.get("notebook_entry"):
                 with notebook_path.open("a") as f:
                     f.write(revised["notebook_entry"] + "\n\n---\n\n")
 
-            print(f"  REVISE: strategy={revised.get('strategy', '?')}")
+            print_step(f"  REVISE: strategy={revised.get('strategy', '?')}")
             return revised
         except Exception as e:
-            print(f"  REVISE: error - {e}, using original plan")
+            print_step(f"  REVISE: error - {e}, using original plan")
             return None
 
     async def _run_coder(self, plan: dict | None) -> Path | None:
@@ -410,7 +476,7 @@ class Orchestrator:
         from auto_scientist.agents.coder import run_coder
 
         if plan is None:
-            print("  IMPLEMENT: skipped (no plan)")
+            print_step("  IMPLEMENT: skipped (no plan)")
             return None
 
         version = f"v{self.state.iteration:02d}"
@@ -424,21 +490,25 @@ class Orchestrator:
         else:
             previous_script = Path("nonexistent")
 
-        print(f"  IMPLEMENT: coder writing {version}")
+        print_step(f"  IMPLEMENT: coder writing {version}")
         try:
-            new_script = await run_coder(
-                plan=plan,
-                previous_script=previous_script,
-                output_dir=self.output_dir,
-                version=version,
-                domain_knowledge=domain_knowledge,
-                data_path=data_path,
-                model=self.model,
-            )
-            print(f"  IMPLEMENT: created {new_script}")
+            async def _coder_coro(buf):
+                return await run_coder(
+                    plan=plan,
+                    previous_script=previous_script,
+                    output_dir=self.output_dir,
+                    version=version,
+                    domain_knowledge=domain_knowledge,
+                    data_path=data_path,
+                    model=self.model,
+                    message_buffer=buf,
+                )
+
+            new_script = await self._with_summaries(_coder_coro, "Coder", [])
+            print_step(f"  IMPLEMENT: created {new_script}")
             return new_script
         except Exception as e:
-            print(f"  IMPLEMENT: error - {e}")
+            print_step(f"  IMPLEMENT: error - {e}")
             self.state.record_failure()
             return None
 
@@ -503,9 +573,9 @@ class Orchestrator:
 
         valid, error = validate_syntax(script_path)
         if not valid:
-            print(f"  VALIDATE: syntax error - {error}")
+            print_step(f"  VALIDATE: syntax error - {error}")
         else:
-            print("  VALIDATE: syntax OK")
+            print_step("  VALIDATE: syntax OK")
         return valid
 
     async def _run_experiment(self, script_path: Path | None) -> RunResult | None:
@@ -513,7 +583,7 @@ class Orchestrator:
         from auto_scientist.runner import run_experiment
 
         if script_path is None:
-            print("  RUN: skipped (no script)")
+            print_step("  RUN: skipped (no script)")
             return None
 
         command = "uv run {script_path}"
@@ -525,7 +595,7 @@ class Orchestrator:
             cwd = self.config.run_cwd
             timeout = self.config.run_timeout_minutes
 
-        print(f"  RUN: executing {script_path.name} (timeout {timeout}m)")
+        print_step(f"  RUN: executing {script_path.name} (timeout {timeout}m)")
         result = await run_experiment(
             script_path=script_path,
             command_template=command,
@@ -534,16 +604,16 @@ class Orchestrator:
         )
 
         if result.timed_out:
-            print(f"  RUN: timed out after {timeout} minutes")
+            print_step(f"  RUN: timed out after {timeout} minutes")
         elif not result.success:
-            print(f"  RUN: failed (rc={result.return_code})")
+            print_step(f"  RUN: failed (rc={result.return_code})")
             if result.stderr:
                 # Print last few lines of stderr
                 stderr_lines = result.stderr.strip().split("\n")
                 for line in stderr_lines[-5:]:
-                    print(f"  RUN: {line}")
+                    print_step(f"  RUN: {line}")
         else:
-            print(f"  RUN: success ({len(result.output_files)} output files)")
+            print_step(f"  RUN: success ({len(result.output_files)} output files)")
 
         # Save stdout to results file
         if result.stdout:
@@ -584,14 +654,18 @@ class Orchestrator:
 
         notebook_path = self.output_dir / "lab_notebook.md"
 
-        print("\nREPORT phase: generating final summary")
+        print_step("\nREPORT phase: generating final summary")
         try:
-            report_path = await run_report(
-                state=self.state,
-                notebook_path=notebook_path,
-                output_dir=self.output_dir,
-                model=self.model,
-            )
-            print(f"REPORT: written to {report_path}")
+            async def _report_coro(buf):
+                return await run_report(
+                    state=self.state,
+                    notebook_path=notebook_path,
+                    output_dir=self.output_dir,
+                    model=self.model,
+                    message_buffer=buf,
+                )
+
+            report_path = await self._with_summaries(_report_coro, "Report", [])
+            print_step(f"REPORT: written to {report_path}")
         except Exception as e:
-            print(f"REPORT: error - {e}")
+            print_step(f"REPORT: error - {e}")

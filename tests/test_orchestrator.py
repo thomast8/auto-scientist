@@ -1290,3 +1290,195 @@ class TestRunIngestionFull:
 
         captured = capsys.readouterr()
         assert "data.csv" in captured.out
+
+
+class TestSummaryIntegration:
+    def test_summary_model_defaults_to_none(self, base_state, tmp_path):
+        o = Orchestrator(state=base_state, data_path=tmp_path, output_dir=tmp_path)
+        assert o.summary_model is None
+
+    def test_summary_model_set(self, base_state, tmp_path):
+        o = Orchestrator(
+            state=base_state, data_path=tmp_path, output_dir=tmp_path,
+            summary_model="gpt-4o-mini",
+        )
+        assert o.summary_model == "gpt-4o-mini"
+
+    @pytest.mark.asyncio
+    async def test_no_summary_when_model_none(self, tmp_path):
+        """When summary_model is None, summarizer is never called."""
+        state = ExperimentState(
+            domain="test", goal="g", phase="iteration", iteration=0,
+        )
+        o = Orchestrator(
+            state=state, data_path=tmp_path, output_dir=tmp_path,
+            max_iterations=1,
+        )
+        o.config = DomainConfig(name="t", description="d", data_paths=[])
+        o.output_dir.mkdir(parents=True, exist_ok=True)
+
+        plan = {"should_stop": False, "hypothesis": "test"}
+        script_path = tmp_path / "v00" / "experiment.py"
+        script_path.parent.mkdir(parents=True, exist_ok=True)
+        script_path.write_text("print('hi')")
+        run_result = RunResult(success=True, stdout="ok", return_code=0)
+
+        with (
+            patch("auto_scientist.orchestrator.wait_for_window", new_callable=AsyncMock),
+            patch.object(o, "_run_analyst", new_callable=AsyncMock, return_value={}),
+            patch.object(o, "_run_scientist_plan", new_callable=AsyncMock, return_value=plan),
+            patch.object(o, "_run_coder", new_callable=AsyncMock, return_value=script_path),
+            patch.object(o, "_validate_script", new_callable=AsyncMock, return_value=True),
+            patch.object(o, "_run_experiment", new_callable=AsyncMock, return_value=run_result),
+            patch.object(o, "_apply_criteria_updates"),
+            patch.object(o, "_run_report", new_callable=AsyncMock),
+            patch("auto_scientist.orchestrator.run_with_summaries", new_callable=AsyncMock) as mock_rws,
+        ):
+            await o.run()
+
+        mock_rws.assert_not_called()
+
+    @pytest.mark.asyncio
+    async def test_summaries_in_iteration(self, tmp_path):
+        """When summary_model is set, run_with_summaries is called for agent steps."""
+        state = ExperimentState(
+            domain="test", goal="g", phase="iteration", iteration=0,
+        )
+        o = Orchestrator(
+            state=state, data_path=tmp_path, output_dir=tmp_path,
+            max_iterations=1, summary_model="gpt-4o-mini",
+        )
+        o.config = DomainConfig(name="t", description="d", data_paths=[])
+        o.output_dir.mkdir(parents=True, exist_ok=True)
+
+        plan = {"should_stop": False, "hypothesis": "test"}
+        script_path = tmp_path / "v00" / "experiment.py"
+        script_path.parent.mkdir(parents=True, exist_ok=True)
+        script_path.write_text("print('hi')")
+        run_result = RunResult(success=True, stdout="ok", return_code=0)
+
+        async def rws_passthrough(coro_fn, *args, **kwargs):
+            buf = kwargs.get("message_buffer", [])
+            return await coro_fn(buf)
+
+        with (
+            patch("auto_scientist.orchestrator.wait_for_window", new_callable=AsyncMock),
+            patch("auto_scientist.agents.analyst.run_analyst", new_callable=AsyncMock, return_value={}),
+            patch("auto_scientist.agents.scientist.run_scientist", new_callable=AsyncMock, return_value=plan),
+            patch("auto_scientist.agents.coder.run_coder", new_callable=AsyncMock, return_value=script_path),
+            patch.object(o, "_validate_script", new_callable=AsyncMock, return_value=True),
+            patch.object(o, "_run_experiment", new_callable=AsyncMock, return_value=run_result),
+            patch.object(o, "_apply_criteria_updates"),
+            patch.object(o, "_run_report", new_callable=AsyncMock),
+            patch("auto_scientist.orchestrator.run_with_summaries", new_callable=AsyncMock) as mock_rws,
+        ):
+            # Make run_with_summaries pass through to the actual coroutine
+            mock_rws.side_effect = rws_passthrough
+            await o.run()
+
+        # Should have been called for analyst, scientist, coder at minimum
+        assert mock_rws.call_count >= 3
+
+    @pytest.mark.asyncio
+    async def test_results_summary_after_run(self, orchestrator, tmp_path):
+        """After successful experiment, results.txt should be summarized."""
+        orchestrator.output_dir.mkdir(parents=True, exist_ok=True)
+        orchestrator.summary_model = "gpt-4o-mini"
+        orchestrator.state.phase = "iteration"
+        orchestrator.state.iteration = 0
+
+        plan = {"should_stop": False, "hypothesis": "test"}
+        script_path = tmp_path / "experiments" / "v00" / "experiment.py"
+        script_path.parent.mkdir(parents=True, exist_ok=True)
+        script_path.write_text("print('hi')")
+
+        results_path = script_path.parent / "results.txt"
+
+        run_result = RunResult(success=True, stdout="R2=0.82", return_code=0)
+
+        with (
+            patch.object(orchestrator, "_run_analyst", new_callable=AsyncMock, return_value={}),
+            patch.object(orchestrator, "_run_scientist_plan", new_callable=AsyncMock, return_value=plan),
+            patch.object(orchestrator, "_run_coder", new_callable=AsyncMock, return_value=script_path),
+            patch.object(orchestrator, "_validate_script", new_callable=AsyncMock, return_value=True),
+            patch.object(orchestrator, "_run_experiment", new_callable=AsyncMock, return_value=run_result) as mock_run,
+            patch.object(orchestrator, "_apply_criteria_updates"),
+            patch("auto_scientist.orchestrator.summarize_results", new_callable=AsyncMock, return_value="Good results") as mock_sr,
+            patch("auto_scientist.orchestrator.print_summary"),
+        ):
+            # Simulate _run_experiment writing results.txt
+            async def run_and_write(*args, **kwargs):
+                results_path.write_text("R2=0.82")
+                return run_result
+            mock_run.side_effect = run_and_write
+            await orchestrator._run_iteration_body()
+
+        mock_sr.assert_called_once()
+
+    @pytest.mark.asyncio
+    async def test_circuit_breaker(self, orchestrator, tmp_path):
+        """After auth error in summary, subsequent summaries should be skipped."""
+        orchestrator.output_dir.mkdir(parents=True, exist_ok=True)
+        orchestrator.summary_model = "gpt-4o-mini"
+        orchestrator.state.phase = "iteration"
+        orchestrator.state.iteration = 0
+
+        plan = {"should_stop": False, "hypothesis": "test"}
+        script_path = tmp_path / "experiments" / "v00" / "experiment.py"
+        script_path.parent.mkdir(parents=True, exist_ok=True)
+        script_path.write_text("print('hi')")
+        run_result = RunResult(success=True, stdout="ok", return_code=0)
+
+        call_count = 0
+
+        async def rws_fail_first(coro_fn, agent_name, *args, **kwargs):
+            nonlocal call_count
+            call_count += 1
+            if call_count == 1:
+                raise Exception("AuthenticationError: invalid key")
+            buf = kwargs.get("message_buffer", [])
+            return await coro_fn(buf)
+
+        with (
+            patch("auto_scientist.agents.analyst.run_analyst", new_callable=AsyncMock, return_value={}),
+            patch("auto_scientist.agents.scientist.run_scientist", new_callable=AsyncMock, return_value=plan),
+            patch("auto_scientist.agents.coder.run_coder", new_callable=AsyncMock, return_value=script_path),
+            patch.object(orchestrator, "_validate_script", new_callable=AsyncMock, return_value=True),
+            patch.object(orchestrator, "_run_experiment", new_callable=AsyncMock, return_value=run_result),
+            patch.object(orchestrator, "_apply_criteria_updates"),
+            patch("auto_scientist.orchestrator.run_with_summaries", new_callable=AsyncMock, side_effect=rws_fail_first),
+        ):
+            await orchestrator._run_iteration_body()
+
+        assert orchestrator._summaries_disabled is True
+
+    @pytest.mark.asyncio
+    async def test_summary_failure_does_not_break(self, orchestrator, tmp_path):
+        """Summary failure should not break the pipeline."""
+        orchestrator.output_dir.mkdir(parents=True, exist_ok=True)
+        orchestrator.summary_model = "gpt-4o-mini"
+        orchestrator.state.phase = "iteration"
+        orchestrator.state.iteration = 0
+
+        plan = {"should_stop": False, "hypothesis": "test"}
+        script_path = tmp_path / "experiments" / "v00" / "experiment.py"
+        script_path.parent.mkdir(parents=True, exist_ok=True)
+        script_path.write_text("print('hi')")
+        run_result = RunResult(success=True, stdout="ok", return_code=0)
+
+        async def rws_always_fail(coro_fn, *args, **kwargs):
+            raise RuntimeError("Summary API down")
+
+        with (
+            patch("auto_scientist.agents.analyst.run_analyst", new_callable=AsyncMock, return_value={}),
+            patch("auto_scientist.agents.scientist.run_scientist", new_callable=AsyncMock, return_value=plan),
+            patch("auto_scientist.agents.coder.run_coder", new_callable=AsyncMock, return_value=script_path),
+            patch.object(orchestrator, "_validate_script", new_callable=AsyncMock, return_value=True),
+            patch.object(orchestrator, "_run_experiment", new_callable=AsyncMock, return_value=run_result),
+            patch.object(orchestrator, "_apply_criteria_updates"),
+            patch("auto_scientist.orchestrator.run_with_summaries", new_callable=AsyncMock, side_effect=rws_always_fail),
+        ):
+            await orchestrator._run_iteration_body()
+
+        # Pipeline should complete despite summary failures
+        assert orchestrator.state.iteration == 1
