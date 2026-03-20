@@ -1,6 +1,7 @@
 """Subprocess experiment runner with syntax validation and timeout."""
 
 import asyncio
+import os
 import subprocess
 import sys
 from pathlib import Path
@@ -54,12 +55,15 @@ async def run_experiment(
     cmd = command_template.format(script_path=str(script_path))
     parts = cmd.split()
 
+    env = {**os.environ, "PYTHONUNBUFFERED": "1"}
+
     try:
         process = await asyncio.create_subprocess_exec(
             *parts,
             stdout=asyncio.subprocess.PIPE,
             stderr=asyncio.subprocess.PIPE,
             cwd=cwd,
+            env=env,
         )
 
         try:

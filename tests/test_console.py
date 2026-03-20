@@ -11,6 +11,7 @@ from auto_scientist.console import (
     YELLOW,
     _color_for_label,
     make_stream_printer,
+    print_summary,
     stream_separator,
 )
 
@@ -33,6 +34,9 @@ class TestColorForLabel:
 
     def test_report_gets_blue(self):
         assert _color_for_label("Report generation") == BLUE
+
+    def test_debate_gets_yellow(self):
+        assert _color_for_label("Debate") == YELLOW
 
     def test_unknown_falls_back_to_cyan(self):
         assert _color_for_label("Unknown agent") == CYAN
@@ -78,6 +82,58 @@ class TestMakeStreamPrinter:
         assert "\033[" not in captured.out
         assert "Test" in captured.out
         assert "token" in captured.out
+
+
+class TestPrintSummary:
+    def test_with_label(self, capsys):
+        print_summary("Analyst", "Found key metrics.", label="done")
+        captured = capsys.readouterr()
+        assert "> [done] " in captured.out
+        assert "Found key metrics." in captured.out
+
+    def test_without_label(self, capsys):
+        with patch.dict(os.environ, {"NO_COLOR": "1"}):
+            print_summary("Results", "R2=0.82 on test set.")
+        captured = capsys.readouterr()
+        assert "> R2=0.82" in captured.out
+        # No brackets when label is empty (check without ANSI codes)
+        assert "[" not in captured.out
+
+    def test_wraps_long_lines(self, capsys):
+        long_text = "x" * 150
+        print_summary("Analyst", long_text, label="done")
+        captured = capsys.readouterr()
+        lines = captured.out.strip().split("\n")
+        # Should have wrapped into multiple lines
+        assert len(lines) > 1
+        # Continuation lines should start with >
+        for line in lines[1:]:
+            stripped = line.lstrip()
+            assert stripped.startswith(">")
+
+    def test_uses_agent_color(self, capsys):
+        print_summary("Analyst", "test summary", label="done")
+        captured = capsys.readouterr()
+        assert GREEN in captured.out
+
+    def test_empty_prints_nothing(self, capsys):
+        print_summary("Analyst", "")
+        captured = capsys.readouterr()
+        assert captured.out == ""
+
+    def test_no_color_env(self, capsys):
+        with patch.dict(os.environ, {"NO_COLOR": "1"}):
+            print_summary("Analyst", "test summary", label="done")
+        captured = capsys.readouterr()
+        assert "\033[" not in captured.out
+        assert "[done]" in captured.out
+
+    def test_truncates_long_summary(self, capsys):
+        long_text = "a" * 500
+        print_summary("Analyst", long_text, label="done")
+        captured = capsys.readouterr()
+        # The full 500 chars should not appear
+        assert "a" * 500 not in captured.out
 
 
 class TestStreamSeparator:

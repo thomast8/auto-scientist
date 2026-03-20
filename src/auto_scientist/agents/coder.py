@@ -32,7 +32,6 @@ async def run_coder(
     version: str,
     domain_knowledge: str = "",
     data_path: str = "",
-    experiment_dependencies: list[str] | None = None,
     model: str | None = None,
 ) -> Path:
     """Implement the scientist's plan as a runnable experiment script.
@@ -44,7 +43,6 @@ async def run_coder(
         version: Version string for the new experiment (e.g., 'v01').
         domain_knowledge: Domain-specific context.
         data_path: Absolute path to the dataset.
-        experiment_dependencies: List of pip package specs available to the script.
 
     Returns:
         Path to the newly created experiment script.
@@ -62,15 +60,7 @@ async def run_coder(
     else:
         previous_script_section = CODER_NO_PREVIOUS
 
-    # Format dependencies
-    if experiment_dependencies:
-        deps_str = ", ".join(experiment_dependencies)
-    else:
-        deps_str = "numpy, scipy, matplotlib, loguru"
-
-    # Format the system prompt with dependencies and data path
     system_prompt = CODER_SYSTEM.format(
-        experiment_dependencies=deps_str,
         data_path=data_path or "(not specified)",
     )
 

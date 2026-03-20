@@ -65,14 +65,13 @@ analysis. You write a conversion script for auditability.
    - name: short lowercase name derived from the goal
    - description: one-line description of the domain
    - data_paths: paths to the canonical data files you just created
-   - run_command: "uv run python -u {script_path}" (default)
+   - run_command: MUST be exactly the literal string "uv run {script_path}"
+     including the curly braces. The orchestrator substitutes {script_path}
+     at runtime. Do NOT replace {script_path} with an actual path.
    - run_cwd: "." (default)
    - run_timeout_minutes: 120 (default, adjust for large datasets)
    - protected_paths: the canonical data directory (experiments must not
      modify it)
-   - experiment_dependencies: Python packages likely needed based on the data
-     format (e.g., pandas for CSV, scipy for numerical work, matplotlib for
-     plots)
 </instructions>
 
 <scope_boundary>

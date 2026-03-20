@@ -1,6 +1,6 @@
 """Domain configuration schema."""
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, field_validator
 
 
 class SuccessCriterion(BaseModel):
@@ -24,9 +24,17 @@ class DomainConfig(BaseModel):
     name: str
     description: str
     data_paths: list[str]
-    run_command: str = "uv run python -u {script_path}"
+    run_command: str = "uv run {script_path}"
     run_cwd: str = "."
+
+    @field_validator("run_command")
+    @classmethod
+    def run_command_must_contain_placeholder(cls, v: str) -> str:
+        if "{script_path}" not in v:
+            raise ValueError(
+                f"run_command must contain '{{script_path}}' placeholder, got: {v}"
+            )
+        return v
     run_timeout_minutes: int = 120
     version_prefix: str = "v"
     protected_paths: list[str] = Field(default_factory=list)
-    experiment_dependencies: list[str] = Field(default_factory=list)

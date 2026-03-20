@@ -416,7 +416,6 @@ class Orchestrator:
         version = f"v{self.state.iteration:02d}"
         domain_knowledge = self.state.domain_knowledge
         data_path = self.state.data_path or ""
-        deps = self.config.experiment_dependencies if self.config else []
 
         # On iteration 0 (no previous versions), use a nonexistent path
         if self.state.versions:
@@ -434,7 +433,6 @@ class Orchestrator:
                 version=version,
                 domain_knowledge=domain_knowledge,
                 data_path=data_path,
-                experiment_dependencies=deps,
                 model=self.model,
             )
             print(f"  IMPLEMENT: created {new_script}")
@@ -518,7 +516,7 @@ class Orchestrator:
             print("  RUN: skipped (no script)")
             return None
 
-        command = "uv run python -u {script_path}"
+        command = "uv run {script_path}"
         cwd = "."
         timeout = 120
 

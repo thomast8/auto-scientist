@@ -168,7 +168,7 @@ The Critic and Scientist debate strategy on equal footing with symmetric context
 
 **Runner** (Phase 2, step 7):
 - Plain Python `asyncio.create_subprocess_exec`
-- Runs: domain-configured command (e.g., `uv run python -u {script_path}`)
+- Runs: domain-configured command (e.g., `uv run {script_path}`)
 - Captures: stdout to results file, checks for output plots
 - `results.txt` is compiled by the experiment script itself via print statements.
   The Coder writes scripts that print structured output (approach spec, parameters,
@@ -302,12 +302,11 @@ class DomainConfig(BaseModel):
     name: str
     description: str
     data_paths: list[str]
-    run_command: str                          # e.g., "uv run python -u {script_path}"
+    run_command: str                          # e.g., "uv run {script_path}"
     run_cwd: str
     run_timeout_minutes: int = 120
     version_prefix: str = "v"
     protected_paths: list[str] = []
-    experiment_dependencies: list[str] = []
 ```
 
 ### ExperimentState

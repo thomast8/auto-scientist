@@ -702,7 +702,7 @@ Only agent that reads or writes Python code.">
 
         <!-- Runner -->
         <g class="agent-group" data-agent="runner"
-           data-tooltip="Runner (subprocess)|No LLM. Runs: uv run python -u {script_path}. Captures stdout to results.txt, discovers output plot PNGs.
+           data-tooltip="Runner (subprocess)|No LLM. Runs: uv run {script_path}. Captures stdout to results.txt, discovers output plot PNGs.
 
 The script itself prints structured output via print statements. No LLM post-processing of results.
 Timeout: configurable (default 120 min).">
@@ -1353,7 +1353,7 @@ Never modifies original data. Logs assumptions to the lab notebook.">
         </div>
       </div>
       <div class="agent-detail">
-        Runs <code>uv run python -u {script_path}</code>. Captures stdout to results.txt.
+        Runs <code>uv run {script_path}</code>. Captures stdout to results.txt.
         The script itself prints structured output (approach spec, parameters, metrics).
       </div>
       <div class="data-section">

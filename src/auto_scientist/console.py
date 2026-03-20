@@ -2,6 +2,7 @@
 
 import os
 import sys
+import textwrap
 from collections.abc import Callable
 
 BOLD = "\033[1m"
@@ -22,6 +23,7 @@ AGENT_COLORS = {
     "Coder": MAGENTA,
     "Ingestor": GREEN,
     "Report": BLUE,
+    "Debate": YELLOW,
 }
 
 
@@ -60,4 +62,45 @@ def make_stream_printer(label: str) -> Callable[[str], None]:
 def stream_separator() -> None:
     """Print a separator after a streamed response completes."""
     sys.stdout.write("\n\n")
+    sys.stdout.flush()
+
+
+def print_summary(agent_name: str, summary: str, label: str = "") -> None:
+    """Print a formatted summary line for an agent.
+
+    Args:
+        agent_name: Agent name (used for color lookup).
+        summary: Summary text to print.
+        label: Optional label like "15s", "done", or "" (for results).
+    """
+    if not summary:
+        return
+
+    use_color = _use_color()
+    color = AGENT_COLORS.get(agent_name, CYAN)
+
+    # Truncate at 300 chars
+    if len(summary) > 300:
+        summary = summary[:300]
+
+    # Build prefix
+    if label:
+        prefix = f"  > [{label}] "
+    else:
+        prefix = "  > "
+
+    continuation = "  > "
+
+    # Wrap text
+    wrapped = textwrap.fill(
+        summary,
+        width=70,
+        initial_indent=prefix,
+        subsequent_indent=continuation,
+    )
+
+    if use_color:
+        sys.stdout.write(f"{color}{wrapped}{RESET}\n")
+    else:
+        sys.stdout.write(f"{wrapped}\n")
     sys.stdout.flush()

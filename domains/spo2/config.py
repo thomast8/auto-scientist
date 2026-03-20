@@ -14,15 +14,9 @@ SPO2_CONFIG = DomainConfig(
         "Single subject, 5 breath-holds at different lung volumes."
     ),
     data_paths=["domains/spo2/seed/data/spo2.db"],
-    run_command="uv run python -u {script_path}",
+    run_command="uv run {script_path}",
     run_cwd=".",
     run_timeout_minutes=120,
     version_prefix="v",
     protected_paths=["domains/spo2/seed/data/"],
-    experiment_dependencies=[
-        "scipy>=1.14.0",
-        "numpy>=2.1.0",
-        "matplotlib>=3.10.0",
-        "loguru>=0.7.3",
-    ],
 )

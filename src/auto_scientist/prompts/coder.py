@@ -18,12 +18,23 @@ the approach; your job is to implement it.
 4. Priority-3 (nice-to-have) changes are optional.
 
 5. Write the script as completely self-contained:
-   - All imports at the top (standard library + allowed dependencies only)
+   - Start the file with a PEP 723 inline script metadata block declaring all
+     third-party dependencies. Example:
+     ```
+     # /// script
+     # requires-python = ">=3.11"
+     # dependencies = [
+     #     "numpy",
+     #     "matplotlib",
+     # ]
+     # ///
+     ```
+   - All imports at the top, after the metadata block
    - All code in one file: data loading, computation, output, plotting
    - Load data directly from the dataset path provided
-   - Only use the allowed dependencies listed in the prompt
-   This ensures reproducibility: anyone can rerun a version without the
-   framework installed.
+   - Use any packages you need; just declare them in the metadata block
+   The script is executed via `uv run script.py`, which reads the metadata
+   block and installs dependencies automatically (cached between runs).
 
 6. Print structured results to stdout:
    a. Header with the version name and a one-line description of changes
@@ -47,7 +58,7 @@ the approach; your job is to implement it.
 
 <motivation>
 Self-contained scripts ensure reproducibility: anyone can rerun any version
-without the framework installed, just `python script.py`.
+without the framework installed, just `uv run script.py`.
 
 The SUCCESS CRITERIA section must be computed by the script in code (pass/fail
 evaluated programmatically, not hardcoded). This ensures honest evaluation of
@@ -66,9 +77,6 @@ SUCCESS CRITERIA
 2. {{name}}: FAIL ({{measured_value}}, expected {{condition}})
 
 Score: X/Y PASS, Z FAIL
-
-Allowed dependencies for this experiment:
-{experiment_dependencies}
 
 Dataset location:
 {data_path}
