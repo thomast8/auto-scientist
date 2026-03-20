@@ -4,6 +4,9 @@ import asyncio
 from pathlib import Path
 
 import click
+from dotenv import load_dotenv
+
+load_dotenv()
 
 from auto_scientist.orchestrator import Orchestrator
 from auto_scientist.state import ExperimentState
