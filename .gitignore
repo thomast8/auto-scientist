@@ -33,4 +33,8 @@ uv.lock
 # Environment variables
 .env
 .env.local
+
+# Tool config (GitNexus, Claude Code, design docs)
 .gitnexus
+.claude/
+.design/
