@@ -20,7 +20,6 @@ AGENT_COLORS = {
     "Scientist": CYAN,
     "Analyst": GREEN,
     "Coder": MAGENTA,
-    "Discovery": BLUE,
     "Ingestor": GREEN,
     "Report": BLUE,
 }

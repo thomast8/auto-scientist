@@ -50,7 +50,7 @@ class Orchestrator:
         state_path = self.output_dir / "state.json"
 
         model_label = self.model or "(SDK default)"
-        print(f"Auto-Scientist starting")
+        print("Auto-Scientist starting")
         print(f"  Model:      {model_label}")
         print(f"  Output:     {self.output_dir}")
         print(f"  Goal:       {self.state.goal[:80]}{'...' if len(self.state.goal) > 80 else ''}")
@@ -136,7 +136,7 @@ class Orchestrator:
 
         # Summary
         data_files = sorted(canonical_data_dir.iterdir())
-        print(f"\nINGESTION complete:")
+        print("\nINGESTION complete:")
         for f in data_files:
             print(f"  {f}")
         print()
@@ -211,9 +211,12 @@ class Orchestrator:
             print(f"  Score:      {version_entry.score}")
         print(f"  Best:       {self.state.best_version} (score {self.state.best_score})")
         if version_dir and version_dir.exists():
-            artifacts = sorted(f for f in version_dir.iterdir() if f.suffix in (".png", ".txt", ".json"))
+            suffixes = (".png", ".txt", ".json")
+            artifacts = sorted(
+                f for f in version_dir.iterdir() if f.suffix in suffixes
+            )
             if artifacts:
-                print(f"  Outputs:")
+                print("  Outputs:")
                 for f in artifacts:
                     print(f"    {f}")
 
@@ -232,7 +235,7 @@ class Orchestrator:
         notebook_path = self.output_dir / "lab_notebook.md"
         domain_knowledge = self.state.domain_knowledge
 
-        print(f"  ANALYZE: initial data characterization")
+        print("  ANALYZE: initial data characterization")
         try:
             analysis = await run_analyst(
                 results_path=None,
@@ -243,7 +246,7 @@ class Orchestrator:
                 data_dir=self.data_path,
                 model=self.model,
             )
-            print(f"  ANALYZE: data characterization complete")
+            print("  ANALYZE: data characterization complete")
             return analysis
         except Exception as e:
             print(f"  ANALYZE: error - {e}")

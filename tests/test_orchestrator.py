@@ -1,6 +1,5 @@
 """Tests for the orchestrator state machine."""
 
-from pathlib import Path
 from unittest.mock import AsyncMock, patch
 
 import pytest
@@ -249,8 +248,13 @@ class TestIteration0:
                           return_value={"success_score": None}),
             patch.object(orchestrator, "_run_scientist_plan", new_callable=AsyncMock,
                           return_value=plan),
-            patch.object(orchestrator, "_run_debate", new_callable=AsyncMock) as mock_debate,
-            patch.object(orchestrator, "_run_scientist_revision", new_callable=AsyncMock) as mock_revision,
+            patch.object(
+                orchestrator, "_run_debate", new_callable=AsyncMock,
+            ) as mock_debate,
+            patch.object(
+                orchestrator, "_run_scientist_revision",
+                new_callable=AsyncMock,
+            ) as mock_revision,
             patch.object(orchestrator, "_run_coder", new_callable=AsyncMock,
                           return_value=script_path),
             patch.object(orchestrator, "_validate_script", new_callable=AsyncMock,
@@ -278,13 +282,34 @@ class TestIteration0:
         run_result = RunResult(success=True, stdout="ok", return_code=0)
 
         with (
-            patch.object(orchestrator, "_run_analyst", new_callable=AsyncMock, return_value={}),
-            patch.object(orchestrator, "_run_scientist_plan", new_callable=AsyncMock, return_value=plan),
-            patch.object(orchestrator, "_run_debate", new_callable=AsyncMock),
-            patch.object(orchestrator, "_run_scientist_revision", new_callable=AsyncMock, return_value=None),
-            patch.object(orchestrator, "_run_coder", new_callable=AsyncMock, return_value=script_path),
-            patch.object(orchestrator, "_validate_script", new_callable=AsyncMock, return_value=True),
-            patch.object(orchestrator, "_run_experiment", new_callable=AsyncMock, return_value=run_result),
+            patch.object(
+                orchestrator, "_run_analyst",
+                new_callable=AsyncMock, return_value={},
+            ),
+            patch.object(
+                orchestrator, "_run_scientist_plan",
+                new_callable=AsyncMock, return_value=plan,
+            ),
+            patch.object(
+                orchestrator, "_run_debate",
+                new_callable=AsyncMock,
+            ),
+            patch.object(
+                orchestrator, "_run_scientist_revision",
+                new_callable=AsyncMock, return_value=None,
+            ),
+            patch.object(
+                orchestrator, "_run_coder",
+                new_callable=AsyncMock, return_value=script_path,
+            ),
+            patch.object(
+                orchestrator, "_validate_script",
+                new_callable=AsyncMock, return_value=True,
+            ),
+            patch.object(
+                orchestrator, "_run_experiment",
+                new_callable=AsyncMock, return_value=run_result,
+            ),
             patch.object(orchestrator, "_apply_criteria_updates"),
         ):
             await orchestrator._run_iteration_body()
@@ -415,7 +440,8 @@ class TestDomainKnowledgeSourcing:
 
         # The orchestrator should check for domain_knowledge in result
         # This is tested via the orchestrator's iteration body
-        assert result.get("domain_knowledge") == "Environmental sensor data with temperature readings"
+        expected = "Environmental sensor data with temperature readings"
+        assert result.get("domain_knowledge") == expected
 
 
 class TestRunIteration:
@@ -434,8 +460,14 @@ class TestRunIteration:
         plan = {"should_stop": True, "stop_reason": "goal reached"}
 
         with (
-            patch.object(orchestrator, "_run_analyst", new_callable=AsyncMock, return_value={}),
-            patch.object(orchestrator, "_run_scientist_plan", new_callable=AsyncMock, return_value=plan),
+            patch.object(
+                orchestrator, "_run_analyst",
+                new_callable=AsyncMock, return_value={},
+            ),
+            patch.object(
+                orchestrator, "_run_scientist_plan",
+                new_callable=AsyncMock, return_value=plan,
+            ),
             patch.object(orchestrator, "_apply_criteria_updates"),
         ):
             await orchestrator._run_iteration_body()
@@ -464,13 +496,34 @@ class TestRunIteration:
         run_result = RunResult(success=True, stdout="ok", return_code=0)
 
         with (
-            patch.object(orchestrator, "_run_analyst", new_callable=AsyncMock, return_value={}),
-            patch.object(orchestrator, "_run_scientist_plan", new_callable=AsyncMock, return_value=plan),
-            patch.object(orchestrator, "_run_debate", new_callable=AsyncMock, return_value=None) as mock_debate,
-            patch.object(orchestrator, "_run_scientist_revision", new_callable=AsyncMock, return_value=None),
-            patch.object(orchestrator, "_run_coder", new_callable=AsyncMock, return_value=script_path),
-            patch.object(orchestrator, "_validate_script", new_callable=AsyncMock, return_value=True),
-            patch.object(orchestrator, "_run_experiment", new_callable=AsyncMock, return_value=run_result),
+            patch.object(
+                orchestrator, "_run_analyst",
+                new_callable=AsyncMock, return_value={},
+            ),
+            patch.object(
+                orchestrator, "_run_scientist_plan",
+                new_callable=AsyncMock, return_value=plan,
+            ),
+            patch.object(
+                orchestrator, "_run_debate",
+                new_callable=AsyncMock, return_value=None,
+            ) as mock_debate,
+            patch.object(
+                orchestrator, "_run_scientist_revision",
+                new_callable=AsyncMock, return_value=None,
+            ),
+            patch.object(
+                orchestrator, "_run_coder",
+                new_callable=AsyncMock, return_value=script_path,
+            ),
+            patch.object(
+                orchestrator, "_validate_script",
+                new_callable=AsyncMock, return_value=True,
+            ),
+            patch.object(
+                orchestrator, "_run_experiment",
+                new_callable=AsyncMock, return_value=run_result,
+            ),
             patch.object(orchestrator, "_apply_criteria_updates"),
         ):
             await orchestrator._run_iteration_body()

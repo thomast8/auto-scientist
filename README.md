@@ -4,9 +4,11 @@ Autonomous scientific investigation framework. Provide a dataset and problem sta
 
 ## How It Works
 
-1. **Discovery**: Explores your data, researches the domain, and designs a first approach
-2. **Iteration**: Runs an autonomous loop of analyze -> critique -> implement -> run
+1. **Ingestion**: Canonicalizes your raw data and produces operational config
+2. **Iteration**: Runs a unified loop: explore data -> define criteria -> analyze -> plan -> debate -> implement -> run
 3. **Report**: Generates a final summary of the best approach and key insights
+
+The iteration loop adapts based on what's available: iteration 0 explores the data, iteration 1 defines success criteria and the first hypothesis, and subsequent iterations do normal science with optional criteria revision.
 
 The system uses Claude (via claude-code-sdk) as the primary scientist, with optional multi-round critic-scientist debate (GPT, Gemini, or any supported model critiques; Claude defends; critic refines).
 
@@ -51,7 +53,7 @@ auto-scientist status --state experiments/state.json
 ## Adding a New Domain
 
 1. Copy `domains/example_template/` to `domains/your_domain/`
-2. Edit `config.py` with your DomainConfig (data paths, success criteria, run command)
+2. Edit `config.py` with your DomainConfig (data paths, run command, dependencies)
 3. Edit `prompts.py` with domain-specific knowledge for the agents
 4. Place seed data in `domains/your_domain/seed/data/`
 

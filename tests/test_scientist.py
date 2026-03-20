@@ -248,7 +248,10 @@ class TestRunScientistCriteriaRevision:
                  "metric_key": "r_squared", "condition": "> 0.85"},
             ],
             "criteria_revision": {
-                "changes": "Lowered R-squared target from 0.95 to 0.90 because noise floor limits achievable accuracy",
+                "changes": (
+                    "Lowered R-squared target from 0.95 to 0.90"
+                    " because noise floor limits achievable accuracy"
+                ),
                 "revised_criteria": [
                     {"name": "Final R-squared", "description": "Investigation goal",
                      "metric_key": "r_squared", "condition": "> 0.90"},

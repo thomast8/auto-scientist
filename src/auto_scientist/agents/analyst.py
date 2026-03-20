@@ -138,7 +138,11 @@ async def run_analyst(
             if results_path and results_path.exists()
             else "(no results file)"
         )
-        plot_list = "\n".join(f"- {p}" for p in plot_paths) if plot_paths else "(no plots available)"
+        plot_list = (
+            "\n".join(f"- {p}" for p in plot_paths)
+            if plot_paths
+            else "(no plots available)"
+        )
         data_section = (
             f"<results>{results_content}</results>\n"
             "<plots>\n"

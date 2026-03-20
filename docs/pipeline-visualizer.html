@@ -579,8 +579,6 @@
   <div class="flow-strip">
     <span class="step" style="color:var(--accent-cyan)">Ingestor</span>
     <span class="arrow">&rarr;</span>
-    <span class="step">Discovery</span>
-    <span class="arrow">&rarr;</span>
     <span class="step">Analyst</span>
     <span class="arrow">&rarr;</span>
     <span class="step">Scientist</span>
@@ -827,7 +825,7 @@ Example: ~500-2500 lines depending on complexity.">
         <!-- =============== PERSISTENT STORES (bottom, y=530) =============== -->
         <!-- Success Criteria -->
         <g class="artifact-node" data-artifact="criteria"
-           data-tooltip="success criteria (top-level)|Defined once by Discovery. Determines when the investigation is done.
+           data-tooltip="success criteria (top-level)|Defined by the Scientist on iteration 1, stored in ExperimentState. Determines when the investigation is done. May be revised by the Scientist on later iterations with justification.
 
 Example (from config.json):
 1. [REQUIRED] Overall R2 (metric: r2_mean, target: >= 0.95)
@@ -1183,7 +1181,7 @@ Never modifies original data. Logs assumptions to the lab notebook.">
         <div class="agent-icon">&#x1F4E5;</div>
         <div>
           <div class="agent-name">Ingestor</div>
-          <div class="agent-role">Phase 0. Canonicalizes raw data before Discovery.</div>
+          <div class="agent-role">Phase 0. Canonicalizes raw data and produces operational config.</div>
         </div>
       </div>
       <div class="agent-detail">

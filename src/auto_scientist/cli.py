@@ -36,7 +36,7 @@ def cli():
     help="Comma-separated critic models (e.g., 'openai:gpt-4o,google:gemini-2.5-pro')",
 )
 @click.option("--schedule", default=None, help="Time window for execution (e.g., '22:00-06:00')")
-@click.option("--interactive", is_flag=True, help="Enable interactive discovery mode")
+@click.option("--interactive", is_flag=True, help="Enable interactive mode")
 @click.option(
     "--debate-rounds",
     default=2,

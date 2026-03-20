@@ -10,7 +10,7 @@ The user has been manually iterating on SpO2 models (v5.x to v7.x, 18 versions) 
 - Fully autonomous by default (optional interactive mode)
 - LLM as scientist with full creative latitude (decides when to stop, when to pivot)
 - Multi-model debate (Claude plans, GPT/Gemini/other critiques the plan)
-- Three-phase flow: Discovery, Iteration, Report
+- Two-phase flow: Ingestion, Iteration (unified loop), Report
 - Four-agent iteration loop: Analyst (observe), Scientist (plan), Critic (challenge), Coder (implement)
 - Strict information boundaries: only the Coder sees Python code
 - Lab notebook as strategic journal; results.txt compiled by the script itself
@@ -22,34 +22,52 @@ The user has been manually iterating on SpO2 models (v5.x to v7.x, 18 versions) 
 
 ## Architecture
 
-### Three Phases
+### Two Phases
 
 ```
-Phase 1: DISCOVERY (autonomous, one-time)
+Phase 0: INGESTION (one-time)
   User provides: dataset path + problem statement
-  System: explores data, researches domain, designs first approach
-  Discovery -> Scientist (plans v00) -> Coder (implements v00)
+  Ingestor: canonicalizes raw data, produces slim DomainConfig
 
-Phase 2: ITERATION (autonomous loop)
-  [0] Synthesis (optional, every N iterations)
-      Condenses the lab notebook into a concise narrative for prompt injection.
-      Raw notebook stays on disk untouched.
+Phase 1: ITERATION (unified loop)
+  Every iteration follows: Analyst -> Scientist -> (Debate) -> Coder -> Run -> Evaluate
+  Behavior adapts based on what data is available:
+
+  Iteration 0 (exploration):
+    Analyst reads raw data files, produces data characterization
+    Scientist plans data exploration (distributions, baselines)
+    Debate skipped (nothing to challenge yet)
+    Coder implements exploration script
+
+  Iteration 1 (criteria definition):
+    Analyst reads exploration results + plots
+    Scientist defines top-level success criteria + first hypothesis
+    Debate challenges the plan
+    Coder implements first real experiment
+
+  Iteration 2+ (normal science):
+    Analyst reads results, evaluates against criteria
+    Scientist plans next hypothesis (may revise criteria)
+    Debate challenges the plan
+    Coder implements
 
   [1] Analyst Agent (Claude, read-only observer)
       Input: results text + plots + lab notebook + success criteria
+      (Iteration 0: raw data files instead of results)
       Output: structured JSON observation (score, criteria, metrics, observations)
+      (Iteration 0: also domain_knowledge, data_summary)
 
   [2] Scientist Agent (Claude, no tools, prompt-in/JSON-out)
-      Input: analysis JSON + lab notebook + domain knowledge
+      Input: analysis JSON + lab notebook + domain knowledge + success criteria
       Output: structured JSON plan (hypothesis, strategy, changes, notebook entry,
               per-iteration success criteria)
+      Optionally: top_level_criteria (iteration 1), criteria_revision (iteration 2+)
       Does NOT read Python code. Analysis + notebook is sufficient for planning.
-      Defines 3-8 testable predictions (success criteria) for each hypothesis.
 
   [3] Stop Check
       If Scientist sets should_stop=true, skip to Report phase
 
-  [4] Critic-Scientist Debate (configurable rounds, default 2)
+  [4] Critic-Scientist Debate (skipped on iteration 0)
       Round 1: Critic (GPT/Gemini/other) critiques the Scientist's plan
       Round 2+: Scientist (Claude API) responds, Critic refines
       Input: plan JSON + lab notebook + domain knowledge
@@ -72,7 +90,7 @@ Phase 2: ITERATION (autonomous loop)
 
   Loop back to [1]
 
-Phase 3: REPORT (one-time)
+Phase 2: REPORT (one-time)
   Generates final summary: best approach, journey, recommendations
 ```
 
@@ -80,13 +98,13 @@ Phase 3: REPORT (one-time)
 
 A core design principle: each agent sees only the information relevant to its role.
 
-| Agent | Sees code? | Sees analysis JSON? | Sees notebook? | Has web search? |
-|-------|-----------|-------------------|---------------|----------------|
-| Analyst | No | Produces it | Yes | No |
-| Scientist | No | Yes (input) | Yes | No |
-| Critic | No | No | Yes | Yes |
-| Scientist (debate) | No | No | Yes | Yes |
-| Coder | Yes (only agent) | No | No | No |
+| Agent | Sees code? | Sees analysis JSON? | Sees notebook? | Has tools? |
+|-------|-----------|-------------------|---------------|------------|
+| Ingestor | No | No | Writes structure summary | Bash, Read, Write, Glob, Grep |
+| Analyst | No | Produces it | Yes | Read, Glob |
+| Scientist | No | Yes (input) | Yes | None |
+| Critic (debate) | No | No | Yes | Web search |
+| Coder | Yes (only agent) | No | No | Bash, Read, Write, Glob |
 
 Why: The plan already incorporates the analysis, so passing both to the Critic
 is redundant. Code is an implementation detail that only the implementer needs.
@@ -94,28 +112,29 @@ The Critic and Scientist debate strategy on equal footing with symmetric context
 
 ### Agent Details
 
-**Discovery Agent** (Phase 1):
-- Uses `ClaudeSDKClient` for persistent session (exploratory, may need multiple queries)
-- Tools: Bash (data exploration, stats, plots), Read/Write, Glob, Grep
-- Produces: domain config (success criteria, metric definitions), lab notebook entry #0
-- Does NOT write experiment scripts (the Scientist plans, the Coder implements)
-- After Discovery, the Scientist plans v00 from the notebook findings, then the Coder implements it
+**Ingestor Agent** (Phase 0):
+- Uses `safe_query()` for persistent session (may need multi-round human Q&A)
+- Tools: Bash (data inspection, conversion), Read/Write, Glob, Grep
+- Produces: canonical dataset in experiments/data/ + slim DomainConfig JSON
 - In `--interactive` mode, uses AskUserQuestion to clarify with the user
 
-**Analyst Agent** (Phase 2, step 1):
+**Analyst Agent** (Phase 1, step 1):
 - Uses `query()` (fresh session each iteration, bounded context)
 - Tools: Read (results file + plot PNGs), Glob (find output files)
 - Input: results text + plot images + lab notebook + success criteria
+- (Iteration 0: raw data directory instead of results)
 - Output: structured JSON: `success_score`, `criteria_results[]`, `key_metrics`, `improvements`, `regressions`, `observations`, `iteration_criteria_results[]`
+- (Iteration 0: also `domain_knowledge`, `data_summary`)
 - Role: pure observer, reports facts only, no recommendations
-- Evaluates two tiers: top-level criteria (from config, drives stopping) and per-iteration criteria (from Scientist, transcribed from script output)
+- Evaluates two tiers: top-level criteria (from state, drives stopping) and per-iteration criteria (from Scientist, transcribed from script output)
 - `max_turns`: 5
 
-**Scientist Agent** (Phase 2, step 2):
+**Scientist Agent** (Phase 1, step 2):
 - Pure prompt-in, JSON-out call (no tools, `max_turns`: 1)
-- Input (via prompt injection): analysis JSON + lab notebook + domain knowledge
+- Input (via prompt injection): analysis JSON + lab notebook + domain knowledge + success criteria
 - Does NOT read Python code; analysis + notebook is sufficient for strategic planning
 - Output: structured JSON plan: `hypothesis`, `strategy`, `changes[]`, `expected_impact`, `should_stop`, `stop_reason`, `notebook_entry`, `success_criteria[]`
+- Optionally: `top_level_criteria` (defines investigation-wide goals on iteration 1), `criteria_revision` (revises criteria with justification)
 - Role: strategic thinker, formulates hypotheses and plans, does NOT write code
 - Defines 3-8 per-iteration success criteria: concrete, measurable predictions of the hypothesis that the experiment script evaluates
 
@@ -160,16 +179,11 @@ The Critic and Scientist debate strategy on equal footing with symmetric context
 ### State Machine
 
 ```
-DISCOVERY -> [SYNTHESIS] -> ANALYZE -> PLAN -> STOP_CHECK -> CRITIQUE
-                                                                |
-                                                          critic -> defender -> critic
-                                                          (repeats for debate_rounds - 1)
-                                                                |
-                                                             IMPLEMENT -> VALIDATE -> RUN -> EVALUATE
-                                                                                                |
-                                                                                    ANALYZE (loop)
-                                                                                    or STOP
+INGESTION -> ANALYZE -> PLAN -> STOP_CHECK -> (DEBATE, skipped iter 0) ->
+             IMPLEMENT -> VALIDATE -> RUN -> EVALUATE -> ANALYZE (loop) or REPORT
 ```
+
+Phases: `ingestion -> iteration (loop) -> report -> stopped`
 
 `VALIDATE` = syntax check on generated script. If fails, re-invoke Coder with error (max 3 retries).
 
@@ -214,18 +228,19 @@ auto-scientist/
       scheduler.py                   # Time-window scheduling logic
       agents/
         __init__.py
-        discovery.py                 # Phase 1: data exploration + first approach
-        analyst.py                   # Phase 2: results + plots -> structured JSON
-        scientist.py                 # Phase 2: analysis -> hypothesis + plan
-        critic.py                    # Phase 2: multi-model critique of plan
-        coder.py                     # Phase 2: plan -> experiment script
-        report.py                    # Phase 3: final summary
+        ingestor.py                  # Phase 0: data canonicalization + config
+        analyst.py                   # Phase 1: results + plots -> structured JSON
+        scientist.py                 # Phase 1: analysis -> hypothesis + plan
+        critic.py                    # Phase 1: multi-model critique of plan
+        coder.py                     # Phase 1: plan -> experiment script
+        report.py                    # Phase 2: final summary
       prompts/
         __init__.py
-        discovery.py
+        ingestor.py
         analyst.py
         scientist.py
         coder.py
+        critic.py
         report.py
       models/
         __init__.py
@@ -280,7 +295,7 @@ dependencies = [
 
 ## Key Data Models
 
-### DomainConfig
+### DomainConfig (operational only)
 
 ```python
 class DomainConfig(BaseModel):
@@ -291,9 +306,8 @@ class DomainConfig(BaseModel):
     run_cwd: str
     run_timeout_minutes: int = 120
     version_prefix: str = "v"
-    success_criteria: list[SuccessCriterion]
-    domain_knowledge: str                    # Injected into agent prompts
     protected_paths: list[str] = []
+    experiment_dependencies: list[str] = []
 ```
 
 ### ExperimentState
@@ -302,14 +316,16 @@ class DomainConfig(BaseModel):
 class ExperimentState(BaseModel):
     domain: str
     goal: str
-    phase: str                               # "discovery", "iteration", "report", "stopped"
+    phase: str                               # "ingestion", "iteration", "report", "stopped"
     iteration: int = 0
     versions: list[VersionEntry] = []
     dead_ends: list[str] = []
     best_version: str | None = None
     best_score: int = 0
-    config: DomainConfig | None = None
     schedule: str | None = None              # e.g., "22:00-06:00"
+    success_criteria: list[SuccessCriterion] | None = None  # Set by Scientist
+    domain_knowledge: str = ""               # Set by Analyst iteration 0
+    criteria_history: list[CriteriaRevision] = []
 ```
 
 ---
@@ -343,7 +359,7 @@ auto-scientist resume --state experiments/state.json
 # Check progress
 auto-scientist status --state experiments/state.json
 
-# Interactive discovery mode
+# Interactive mode
 auto-scientist run --data ./data.csv --goal "..." --interactive
 ```
 
@@ -442,7 +458,7 @@ QC-pass R2a    0.57      0.97    +70% (dramatic)
 
 ### Reproduction test (the real validation)
 1. `auto-scientist run --data domains/spo2/seed/data/ --goal "Model SpO2 dynamics during breath-holds in a physiologically grounded, transferable way" --max-iterations 20 --schedule "22:00-06:00"`
-2. Let it run from scratch (no seed script - Discovery creates v1)
+2. Let it run from scratch (iteration 0 explores, iteration 1 defines criteria and first approach)
 3. Compare: does it converge to something comparable to the manual v7.05 result? Does it discover similar structural insights (baseline correction, power-law curvature)?
 4. This is the ultimate test of the framework
 

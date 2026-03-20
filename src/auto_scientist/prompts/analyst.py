@@ -267,14 +267,20 @@ appears to be environmental sensor data. No criteria to score.
     "timestamps span 2025-01-01 to 2025-01-21, ~24 readings per day"
   ],
   "iteration_criteria_results": [],
-  "domain_knowledge": "Environmental sensor dataset with temperature, humidity, and pressure readings sampled approximately hourly over a 21-day period. Three humidity values are missing.",
+  "domain_knowledge": "Environmental sensor dataset with temperature, \
+humidity, and pressure readings sampled approximately hourly over a \
+21-day period. Three humidity values are missing.",
   "data_summary": {{
     "files": [
-      {{"name": "sensor_readings.csv", "rows": 500, "columns": ["timestamp", "temperature", "humidity", "pressure"]}}
+      {{"name": "sensor_readings.csv", "rows": 500,
+        "columns": ["timestamp", "temperature",
+                     "humidity", "pressure"]}}
     ],
     "total_rows": 500,
     "column_details": [
-      {{"name": "timestamp", "dtype": "datetime", "min": "2025-01-01T00:00:00", "max": "2025-01-21T23:00:00", "missing": 0}},
+      {{"name": "timestamp", "dtype": "datetime",
+        "min": "2025-01-01T00:00:00",
+        "max": "2025-01-21T23:00:00", "missing": 0}},
       {{"name": "temperature", "dtype": "float64", "min": 15.2, "max": 38.7, "missing": 0}},
       {{"name": "humidity", "dtype": "float64", "min": 22.0, "max": 98.5, "missing": 3}},
       {{"name": "pressure", "dtype": "float64", "min": 990.1, "max": 1025.3, "missing": 0}}
