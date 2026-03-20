@@ -101,6 +101,15 @@ class TestWaitForWindow:
     @patch("auto_scientist.scheduler.datetime")
     async def test_inside_window_no_sleep(self, mock_dt, mock_sleep):
         mock_dt.now.return_value = datetime(2026, 1, 1, 23, 0)
-        # parse_schedule uses time.fromisoformat, not datetime, so no issue
         await wait_for_window("22:00-06:00")
         mock_sleep.assert_not_called()
+
+    @pytest.mark.asyncio
+    @patch("auto_scientist.scheduler.asyncio.sleep", new_callable=AsyncMock)
+    @patch("auto_scientist.scheduler.datetime")
+    async def test_outside_window_sleeps(self, mock_dt, mock_sleep):
+        mock_dt.now.return_value = datetime(2026, 1, 1, 14, 0)
+        await wait_for_window("22:00-06:00")
+        mock_sleep.assert_called_once()
+        sleep_secs = mock_sleep.call_args[0][0]
+        assert sleep_secs > 0

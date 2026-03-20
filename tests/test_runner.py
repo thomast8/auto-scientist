@@ -135,6 +135,18 @@ class TestRunExperiment:
         )
         assert not result.success
 
+    @pytest.mark.asyncio
+    async def test_command_not_found(self, tmp_path):
+        script = tmp_path / "valid.py"
+        script.write_text("print('ok')\n")
+        result = await run_experiment(
+            script_path=script,
+            command_template="nonexistent_binary_xyz {script_path}",
+            cwd=str(tmp_path),
+        )
+        assert not result.success
+        assert "Command not found" in result.stderr or "not found" in result.stderr.lower()
+
 
 class TestRunResult:
     def test_default_fields(self):

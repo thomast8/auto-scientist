@@ -1,6 +1,7 @@
 """Tests for the orchestrator state machine."""
 
-from unittest.mock import AsyncMock, patch
+from pathlib import Path
+from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
@@ -716,3 +717,576 @@ class TestRunIteration:
             await orchestrator._run_iteration_body()
 
         assert orchestrator.state.phase == "report"
+
+    @pytest.mark.asyncio
+    async def test_validation_failure_increments_iteration(self, orchestrator, tmp_path):
+        orchestrator.output_dir.mkdir(parents=True, exist_ok=True)
+        orchestrator.state.phase = "iteration"
+        orchestrator.state.iteration = 0
+
+        plan = {"should_stop": False, "hypothesis": "test"}
+        script_path = tmp_path / "experiments" / "v00" / "experiment.py"
+        script_path.parent.mkdir(parents=True, exist_ok=True)
+        script_path.write_text("def foo(")
+
+        with (
+            patch.object(orchestrator, "_run_analyst", new_callable=AsyncMock,
+                          return_value={}),
+            patch.object(orchestrator, "_run_scientist_plan", new_callable=AsyncMock,
+                          return_value=plan),
+            patch.object(orchestrator, "_run_coder", new_callable=AsyncMock,
+                          return_value=script_path),
+            patch.object(orchestrator, "_validate_script", new_callable=AsyncMock,
+                          return_value=False),
+            patch.object(orchestrator, "_apply_criteria_updates"),
+        ):
+            await orchestrator._run_iteration_body()
+
+        assert orchestrator.state.consecutive_failures == 1
+        assert orchestrator.state.iteration == 1
+
+    @pytest.mark.asyncio
+    async def test_iteration_summary_prints_artifacts(self, orchestrator, tmp_path, capsys):
+        orchestrator.output_dir.mkdir(parents=True, exist_ok=True)
+        orchestrator.state.phase = "iteration"
+        orchestrator.state.iteration = 0
+
+        plan = {"should_stop": False, "hypothesis": "test"}
+        script_path = tmp_path / "experiments" / "v00" / "experiment.py"
+        script_path.parent.mkdir(parents=True, exist_ok=True)
+        script_path.write_text("print('hi')")
+        # Create some artifact files
+        (script_path.parent / "plot.png").write_text("fake")
+        (script_path.parent / "results.txt").write_text("output")
+        run_result = RunResult(success=True, stdout="ok", return_code=0)
+
+        with (
+            patch.object(orchestrator, "_run_analyst", new_callable=AsyncMock,
+                          return_value={}),
+            patch.object(orchestrator, "_run_scientist_plan", new_callable=AsyncMock,
+                          return_value=plan),
+            patch.object(orchestrator, "_run_coder", new_callable=AsyncMock,
+                          return_value=script_path),
+            patch.object(orchestrator, "_validate_script", new_callable=AsyncMock,
+                          return_value=True),
+            patch.object(orchestrator, "_run_experiment", new_callable=AsyncMock,
+                          return_value=run_result),
+            patch.object(orchestrator, "_apply_criteria_updates"),
+        ):
+            await orchestrator._run_iteration_body()
+
+        captured = capsys.readouterr()
+        assert "Outputs:" in captured.out
+
+
+class TestRunAnalystInitial:
+    @pytest.mark.asyncio
+    async def test_calls_run_analyst_with_data_dir(self, orchestrator, tmp_path):
+        orchestrator.output_dir.mkdir(parents=True, exist_ok=True)
+        orchestrator.data_path = tmp_path / "data"
+
+        captured_kwargs = {}
+
+        async def capture_analyst(**kwargs):
+            captured_kwargs.update(kwargs)
+            return {"success_score": None}
+
+        with patch("auto_scientist.agents.analyst.run_analyst", side_effect=capture_analyst):
+            result = await orchestrator._run_analyst_initial()
+
+        assert captured_kwargs["results_path"] is None
+        assert captured_kwargs["data_dir"] == tmp_path / "data"
+        assert result["success_score"] is None
+
+    @pytest.mark.asyncio
+    async def test_error_returns_none(self, orchestrator, tmp_path):
+        orchestrator.output_dir.mkdir(parents=True, exist_ok=True)
+        orchestrator.data_path = tmp_path / "data"
+
+        with patch(
+            "auto_scientist.agents.analyst.run_analyst",
+            new_callable=AsyncMock,
+            side_effect=RuntimeError("Agent error"),
+        ):
+            result = await orchestrator._run_analyst_initial()
+
+        assert result is None
+
+
+class TestRunAnalystNormal:
+    @pytest.mark.asyncio
+    async def test_no_results_path_returns_none(self, orchestrator, tmp_path):
+        orchestrator.output_dir.mkdir(parents=True, exist_ok=True)
+        orchestrator.state.versions = [
+            VersionEntry(version="v00", iteration=0, script_path="/tmp/s.py",
+                          results_path=None),
+        ]
+
+        result = await orchestrator._run_analyst()
+        assert result is None
+
+    @pytest.mark.asyncio
+    async def test_updates_best_score(self, orchestrator, tmp_path):
+        orchestrator.output_dir.mkdir(parents=True, exist_ok=True)
+
+        results_path = tmp_path / "results.txt"
+        results_path.write_text("data")
+        latest = VersionEntry(
+            version="v01", iteration=1, script_path=str(tmp_path / "s.py"),
+            results_path=str(results_path),
+        )
+        orchestrator.state.versions = [latest]
+
+        async def fake_analyst(**kwargs):
+            return {"success_score": 90}
+
+        with patch("auto_scientist.agents.analyst.run_analyst", side_effect=fake_analyst):
+            await orchestrator._run_analyst()
+
+        assert latest.score == 90
+        assert orchestrator.state.best_score == 90
+        assert orchestrator.state.best_version == "v01"
+
+    @pytest.mark.asyncio
+    async def test_error_returns_none(self, orchestrator, tmp_path):
+        orchestrator.output_dir.mkdir(parents=True, exist_ok=True)
+
+        results_path = tmp_path / "results.txt"
+        results_path.write_text("data")
+        orchestrator.state.versions = [
+            VersionEntry(version="v01", iteration=1, script_path=str(tmp_path / "s.py"),
+                          results_path=str(results_path)),
+        ]
+
+        with patch(
+            "auto_scientist.agents.analyst.run_analyst",
+            new_callable=AsyncMock,
+            side_effect=RuntimeError("Agent error"),
+        ):
+            result = await orchestrator._run_analyst()
+
+        assert result is None
+
+
+class TestRunScientistPlan:
+    @pytest.mark.asyncio
+    async def test_returns_plan(self, orchestrator, tmp_path):
+        orchestrator.output_dir.mkdir(parents=True, exist_ok=True)
+        plan = {"hypothesis": "test", "strategy": "incremental", "notebook_entry": "## v00"}
+
+        with patch(
+            "auto_scientist.agents.scientist.run_scientist",
+            new_callable=AsyncMock,
+            return_value=plan,
+        ):
+            result = await orchestrator._run_scientist_plan({"success_score": 50})
+
+        assert result["hypothesis"] == "test"
+        notebook = orchestrator.output_dir / "lab_notebook.md"
+        assert notebook.exists()
+        assert "## v00" in notebook.read_text()
+
+    @pytest.mark.asyncio
+    async def test_error_returns_none(self, orchestrator, tmp_path):
+        orchestrator.output_dir.mkdir(parents=True, exist_ok=True)
+
+        with patch(
+            "auto_scientist.agents.scientist.run_scientist",
+            new_callable=AsyncMock,
+            side_effect=RuntimeError("Agent error"),
+        ):
+            result = await orchestrator._run_scientist_plan({})
+
+        assert result is None
+
+
+class TestRunDebateOrchestrator:
+    @pytest.mark.asyncio
+    async def test_no_critics_returns_none(self, orchestrator):
+        orchestrator.critic_models = []
+        result = await orchestrator._run_debate({"hypothesis": "test"})
+        assert result is None
+
+    @pytest.mark.asyncio
+    async def test_no_plan_returns_none(self, orchestrator):
+        orchestrator.critic_models = ["openai:gpt-4o"]
+        result = await orchestrator._run_debate(None)
+        assert result is None
+
+    @pytest.mark.asyncio
+    async def test_calls_run_debate_with_args(self, orchestrator, tmp_path):
+        orchestrator.output_dir.mkdir(parents=True, exist_ok=True)
+        orchestrator.critic_models = ["openai:gpt-4o"]
+        orchestrator.state.domain_knowledge = "test knowledge"
+        plan = {"hypothesis": "test"}
+
+        critique = [{"model": "openai:gpt-4o", "critique": "looks good", "transcript": []}]
+
+        with patch(
+            "auto_scientist.agents.critic.run_debate",
+            new_callable=AsyncMock,
+            return_value=critique,
+        ) as mock_debate:
+            result = await orchestrator._run_debate(plan)
+
+        assert result == critique
+        call_kwargs = mock_debate.call_args.kwargs
+        assert call_kwargs["critic_specs"] == ["openai:gpt-4o"]
+        assert call_kwargs["domain_knowledge"] == "test knowledge"
+
+
+class TestRunScientistRevisionOrchestrator:
+    @pytest.mark.asyncio
+    async def test_no_plan_returns_none(self, orchestrator):
+        result = await orchestrator._run_scientist_revision(None, [], {})
+        assert result is None
+
+    @pytest.mark.asyncio
+    async def test_no_debate_result_returns_none(self, orchestrator):
+        result = await orchestrator._run_scientist_revision({"h": "x"}, None, {})
+        assert result is None
+
+    @pytest.mark.asyncio
+    async def test_returns_revised_plan(self, orchestrator, tmp_path):
+        orchestrator.output_dir.mkdir(parents=True, exist_ok=True)
+        plan = {"hypothesis": "original"}
+        debate_result = [
+            {"model": "openai:gpt-4o", "critique": "weak",
+             "transcript": [{"role": "critic", "content": "weak"}]},
+        ]
+        revised = {"hypothesis": "revised", "notebook_entry": "## revised"}
+
+        with patch(
+            "auto_scientist.agents.scientist.run_scientist_revision",
+            new_callable=AsyncMock,
+            return_value=revised,
+        ):
+            result = await orchestrator._run_scientist_revision(plan, debate_result, {})
+
+        assert result["hypothesis"] == "revised"
+        notebook = orchestrator.output_dir / "lab_notebook.md"
+        assert "## revised" in notebook.read_text()
+
+    @pytest.mark.asyncio
+    async def test_error_returns_none(self, orchestrator, tmp_path):
+        orchestrator.output_dir.mkdir(parents=True, exist_ok=True)
+        plan = {"hypothesis": "original"}
+        debate_result = [
+            {"model": "openai:gpt-4o", "critique": "weak",
+             "transcript": [{"role": "critic", "content": "weak"}]},
+        ]
+
+        with patch(
+            "auto_scientist.agents.scientist.run_scientist_revision",
+            new_callable=AsyncMock,
+            side_effect=RuntimeError("Agent error"),
+        ):
+            result = await orchestrator._run_scientist_revision(plan, debate_result, {})
+
+        assert result is None
+
+
+class TestRunCoderOrchestrator:
+    @pytest.mark.asyncio
+    async def test_no_plan_returns_none(self, orchestrator):
+        result = await orchestrator._run_coder(None)
+        assert result is None
+
+    @pytest.mark.asyncio
+    async def test_calls_run_coder(self, orchestrator, tmp_path):
+        orchestrator.output_dir.mkdir(parents=True, exist_ok=True)
+        orchestrator.state.data_path = str(tmp_path / "data")
+        plan = {"hypothesis": "test"}
+
+        script_path = tmp_path / "experiments" / "v00" / "experiment.py"
+
+        with patch(
+            "auto_scientist.agents.coder.run_coder",
+            new_callable=AsyncMock,
+            return_value=script_path,
+        ):
+            result = await orchestrator._run_coder(plan)
+
+        assert result == script_path
+
+    @pytest.mark.asyncio
+    async def test_error_records_failure(self, orchestrator, tmp_path):
+        orchestrator.output_dir.mkdir(parents=True, exist_ok=True)
+
+        with patch(
+            "auto_scientist.agents.coder.run_coder",
+            new_callable=AsyncMock,
+            side_effect=RuntimeError("Coder failed"),
+        ):
+            result = await orchestrator._run_coder({"hypothesis": "test"})
+
+        assert result is None
+        assert orchestrator.state.consecutive_failures == 1
+
+    @pytest.mark.asyncio
+    async def test_uses_previous_script_from_versions(self, orchestrator, tmp_path):
+        orchestrator.output_dir.mkdir(parents=True, exist_ok=True)
+        orchestrator.state.versions = [
+            VersionEntry(version="v00", iteration=0,
+                          script_path=str(tmp_path / "v00" / "experiment.py")),
+        ]
+
+        captured_kwargs = {}
+
+        async def capture_coder(**kwargs):
+            captured_kwargs.update(kwargs)
+            return tmp_path / "v01" / "experiment.py"
+
+        with patch("auto_scientist.agents.coder.run_coder", side_effect=capture_coder):
+            await orchestrator._run_coder({"hypothesis": "test"})
+
+        assert str(captured_kwargs["previous_script"]) == str(tmp_path / "v00" / "experiment.py")
+
+
+class TestValidateScript:
+    @pytest.mark.asyncio
+    async def test_valid_script_returns_true(self, orchestrator, tmp_path):
+        script = tmp_path / "valid.py"
+        script.write_text("x = 1 + 2\n")
+        result = await orchestrator._validate_script(script)
+        assert result is True
+
+    @pytest.mark.asyncio
+    async def test_invalid_script_returns_false(self, orchestrator, tmp_path):
+        script = tmp_path / "invalid.py"
+        script.write_text("def foo(\n")
+        result = await orchestrator._validate_script(script)
+        assert result is False
+
+
+class TestRunExperimentOrchestrator:
+    @pytest.mark.asyncio
+    async def test_none_script_returns_none(self, orchestrator):
+        result = await orchestrator._run_experiment(None)
+        assert result is None
+
+    @pytest.mark.asyncio
+    async def test_uses_config_command(self, orchestrator, tmp_path):
+        orchestrator.config = DomainConfig(
+            name="t", description="d", data_paths=[],
+            run_command="python {script_path}",
+            run_cwd=str(tmp_path),
+            run_timeout_minutes=5,
+        )
+        script = tmp_path / "test.py"
+        script.write_text("print('hello')\n")
+
+        result = await orchestrator._run_experiment(script)
+
+        assert result.success
+        assert "hello" in result.stdout
+
+    @pytest.mark.asyncio
+    async def test_saves_stdout_to_results(self, orchestrator, tmp_path):
+        orchestrator.config = DomainConfig(
+            name="t", description="d", data_paths=[],
+            run_command="python {script_path}",
+            run_cwd=str(tmp_path),
+        )
+        script = tmp_path / "test.py"
+        script.write_text("print('output data')\n")
+
+        await orchestrator._run_experiment(script)
+
+        results_path = script.parent / "results.txt"
+        assert results_path.exists()
+        assert "output data" in results_path.read_text()
+
+    @pytest.mark.asyncio
+    async def test_timeout_prints_message(self, orchestrator, tmp_path, capsys):
+        orchestrator.config = DomainConfig(
+            name="t", description="d", data_paths=[],
+            run_command="python {script_path}",
+            run_cwd=str(tmp_path),
+            run_timeout_minutes=0,
+        )
+        script = tmp_path / "slow.py"
+        script.write_text("import time\ntime.sleep(10)\n")
+
+        result = await orchestrator._run_experiment(script)
+
+        assert result.timed_out
+        captured = capsys.readouterr()
+        assert "timed out" in captured.out
+
+    @pytest.mark.asyncio
+    async def test_failure_prints_stderr(self, orchestrator, tmp_path, capsys):
+        orchestrator.config = DomainConfig(
+            name="t", description="d", data_paths=[],
+            run_command="python {script_path}",
+            run_cwd=str(tmp_path),
+        )
+        script = tmp_path / "fail.py"
+        script.write_text("raise ValueError('test error')\n")
+
+        result = await orchestrator._run_experiment(script)
+
+        assert not result.success
+        captured = capsys.readouterr()
+        assert "failed" in captured.out
+
+    @pytest.mark.asyncio
+    async def test_default_command_without_config(self, orchestrator, tmp_path):
+        orchestrator.config = None
+        script = tmp_path / "test.py"
+        script.write_text("print('hello')\n")
+
+        result = await orchestrator._run_experiment(script)
+        assert result is not None
+
+
+class TestRunReportOrchestrator:
+    @pytest.mark.asyncio
+    async def test_calls_run_report(self, orchestrator, tmp_path):
+        orchestrator.output_dir.mkdir(parents=True, exist_ok=True)
+
+        report_path = orchestrator.output_dir / "report.md"
+
+        with patch(
+            "auto_scientist.agents.report.run_report",
+            new_callable=AsyncMock,
+            return_value=report_path,
+        ) as mock_report:
+            await orchestrator._run_report()
+
+        mock_report.assert_called_once()
+        call_kwargs = mock_report.call_args.kwargs
+        assert call_kwargs["state"] is orchestrator.state
+        assert call_kwargs["output_dir"] == orchestrator.output_dir
+
+    @pytest.mark.asyncio
+    async def test_error_does_not_raise(self, orchestrator, tmp_path, capsys):
+        orchestrator.output_dir.mkdir(parents=True, exist_ok=True)
+
+        with patch(
+            "auto_scientist.agents.report.run_report",
+            new_callable=AsyncMock,
+            side_effect=RuntimeError("Report failed"),
+        ):
+            await orchestrator._run_report()
+
+        captured = capsys.readouterr()
+        assert "error" in captured.out
+
+
+class TestRunFullOrchestration:
+    @pytest.mark.asyncio
+    async def test_run_prints_critics(self, tmp_path, capsys):
+        state = ExperimentState(
+            domain="test", goal="g", phase="iteration",
+            iteration=20,
+        )
+        o = Orchestrator(
+            state=state, data_path=tmp_path, output_dir=tmp_path,
+            max_iterations=20,
+            critic_models=["openai:gpt-4o"],
+        )
+        o.config = DomainConfig(name="t", description="d", data_paths=[])
+
+        with patch.object(o, "_run_report", new_callable=AsyncMock):
+            await o.run()
+
+        captured = capsys.readouterr()
+        assert "openai:gpt-4o" in captured.out
+
+    @pytest.mark.asyncio
+    async def test_run_iteration_loop_with_schedule(self, tmp_path):
+        state = ExperimentState(
+            domain="test", goal="g", phase="iteration",
+            iteration=0,
+        )
+        o = Orchestrator(
+            state=state, data_path=tmp_path, output_dir=tmp_path,
+            max_iterations=1,
+        )
+        o.config = DomainConfig(name="t", description="d", data_paths=[])
+        state.schedule = "00:00-23:59"
+
+        plan = {"should_stop": False, "hypothesis": "test"}
+        script_path = tmp_path / "v00" / "experiment.py"
+        script_path.parent.mkdir(parents=True, exist_ok=True)
+        script_path.write_text("print('hi')")
+        run_result = RunResult(success=True, stdout="ok", return_code=0)
+
+        with (
+            patch("auto_scientist.orchestrator.wait_for_window", new_callable=AsyncMock),
+            patch.object(o, "_run_analyst", new_callable=AsyncMock, return_value={}),
+            patch.object(o, "_run_scientist_plan", new_callable=AsyncMock, return_value=plan),
+            patch.object(o, "_run_coder", new_callable=AsyncMock, return_value=script_path),
+            patch.object(o, "_validate_script", new_callable=AsyncMock, return_value=True),
+            patch.object(o, "_run_experiment", new_callable=AsyncMock, return_value=run_result),
+            patch.object(o, "_apply_criteria_updates"),
+            patch.object(o, "_run_report", new_callable=AsyncMock),
+        ):
+            await o.run()
+
+        assert state.phase == "stopped"
+        assert state.iteration == 1
+
+
+class TestRunIngestionFull:
+    @pytest.mark.asyncio
+    async def test_ingestion_loads_config(self, tmp_path):
+        state = ExperimentState(
+            domain="test", goal="g", phase="ingestion",
+        )
+        o = Orchestrator(
+            state=state, data_path=tmp_path / "raw.csv",
+            output_dir=tmp_path / "experiments",
+            max_iterations=0,
+        )
+
+        canonical = tmp_path / "experiments" / "data"
+        canonical.mkdir(parents=True, exist_ok=True)
+        (canonical / "clean.csv").write_text("a,b\n1,2\n")
+
+        config_path = tmp_path / "experiments" / "domain_config.json"
+        config_path.write_text('{"name":"mydom","description":"test","data_paths":["clean.csv"]}')
+
+        with (
+            patch(
+                "auto_scientist.agents.ingestor.run_ingestor",
+                new_callable=AsyncMock,
+                return_value=canonical,
+            ),
+            patch.object(o, "_run_report", new_callable=AsyncMock),
+        ):
+            await o.run()
+
+        assert o.config is not None
+        assert o.config.name == "mydom"
+        assert state.config_path == str(config_path)
+        assert state.phase == "stopped"
+
+    @pytest.mark.asyncio
+    async def test_ingestion_prints_data_files(self, tmp_path, capsys):
+        state = ExperimentState(
+            domain="test", goal="g", phase="ingestion",
+        )
+        o = Orchestrator(
+            state=state, data_path=tmp_path / "raw.csv",
+            output_dir=tmp_path / "experiments",
+            max_iterations=0,
+        )
+
+        canonical = tmp_path / "experiments" / "data"
+        canonical.mkdir(parents=True, exist_ok=True)
+        (canonical / "data.csv").write_text("a,b\n1,2\n")
+
+        with (
+            patch(
+                "auto_scientist.agents.ingestor.run_ingestor",
+                new_callable=AsyncMock,
+                return_value=canonical,
+            ),
+            patch.object(o, "_run_report", new_callable=AsyncMock),
+        ):
+            await o.run()
+
+        captured = capsys.readouterr()
+        assert "data.csv" in captured.out

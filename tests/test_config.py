@@ -49,7 +49,6 @@ class TestDomainConfig:
         assert dc.run_timeout_minutes == 120
         assert dc.version_prefix == "v"
         assert dc.protected_paths == []
-        assert dc.experiment_dependencies == []
         assert not hasattr(dc, "success_criteria") or "success_criteria" not in dc.model_fields
         assert not hasattr(dc, "domain_knowledge") or "domain_knowledge" not in dc.model_fields
 
@@ -95,7 +94,6 @@ class TestDomainConfigSerialization:
             data_paths=["a.csv", "b.csv"],
             run_command="python {script_path}",
             protected_paths=["src/"],
-            experiment_dependencies=["numpy"],
         )
         json_str = dc.model_dump_json()
         loaded = DomainConfig.model_validate_json(json_str)
@@ -103,7 +101,6 @@ class TestDomainConfigSerialization:
         assert loaded.data_paths == ["a.csv", "b.csv"]
         assert loaded.run_command == "python {script_path}"
         assert loaded.protected_paths == ["src/"]
-        assert loaded.experiment_dependencies == ["numpy"]
 
     def test_custom_run_command(self):
         dc = DomainConfig(
@@ -119,9 +116,6 @@ class TestDomainConfigSerialization:
         )
         assert dc.protected_paths == ["src/", "data/"]
 
-    def test_experiment_dependencies_list(self):
-        dc = DomainConfig(
-            name="t", description="d", data_paths=[],
-            experiment_dependencies=["numpy", "scipy"],
-        )
-        assert dc.experiment_dependencies == ["numpy", "scipy"]
+    def test_no_experiment_dependencies_field(self):
+        """experiment_dependencies removed; scripts declare deps via PEP 723 inline metadata."""
+        assert "experiment_dependencies" not in DomainConfig.model_fields

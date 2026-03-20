@@ -412,3 +412,88 @@ class TestRunScientistRevision:
                 notebook_path=notebook_path,
                 version="v01",
             )
+
+    @pytest.mark.asyncio
+    @patch("auto_scientist.agents.scientist.query")
+    async def test_fallback_to_assistant_text(self, mock_query, tmp_path):
+        from auto_scientist.agents.scientist import AssistantMessage, ResultMessage, TextBlock
+
+        result_msg = MagicMock(spec=ResultMessage)
+        result_msg.result = ""
+
+        assistant_msg = MagicMock(spec=AssistantMessage)
+        text_block = MagicMock(spec=TextBlock)
+        text_block.text = json.dumps(SAMPLE_PLAN)
+        assistant_msg.content = [text_block]
+
+        async def fake_query(**kwargs):
+            yield assistant_msg
+            yield result_msg
+
+        mock_query.side_effect = fake_query
+
+        notebook_path = tmp_path / "notebook.md"
+
+        result = await run_scientist_revision(
+            original_plan=SAMPLE_PLAN,
+            debate_transcript=[{"role": "critic", "content": "test"}],
+            analysis={},
+            notebook_path=notebook_path,
+            version="v01",
+        )
+        assert result["hypothesis"] == "test hypothesis"
+
+
+class TestRunScientistAssistantFallback:
+    @pytest.mark.asyncio
+    @patch("auto_scientist.agents.scientist.query")
+    async def test_run_scientist_fallback_to_assistant_text(self, mock_query, tmp_path):
+        from auto_scientist.agents.scientist import AssistantMessage, ResultMessage, TextBlock
+
+        result_msg = MagicMock(spec=ResultMessage)
+        result_msg.result = ""
+
+        assistant_msg = MagicMock(spec=AssistantMessage)
+        text_block = MagicMock(spec=TextBlock)
+        text_block.text = json.dumps(SAMPLE_PLAN)
+        assistant_msg.content = [text_block]
+
+        async def fake_query(**kwargs):
+            yield assistant_msg
+            yield result_msg
+
+        mock_query.side_effect = fake_query
+
+        notebook_path = tmp_path / "notebook.md"
+
+        result = await run_scientist(
+            analysis={}, notebook_path=notebook_path, version="v01",
+        )
+        assert result["hypothesis"] == "test hypothesis"
+
+    @pytest.mark.asyncio
+    @patch("auto_scientist.agents.scientist.query")
+    async def test_run_scientist_markdown_fenced_response(self, mock_query, tmp_path):
+        from auto_scientist.agents.scientist import AssistantMessage, ResultMessage, TextBlock
+
+        result_msg = MagicMock(spec=ResultMessage)
+        result_msg.result = ""
+
+        fenced = f"```json\n{json.dumps(SAMPLE_PLAN)}\n```"
+        assistant_msg = MagicMock(spec=AssistantMessage)
+        text_block = MagicMock(spec=TextBlock)
+        text_block.text = fenced
+        assistant_msg.content = [text_block]
+
+        async def fake_query(**kwargs):
+            yield assistant_msg
+            yield result_msg
+
+        mock_query.side_effect = fake_query
+
+        notebook_path = tmp_path / "notebook.md"
+
+        result = await run_scientist(
+            analysis={}, notebook_path=notebook_path, version="v01",
+        )
+        assert result["hypothesis"] == "test hypothesis"

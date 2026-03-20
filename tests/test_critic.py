@@ -422,6 +422,25 @@ class TestRunDebate:
                 notebook_content="",
             )
 
+    @pytest.mark.asyncio
+    async def test_anthropic_critic_dispatches_correctly(self, plan):
+        with patch(
+            "auto_scientist.agents.critic.query_anthropic",
+            new_callable=AsyncMock,
+            return_value="Anthropic critique",
+        ) as mock_anthropic:
+            result = await run_debate(
+                critic_specs=["anthropic:claude-sonnet-4-6"],
+                plan=plan,
+                notebook_content="",
+                max_rounds=1,
+            )
+
+        assert len(result) == 1
+        assert result[0]["critique"] == "Anthropic critique"
+        # query_anthropic called for the critic (not scientist response)
+        assert mock_anthropic.call_count == 1
+
 
 class TestRunDebateStreaming:
     @pytest.mark.asyncio

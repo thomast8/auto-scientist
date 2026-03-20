@@ -1,7 +1,7 @@
 """Tests for the Ingestor agent module."""
 
 import asyncio
-from unittest.mock import AsyncMock, patch
+from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
@@ -128,6 +128,40 @@ class TestRunIngestorValidation:
 
         with pytest.raises(FileNotFoundError, match="did not produce any data files"):
             await run_ingestor(raw_data, output_dir, "test goal")
+
+
+class TestRunIngestorMessageProcessing:
+    @pytest.mark.asyncio
+    @patch("auto_scientist.agents.ingestor.safe_query")
+    async def test_assistant_message_printed(self, mock_query, tmp_path, capsys):
+        """AssistantMessage text blocks should be printed to stdout."""
+        from auto_scientist.agents.ingestor import AssistantMessage, ResultMessage, TextBlock
+
+        raw_data = tmp_path / "data.csv"
+        raw_data.write_text("a,b\n1,2\n")
+        output_dir = tmp_path / "experiments"
+        output_dir.mkdir()
+        data_dir = output_dir / "data"
+        data_dir.mkdir()
+        (data_dir / "output.csv").write_text("a,b\n1,2\n")
+
+        assistant_msg = MagicMock(spec=AssistantMessage)
+        text_block = MagicMock(spec=TextBlock)
+        text_block.text = "Processing your data files..."
+        assistant_msg.content = [text_block]
+
+        result_msg = MagicMock(spec=ResultMessage)
+
+        async def fake_query(**kwargs):
+            yield assistant_msg
+            yield result_msg
+
+        mock_query.side_effect = fake_query
+
+        await run_ingestor(raw_data, output_dir, "test goal")
+
+        captured = capsys.readouterr()
+        assert "Processing your data" in captured.out
 
 
 class TestRunIngestorOptions:

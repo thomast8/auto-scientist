@@ -166,34 +166,8 @@ class TestRunCoder:
 
     @pytest.mark.asyncio
     @patch("auto_scientist.agents.coder.query")
-    async def test_deps_in_prompt(self, mock_query, tmp_path):
-        from auto_scientist.agents.coder import ResultMessage
-        result_msg = MagicMock(spec=ResultMessage)
-
-        captured_opts = {}
-
-        async def fake_query(**kwargs):
-            captured_opts.update(kwargs)
-            script_path = tmp_path / "v01" / "experiment.py"
-            script_path.parent.mkdir(parents=True, exist_ok=True)
-            script_path.write_text("print('test')")
-            yield result_msg
-
-        mock_query.side_effect = fake_query
-
-        await run_coder(
-            plan={"hypothesis": "test", "changes": []},
-            previous_script=tmp_path / "nonexistent" / "experiment.py",
-            output_dir=tmp_path, version="v01",
-            experiment_dependencies=["pandas", "scikit-learn"],
-        )
-        system = captured_opts["options"].system_prompt
-        assert "pandas" in system
-        assert "scikit-learn" in system
-
-    @pytest.mark.asyncio
-    @patch("auto_scientist.agents.coder.query")
-    async def test_default_deps_in_prompt(self, mock_query, tmp_path):
+    async def test_pep723_instruction_in_prompt(self, mock_query, tmp_path):
+        """System prompt instructs coder to declare deps via PEP 723 inline metadata."""
         from auto_scientist.agents.coder import ResultMessage
         result_msg = MagicMock(spec=ResultMessage)
 
@@ -214,5 +188,5 @@ class TestRunCoder:
             output_dir=tmp_path, version="v01",
         )
         system = captured_opts["options"].system_prompt
-        assert "numpy" in system
-        assert "matplotlib" in system
+        assert "# /// script" in system
+        assert "uv run" in system
