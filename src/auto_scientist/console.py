@@ -117,11 +117,7 @@ def print_summary(agent_name: str, summary: str, label: str = "") -> None:
     if len(summary) > 300:
         summary = summary[:300]
 
-    # Build prefix
-    if label:
-        prefix = f"  > [{label}] "
-    else:
-        prefix = "  > "
+    prefix = f"  > [{label}] " if label else "  > "
 
     continuation = "  > "
 

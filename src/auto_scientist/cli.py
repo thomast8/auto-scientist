@@ -59,6 +59,11 @@ def cli():
     is_flag=True,
     help="Disable live token streaming during debate phase",
 )
+@click.option(
+    "--summary-model",
+    default=None,
+    help="OpenAI model for periodic agent summaries (e.g., 'gpt-4o-mini'). Opt-in.",
+)
 def run(
     data: str,
     goal: str,
@@ -70,6 +75,7 @@ def run(
     output_dir: str,
     model: str | None,
     no_stream: bool,
+    summary_model: str | None,
 ):
     """Run autonomous scientific investigation from raw data."""
     critic_list = [c.strip() for c in critics.split(",") if c.strip()] if critics else []
@@ -98,6 +104,7 @@ def run(
         debate_rounds=debate_rounds,
         model=model,
         stream=not no_stream,
+        summary_model=summary_model,
     )
 
     asyncio.run(orchestrator.run())

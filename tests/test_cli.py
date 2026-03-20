@@ -217,3 +217,30 @@ class TestRunCommandOptions:
         ])
         call_kwargs = mock_orch.call_args.kwargs
         assert call_kwargs["stream"] is False
+
+    @patch("auto_scientist.cli.asyncio.run")
+    @patch("auto_scientist.cli.Orchestrator")
+    def test_passes_summary_model(self, mock_orch, mock_async_run, tmp_path):
+        data_file = tmp_path / "data.csv"
+        data_file.write_text("a,b\n1,2\n")
+
+        runner = CliRunner()
+        runner.invoke(cli, [
+            "run", "--data", str(data_file), "--goal", "test",
+            "--summary-model", "gpt-4o-mini",
+        ])
+        call_kwargs = mock_orch.call_args.kwargs
+        assert call_kwargs["summary_model"] == "gpt-4o-mini"
+
+    @patch("auto_scientist.cli.asyncio.run")
+    @patch("auto_scientist.cli.Orchestrator")
+    def test_summary_model_default_none(self, mock_orch, mock_async_run, tmp_path):
+        data_file = tmp_path / "data.csv"
+        data_file.write_text("a,b\n1,2\n")
+
+        runner = CliRunner()
+        runner.invoke(cli, [
+            "run", "--data", str(data_file), "--goal", "test",
+        ])
+        call_kwargs = mock_orch.call_args.kwargs
+        assert call_kwargs.get("summary_model") is None

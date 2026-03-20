@@ -135,7 +135,7 @@ class TestRunIngestorMessageProcessing:
     @patch("auto_scientist.agents.ingestor.safe_query")
     async def test_assistant_message_printed(self, mock_query, tmp_path, capsys):
         """AssistantMessage text blocks should be printed to stdout."""
-        from auto_scientist.agents.ingestor import AssistantMessage, ResultMessage, TextBlock
+        from claude_code_sdk import AssistantMessage, ResultMessage, TextBlock
 
         raw_data = tmp_path / "data.csv"
         raw_data.write_text("a,b\n1,2\n")
@@ -169,7 +169,7 @@ class TestRunIngestorMessageBuffer:
     @patch("auto_scientist.agents.ingestor.safe_query")
     async def test_populates_buffer_instead_of_printing(self, mock_query, tmp_path, capsys):
         """When message_buffer is provided, text goes to buffer, not stdout."""
-        from auto_scientist.agents.ingestor import AssistantMessage, ResultMessage, TextBlock
+        from claude_code_sdk import AssistantMessage, ResultMessage, TextBlock
 
         raw_data = tmp_path / "data.csv"
         raw_data.write_text("a,b\n1,2\n")

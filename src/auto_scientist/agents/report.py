@@ -8,9 +8,8 @@ from pathlib import Path
 
 from claude_code_sdk import AssistantMessage, ClaudeCodeOptions, ResultMessage, TextBlock
 
-from auto_scientist.sdk_utils import safe_query
-
 from auto_scientist.prompts.report import REPORT_SYSTEM, REPORT_USER
+from auto_scientist.sdk_utils import safe_query
 from auto_scientist.state import ExperimentState
 
 

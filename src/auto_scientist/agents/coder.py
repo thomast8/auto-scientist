@@ -27,6 +27,7 @@ from auto_scientist.prompts.coder import (
     CODER_USER,
 )
 
+
 async def run_coder(
     plan: dict[str, Any],
     previous_script: Path,

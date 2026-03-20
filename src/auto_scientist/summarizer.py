@@ -5,6 +5,7 @@ pipeline step. Used by the orchestrator when --summary-model is set.
 """
 
 import asyncio
+import contextlib
 import logging
 from collections.abc import Callable, Coroutine
 from typing import Any, TypeVar
@@ -16,8 +17,14 @@ T = TypeVar("T")
 
 logger = logging.getLogger(__name__)
 
-PROGRESS_PREFIX = "The agent is currently working. Based on the output so far, summarize what the agent is currently doing in 1-2 sentences."
-FINAL_PREFIX = "The agent has finished. Based on the full output, summarize what the agent accomplished in 1-2 sentences."
+PROGRESS_PREFIX = (
+    "The agent is currently working. Based on the output so far, "
+    "summarize what the agent is currently doing in 1-2 sentences."
+)
+FINAL_PREFIX = (
+    "The agent has finished. Based on the full output, "
+    "summarize what the agent accomplished in 1-2 sentences."
+)
 
 SUMMARY_PROMPTS: dict[str, str] = {
     "Ingestor": (
@@ -83,7 +90,8 @@ async def summarize_agent_output(
         return ""
 
     try:
-        instruction = SUMMARY_PROMPTS.get(agent_name, "Summarize the following agent output in 1-2 sentences.")
+        fallback = "Summarize the following agent output in 1-2 sentences."
+        instruction = SUMMARY_PROMPTS.get(agent_name, fallback)
         prefix = PROGRESS_PREFIX if progress else FINAL_PREFIX
         prompt = f"{instruction}\n\n{prefix}\n\nAgent output:\n{output}"
         return await query_openai(model, prompt, max_tokens=150)
@@ -174,10 +182,8 @@ async def run_with_summaries(
         result = await coro_fn(message_buffer)
     finally:
         poll_task.cancel()
-        try:
+        with contextlib.suppress(asyncio.CancelledError):
             await poll_task
-        except asyncio.CancelledError:
-            pass
 
         # Final summary of all output
         if message_buffer:
