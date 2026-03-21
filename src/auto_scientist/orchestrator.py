@@ -7,7 +7,14 @@ from pathlib import Path
 from typing import Any
 
 from auto_scientist.config import DomainConfig, SuccessCriterion
-from auto_scientist.console import STEP_COLORS, print_step, print_summary
+from auto_scientist.console import (
+    STEP_COLORS,
+    close_console_log,
+    init_console_log,
+    print_step,
+    print_summary,
+)
+from auto_scientist.log_setup import setup_file_logging
 from auto_scientist.runner import RunResult
 from auto_scientist.scheduler import wait_for_window
 from auto_scientist.state import CriteriaRevision, ExperimentState, VersionEntry
@@ -37,6 +44,7 @@ class Orchestrator:
         model: str | None = None,
         stream: bool = True,
         summary_model: str | None = None,
+        verbose: bool = False,
     ):
         self.state = state
         self.data_path = data_path
@@ -50,73 +58,89 @@ class Orchestrator:
         self.model = model
         self.stream = stream
         self.summary_model = summary_model
+        self.verbose = verbose
 
     async def run(self) -> None:
         """Execute the full orchestration loop."""
         self.output_dir.mkdir(parents=True, exist_ok=True)
+        setup_file_logging(self.output_dir, verbose=self.verbose)
+        init_console_log(self.output_dir / "console.log")
+        logger.info(
+            f"Run started: output_dir={self.output_dir}, "
+            f"model={self.model or 'SDK default'}, "
+            f"max_iterations={self.max_iterations}, "
+            f"critics={self.critic_models or 'none'}"
+        )
+
         state_path = self.output_dir / "state.json"
 
         model_label = self.model or "(SDK default)"
-        print("Auto-Scientist starting")
-        print(f"  Model:      {model_label}")
-        print(f"  Output:     {self.output_dir}")
-        print(f"  Goal:       {self.state.goal[:80]}{'...' if len(self.state.goal) > 80 else ''}")
+        print_step("Auto-Scientist starting")
+        print_step(f"  Model:      {model_label}")
+        print_step(f"  Output:     {self.output_dir}")
+        goal_preview = self.state.goal[:80] + ("..." if len(self.state.goal) > 80 else "")
+        print_step(f"  Goal:       {goal_preview}")
         if self.critic_models:
-            print(f"  Critics:    {', '.join(self.critic_models)}")
-        print()
+            print_step(f"  Critics:    {', '.join(self.critic_models)}")
+        print_step("")
 
-        # Phase 0: Ingestion
-        if self.state.phase == "ingestion":
-            self.state.raw_data_path = self.state.data_path
-            self.state.save(state_path)
+        try:
+            # Phase 0: Ingestion
+            if self.state.phase == "ingestion":
+                self.state.raw_data_path = self.state.data_path
+                self.state.save(state_path)
 
-            canonical_data_dir = await self._run_ingestion()
+                canonical_data_dir = await self._run_ingestion()
 
-            self.state.data_path = str(canonical_data_dir)
-            self.data_path = canonical_data_dir
+                self.state.data_path = str(canonical_data_dir)
+                self.data_path = canonical_data_dir
 
-            # Load config if produced by ingestor
-            config_path = self.output_dir / "domain_config.json"
-            if config_path.exists():
-                config_data = json.loads(config_path.read_text())
-                self.config = DomainConfig.model_validate(config_data)
-                self.state.config_path = str(config_path)
+                # Load config if produced by ingestor
+                config_path = self.output_dir / "domain_config.json"
+                if config_path.exists():
+                    config_data = json.loads(config_path.read_text())
+                    self.config = DomainConfig.model_validate(config_data)
+                    self.state.config_path = str(config_path)
 
-            self.state.phase = "iteration"
-            self.state.save(state_path)
+                self.state.phase = "iteration"
+                self.state.save(state_path)
+                logger.info("Ingestion complete, entering iteration phase")
 
-        # Phase 1: Unified iteration loop
-        while self.state.phase == "iteration":
-            if self.state.iteration >= self.max_iterations:
-                print(f"Reached max iterations ({self.max_iterations}). Stopping.")
-                self.state.phase = "report"
-                break
+            # Phase 1: Unified iteration loop
+            while self.state.phase == "iteration":
+                if self.state.iteration >= self.max_iterations:
+                    print_step(f"Reached max iterations ({self.max_iterations}). Stopping.")
+                    self.state.phase = "report"
+                    break
 
-            if self.state.should_stop_on_failures(self.max_consecutive_failures):
-                print(
-                    f"Hit {self.max_consecutive_failures} consecutive failures. Stopping."
-                )
-                self.state.phase = "report"
-                break
+                if self.state.should_stop_on_failures(self.max_consecutive_failures):
+                    print_step(
+                        f"Hit {self.max_consecutive_failures} consecutive failures. Stopping."
+                    )
+                    self.state.phase = "report"
+                    break
 
-            # Schedule check
-            await wait_for_window(self.state.schedule)
+                # Schedule check
+                await wait_for_window(self.state.schedule)
 
-            await self._run_iteration_body()
-            self.state.save(state_path)
+                await self._run_iteration_body()
+                self.state.save(state_path)
 
-        # Score the final version if it was never evaluated
-        if self.state.versions and self.state.versions[-1].score is None:
-            await self._score_final_version()
-            self.state.save(state_path)
+            # Score the final version if it was never evaluated
+            if self.state.versions and self.state.versions[-1].score is None:
+                await self._score_final_version()
+                self.state.save(state_path)
 
-        # Phase 2: Report
-        if self.state.phase == "report":
-            await self._run_report()
-            self.state.phase = "stopped"
-            self.state.save(state_path)
+            # Phase 2: Report
+            if self.state.phase == "report":
+                await self._run_report()
+                self.state.phase = "stopped"
+                self.state.save(state_path)
 
-        print(f"Experiment completed. Final state saved to {state_path}")
+            print_step(f"Experiment completed. Final state saved to {state_path}")
+            logger.info("Run finished successfully")
+        finally:
+            close_console_log()
 
     async def _run_ingestion(self) -> Path:
         """Phase 0: Canonicalize raw data into experiments/data/."""
@@ -149,19 +173,26 @@ class Orchestrator:
                 message_buffer=buf,
             )
 
-        canonical_data_dir = await self._with_summaries(_ingestor_coro, "Ingestor", [])
+        buffer: list[str] = []
+        try:
+            canonical_data_dir = await self._with_summaries(
+                _ingestor_coro, "Ingestor", buffer,
+            )
+        finally:
+            self._persist_buffer("ingestor", buffer)
 
         # Summary
         data_files = sorted(canonical_data_dir.iterdir())
         print_step("\nINGESTION complete:")
         for f in data_files:
             print_step(f"  {f}", color=STEP_COLORS["INGESTION"])
-        print()
+        print_step("")
 
         return canonical_data_dir
 
     async def _run_iteration_body(self) -> None:
         """Run one iteration of the pipeline (inlined, not _run_iteration)."""
+        logger.info(f"=== Iteration {self.state.iteration} start ===")
         print_step(f"\n{'='*60}")
         print_step(f"ITERATION {self.state.iteration}")
         print_step(f"{'='*60}")
@@ -172,6 +203,7 @@ class Orchestrator:
         # Apply domain_knowledge from Analyst if present
         if analysis and analysis.get("domain_knowledge"):
             self.state.domain_knowledge = analysis["domain_knowledge"]
+            logger.info("Domain knowledge updated from Analyst")
 
         # Score the evaluated version with current criteria
         self._score_latest(analysis)
@@ -185,7 +217,8 @@ class Orchestrator:
 
         # Step 3: Check if Scientist recommends stopping
         if plan and plan.get("should_stop"):
-            print(f"Scientist recommends stopping: {plan.get('stop_reason', 'unknown')}")
+            print_step(f"Scientist recommends stopping: {plan.get('stop_reason', 'unknown')}")
+            logger.info(f"Scientist stop: {plan.get('stop_reason', 'unknown')}")
             self.state.phase = "report"
             return
 
@@ -248,11 +281,16 @@ class Orchestrator:
                 f for f in version_dir.iterdir() if f.suffix in suffixes
             )
             if artifacts:
-                print("  Outputs:")
+                print_step("  Outputs:")
                 for f in artifacts:
-                    print(f"    {f}")
+                    print_step(f"    {f}")
 
         # Increment at end of loop body
+        logger.info(
+            f"Iteration {self.state.iteration} complete: "
+            f"status={version_entry.status}, score={version_entry.score}, "
+            f"best={self.state.best_version} ({self.state.best_score})"
+        )
         self.state.iteration += 1
 
     def _should_summarize(self) -> bool:
@@ -271,6 +309,19 @@ class Orchestrator:
             coro_fn, agent_name, self.summary_model, message_buffer,
         )
 
+    def _persist_buffer(
+        self, agent_name: str, buffer: list[str], iteration: int | None = None,
+    ) -> None:
+        """Write an agent's message buffer to disk for debugging."""
+        if not buffer:
+            return
+        buffers_dir = self.output_dir / "buffers"
+        buffers_dir.mkdir(exist_ok=True)
+        if iteration is None:
+            iteration = self.state.iteration
+        filename = f"{agent_name.lower().replace(' ', '_')}_{iteration:02d}.txt"
+        (buffers_dir / filename).write_text("\n".join(buffer))
+
     def _notebook_content(self) -> str:
         """Return notebook content."""
         notebook_path = self.output_dir / "lab_notebook.md"
@@ -284,6 +335,7 @@ class Orchestrator:
         domain_knowledge = self.state.domain_knowledge
 
         print_step("  ANALYZE: initial data characterization")
+        buffer: list[str] = []
         try:
             async def _analyst_coro(buf):
                 return await run_analyst(
@@ -297,12 +349,16 @@ class Orchestrator:
                     message_buffer=buf,
                 )
 
-            analysis = await self._with_summaries(_analyst_coro, "Analyst", [])
+            analysis = await self._with_summaries(_analyst_coro, "Analyst", buffer)
+            logger.info("Analyst initial: data characterization complete")
             print_step("  ANALYZE: data characterization complete")
             return analysis
         except Exception as e:
+            logger.exception(f"Analyst initial error: {e}")
             print_step(f"  ANALYZE: error - {e}")
             return None
+        finally:
+            self._persist_buffer("analyst", buffer)
 
     async def _run_analyst(self) -> dict[str, Any] | None:
         """Invoke the Analyst agent on latest results + plots."""
@@ -329,6 +385,7 @@ class Orchestrator:
         success_criteria = self.state.success_criteria or []
 
         print_step(f"  ANALYZE: analyzing {latest.version} ({len(plot_paths)} plots)")
+        buffer: list[str] = []
         try:
             async def _analyst_coro(buf):
                 return await run_analyst(
@@ -341,12 +398,20 @@ class Orchestrator:
                     message_buffer=buf,
                 )
 
-            analysis = await self._with_summaries(_analyst_coro, "Analyst", [])
-            print_step(f"  ANALYZE: complete ({len(analysis.get('criteria_results', []))} criteria evaluated)")
+            analysis = await self._with_summaries(_analyst_coro, "Analyst", buffer)
+            n_criteria = len(analysis.get("criteria_results", []))
+            logger.info(
+                f"Analyst complete: {n_criteria} criteria evaluated, "
+                f"data_summary={'yes' if analysis.get('data_summary') else 'no'}"
+            )
+            print_step(f"  ANALYZE: complete ({n_criteria} criteria evaluated)")
             return analysis
         except Exception as e:
+            logger.exception(f"Analyst error: {e}")
             print_step(f"  ANALYZE: error - {e}")
             return None
+        finally:
+            self._persist_buffer("analyst", buffer)
 
     async def _run_scientist_plan(self, analysis: dict | None) -> dict[str, Any] | None:
         """Invoke the Scientist agent to formulate a plan."""
@@ -357,6 +422,7 @@ class Orchestrator:
         domain_knowledge = self.state.domain_knowledge
 
         print_step(f"  PLAN: scientist planning {version}")
+        buffer: list[str] = []
         try:
             async def _scientist_coro(buf):
                 return await run_scientist(
@@ -369,19 +435,28 @@ class Orchestrator:
                     message_buffer=buf,
                 )
 
-            plan = await self._with_summaries(_scientist_coro, "Scientist", [])
+            plan = await self._with_summaries(_scientist_coro, "Scientist", buffer)
 
             # Write the notebook entry from the plan
             if plan.get("notebook_entry"):
                 with notebook_path.open("a") as f:
                     f.write(plan["notebook_entry"] + "\n\n---\n\n")
 
+            logger.info(
+                f"Scientist plan: strategy={plan.get('strategy', '?')}, "
+                f"changes={len(plan.get('changes', []))}, "
+                f"hypothesis={plan.get('hypothesis', '?')[:100]}, "
+                f"should_stop={plan.get('should_stop', False)}"
+            )
             print_step(f"  PLAN: strategy={plan.get('strategy', '?')}, "
                        f"changes={len(plan.get('changes', []))}")
             return plan
         except Exception as e:
+            logger.exception(f"Scientist plan error: {e}")
             print_step(f"  PLAN: error - {e}")
             return None
+        finally:
+            self._persist_buffer("scientist", buffer)
 
     async def _run_debate(self, plan: dict | None) -> list[dict[str, Any]] | None:
         """Send plan to critic model(s) for debate with the Scientist."""
@@ -401,6 +476,8 @@ class Orchestrator:
         n_critics = len(self.critic_models)
         print_step(f"  DEBATE: {n_critics} critic(s), {self.debate_rounds} round(s)")
 
+        buffer: list[str] = []
+
         async def _debate_coro(buf):
             return await run_debate(
                 critic_specs=self.critic_models,
@@ -412,10 +489,12 @@ class Orchestrator:
                 message_buffer=buf,
             )
 
-        critiques = await self._with_summaries(_debate_coro, "Debate", [])
-
-        print_step(f"  DEBATE: received {len(critiques)} critique(s)")
-        return critiques
+        try:
+            critiques = await self._with_summaries(_debate_coro, "Debate", buffer)
+            print_step(f"  DEBATE: received {len(critiques)} critique(s)")
+            return critiques
+        finally:
+            self._persist_buffer("debate", buffer)
 
     async def _run_scientist_revision(
         self,
@@ -441,6 +520,7 @@ class Orchestrator:
             all_transcript.extend(entry.get("transcript", []))
 
         print_step("  REVISE: scientist revising plan after debate")
+        buffer: list[str] = []
         try:
             async def _revision_coro(buf):
                 return await run_scientist_revision(
@@ -454,7 +534,9 @@ class Orchestrator:
                     message_buffer=buf,
                 )
 
-            revised = await self._with_summaries(_revision_coro, "Scientist Revision", [])
+            revised = await self._with_summaries(
+                _revision_coro, "Scientist Revision", buffer,
+            )
 
             # Write revised notebook entry
             if revised.get("notebook_entry"):
@@ -464,8 +546,11 @@ class Orchestrator:
             print_step(f"  REVISE: strategy={revised.get('strategy', '?')}")
             return revised
         except Exception as e:
+            logger.exception(f"Scientist revision error: {e}")
             print_step(f"  REVISE: error - {e}, using original plan")
             return None
+        finally:
+            self._persist_buffer("scientist_revision", buffer)
 
     async def _run_coder(self, plan: dict | None) -> Path | None:
         """Invoke the Coder agent to implement the plan."""
@@ -487,6 +572,7 @@ class Orchestrator:
             previous_script = Path("nonexistent")
 
         print_step(f"  IMPLEMENT: coder writing {version}")
+        buffer: list[str] = []
         try:
             async def _coder_coro(buf):
                 return await run_coder(
@@ -500,16 +586,26 @@ class Orchestrator:
                     message_buffer=buf,
                 )
 
-            new_script = await self._with_summaries(_coder_coro, "Coder", [])
+            new_script = await self._with_summaries(_coder_coro, "Coder", buffer)
             print_step(f"  IMPLEMENT: created {new_script}")
             return new_script
         except Exception as e:
+            logger.exception(f"Coder error: {e}")
             print_step(f"  IMPLEMENT: error - {e}")
             self.state.record_failure()
             return None
+        finally:
+            self._persist_buffer("coder", buffer)
 
     def _apply_criteria_updates(self, plan: dict[str, Any]) -> None:
-        """Check Scientist plan for top_level_criteria or criteria_revision, update state."""
+        """Check Scientist plan for top_level_criteria or criteria_revision, update state.
+
+        TODO: criteria revision is purely voluntary (Scientist includes criteria_revision
+        in plan output). In toy_function_022, a v02 regression was never addressed because
+        the loop hit max iterations before the Scientist could evaluate it. Consider
+        making revision more systematic, e.g. prompting the Scientist more strongly on
+        score regressions or adding an automatic revision consideration step.
+        """
         if plan.get("top_level_criteria"):
             criteria = [
                 c for raw in plan["top_level_criteria"]
@@ -711,6 +807,7 @@ class Orchestrator:
         notebook_path = self.output_dir / "lab_notebook.md"
 
         print_step("\nREPORT phase: generating final summary")
+        buffer: list[str] = []
         try:
             async def _report_coro(buf):
                 return await run_report(
@@ -721,7 +818,10 @@ class Orchestrator:
                     message_buffer=buf,
                 )
 
-            report_path = await self._with_summaries(_report_coro, "Report", [])
+            report_path = await self._with_summaries(_report_coro, "Report", buffer)
             print_step(f"REPORT: written to {report_path}")
         except Exception as e:
+            logger.exception(f"Report error: {e}")
             print_step(f"REPORT: error - {e}")
+        finally:
+            self._persist_buffer("report", buffer)

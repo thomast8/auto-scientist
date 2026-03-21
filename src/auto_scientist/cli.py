@@ -67,6 +67,10 @@ def cli():
     default=None,
     help="OpenAI model for periodic agent summaries (e.g., 'gpt-4o-mini'). Opt-in.",
 )
+@click.option(
+    "-v", "--verbose", is_flag=True,
+    help="Show debug log messages on console (always written to debug.log).",
+)
 def run(
     data: str,
     goal: str,
@@ -79,6 +83,7 @@ def run(
     model: str | None,
     no_stream: bool,
     summary_model: str | None,
+    verbose: bool,
 ):
     """Run autonomous scientific investigation from raw data."""
     critic_list = [c.strip() for c in critics.split(",") if c.strip()] if critics else []
@@ -108,6 +113,7 @@ def run(
         model=model,
         stream=not no_stream,
         summary_model=summary_model,
+        verbose=verbose,
     )
 
     asyncio.run(orchestrator.run())
@@ -120,7 +126,11 @@ def run(
     type=click.Path(exists=True),
     help="Path to state.json for resumption",
 )
-def resume(state: str):
+@click.option(
+    "-v", "--verbose", is_flag=True,
+    help="Show debug log messages on console (always written to debug.log).",
+)
+def resume(state: str, verbose: bool):
     """Resume a previously paused or crashed run."""
     loaded_state = ExperimentState.load(Path(state))
     output_dir = Path(state).parent
@@ -131,6 +141,7 @@ def resume(state: str):
         state=loaded_state,
         data_path=data_path,
         output_dir=output_dir,
+        verbose=verbose,
     )
 
     asyncio.run(orchestrator.run())

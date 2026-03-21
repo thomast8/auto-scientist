@@ -1,10 +1,14 @@
 """Console output helpers for live token streaming."""
 
 import os
+import re
 import shutil
 import sys
 import textwrap
 from collections.abc import Callable
+from datetime import datetime
+from pathlib import Path
+from typing import TextIO
 
 BOLD = "\033[1m"
 RESET = "\033[0m"
@@ -46,6 +50,38 @@ def _use_color() -> bool:
     return "NO_COLOR" not in os.environ
 
 
+# ---------------------------------------------------------------------------
+# Console log file tee (mirrors print_step / print_summary to a file)
+# ---------------------------------------------------------------------------
+_log_file: TextIO | None = None
+_ANSI_RE = re.compile(r"\033\[[0-9;]*m")
+
+
+def init_console_log(path: Path) -> None:
+    """Open the console log file. Called once by the orchestrator at startup."""
+    global _log_file
+    _log_file = open(path, "a")  # noqa: SIM115 — append mode, closed explicitly
+
+
+def close_console_log() -> None:
+    """Flush and close the console log file."""
+    global _log_file
+    if _log_file is not None:
+        _log_file.close()
+        _log_file = None
+
+
+def _log_to_file(text: str) -> None:
+    """Write *text* to the console log, stripping ANSI codes and adding a timestamp."""
+    if _log_file is None:
+        return
+    clean = _ANSI_RE.sub("", text)
+    ts = datetime.now().strftime("%H:%M:%S")
+    for line in clean.splitlines():
+        _log_file.write(f"[{ts}] {line}\n")
+    _log_file.flush()
+
+
 def _wrap(message: str, subsequent_indent: str | None = None) -> str:
     """Wrap *message* to the terminal width with a hanging indent.
 
@@ -78,6 +114,7 @@ def print_step(message: str, *, color: str | None = None) -> None:
     Pass ``color`` explicitly to override prefix-based detection.
     """
     message = _wrap(message)
+    _log_to_file(message)
 
     if not _use_color():
         print(message)
@@ -118,6 +155,7 @@ def make_stream_printer(label: str) -> Callable[[str], None]:
                 sys.stdout.write(f"\n{color}{BOLD}{label}{RESET}\n")
             else:
                 sys.stdout.write(f"\n{label}\n")
+            _log_to_file(label)
             printed_label = True
         sys.stdout.write(token)
         sys.stdout.flush()
@@ -152,6 +190,7 @@ def print_summary(agent_name: str, summary: str, label: str = "") -> None:
 
     prefix = f"  > [{label}] " if label else "  > "
     line = _wrap(f"{prefix}{summary}", subsequent_indent=" " * len(prefix))
+    _log_to_file(line)
 
     if use_color:
         sys.stdout.write(f"{color}{line}{RESET}\n")

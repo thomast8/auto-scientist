@@ -109,7 +109,7 @@ async def summarize_agent_output(
         instructions = f"{instruction}\n\n{prefix}"
         return await _query_summary(model, instructions, f"Agent output:\n{output}")
     except Exception as e:
-        print(f"  SUMMARY: error summarizing {agent_name}: {e}")
+        logger.warning(f"Error summarizing {agent_name}: {e}")
         return ""
 
 
@@ -134,7 +134,7 @@ async def summarize_results(
         instructions = f"{instruction}\n\n{FINAL_PREFIX}"
         return await _query_summary(model, instructions, f"Results:\n{results_text}")
     except Exception as e:
-        print(f"  SUMMARY: error summarizing results: {e}")
+        logger.warning(f"Error summarizing results: {e}")
         return ""
 
 
@@ -188,7 +188,7 @@ async def run_with_summaries(
                     label = f"{int(elapsed)}s"
                     print_summary(agent_name, summary, label=label)
             except Exception as e:
-                print(f"  SUMMARY: periodic poll error for {agent_name}: {e}")
+                logger.warning(f"Periodic poll error for {agent_name}: {e}")
 
     poll_task = asyncio.create_task(poll_loop())
     try:
@@ -208,6 +208,6 @@ async def run_with_summaries(
                 if summary:
                     print_summary(agent_name, summary, label="done")
             except Exception as e:
-                print(f"  SUMMARY: final summary error for {agent_name}: {e}")
+                logger.warning(f"Final summary error for {agent_name}: {e}")
 
     return result

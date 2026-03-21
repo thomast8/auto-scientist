@@ -48,28 +48,40 @@ def append_block_to_buffer(block: Any, buffer: list[str]) -> None:
 
     Handles TextBlock (text), ToolUseBlock (tool name + truncated input),
     and ToolResultBlock (truncated output). Silently skips unknown types.
+    Also logs each block to debug.log for post-mortem analysis.
     """
     from claude_code_sdk import TextBlock, ToolResultBlock, ToolUseBlock
 
     if isinstance(block, TextBlock):
         buffer.append(block.text)
+        preview = block.text[:300].replace("\n", " ")
+        logger.debug(f"[text] {preview}")
     elif isinstance(block, ToolUseBlock):
         input_str = str(block.input)
         if len(input_str) > 200:
             input_str = input_str[:200] + "..."
-        buffer.append(f"[Tool: {block.name}] {input_str}")
+        entry = f"[Tool: {block.name}] {input_str}"
+        buffer.append(entry)
+        logger.debug(entry)
     elif isinstance(block, ToolResultBlock):
         content = str(block.content) if block.content else ""
         if len(content) > 200:
             content = content[:200] + "..."
         prefix = "[Error] " if block.is_error else "[Result] "
-        buffer.append(f"{prefix}{content}")
+        entry = f"{prefix}{content}"
+        buffer.append(entry)
+        logger.debug(entry)
 
 
 async def safe_query(
     prompt: str, options: ClaudeCodeOptions
 ) -> AsyncIterator[Message]:
     """Wrap claude_code_sdk.query, filtering out None (unknown message types)."""
+    logger.debug(
+        f"SDK query start: model={options.model}, "
+        f"max_turns={options.max_turns}, "
+        f"prompt_len={len(prompt)}"
+    )
     async for msg in query(prompt=prompt, options=options):
         if msg is not None:
             yield msg

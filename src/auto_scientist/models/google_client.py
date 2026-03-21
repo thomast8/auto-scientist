@@ -1,9 +1,12 @@
 """Google AI wrapper with optional streaming."""
 
+import logging
 from collections.abc import Callable
 
 from google import genai
 from google.genai import types
+
+logger = logging.getLogger(__name__)
 
 
 async def query_google(
@@ -24,6 +27,7 @@ async def query_google(
     Returns:
         The model's text response.
     """
+    logger.debug(f"Google call: model={model}, prompt_len={len(prompt)}, web_search={web_search}")
     client = genai.Client()
 
     config = None
@@ -43,11 +47,15 @@ async def query_google(
             if text:
                 on_token(text)
                 parts.append(text)
-        return "".join(parts)
+        result = "".join(parts)
+        logger.debug(f"Google response: {len(result)} chars")
+        return result
 
     response = await client.aio.models.generate_content(
         model=model,
         contents=prompt,
         config=config,
     )
-    return response.text or ""
+    result = response.text or ""
+    logger.debug(f"Google response: {len(result)} chars")
+    return result
