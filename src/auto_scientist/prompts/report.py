@@ -58,6 +58,7 @@ REPORT_USER = """\
 </data>
 
 <task>
-Write the final report to: {report_path}
+Write the final report to the file "{report_path}" in the current working directory.
+Use a relative path, not an absolute path. The file must be created in cwd.
 </task>
 """
