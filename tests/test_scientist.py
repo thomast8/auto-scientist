@@ -92,7 +92,7 @@ SAMPLE_PLAN = {
     "expected_impact": "improvement",
     "should_stop": False,
     "stop_reason": None,
-    "notebook_entry": "## v01",
+    "notebook_entry": "First hypothesis\n\nTesting incremental approach",
     "success_criteria": [
         {"name": "metric", "description": "desc", "metric_key": "m", "condition": "> 0.5"}
     ],
@@ -266,7 +266,7 @@ class TestRunScientistExploration:
             "expected_impact": "Baseline understanding of the dataset",
             "should_stop": False,
             "stop_reason": None,
-            "notebook_entry": "## v00 - Data exploration",
+            "notebook_entry": "Data exploration\n\nFirst look at the data",
             "success_criteria": [],
         }
 
@@ -305,7 +305,7 @@ class TestRunScientistCriteriaDefinition:
             "expected_impact": "R-squared above 0.9",
             "should_stop": False,
             "stop_reason": None,
-            "notebook_entry": "## v01 - First hypothesis",
+            "notebook_entry": "First hypothesis\n\nDefining initial approach",
             "success_criteria": [
                 {"name": "R-squared", "description": "Fit quality",
                  "metric_key": "r_squared", "condition": "> 0.9"},
@@ -354,7 +354,7 @@ class TestRunScientistCriteriaRevision:
             "expected_impact": "Stable R-squared around 0.90",
             "should_stop": False,
             "stop_reason": None,
-            "notebook_entry": "## v03 - Adjusting targets",
+            "notebook_entry": "Adjusting targets\n\nRevising criteria based on evidence",
             "success_criteria": [
                 {"name": "R-squared", "description": "Fit quality",
                  "metric_key": "r_squared", "condition": "> 0.85"},

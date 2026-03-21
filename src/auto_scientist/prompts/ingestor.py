@@ -50,7 +50,26 @@ analysis. You write a conversion script for auditability.
 
 5. Run the script to produce the canonical output.
 
-6. Update the lab notebook with a data structure summary only:
+6. Update the lab notebook (XML format) with a data structure summary only.
+   The notebook file uses XML. Write it with this exact structure:
+
+   ```xml
+   <?xml version="1.0" encoding="utf-8"?>
+   <lab_notebook>
+   <entry version="ingestion" source="ingestor">
+     <title>Ingestion Entry</title>
+     <content>
+   Schema: [column names, types, null counts]
+   Rows: [count]
+   Value ranges: [per column min/max/notes]
+   Canonical format: [format chosen and why]
+   Assumptions: [any structural assumptions (autonomous mode)]
+     </content>
+   </entry>
+   </lab_notebook>
+   ```
+
+   Include only structural facts:
    - Schema, column names, data types
    - Row counts, file sizes
    - Value ranges per column

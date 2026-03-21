@@ -78,7 +78,7 @@ def plan():
         "expected_impact": "Smoother convergence, better final score",
         "should_stop": False,
         "stop_reason": None,
-        "notebook_entry": "## v02 - Learning rate adjustment",
+        "notebook_entry": "Learning rate adjustment\n\nReducing lr for convergence",
         "success_criteria": [
             {
                 "name": "Convergence improves",

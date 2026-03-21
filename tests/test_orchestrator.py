@@ -100,10 +100,10 @@ class TestEvaluate:
 
 class TestNotebookContent:
     def test_returns_content_when_exists(self, orchestrator, tmp_path):
-        notebook = tmp_path / "experiments" / "lab_notebook.md"
+        notebook = tmp_path / "experiments" / "lab_notebook.xml"
         notebook.parent.mkdir(parents=True, exist_ok=True)
-        notebook.write_text("# Notebook")
-        assert orchestrator._notebook_content() == "# Notebook"
+        notebook.write_text("<lab_notebook/>")
+        assert orchestrator._notebook_content() == "<lab_notebook/>"
 
     def test_returns_empty_when_missing(self, orchestrator):
         assert orchestrator._notebook_content() == ""
@@ -1014,7 +1014,7 @@ class TestRunScientistPlan:
     @pytest.mark.asyncio
     async def test_returns_plan(self, orchestrator, tmp_path):
         orchestrator.output_dir.mkdir(parents=True, exist_ok=True)
-        plan = {"hypothesis": "test", "strategy": "incremental", "notebook_entry": "## v00"}
+        plan = {"hypothesis": "test", "strategy": "incremental", "notebook_entry": "Test plan\n\nNarrative"}
 
         with patch(
             "auto_scientist.agents.scientist.run_scientist",
@@ -1024,9 +1024,11 @@ class TestRunScientistPlan:
             result = await orchestrator._run_scientist_plan({"success_score": 50})
 
         assert result["hypothesis"] == "test"
-        notebook = orchestrator.output_dir / "lab_notebook.md"
+        notebook = orchestrator.output_dir / "lab_notebook.xml"
         assert notebook.exists()
-        assert "## v00" in notebook.read_text()
+        content = notebook.read_text()
+        assert "<entry" in content
+        assert "<title>Test plan</title>" in content
 
     @pytest.mark.asyncio
     async def test_error_returns_none(self, orchestrator, tmp_path):
@@ -1096,7 +1098,7 @@ class TestRunScientistRevisionOrchestrator:
             {"model": "openai:gpt-4o", "critique": "weak",
              "transcript": [{"role": "critic", "content": "weak"}]},
         ]
-        revised = {"hypothesis": "revised", "notebook_entry": "## revised"}
+        revised = {"hypothesis": "revised", "notebook_entry": "Revised plan\n\nAdjusted approach"}
 
         with patch(
             "auto_scientist.agents.scientist.run_scientist_revision",
@@ -1106,8 +1108,10 @@ class TestRunScientistRevisionOrchestrator:
             result = await orchestrator._run_scientist_revision(plan, debate_result, {})
 
         assert result["hypothesis"] == "revised"
-        notebook = orchestrator.output_dir / "lab_notebook.md"
-        assert "## revised" in notebook.read_text()
+        notebook = orchestrator.output_dir / "lab_notebook.xml"
+        content = notebook.read_text()
+        assert "<title>Revised plan</title>" in content
+        assert 'source="revision"' in content
 
     @pytest.mark.asyncio
     async def test_error_returns_none(self, orchestrator, tmp_path):

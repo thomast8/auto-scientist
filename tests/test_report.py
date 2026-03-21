@@ -32,7 +32,7 @@ class TestRunReport:
             domain="test", goal="test goal",
             iteration=5, best_version="v03", best_score=85,
         )
-        notebook_path = tmp_path / "lab_notebook.md"
+        notebook_path = tmp_path / "lab_notebook.xml"
         notebook_path.write_text("# Lab Notebook")
 
         result = await run_report(
@@ -53,7 +53,7 @@ class TestRunReport:
         mock_query.side_effect = fake_query
 
         state = ExperimentState(domain="test", goal="test goal")
-        notebook_path = tmp_path / "lab_notebook.md"
+        notebook_path = tmp_path / "lab_notebook.xml"
 
         with pytest.raises(FileNotFoundError, match="did not create"):
             await run_report(
@@ -80,7 +80,7 @@ class TestRunReport:
             domain="spo2", goal="predict oxygen levels",
             iteration=10, best_version="v07", best_score=92,
         )
-        notebook_path = tmp_path / "lab_notebook.md"
+        notebook_path = tmp_path / "lab_notebook.xml"
         notebook_path.write_text("# Notebook")
 
         await run_report(state=state, notebook_path=notebook_path, output_dir=tmp_path)
@@ -107,7 +107,7 @@ class TestRunReport:
         mock_query.side_effect = fake_query
 
         state = ExperimentState(domain="test", goal="test goal")
-        notebook_path = tmp_path / "lab_notebook.md"
+        notebook_path = tmp_path / "lab_notebook.xml"
         notebook_path.write_text("# Notebook")
 
         await run_report(state=state, notebook_path=notebook_path, output_dir=tmp_path)
@@ -157,7 +157,7 @@ class TestReportPath:
         mock_query.side_effect = fake_query
 
         state = ExperimentState(domain="test", goal="test goal")
-        notebook_path = tmp_path / "lab_notebook.md"
+        notebook_path = tmp_path / "lab_notebook.xml"
         notebook_path.write_text("# Notebook")
 
         await run_report(state=state, notebook_path=notebook_path, output_dir=tmp_path)
@@ -189,7 +189,7 @@ class TestReportMessageBuffer:
         mock_query.side_effect = fake_query
 
         state = ExperimentState(domain="test", goal="test goal")
-        notebook_path = tmp_path / "lab_notebook.md"
+        notebook_path = tmp_path / "lab_notebook.xml"
         notebook_path.write_text("# Notebook")
 
         buf: list[str] = []

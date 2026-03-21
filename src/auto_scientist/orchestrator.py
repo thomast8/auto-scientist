@@ -15,6 +15,7 @@ from auto_scientist.console import (
     print_summary,
 )
 from auto_scientist.log_setup import setup_file_logging
+from auto_scientist.notebook import NOTEBOOK_FILENAME, append_entry, read_notebook
 from auto_scientist.runner import RunResult
 from auto_scientist.scheduler import wait_for_window
 from auto_scientist.state import CriteriaRevision, ExperimentState, VersionEntry
@@ -324,14 +325,13 @@ class Orchestrator:
 
     def _notebook_content(self) -> str:
         """Return notebook content."""
-        notebook_path = self.output_dir / "lab_notebook.md"
-        return notebook_path.read_text() if notebook_path.exists() else ""
+        return read_notebook(self.output_dir / NOTEBOOK_FILENAME)
 
     async def _run_analyst_initial(self) -> dict[str, Any] | None:
         """Iteration 0: analyze raw canonical data instead of experiment results."""
         from auto_scientist.agents.analyst import run_analyst
 
-        notebook_path = self.output_dir / "lab_notebook.md"
+        notebook_path = self.output_dir / NOTEBOOK_FILENAME
         domain_knowledge = self.state.domain_knowledge
 
         print_step("  ANALYZE: initial data characterization")
@@ -369,7 +369,7 @@ class Orchestrator:
             return await self._run_analyst_initial()
 
         latest = self.state.versions[-1]
-        notebook_path = self.output_dir / "lab_notebook.md"
+        notebook_path = self.output_dir / NOTEBOOK_FILENAME
         domain_knowledge = self.state.domain_knowledge
 
         # Find results file
@@ -418,7 +418,7 @@ class Orchestrator:
         from auto_scientist.agents.scientist import run_scientist
 
         version = f"v{self.state.iteration:02d}"
-        notebook_path = self.output_dir / "lab_notebook.md"
+        notebook_path = self.output_dir / NOTEBOOK_FILENAME
         domain_knowledge = self.state.domain_knowledge
 
         print_step(f"  PLAN: scientist planning {version}")
@@ -439,8 +439,7 @@ class Orchestrator:
 
             # Write the notebook entry from the plan
             if plan.get("notebook_entry"):
-                with notebook_path.open("a") as f:
-                    f.write(plan["notebook_entry"] + "\n\n---\n\n")
+                append_entry(notebook_path, plan["notebook_entry"], version, "scientist")
 
             logger.info(
                 f"Scientist plan: strategy={plan.get('strategy', '?')}, "
@@ -510,7 +509,7 @@ class Orchestrator:
         from auto_scientist.agents.scientist import run_scientist_revision
 
         version = f"v{self.state.iteration:02d}"
-        notebook_path = self.output_dir / "lab_notebook.md"
+        notebook_path = self.output_dir / NOTEBOOK_FILENAME
         domain_knowledge = self.state.domain_knowledge
 
         # Combine transcripts from all critics
@@ -540,8 +539,7 @@ class Orchestrator:
 
             # Write revised notebook entry
             if revised.get("notebook_entry"):
-                with notebook_path.open("a") as f:
-                    f.write(revised["notebook_entry"] + "\n\n---\n\n")
+                append_entry(notebook_path, revised["notebook_entry"], version, "revision")
 
             print_step(f"  REVISE: strategy={revised.get('strategy', '?')}")
             return revised
@@ -804,7 +802,7 @@ class Orchestrator:
         """Phase 2: Generate final summary report."""
         from auto_scientist.agents.report import run_report
 
-        notebook_path = self.output_dir / "lab_notebook.md"
+        notebook_path = self.output_dir / NOTEBOOK_FILENAME
 
         print_step("\nREPORT phase: generating final summary")
         buffer: list[str] = []

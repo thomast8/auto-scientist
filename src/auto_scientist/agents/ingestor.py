@@ -14,6 +14,7 @@ from claude_code_sdk import (
     TextBlock,
 )
 
+from auto_scientist.notebook import NOTEBOOK_FILENAME
 from auto_scientist.prompts.ingestor import INGESTOR_SYSTEM, INGESTOR_USER
 from auto_scientist.sdk_utils import append_block_to_buffer, safe_query
 
@@ -41,7 +42,7 @@ async def run_ingestor(
     """
     data_dir = output_dir / "data"
     data_dir.mkdir(parents=True, exist_ok=True)
-    notebook_path = output_dir / "lab_notebook.md"
+    notebook_path = output_dir / NOTEBOOK_FILENAME
 
     tools = ["Bash", "Read", "Write", "Glob", "Grep"]
     if interactive:

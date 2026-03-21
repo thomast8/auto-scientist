@@ -250,12 +250,12 @@ async def run_scientist_revision(
     notebook_path = Path(notebook_path)
     notebook_content = notebook_path.read_text() if notebook_path.exists() else ""
 
-    # Format debate transcript
+    # Format debate transcript as XML turns
     transcript_parts = []
     for entry in debate_transcript:
-        role = entry["role"].capitalize()
-        transcript_parts.append(f"### {role}\n{entry['content']}")
-    transcript_text = "\n\n".join(transcript_parts)
+        role = entry["role"]
+        transcript_parts.append(f"<turn role=\"{role}\">\n{entry['content']}\n</turn>")
+    transcript_text = "\n".join(transcript_parts)
 
     user_prompt = SCIENTIST_REVISION_USER.format(
         domain_knowledge=domain_knowledge or "(no domain knowledge provided)",

@@ -65,10 +65,10 @@ see or write code.
    Good: "RMSE < 500 kg/ha on test set". Bad: "results look good".
    Bad: "Residuals approximately normal" (no numeric threshold).
 
-7. Write a notebook entry as continuous narrative under
-   ## {{version}} - [Brief Title]. Include arc reflection and plan.
-   Good: "v03 was a dead end: adding sensor delay sounded correct,
-   but the optimizer can't distinguish delay from washout rate."
+7. Write a notebook entry as continuous narrative text. The first
+   line is a brief title; the rest is the narrative. Include arc
+   reflection and plan. The orchestrator wraps it in XML.
+   Good: "Interaction features\n\nv02 was incremental..."
    Bad: "v03 didn't work, trying something different."
 
 8. Set should_stop=true when all required criteria pass, or when
@@ -118,7 +118,7 @@ below 500.",
   "expected_impact": "RMSE below 500, R-squared above 0.75.",
   "should_stop": false,
   "stop_reason": null,
-  "notebook_entry": "## v03 - Interaction features\\n\\nv02 was an \
+  "notebook_entry": "Interaction features\\n\\nv02 was an \
 incremental improvement: polynomial soil features reduced RMSE \
 from 580 to 550. However, soil and weather are still treated as \
 independent. Errors concentrate in high-rainfall periods, \
@@ -201,7 +201,7 @@ adjacency list with segment lengths",
 error below 15%.",
   "should_stop": false,
   "stop_reason": null,
-  "notebook_entry": "## v04 - Network simulation\\n\\nv03 was a \
+  "notebook_entry": "Network simulation\\n\\nv03 was a \
 dead end: tuning lag windows 5-30min gave no improvement (r2 \
 stayed 0.31). The fundamental problem: regression treats each \
 intersection as isolated. A queue at intersection A spills back \
@@ -272,7 +272,7 @@ and wind brackets (0-5, 5-15, 15+ m/s)",
 corrections.",
   "should_stop": false,
   "stop_reason": null,
-  "notebook_entry": "## v06 - Lookup tables\\n\\nThree paradigms \
+  "notebook_entry": "Lookup tables\\n\\nThree paradigms \
 explored: polynomial (v03, 1.8C), physics (v04, 3.2C), \
 time-varying (v05, 2.1C). Physics failed due to unmeasurable \
 parameters. Time-varying failed because drift depends on weather, \
@@ -357,7 +357,7 @@ pairs",
   "expected_impact": "Baseline understanding of the dataset.",
   "should_stop": false,
   "stop_reason": null,
-  "notebook_entry": "## v00 - Data exploration\\n\\nFirst iteration. \
+  "notebook_entry": "Data exploration\\n\\nFirst iteration. \
 No prior results or criteria. Goal: understand the data before \
 forming hypotheses.\\n\\nPlan: compute distributions, check data \
 quality, correlations, and diagnostic plots.",
@@ -414,7 +414,7 @@ and RMSE on held-out 20% test set",
   "expected_impact": "R-squared above 0.9 on test set.",
   "should_stop": false,
   "stop_reason": null,
-  "notebook_entry": "## v01 - Polynomial fitting\\n\\nExploration \
+  "notebook_entry": "Polynomial fitting\\n\\nExploration \
 (v00) found 200 points with x in [0,10] and y in [-2.7, 9.8]. \
 The data follows a smooth curve with additive noise.\\n\\nFirst \
 hypothesis: polynomial fit. Testing degrees 2-6 with CV.",
@@ -486,7 +486,7 @@ since v06, v07 brought further improvements. Time to stop.
   "stop_reason": "All required criteria pass: transport \
 RMSE=0.08 (< 0.15), settling error=3% (< 10%), shear \
 R-squared=0.94 (> 0.85). Converged since v06.",
-  "notebook_entry": "## v08 - Investigation complete\\n\\nAll \
+  "notebook_entry": "Investigation complete\\n\\nAll \
 criteria met since v06. v07 further improved settling 5% to 3%. \
 Transport RMSE (0.08) well below 0.15, shear R-squared (0.94) \
 exceeds 0.85.\\n\\nStopping: converged, all targets met.",
@@ -529,7 +529,8 @@ strategy: one of "incremental", "structural", "exploratory".
 changes: list of planned changes with priority 1/2/3.
 should_stop: true if investigation should end.
 stop_reason: why stopping (null if should_stop is false).
-notebook_entry: markdown to append to lab notebook.
+notebook_entry: narrative text. First line is the entry title,
+  remaining lines are the narrative. The orchestrator wraps it in XML.
 success_criteria: 3-8 testable predictions of the hypothesis.
 top_level_criteria: (optional) investigation-wide goals, defined when
   analysis is available but no top-level criteria exist yet.
@@ -572,7 +573,7 @@ SCIENTIST_USER = """\
 1. Understand the current state from the analysis and notebook
 2. Formulate a clear hypothesis about what to change and why
 3. Create a detailed implementation plan with prioritized changes
-4. Write the notebook entry (## {{version}} - [Brief Title])
+4. Write the notebook entry (title on first line, narrative below)
 5. Decide whether to stop or continue
 
 The new version is: {version}
@@ -650,7 +651,7 @@ vs gravimetric), corrupting polynomial features",
 features.",
   "should_stop": false,
   "stop_reason": null,
-  "notebook_entry": "### Post-debate revision\\n\\nCritic found \
+  "notebook_entry": "Post-debate revision\\n\\nCritic found \
 soil moisture uses different units across stations. Valid \
 concern: polynomial features on mixed units are meaningless. \
 Added normalization step and validation check. Core hypothesis \
@@ -717,7 +718,7 @@ validate on next",
 overfitting on 500 samples.",
   "should_stop": false,
   "stop_reason": null,
-  "notebook_entry": "### Post-debate revision\\n\\nCritic \
+  "notebook_entry": "Post-debate revision\\n\\nCritic \
 challenged NN on sample size (500). Temporal argument held, \
 but 3-layer transformer was overparametrized. Revised to \
 single-layer LSTM (32 units, ~10x fewer params). Added \
