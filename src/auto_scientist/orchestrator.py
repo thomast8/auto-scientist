@@ -387,7 +387,8 @@ class Orchestrator:
         # Summarizer
         if mc.summarizer:
             r_label = mc.summarizer.reasoning.level
-            line = f"  {'Summarizer':<12s}{mc.summarizer.provider}:{mc.summarizer.model}  [{r_label}]"
+            s = mc.summarizer
+            line = f"  {'Summarizer':<12s}{s.provider}:{s.model}  [{r_label}]"
             if use_color:
                 lines.append(f"{DIM}{line}{RESET}")
             else:
