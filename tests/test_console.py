@@ -104,8 +104,6 @@ class TestPrintSummary:
         long_text = "x" * 250
         print_summary("Analyst", long_text, label="done")
         captured = capsys.readouterr()
-        lines = captured.out.strip().split("\n")
-        assert len(lines) == 1
         assert "..." in captured.out
 
     def test_uses_agent_color(self, capsys):

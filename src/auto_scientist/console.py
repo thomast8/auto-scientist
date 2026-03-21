@@ -1,6 +1,7 @@
 """Console output helpers for live token streaming."""
 
 import os
+import shutil
 import sys
 import textwrap
 from collections.abc import Callable
@@ -45,6 +46,29 @@ def _use_color() -> bool:
     return "NO_COLOR" not in os.environ
 
 
+def _wrap(message: str, subsequent_indent: str | None = None) -> str:
+    """Wrap *message* to the terminal width with a hanging indent.
+
+    If *subsequent_indent* is not given, continuation lines are indented to
+    match the leading whitespace of the message plus two extra spaces.
+    """
+    width = shutil.get_terminal_size().columns
+    if len(message) <= width:
+        return message
+
+    if subsequent_indent is None:
+        leading = len(message) - len(message.lstrip())
+        subsequent_indent = " " * (leading + 2)
+
+    return textwrap.fill(
+        message,
+        width=width,
+        subsequent_indent=subsequent_indent,
+        break_long_words=False,
+        break_on_hyphens=False,
+    )
+
+
 def print_step(message: str, *, color: str | None = None) -> None:
     """Print a pipeline status message with color based on its prefix.
 
@@ -53,6 +77,8 @@ def print_step(message: str, *, color: str | None = None) -> None:
 
     Pass ``color`` explicitly to override prefix-based detection.
     """
+    message = _wrap(message)
+
     if not _use_color():
         print(message)
         return
@@ -125,7 +151,7 @@ def print_summary(agent_name: str, summary: str, label: str = "") -> None:
         summary = summary[:197] + "..."
 
     prefix = f"  > [{label}] " if label else "  > "
-    line = f"{prefix}{summary}"
+    line = _wrap(f"{prefix}{summary}", subsequent_indent=" " * len(prefix))
 
     if use_color:
         sys.stdout.write(f"{color}{line}{RESET}\n")
