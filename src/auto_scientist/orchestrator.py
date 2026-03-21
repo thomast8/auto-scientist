@@ -350,17 +350,17 @@ class Orchestrator:
         use_color = _use_color()
         mc = self.model_config
 
-        # Agent -> (color, resolved model, reasoning level)
-        agent_map = {
-            "Analyst": ("Analyst", "analyst"),
-            "Scientist": ("Scientist", "scientist"),
-            "Coder": ("Coder", "coder"),
-            "Ingestor": ("Ingestor", "ingestor"),
-            "Report": ("Report", "report"),
-        }
+        # Agents in orchestrator call order
+        agent_map = [
+            ("Ingestor", "Ingestor", "ingestor"),
+            ("Analyst", "Analyst", "analyst"),
+            ("Scientist", "Scientist", "scientist"),
+            ("Coder", "Coder", "coder"),
+            ("Report", "Report", "report"),
+        ]
 
         lines: list[str] = []
-        for display_name, (color_key, field_name) in agent_map.items():
+        for display_name, color_key, field_name in agent_map:
             cfg = mc.resolve(field_name)
             color = AGENT_COLORS.get(color_key, "")
             reasoning_label = cfg.reasoning.level

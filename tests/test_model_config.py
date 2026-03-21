@@ -109,11 +109,12 @@ class TestBuiltinPresets:
         assert mc.summarizer.model == "gpt-5.4-nano"
         assert mc.summarizer.reasoning.level == "off"
 
-    def test_fast_preset_all_agents_use_haiku(self):
+    def test_fast_preset_all_agents_use_haiku_with_off_reasoning(self):
         mc = ModelConfig.builtin_preset("fast")
         for agent in ["analyst", "scientist", "coder", "ingestor", "report"]:
             cfg = mc.resolve(agent)
             assert cfg.model == "claude-haiku-4-5"
+            assert cfg.reasoning.level == "off"
 
     def test_nonexistent_preset_raises(self):
         with pytest.raises(ValueError, match="Unknown preset"):
