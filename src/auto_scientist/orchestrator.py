@@ -717,6 +717,55 @@ class Orchestrator:
             target_max=target_max,
         )
 
+    def _read_run_result(self, version_dir: Path) -> RunResult:
+        """Read run_result.json and companion files from a version directory.
+
+        Returns a populated RunResult. If run_result.json is missing or
+        malformed, returns a failure RunResult.
+        """
+        run_result_path = version_dir / "run_result.json"
+        if not run_result_path.exists():
+            return RunResult(
+                success=False,
+                stderr="Coder did not produce run_result.json",
+            )
+
+        try:
+            data = json.loads(run_result_path.read_text())
+        except (json.JSONDecodeError, OSError) as e:
+            return RunResult(
+                success=False,
+                stderr=f"Failed to parse run_result.json: {e}",
+            )
+
+        # Build stderr from error field + stderr.txt
+        stderr_parts = []
+        if data.get("error"):
+            stderr_parts.append(data["error"])
+        stderr_path = version_dir / "stderr.txt"
+        if stderr_path.exists():
+            stderr_parts.append(stderr_path.read_text())
+        stderr = "\n".join(stderr_parts)
+
+        # Read stdout from results.txt
+        results_path = version_dir / "results.txt"
+        stdout = results_path.read_text() if results_path.exists() else ""
+
+        # Discover output files
+        output_files = [
+            str(f) for f in version_dir.iterdir()
+            if f.suffix in (".png", ".txt", ".csv", ".json")
+        ]
+
+        return RunResult(
+            success=data.get("success", False),
+            return_code=data.get("return_code", -1),
+            timed_out=data.get("timed_out", False),
+            stdout=stdout,
+            stderr=stderr,
+            output_files=output_files,
+        )
+
     async def _validate_script(self, script_path: Path) -> bool:
         """Syntax-check the generated script."""
         from auto_scientist.runner import validate_syntax

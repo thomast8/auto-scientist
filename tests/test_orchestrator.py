@@ -1205,6 +1205,101 @@ class TestValidateScript:
         assert result is False
 
 
+class TestReadRunResult:
+    def test_happy_path(self, orchestrator, tmp_path):
+        """Reads valid run_result.json + results.txt into RunResult."""
+        version_dir = tmp_path / "v01"
+        version_dir.mkdir()
+        (version_dir / "run_result.json").write_text(
+            '{"success": true, "return_code": 0, "timed_out": false, '
+            '"error": null, "attempts": 1}'
+        )
+        (version_dir / "results.txt").write_text("output data")
+        (version_dir / "plot.png").write_text("fake png")
+
+        result = orchestrator._read_run_result(version_dir)
+
+        assert result.success is True
+        assert result.return_code == 0
+        assert result.timed_out is False
+        assert result.stdout == "output data"
+        assert any("plot.png" in f for f in result.output_files)
+
+    def test_missing_run_result_json(self, orchestrator, tmp_path):
+        """Returns failure RunResult when run_result.json is missing."""
+        version_dir = tmp_path / "v01"
+        version_dir.mkdir()
+
+        result = orchestrator._read_run_result(version_dir)
+
+        assert result.success is False
+        assert "run_result.json" in result.stderr
+
+    def test_malformed_json(self, orchestrator, tmp_path):
+        """Returns failure RunResult when run_result.json is malformed."""
+        version_dir = tmp_path / "v01"
+        version_dir.mkdir()
+        (version_dir / "run_result.json").write_text("not valid json{}")
+
+        result = orchestrator._read_run_result(version_dir)
+
+        assert result.success is False
+        assert result.stderr  # should contain error message
+
+    def test_reads_stderr_txt(self, orchestrator, tmp_path):
+        """Includes stderr.txt content in RunResult.stderr."""
+        version_dir = tmp_path / "v01"
+        version_dir.mkdir()
+        (version_dir / "run_result.json").write_text(
+            '{"success": false, "return_code": 1, "timed_out": false, '
+            '"error": "import error", "attempts": 2}'
+        )
+        (version_dir / "stderr.txt").write_text("Traceback: ImportError")
+
+        result = orchestrator._read_run_result(version_dir)
+
+        assert result.success is False
+        assert "import error" in result.stderr
+        assert "Traceback" in result.stderr
+
+    def test_discovers_output_files(self, orchestrator, tmp_path):
+        """Discovers .png, .txt, .csv, .json output files."""
+        version_dir = tmp_path / "v01"
+        version_dir.mkdir()
+        (version_dir / "run_result.json").write_text(
+            '{"success": true, "return_code": 0, "timed_out": false, '
+            '"error": null, "attempts": 1}'
+        )
+        (version_dir / "experiment.py").write_text("print('hi')")
+        (version_dir / "plot.png").write_text("fake")
+        (version_dir / "results.txt").write_text("output")
+        (version_dir / "data.csv").write_text("a,b")
+        (version_dir / "meta.json").write_text("{}")
+
+        result = orchestrator._read_run_result(version_dir)
+
+        suffixes = {Path(f).suffix for f in result.output_files}
+        assert ".png" in suffixes
+        assert ".txt" in suffixes
+        assert ".csv" in suffixes
+        assert ".json" in suffixes
+
+    def test_timed_out(self, orchestrator, tmp_path):
+        """Correctly maps timed_out field."""
+        version_dir = tmp_path / "v01"
+        version_dir.mkdir()
+        (version_dir / "run_result.json").write_text(
+            '{"success": false, "return_code": 124, "timed_out": true, '
+            '"error": "Script timed out", "attempts": 1}'
+        )
+
+        result = orchestrator._read_run_result(version_dir)
+
+        assert result.success is False
+        assert result.timed_out is True
+        assert result.return_code == 124
+
+
 class TestRunExperimentOrchestrator:
     @pytest.mark.asyncio
     async def test_none_script_returns_none(self, orchestrator):
