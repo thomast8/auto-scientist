@@ -168,6 +168,9 @@ class Orchestrator:
         if analysis and analysis.get("domain_knowledge"):
             self.state.domain_knowledge = analysis["domain_knowledge"]
 
+        # Score the evaluated version with current criteria
+        self._score_latest(analysis)
+
         # Step 2: Scientist plans next iteration
         plan = await self._run_scientist_plan(analysis)
 
@@ -175,8 +178,9 @@ class Orchestrator:
         if plan:
             self._apply_criteria_updates(plan)
 
-        # Score the latest version now that criteria are available
-        self._score_latest(analysis)
+        # Re-score if criteria were just defined or revised (changes the basis)
+        if plan and (plan.get("top_level_criteria") or plan.get("criteria_revision")):
+            self._score_latest(analysis)
 
         # Step 3: Check if Scientist recommends stopping
         if plan and plan.get("should_stop"):
