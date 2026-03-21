@@ -6,6 +6,7 @@ from unittest.mock import AsyncMock, patch
 import pytest
 
 from auto_scientist.config import DomainConfig, SuccessCriterion
+from auto_scientist.model_config import AgentModelConfig, ModelConfig
 from auto_scientist.orchestrator import Orchestrator
 from auto_scientist.runner import RunResult
 from auto_scientist.state import ExperimentState, VersionEntry
@@ -38,22 +39,26 @@ class TestOrchestratorInit:
     def test_defaults(self, base_state, tmp_path):
         o = Orchestrator(state=base_state, data_path=tmp_path, output_dir=tmp_path)
         assert o.max_iterations == 20
-        assert o.critic_models == []
+        assert o.model_config.critics == []
         assert o.debate_rounds == 2
         assert o.max_consecutive_failures == 5
 
     def test_custom_values(self, base_state, tmp_path):
+        mc = ModelConfig(
+            defaults=AgentModelConfig(model="claude-sonnet-4-6"),
+            critics=[AgentModelConfig(provider="openai", model="gpt-4o")],
+        )
         o = Orchestrator(
             state=base_state,
             data_path=tmp_path,
             output_dir=tmp_path,
             max_iterations=5,
-            critic_models=["openai:gpt-4o"],
+            model_config=mc,
             debate_rounds=3,
             max_consecutive_failures=2,
         )
         assert o.max_iterations == 5
-        assert o.critic_models == ["openai:gpt-4o"]
+        assert len(o.model_config.critics) == 1
         assert o.debate_rounds == 3
 
 
@@ -273,7 +278,7 @@ class TestIteration0:
         orchestrator.output_dir.mkdir(parents=True, exist_ok=True)
         orchestrator.state.phase = "iteration"
         orchestrator.state.iteration = 0
-        orchestrator.critic_models = ["openai:gpt-4o"]
+        orchestrator.model_config.critics = [AgentModelConfig(provider="openai", model="gpt-4o")]
 
         plan = {"should_stop": False, "hypothesis": "explore"}
         script_path = tmp_path / "experiments" / "v00" / "experiment.py"
@@ -704,7 +709,7 @@ class TestRunIteration:
     @pytest.mark.asyncio
     async def test_no_critics_skips_debate(self, orchestrator, tmp_path):
         orchestrator.output_dir.mkdir(parents=True, exist_ok=True)
-        orchestrator.critic_models = []
+        orchestrator.model_config.critics = []
         orchestrator.state.phase = "iteration"
         orchestrator.state.iteration = 1
         orchestrator.state.versions = [
@@ -1213,20 +1218,20 @@ class TestRunScientistPlan:
 class TestRunDebateOrchestrator:
     @pytest.mark.asyncio
     async def test_no_critics_returns_none(self, orchestrator):
-        orchestrator.critic_models = []
+        orchestrator.model_config.critics = []
         result = await orchestrator._run_debate({"hypothesis": "test"})
         assert result is None
 
     @pytest.mark.asyncio
     async def test_no_plan_returns_none(self, orchestrator):
-        orchestrator.critic_models = ["openai:gpt-4o"]
+        orchestrator.model_config.critics = [AgentModelConfig(provider="openai", model="gpt-4o")]
         result = await orchestrator._run_debate(None)
         assert result is None
 
     @pytest.mark.asyncio
     async def test_calls_run_debate_with_args(self, orchestrator, tmp_path):
         orchestrator.output_dir.mkdir(parents=True, exist_ok=True)
-        orchestrator.critic_models = ["openai:gpt-4o"]
+        orchestrator.model_config.critics = [AgentModelConfig(provider="openai", model="gpt-4o")]
         orchestrator.state.domain_knowledge = "test knowledge"
         plan = {"hypothesis": "test"}
 
@@ -1241,7 +1246,8 @@ class TestRunDebateOrchestrator:
 
         assert result == critique
         call_kwargs = mock_debate.call_args.kwargs
-        assert call_kwargs["critic_specs"] == ["openai:gpt-4o"]
+        assert len(call_kwargs["critic_configs"]) == 1
+        assert call_kwargs["critic_configs"][0].model == "gpt-4o"
         assert call_kwargs["domain_knowledge"] == "test knowledge"
 
 
@@ -1564,12 +1570,16 @@ class TestRunFullOrchestration:
             phase="iteration",
             iteration=20,
         )
+        mc = ModelConfig(
+            defaults=AgentModelConfig(model="claude-sonnet-4-6"),
+            critics=[AgentModelConfig(provider="openai", model="gpt-4o")],
+        )
         o = Orchestrator(
             state=state,
             data_path=tmp_path,
             output_dir=tmp_path,
             max_iterations=20,
-            critic_models=["openai:gpt-4o"],
+            model_config=mc,
         )
         o.config = DomainConfig(name="t", description="d", data_paths=[])
 
@@ -1687,33 +1697,36 @@ class TestRunIngestionFull:
 
 
 class TestSummaryIntegration:
-    def test_summary_model_defaults_to_none(self, base_state, tmp_path):
+    def test_default_has_summarizer(self, base_state, tmp_path):
         o = Orchestrator(state=base_state, data_path=tmp_path, output_dir=tmp_path)
-        assert o.summary_model is None
+        assert o.model_config.summarizer is not None
 
-    def test_summary_model_set(self, base_state, tmp_path):
+    def test_no_summarizer_when_none(self, base_state, tmp_path):
+        mc = ModelConfig(defaults=AgentModelConfig(model="claude-sonnet-4-6"))
         o = Orchestrator(
             state=base_state,
             data_path=tmp_path,
             output_dir=tmp_path,
-            summary_model="gpt-4o-mini",
+            model_config=mc,
         )
-        assert o.summary_model == "gpt-4o-mini"
+        assert o.model_config.summarizer is None
 
     @pytest.mark.asyncio
-    async def test_no_summary_when_model_none(self, tmp_path):
-        """When summary_model is None, summarizer is never called."""
+    async def test_no_summary_when_summarizer_none(self, tmp_path):
+        """When summarizer is None, run_with_summaries is never called."""
         state = ExperimentState(
             domain="test",
             goal="g",
             phase="iteration",
             iteration=0,
         )
+        mc = ModelConfig(defaults=AgentModelConfig(model="claude-sonnet-4-6"))
         o = Orchestrator(
             state=state,
             data_path=tmp_path,
             output_dir=tmp_path,
             max_iterations=1,
+            model_config=mc,
         )
         o.config = DomainConfig(name="t", description="d", data_paths=[])
         o.output_dir.mkdir(parents=True, exist_ok=True)
@@ -1742,19 +1755,20 @@ class TestSummaryIntegration:
 
     @pytest.mark.asyncio
     async def test_summaries_in_iteration(self, tmp_path):
-        """When summary_model is set, run_with_summaries is called for agent steps."""
+        """When summarizer is set, run_with_summaries is called for agent steps."""
         state = ExperimentState(
             domain="test",
             goal="g",
             phase="iteration",
             iteration=0,
         )
+        mc = ModelConfig.builtin_preset("default")
         o = Orchestrator(
             state=state,
             data_path=tmp_path,
             output_dir=tmp_path,
             max_iterations=1,
-            summary_model="gpt-4o-mini",
+            model_config=mc,
         )
         o.config = DomainConfig(name="t", description="d", data_paths=[])
         o.output_dir.mkdir(parents=True, exist_ok=True)
@@ -1802,7 +1816,7 @@ class TestSummaryIntegration:
     async def test_results_summary_after_run(self, orchestrator, tmp_path):
         """After successful experiment, results.txt should be summarized."""
         orchestrator.output_dir.mkdir(parents=True, exist_ok=True)
-        orchestrator.summary_model = "gpt-4o-mini"
+        orchestrator.model_config.summarizer = AgentModelConfig(provider="openai", model="gpt-4o-mini")
         orchestrator.state.phase = "iteration"
         orchestrator.state.iteration = 0
 
@@ -1843,7 +1857,7 @@ class TestSummaryIntegration:
     async def test_summary_failure_does_not_break(self, orchestrator, tmp_path):
         """run_with_summaries handles summary errors internally; pipeline completes."""
         orchestrator.output_dir.mkdir(parents=True, exist_ok=True)
-        orchestrator.summary_model = "gpt-4o-mini"
+        orchestrator.model_config.summarizer = AgentModelConfig(provider="openai", model="gpt-4o-mini")
         orchestrator.state.phase = "iteration"
         orchestrator.state.iteration = 0
 

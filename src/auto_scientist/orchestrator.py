@@ -8,12 +8,15 @@ from typing import Any
 
 from auto_scientist.config import DomainConfig, SuccessCriterion
 from auto_scientist.console import (
+    AGENT_COLORS,
     BOLD,
     DIM,
     GREEN,
     RED,
+    RESET,
     STEP_COLORS,
     YELLOW,
+    _use_color,
     close_console_log,
     init_console_log,
     print_header,
@@ -22,6 +25,7 @@ from auto_scientist.console import (
     print_summary,
 )
 from auto_scientist.log_setup import setup_file_logging
+from auto_scientist.model_config import ModelConfig
 from auto_scientist.notebook import NOTEBOOK_FILENAME, append_entry, read_notebook
 from auto_scientist.runner import RunResult
 from auto_scientist.scheduler import wait_for_window
@@ -45,27 +49,23 @@ class Orchestrator:
         data_path: Path | None,
         output_dir: Path,
         max_iterations: int = 20,
-        critic_models: list[str] | None = None,
+        model_config: ModelConfig | None = None,
         interactive: bool = False,
         max_consecutive_failures: int = 5,
         debate_rounds: int = 2,
-        model: str | None = None,
         stream: bool = True,
-        summary_model: str | None = None,
         verbose: bool = False,
     ):
         self.state = state
         self.data_path = data_path
         self.output_dir = output_dir
         self.max_iterations = max_iterations
-        self.critic_models = critic_models or []
+        self.model_config = model_config or ModelConfig.builtin_preset("default")
         self.interactive = interactive
         self.max_consecutive_failures = max_consecutive_failures
         self.debate_rounds = debate_rounds
         self.config: DomainConfig | None = None
-        self.model = model
         self.stream = stream
-        self.summary_model = summary_model
         self.verbose = verbose
 
     async def run(self) -> None:
@@ -75,23 +75,24 @@ class Orchestrator:
         init_console_log(self.output_dir / "console.log")
         logger.info(
             f"Run started: output_dir={self.output_dir}, "
-            f"model={self.model or 'SDK default'}, "
+            f"defaults={self.model_config.defaults.model}, "
             f"max_iterations={self.max_iterations}, "
-            f"critics={self.critic_models or 'none'}"
+            f"critics={len(self.model_config.critics)}"
         )
 
         state_path = self.output_dir / "state.json"
 
-        model_label = self.model or "(SDK default)"
+        # Persist model config for resume
+        mc_path = self.output_dir / "model_config.json"
+        mc_path.write_text(self.model_config.model_dump_json(indent=2))
+
         goal_preview = self.state.goal[:80] + ("..." if len(self.state.goal) > 80 else "")
         fields = {
-            "Model": model_label,
             "Output": str(self.output_dir),
             "Goal": goal_preview,
         }
-        if self.critic_models:
-            fields["Critics"] = ", ".join(self.critic_models)
         print_header("Auto-Scientist", fields)
+        self._print_model_banner()
 
         try:
             # Phase 0: Ingestion
@@ -175,6 +176,8 @@ class Orchestrator:
 
         print_step("INGESTION phase: canonicalizing raw data")
 
+        cfg = self.model_config.resolve("ingestor")
+
         async def _ingestor_coro(buf):
             return await run_ingestor(
                 raw_data_path=source_path,
@@ -182,7 +185,7 @@ class Orchestrator:
                 goal=self.state.goal,
                 interactive=self.interactive,
                 config_path=config_path,
-                model=self.model,
+                model=cfg.model,
                 message_buffer=buf,
             )
 
@@ -288,7 +291,7 @@ class Orchestrator:
                 try:
                     results_text = results_path.read_text()
                     summary = await summarize_results(
-                        results_text, self.summary_model,
+                        results_text, self._summary_model,
                     )
                     if summary:
                         print_summary("Results", summary)
@@ -340,9 +343,69 @@ class Orchestrator:
         )
         self.state.iteration += 1
 
+    def _print_model_banner(self) -> None:
+        """Print a color-coded per-agent model configuration banner."""
+        import sys
+
+        use_color = _use_color()
+        mc = self.model_config
+
+        # Agent -> (color, resolved model, reasoning level)
+        agent_map = {
+            "Analyst": ("Analyst", "analyst"),
+            "Scientist": ("Scientist", "scientist"),
+            "Coder": ("Coder", "coder"),
+            "Ingestor": ("Ingestor", "ingestor"),
+            "Report": ("Report", "report"),
+        }
+
+        lines: list[str] = []
+        for display_name, (color_key, field_name) in agent_map.items():
+            cfg = mc.resolve(field_name)
+            color = AGENT_COLORS.get(color_key, "")
+            reasoning_label = cfg.reasoning.level
+            if cfg.reasoning.budget:
+                reasoning_label += f" ({cfg.reasoning.budget} tokens)"
+            line = f"  {display_name:<12s}{cfg.model}  [{reasoning_label}]"
+            if use_color:
+                lines.append(f"{color}{line}{RESET}")
+            else:
+                lines.append(line)
+
+        # Critics
+        if mc.critics:
+            for i, critic in enumerate(mc.critics):
+                color = AGENT_COLORS.get("Critic", "")
+                label = f"Critic {i + 1}" if len(mc.critics) > 1 else "Critic"
+                r_label = critic.reasoning.level
+                line = f"  {label:<12s}{critic.provider}:{critic.model}  [{r_label}]"
+                if use_color:
+                    lines.append(f"{color}{line}{RESET}")
+                else:
+                    lines.append(line)
+
+        # Summarizer
+        if mc.summarizer:
+            r_label = mc.summarizer.reasoning.level
+            line = f"  {'Summarizer':<12s}{mc.summarizer.provider}:{mc.summarizer.model}  [{r_label}]"
+            if use_color:
+                lines.append(f"{DIM}{line}{RESET}")
+            else:
+                lines.append(line)
+
+        sys.stdout.write("\n".join(lines) + "\n\n")
+        sys.stdout.flush()
+
     def _should_summarize(self) -> bool:
         """Check if summaries are enabled."""
-        return bool(self.summary_model)
+        return self.model_config.summarizer is not None
+
+    @property
+    def _summary_model(self) -> str:
+        """Return the summarizer model name."""
+        if self.model_config.summarizer is None:
+            raise RuntimeError("Summarizer not configured")
+        return self.model_config.summarizer.model
 
     async def _with_summaries(self, coro_fn, agent_name: str, message_buffer: list[str]):
         """Wrap an agent call in run_with_summaries if enabled.
@@ -353,7 +416,7 @@ class Orchestrator:
         if not self._should_summarize():
             return await coro_fn(message_buffer)
         return await run_with_summaries(
-            coro_fn, agent_name, self.summary_model, message_buffer,
+            coro_fn, agent_name, self._summary_model, message_buffer,
         )
 
     def _persist_buffer(
@@ -379,6 +442,7 @@ class Orchestrator:
 
         notebook_path = self.output_dir / NOTEBOOK_FILENAME
         domain_knowledge = self.state.domain_knowledge
+        cfg = self.model_config.resolve("analyst")
 
         print_step("  ANALYZE: initial data characterization")
         buffer: list[str] = []
@@ -391,7 +455,7 @@ class Orchestrator:
                     domain_knowledge=domain_knowledge,
                     success_criteria=self.state.success_criteria,
                     data_dir=self.data_path,
-                    model=self.model,
+                    model=cfg.model,
                     message_buffer=buf,
                 )
 
@@ -430,6 +494,8 @@ class Orchestrator:
 
         success_criteria = self.state.success_criteria or []
 
+        cfg = self.model_config.resolve("analyst")
+
         print_step(f"  ANALYZE: analyzing {latest.version} ({len(plot_paths)} plots)")
         buffer: list[str] = []
         try:
@@ -440,7 +506,7 @@ class Orchestrator:
                     notebook_path=notebook_path,
                     domain_knowledge=domain_knowledge,
                     success_criteria=success_criteria,
-                    model=self.model,
+                    model=cfg.model,
                     message_buffer=buf,
                 )
 
@@ -467,6 +533,8 @@ class Orchestrator:
         notebook_path = self.output_dir / NOTEBOOK_FILENAME
         domain_knowledge = self.state.domain_knowledge
 
+        cfg = self.model_config.resolve("scientist")
+
         print_step(f"  PLAN: scientist planning {version}")
         buffer: list[str] = []
         try:
@@ -477,7 +545,7 @@ class Orchestrator:
                     version=version,
                     domain_knowledge=domain_knowledge,
                     success_criteria=self.state.success_criteria,
-                    model=self.model,
+                    model=cfg.model,
                     message_buffer=buf,
                 )
 
@@ -505,7 +573,7 @@ class Orchestrator:
 
     async def _run_debate(self, plan: dict | None) -> list[dict[str, Any]] | None:
         """Send plan to critic model(s) for debate with the Scientist."""
-        if not self.critic_models or plan is None:
+        if not self.model_config.critics or plan is None:
             print_step("  DEBATE: skipped (no critics configured or no plan)")
             return None
 
@@ -513,23 +581,25 @@ class Orchestrator:
 
         notebook_content = self._notebook_content()
         domain_knowledge = self.state.domain_knowledge
+        scientist_cfg = self.model_config.resolve("scientist")
 
         from auto_scientist.console import make_stream_printer
 
         factory = make_stream_printer if self.stream else None
 
-        n_critics = len(self.critic_models)
+        n_critics = len(self.model_config.critics)
         print_step(f"  DEBATE: {n_critics} critic(s), {self.debate_rounds} round(s)")
 
         buffer: list[str] = []
 
         async def _debate_coro(buf):
             return await run_debate(
-                critic_specs=self.critic_models,
+                critic_configs=self.model_config.critics,
                 plan=plan,
                 notebook_content=notebook_content,
                 domain_knowledge=domain_knowledge,
                 max_rounds=self.debate_rounds,
+                scientist_config=scientist_cfg,
                 on_token_factory=factory,
                 message_buffer=buf,
             )
@@ -568,6 +638,8 @@ class Orchestrator:
             all_transcript.append({"role": "critic", "content": f"[{entry['model']}]"})
             all_transcript.extend(entry.get("transcript", []))
 
+        cfg = self.model_config.resolve("scientist")
+
         print_step("  REVISE: scientist revising plan after debate")
         buffer: list[str] = []
         try:
@@ -579,7 +651,7 @@ class Orchestrator:
                     notebook_path=notebook_path,
                     version=version,
                     domain_knowledge=domain_knowledge,
-                    model=self.model,
+                    model=cfg.model,
                     message_buffer=buf,
                 )
 
@@ -622,6 +694,8 @@ class Orchestrator:
         run_timeout = self.config.run_timeout_minutes if self.config else 120
         run_cmd = self.config.run_command if self.config else "uv run {script_path}"
 
+        cfg = self.model_config.resolve("coder")
+
         print_step(f"  IMPLEMENT: coder writing and running {version}")
         buffer: list[str] = []
         try:
@@ -633,7 +707,7 @@ class Orchestrator:
                     version=version,
                     domain_knowledge=domain_knowledge,
                     data_path=data_path,
-                    model=self.model,
+                    model=cfg.model,
                     message_buffer=buf,
                     run_timeout_minutes=run_timeout,
                     run_command=run_cmd,
@@ -868,13 +942,15 @@ class Orchestrator:
 
         print_step("\nREPORT phase: generating final summary")
         buffer: list[str] = []
+        cfg = self.model_config.resolve("report")
+
         try:
             async def _report_coro(buf):
                 return await run_report(
                     state=self.state,
                     notebook_path=notebook_path,
                     output_dir=self.output_dir,
-                    model=self.model,
+                    model=cfg.model,
                     message_buffer=buf,
                 )
 

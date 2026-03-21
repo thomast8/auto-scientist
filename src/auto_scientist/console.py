@@ -20,6 +20,7 @@ GREEN = "\033[32m"
 MAGENTA = "\033[35m"
 BLUE = "\033[34m"
 RED = "\033[31m"
+DIM = "\033[2m"
 
 AGENT_COLORS = {
     "Critic": YELLOW,
@@ -164,6 +165,53 @@ def make_stream_printer(label: str) -> Callable[[str], None]:
 def stream_separator() -> None:
     """Print a separator after a streamed response completes."""
     sys.stdout.write("\n\n")
+    sys.stdout.flush()
+
+
+def print_header(title: str, fields: dict[str, str] | None = None) -> None:
+    """Print a styled startup banner with optional key-value fields.
+
+    Renders the title in bold with a trailing line, and fields in dim text below.
+    """
+    width = min(shutil.get_terminal_size().columns, 60)
+    separator_len = max(width - len(title) - 1, 10)
+    separator = "─" * separator_len
+
+    header_line = f"{title} {separator}"
+    _log_to_file(header_line)
+
+    if _use_color():
+        sys.stdout.write(f"\n{BOLD}{header_line}{RESET}\n")
+    else:
+        sys.stdout.write(f"\n{header_line}\n")
+
+    if fields:
+        for key, value in fields.items():
+            line = _wrap(f"  {f'{key}:':<12s}{value}")
+            _log_to_file(line)
+            if _use_color():
+                sys.stdout.write(f"{DIM}{line}{RESET}\n")
+            else:
+                sys.stdout.write(f"{line}\n")
+
+    sys.stdout.write("\n")
+    sys.stdout.flush()
+
+
+def print_iteration_header(iteration: int) -> None:
+    """Print a styled iteration separator with heavy box-drawing lines."""
+    width = min(shutil.get_terminal_size().columns, 60)
+    separator = "━" * width
+    title = f"ITERATION {iteration}"
+
+    _log_to_file(separator)
+    _log_to_file(title)
+    _log_to_file(separator)
+
+    if _use_color():
+        sys.stdout.write(f"\n\n{BOLD}{separator}\n{title}\n{separator}{RESET}\n")
+    else:
+        sys.stdout.write(f"\n\n{separator}\n{title}\n{separator}\n")
     sys.stdout.flush()
 
 
