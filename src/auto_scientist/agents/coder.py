@@ -37,6 +37,8 @@ async def run_coder(
     data_path: str = "",
     model: str | None = None,
     message_buffer: list[str] | None = None,
+    run_timeout_minutes: int = 120,
+    run_command: str = "uv run {script_path}",
 ) -> Path:
     """Implement the scientist's plan as a runnable experiment script.
 
@@ -66,6 +68,8 @@ async def run_coder(
 
     system_prompt = CODER_SYSTEM.format(
         data_path=data_path or "(not specified)",
+        run_timeout_minutes=run_timeout_minutes,
+        run_command=run_command,
     )
 
     user_prompt = CODER_USER.format(
@@ -74,12 +78,14 @@ async def run_coder(
         previous_script_section=previous_script_section,
         new_script_path=str(new_script_path),
         version=version,
+        run_timeout_minutes=run_timeout_minutes,
+        run_command=run_command,
     )
 
     options = ClaudeCodeOptions(
         system_prompt=system_prompt,
         allowed_tools=["Read", "Write", "Edit", "Bash", "Glob", "Grep"],
-        max_turns=30,
+        max_turns=50,
         permission_mode="acceptEdits",
         cwd=output_dir,
         model=model,

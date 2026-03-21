@@ -26,7 +26,7 @@ What you produce:
   plots as PNGs in its directory.
 - A run_result.json in the version directory reporting whether the script
   ran successfully:
-  {{"success": true, "return_code": 0, "error": null, "attempts": 1}}
+  {{"success": true, "return_code": 0, "timed_out": false, "error": null, "attempts": 1}}
   The orchestrator reads this file to determine the outcome. If it is
   missing, the orchestrator treats the iteration as a failure.
 - An Analyst agent reads results.txt and plots to evaluate the experiment.
@@ -82,7 +82,25 @@ plan as given.
 
 9. Use f-strings for string formatting (project convention).
 
-10. Verify syntax after writing.
+10. After writing the script, verify syntax by running:
+    `python -c "import py_compile; py_compile.compile('<script_path>', doraise=True)"`
+
+11. Run the script:
+    `timeout {run_timeout_minutes}m {run_command} > results.txt 2>stderr.txt; echo $? > exitcode.txt`
+    Separate stdout and stderr so that results.txt contains only the script's
+    output (which the Analyst will read), and stderr.txt contains error info
+    for your debugging. Read exitcode.txt to determine the exit code.
+
+12. If the exit code is non-zero:
+    - Exit code 124 means timeout. Note this for run_result.json. Do not retry
+      on timeout (the approach likely needs rethinking by the Scientist).
+    - Otherwise, read stderr.txt to diagnose the error, fix the script, and
+      re-run. Repeat until it passes or you run out of turns.
+
+13. After the script finishes (success or final failure), write run_result.json
+    in the same directory as the script:
+    {{"success": true/false, "return_code": N, "timed_out": true/false,
+     "error": "..." or null, "attempts": N}}
 </instructions>
 
 <motivation>
@@ -129,6 +147,10 @@ Implement the scientist's plan as a new complete experiment script.
 2. Write the new script to: {new_script_path}
 3. Verify syntax by running:
    `python -c "import py_compile; py_compile.compile('{new_script_path}', doraise=True)"`
+4. Run the script:
+   `timeout {run_timeout_minutes}m {run_command} > results.txt 2>stderr.txt; echo $? > exitcode.txt`
+5. If it fails (non-zero exit, not timeout), read stderr.txt, fix, and re-run
+6. Write run_result.json in the version directory
 
 The new version is: {version}
 </task>

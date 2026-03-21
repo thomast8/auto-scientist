@@ -161,7 +161,7 @@ class TestRunCoder:
         )
         opts = captured_opts["options"]
         assert opts.allowed_tools == ["Read", "Write", "Edit", "Bash", "Glob", "Grep"]
-        assert opts.max_turns == 30
+        assert opts.max_turns == 50
         assert opts.permission_mode == "acceptEdits"
 
     @pytest.mark.asyncio
@@ -190,6 +190,40 @@ class TestRunCoder:
         system = captured_opts["options"].system_prompt
         assert "# /// script" in system
         assert "uv run" in system
+
+    @pytest.mark.asyncio
+    @patch("auto_scientist.agents.coder.query")
+    async def test_run_instructions_in_prompts(self, mock_query, tmp_path):
+        """Prompts include run_timeout_minutes and run_command for self-execution."""
+        from auto_scientist.agents.coder import ResultMessage
+        result_msg = MagicMock(spec=ResultMessage)
+
+        captured_opts = {}
+
+        async def fake_query(**kwargs):
+            captured_opts.update(kwargs)
+            script_path = tmp_path / "v01" / "experiment.py"
+            script_path.parent.mkdir(parents=True, exist_ok=True)
+            script_path.write_text("print('test')")
+            yield result_msg
+
+        mock_query.side_effect = fake_query
+
+        await run_coder(
+            plan={"hypothesis": "test", "changes": []},
+            previous_script=tmp_path / "nonexistent" / "experiment.py",
+            output_dir=tmp_path, version="v01",
+            run_timeout_minutes=60,
+            run_command="uv run {script_path}",
+        )
+        system = captured_opts["options"].system_prompt
+        user = captured_opts["prompt"]
+        # System prompt should contain run_result.json instructions
+        assert "run_result.json" in system
+        assert "timed_out" in system
+        # User prompt should contain the timeout and run command
+        assert "60" in user
+        assert "uv run" in user
 
 
 class TestCoderMessageBuffer:
