@@ -8,9 +8,16 @@ from typing import Any
 
 from auto_scientist.config import DomainConfig, SuccessCriterion
 from auto_scientist.console import (
+    BOLD,
+    DIM,
+    GREEN,
+    RED,
     STEP_COLORS,
+    YELLOW,
     close_console_log,
     init_console_log,
+    print_header,
+    print_iteration_header,
     print_step,
     print_summary,
 )
@@ -76,14 +83,15 @@ class Orchestrator:
         state_path = self.output_dir / "state.json"
 
         model_label = self.model or "(SDK default)"
-        print_step("Auto-Scientist starting")
-        print_step(f"  Model:      {model_label}")
-        print_step(f"  Output:     {self.output_dir}")
         goal_preview = self.state.goal[:80] + ("..." if len(self.state.goal) > 80 else "")
-        print_step(f"  Goal:       {goal_preview}")
+        fields = {
+            "Model": model_label,
+            "Output": str(self.output_dir),
+            "Goal": goal_preview,
+        }
         if self.critic_models:
-            print_step(f"  Critics:    {', '.join(self.critic_models)}")
-        print_step("")
+            fields["Critics"] = ", ".join(self.critic_models)
+        print_header("Auto-Scientist", fields)
 
         try:
             # Phase 0: Ingestion
@@ -110,13 +118,17 @@ class Orchestrator:
             # Phase 1: Unified iteration loop
             while self.state.phase == "iteration":
                 if self.state.iteration >= self.max_iterations:
-                    print_step(f"Reached max iterations ({self.max_iterations}). Stopping.")
+                    print_step(
+                        f"Reached max iterations ({self.max_iterations}). Stopping.",
+                        color=YELLOW,
+                    )
                     self.state.phase = "report"
                     break
 
                 if self.state.should_stop_on_failures(self.max_consecutive_failures):
                     print_step(
-                        f"Hit {self.max_consecutive_failures} consecutive failures. Stopping."
+                        f"Hit {self.max_consecutive_failures} consecutive failures. Stopping.",
+                        color=RED,
                     )
                     self.state.phase = "report"
                     break
@@ -138,7 +150,7 @@ class Orchestrator:
                 self.state.phase = "stopped"
                 self.state.save(state_path)
 
-            print_step(f"Experiment completed. Final state saved to {state_path}")
+            print_step(f"Experiment completed. Final state saved to {state_path}", color=GREEN)
             logger.info("Run finished successfully")
         finally:
             close_console_log()
@@ -194,9 +206,7 @@ class Orchestrator:
     async def _run_iteration_body(self) -> None:
         """Run one iteration of the pipeline (inlined, not _run_iteration)."""
         logger.info(f"=== Iteration {self.state.iteration} start ===")
-        print_step(f"\n{'='*60}")
-        print_step(f"ITERATION {self.state.iteration}")
-        print_step(f"{'='*60}")
+        print_iteration_header(self.state.iteration)
 
         # Step 1: Analyst observes latest results (or raw data on iteration 0)
         analysis = await self._run_analyst()
@@ -218,7 +228,10 @@ class Orchestrator:
 
         # Step 3: Check if Scientist recommends stopping
         if plan and plan.get("should_stop"):
-            print_step(f"Scientist recommends stopping: {plan.get('stop_reason', 'unknown')}")
+            print_step(
+                f"Scientist recommends stopping: {plan.get('stop_reason', 'unknown')}",
+                color=YELLOW,
+            )
             logger.info(f"Scientist stop: {plan.get('stop_reason', 'unknown')}")
             self.state.phase = "report"
             return
@@ -245,8 +258,8 @@ class Orchestrator:
             )
             self.state.record_failure()
             self.state.record_version(version_entry)
-            print_step(f"\nITERATION {self.state.iteration} complete:")
-            print_step(f"  Status:     {version_entry.status}")
+            print_step(f"\nITERATION {self.state.iteration} complete:", color=BOLD)
+            print_step(f"  Status:     {version_entry.status}", color=RED)
             logger.info(
                 f"Iteration {self.state.iteration} complete: "
                 f"status=failed (coder produced no script)"
@@ -258,13 +271,14 @@ class Orchestrator:
         run_result = self._read_run_result(new_script.parent)
 
         if run_result.timed_out:
-            print_step("  RUN RESULT: timed out")
+            print_step("  RUN RESULT: timed out", color=RED)
         elif not run_result.success:
-            print_step(f"  RUN RESULT: failed (rc={run_result.return_code})")
+            print_step(f"  RUN RESULT: failed (rc={run_result.return_code})", color=RED)
         else:
             print_step(
                 f"  RUN RESULT: success "
-                f"({len(run_result.output_files)} output files)"
+                f"({len(run_result.output_files)} output files)",
+                color=GREEN,
             )
 
         # Results summary
@@ -294,22 +308,29 @@ class Orchestrator:
 
         # Iteration summary
         version_dir = new_script.parent if new_script else None
-        print_step(f"\nITERATION {self.state.iteration} complete:")
+        status_color = GREEN if version_entry.status == "completed" else RED
+        print_step(f"\nITERATION {self.state.iteration} complete:", color=BOLD)
         if new_script:
-            print_step(f"  Script:     {new_script}")
-        print_step(f"  Status:     {version_entry.status}")
+            print_step(f"  Script:     {new_script}", color=DIM)
+        print_step(f"  Status:     {version_entry.status}", color=status_color)
         if version_entry.score is not None:
-            print_step(f"  Score:      {version_entry.score}")
-        print_step(f"  Best:       {self.state.best_version} (score {self.state.best_score})")
+            print_step(f"  Score:      {version_entry.score}", color=BOLD)
+        print_step(
+            f"  Best:       {self.state.best_version} (score {self.state.best_score})",
+            color=BOLD,
+        )
         if version_dir and version_dir.exists():
             suffixes = (".png", ".txt", ".json")
             artifacts = sorted(
-                f for f in version_dir.iterdir() if f.suffix in suffixes
+                f
+                for f in version_dir.iterdir()
+                if f.suffix in suffixes
+                and f.name not in self._INFRA_FILES
             )
             if artifacts:
-                print_step("  Outputs:")
+                print_step("  Outputs:", color=DIM)
                 for f in artifacts:
-                    print_step(f"    {f}")
+                    print_step(f"    {f}", color=DIM)
 
         # Increment at end of loop body
         logger.info(
@@ -708,11 +729,11 @@ class Orchestrator:
         if score > self.state.best_score:
             self.state.best_score = score
             self.state.best_version = latest.version
-        print_step(f"  SCORE: {score}")
+        print_step(f"  SCORE: {score}", color=GREEN)
 
     async def _score_final_version(self) -> None:
         """Run the Analyst on the last version so it gets a score before report."""
-        print_step("\nScoring final version before report...")
+        print_step("\nScoring final version before report...", color=BOLD)
         analysis = await self._run_analyst()
         if analysis:
             self._score_latest(analysis)
