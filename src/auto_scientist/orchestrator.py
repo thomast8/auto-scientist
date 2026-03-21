@@ -105,6 +105,11 @@ class Orchestrator:
             await self._run_iteration_body()
             self.state.save(state_path)
 
+        # Score the final version if it was never evaluated
+        if self.state.versions and self.state.versions[-1].score is None:
+            await self._score_final_version()
+            self.state.save(state_path)
+
         # Phase 2: Report
         if self.state.phase == "report":
             await self._run_report()
@@ -576,6 +581,13 @@ class Orchestrator:
             self.state.best_score = score
             self.state.best_version = latest.version
         print_step(f"  SCORE: {score}")
+
+    async def _score_final_version(self) -> None:
+        """Run the Analyst on the last version so it gets a score before report."""
+        print_step("\nScoring final version before report...")
+        analysis = await self._run_analyst()
+        if analysis:
+            self._score_latest(analysis)
 
     @staticmethod
     def _parse_criterion(raw: dict[str, Any]) -> SuccessCriterion | None:

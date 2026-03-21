@@ -196,7 +196,7 @@ class TestVersionEntry:
     def test_defaults(self):
         entry = VersionEntry(version="v01", iteration=1, script_path="/tmp/s.py")
         assert entry.results_path is None
-        assert entry.score == 0
+        assert entry.score is None
         assert entry.hypothesis == ""
         assert entry.status == "pending"
 

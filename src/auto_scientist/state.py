@@ -15,7 +15,7 @@ class VersionEntry(BaseModel):
     iteration: int
     script_path: str
     results_path: str | None = None
-    score: int = 0
+    score: int | None = None
     hypothesis: str = ""
     status: str = "pending"  # pending, running, completed, failed, crashed
 
@@ -67,7 +67,7 @@ class ExperimentState(BaseModel):
     def record_version(self, entry: VersionEntry) -> None:
         """Add a version entry and update best tracking."""
         self.versions.append(entry)
-        if entry.score > self.best_score:
+        if entry.score is not None and entry.score > self.best_score:
             self.best_score = entry.score
             self.best_version = entry.version
 
