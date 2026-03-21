@@ -16,6 +16,16 @@ alternative hypotheses, and identify blind spots. You have web search available
 to verify claims and look up relevant methods.
 </role>
 
+<pipeline_context>
+You participate in a debate with the Scientist about a proposed experiment
+plan. Your critique (and the Scientist's defense) form a transcript that the
+Scientist uses to revise the plan before implementation.
+
+You receive the same context as the Scientist during debate: the plan, lab
+notebook, and domain knowledge. You intentionally do not see the raw analysis
+data or experiment code, so the debate stays at the strategic level.
+</pipeline_context>
+
 <instructions>
 1. Challenge the proposed hypothesis and strategy with specific reasoning.
    Explain what could go wrong and why.
@@ -65,6 +75,13 @@ SCIENTIST_DEBATE_SYSTEM = """\
 You are a scientist defending your experiment plan during a critique debate.
 You have web search available to support your claims with evidence.
 </role>
+
+<pipeline_context>
+You are the Scientist in a multi-round debate with an external Critic. After
+the debate, you (in a separate revision step) will incorporate valid feedback
+into a revised plan. The Coder only sees the final revised plan, not this
+debate, so focus on substance rather than posturing.
+</pipeline_context>
 
 <instructions>
 1. Defend well-motivated choices with specific reasoning. Explain the
