@@ -122,3 +122,93 @@ class TestBuiltinPresets:
     def test_default_preset_has_no_critics(self):
         mc = ModelConfig.builtin_preset("default")
         assert mc.critics == []
+
+
+class TestFromToml:
+    def test_minimal_config(self, tmp_path):
+        toml_file = tmp_path / "models.toml"
+        toml_file.write_text('[defaults]\nmodel = "claude-sonnet-4-6"\n')
+        mc = ModelConfig.from_toml(toml_file)
+        assert mc.defaults.model == "claude-sonnet-4-6"
+        assert mc.scientist is None
+        assert mc.critics == []
+
+    def test_full_config_round_trip(self, tmp_path):
+        toml_file = tmp_path / "models.toml"
+        toml_file.write_text("""\
+[defaults]
+model = "claude-sonnet-4-6"
+reasoning = "adaptive"
+
+[agents.scientist]
+model = "claude-opus-4-6"
+reasoning = "high"
+
+[agents.summarizer]
+provider = "openai"
+model = "gpt-4o-mini"
+""")
+        mc = ModelConfig.from_toml(toml_file)
+        assert mc.defaults.model == "claude-sonnet-4-6"
+        assert mc.defaults.reasoning.level == "adaptive"
+        assert mc.scientist is not None
+        assert mc.scientist.model == "claude-opus-4-6"
+        assert mc.scientist.reasoning.level == "high"
+        assert mc.summarizer is not None
+        assert mc.summarizer.provider == "openai"
+
+    def test_critic_array(self, tmp_path):
+        toml_file = tmp_path / "models.toml"
+        toml_file.write_text("""\
+[defaults]
+model = "claude-sonnet-4-6"
+
+[[agents.critic]]
+provider = "openai"
+model = "o4-mini"
+reasoning = "high"
+
+[[agents.critic]]
+provider = "google"
+model = "gemini-2.5-pro"
+""")
+        mc = ModelConfig.from_toml(toml_file)
+        assert len(mc.critics) == 2
+        assert mc.critics[0].provider == "openai"
+        assert mc.critics[0].model == "o4-mini"
+        assert mc.critics[0].reasoning.level == "high"
+        assert mc.critics[1].provider == "google"
+
+    def test_reasoning_budget_in_toml(self, tmp_path):
+        toml_file = tmp_path / "models.toml"
+        toml_file.write_text("""\
+[defaults]
+model = "claude-sonnet-4-6"
+
+[agents.analyst]
+model = "claude-sonnet-4-6"
+reasoning = { level = "high", budget = 4096 }
+""")
+        mc = ModelConfig.from_toml(toml_file)
+        assert mc.analyst is not None
+        assert mc.analyst.reasoning.level == "high"
+        assert mc.analyst.reasoning.budget == 4096
+
+    def test_missing_agents_resolve_to_defaults(self, tmp_path):
+        toml_file = tmp_path / "models.toml"
+        toml_file.write_text("""\
+[defaults]
+model = "claude-haiku-4-5"
+reasoning = "low"
+
+[agents.scientist]
+model = "claude-opus-4-6"
+""")
+        mc = ModelConfig.from_toml(toml_file)
+        # Analyst not in TOML, should resolve to defaults
+        cfg = mc.resolve("analyst")
+        assert cfg.model == "claude-haiku-4-5"
+        assert cfg.reasoning.level == "low"
+        # Scientist has override
+        cfg = mc.resolve("scientist")
+        assert cfg.model == "claude-opus-4-6"
