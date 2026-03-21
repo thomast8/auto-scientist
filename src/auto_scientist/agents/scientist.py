@@ -6,16 +6,11 @@ Output: structured JSON plan with hypothesis, strategy, changes, notebook entry.
 """
 
 import json
+import logging
 from pathlib import Path
 from typing import Any
 
-from claude_code_sdk import (
-    AssistantMessage,
-    ClaudeCodeOptions,
-    ResultMessage,
-    TextBlock,
-    query,
-)
+from claude_code_sdk import ClaudeCodeOptions
 
 from auto_scientist.config import SuccessCriterion
 from auto_scientist.prompts.scientist import (
@@ -24,9 +19,18 @@ from auto_scientist.prompts.scientist import (
     SCIENTIST_SYSTEM,
     SCIENTIST_USER,
 )
-from auto_scientist.sdk_utils import append_block_to_buffer
+from auto_scientist.schemas import ScientistPlanOutput
+from auto_scientist.sdk_utils import (
+    OutputValidationError,
+    collect_text_from_query,
+    validate_json_output,
+)
 
-# JSON schema for structured output
+logger = logging.getLogger(__name__)
+
+MAX_ATTEMPTS = 3
+
+# JSON schema for structured output (injected into the prompt for LLM guidance)
 SCIENTIST_PLAN_SCHEMA = {
     "type": "object",
     "properties": {
@@ -150,6 +154,7 @@ async def run_scientist(
         domain_knowledge: Domain-specific context.
         success_criteria: Existing top-level criteria (None if not yet defined).
         model: Model override.
+        message_buffer: Optional buffer for streaming messages.
 
     Returns:
         Structured plan dict with keys: hypothesis, strategy, changes,
@@ -183,46 +188,23 @@ async def run_scientist(
         model=model,
     )
 
-    result_text = ""
-    assistant_texts: list[str] = []
+    correction_hint = ""
+    for attempt in range(MAX_ATTEMPTS):
+        effective_prompt = user_prompt + correction_hint
 
-    async for message in query(prompt=user_prompt, options=options):
-        if isinstance(message, ResultMessage):
-            if message.result:
-                result_text = message.result
-        elif isinstance(message, AssistantMessage):
-            for block in message.content:
-                if isinstance(block, TextBlock):
-                    assistant_texts.append(block.text)
-                if message_buffer is not None:
-                    append_block_to_buffer(block, message_buffer)
+        raw = await collect_text_from_query(
+            effective_prompt, options, message_buffer, agent_name="Scientist",
+        )
 
-    # Parse the result - prefer ResultMessage.result, fallback to assistant text
-    raw = result_text
-    if not raw:
-        raw = "\n".join(assistant_texts)
+        try:
+            return validate_json_output(raw, ScientistPlanOutput, "Scientist")
+        except OutputValidationError as e:
+            if attempt == MAX_ATTEMPTS - 1:
+                raise
+            correction_hint = f"\n\n{e.correction_prompt()}"
+            logger.warning(f"Scientist attempt {attempt + 1} failed, retrying: {e}")
 
-    if not raw:
-        raise RuntimeError("Scientist agent returned no output")
-
-    # Extract JSON from the response (handle possible markdown fencing)
-    raw = raw.strip()
-    if raw.startswith("```"):
-        lines = raw.split("\n")
-        lines = [line for line in lines if not line.strip().startswith("```")]
-        raw = "\n".join(lines)
-
-    return json.loads(raw)
-
-
-def _parse_json_response(raw: str, label: str) -> dict[str, Any]:
-    """Parse JSON from a response, handling markdown fencing."""
-    raw = raw.strip()
-    if raw.startswith("```"):
-        lines = raw.split("\n")
-        lines = [line for line in lines if not line.strip().startswith("```")]
-        raw = "\n".join(lines)
-    return json.loads(raw)
+    raise RuntimeError("Scientist: exhausted retries")  # unreachable
 
 
 async def run_scientist_revision(
@@ -244,6 +226,8 @@ async def run_scientist_revision(
         notebook_path: Path to the lab notebook.
         version: Version string.
         domain_knowledge: Domain-specific context.
+        model: Model override.
+        message_buffer: Optional buffer for streaming messages.
 
     Returns:
         Revised plan dict (same schema as the initial plan).
@@ -283,25 +267,20 @@ async def run_scientist_revision(
         model=model,
     )
 
-    result_text = ""
-    assistant_texts: list[str] = []
+    correction_hint = ""
+    for attempt in range(MAX_ATTEMPTS):
+        effective_prompt = user_prompt + correction_hint
 
-    async for message in query(prompt=user_prompt, options=options):
-        if isinstance(message, ResultMessage):
-            if message.result:
-                result_text = message.result
-        elif isinstance(message, AssistantMessage):
-            for block in message.content:
-                if isinstance(block, TextBlock):
-                    assistant_texts.append(block.text)
-                if message_buffer is not None:
-                    append_block_to_buffer(block, message_buffer)
+        raw = await collect_text_from_query(
+            effective_prompt, options, message_buffer, agent_name="Scientist revision",
+        )
 
-    raw = result_text
-    if not raw:
-        raw = "\n".join(assistant_texts)
+        try:
+            return validate_json_output(raw, ScientistPlanOutput, "Scientist revision")
+        except OutputValidationError as e:
+            if attempt == MAX_ATTEMPTS - 1:
+                raise
+            correction_hint = f"\n\n{e.correction_prompt()}"
+            logger.warning(f"Scientist revision attempt {attempt + 1} failed, retrying: {e}")
 
-    if not raw:
-        raise RuntimeError("Scientist revision returned no output")
-
-    return _parse_json_response(raw, "Scientist revision")
+    raise RuntimeError("Scientist revision: exhausted retries")  # unreachable

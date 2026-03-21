@@ -4,40 +4,15 @@ import json
 from unittest.mock import MagicMock, patch
 
 import pytest
+from claude_code_sdk import AssistantMessage, ResultMessage, TextBlock
 
 from auto_scientist.agents.scientist import (
     _format_criteria_for_prompt,
-    _parse_json_response,
     run_scientist,
     run_scientist_revision,
 )
 from auto_scientist.config import SuccessCriterion
-
-
-class TestParseJsonResponse:
-    """Tests for the pure JSON parsing helper."""
-
-    def test_clean_json(self):
-        result = _parse_json_response('{"key": "value"}', "test")
-        assert result == {"key": "value"}
-
-    def test_markdown_fenced_json(self):
-        raw = '```json\n{"key": "value"}\n```'
-        result = _parse_json_response(raw, "test")
-        assert result == {"key": "value"}
-
-    def test_markdown_fenced_no_language(self):
-        raw = '```\n{"key": "value"}\n```'
-        result = _parse_json_response(raw, "test")
-        assert result == {"key": "value"}
-
-    def test_invalid_json_raises(self):
-        with pytest.raises(json.JSONDecodeError):
-            _parse_json_response("not json", "test")
-
-    def test_whitespace_stripped(self):
-        result = _parse_json_response('  \n{"key": "value"}\n  ', "test")
-        assert result == {"key": "value"}
+from auto_scientist.sdk_utils import OutputValidationError
 
 
 class TestFormatCriteriaForPrompt:
@@ -101,9 +76,9 @@ SAMPLE_PLAN = {
 
 class TestRunScientist:
     @pytest.mark.asyncio
-    @patch("auto_scientist.agents.scientist.query")
+    @patch("auto_scientist.sdk_utils.query")
     async def test_returns_parsed_plan(self, mock_query, tmp_path):
-        from auto_scientist.agents.scientist import ResultMessage
+        from claude_code_sdk import ResultMessage
         result_msg = MagicMock(spec=ResultMessage)
         result_msg.result = json.dumps(SAMPLE_PLAN)
 
@@ -125,9 +100,9 @@ class TestRunScientist:
         assert result["strategy"] == "incremental"
 
     @pytest.mark.asyncio
-    @patch("auto_scientist.agents.scientist.query")
+    @patch("auto_scientist.sdk_utils.query")
     async def test_missing_notebook_uses_fallback(self, mock_query, tmp_path):
-        from auto_scientist.agents.scientist import ResultMessage
+        from claude_code_sdk import ResultMessage
         result_msg = MagicMock(spec=ResultMessage)
         result_msg.result = json.dumps(SAMPLE_PLAN)
 
@@ -144,9 +119,9 @@ class TestRunScientist:
         assert result["hypothesis"] == "test hypothesis"
 
     @pytest.mark.asyncio
-    @patch("auto_scientist.agents.scientist.query")
+    @patch("auto_scientist.sdk_utils.query")
     async def test_empty_output_raises(self, mock_query, tmp_path):
-        from auto_scientist.agents.scientist import ResultMessage
+        from claude_code_sdk import ResultMessage
         result_msg = MagicMock(spec=ResultMessage)
         result_msg.result = ""
 
@@ -163,10 +138,10 @@ class TestRunScientist:
             )
 
     @pytest.mark.asyncio
-    @patch("auto_scientist.agents.scientist.query")
+    @patch("auto_scientist.sdk_utils.query")
     async def test_web_search_only(self, mock_query, tmp_path):
         """Scientist should only have WebSearch (no code/file tools)."""
-        from auto_scientist.agents.scientist import ResultMessage
+        from claude_code_sdk import ResultMessage
         result_msg = MagicMock(spec=ResultMessage)
         result_msg.result = json.dumps(SAMPLE_PLAN)
 
@@ -186,9 +161,9 @@ class TestRunScientist:
 
 class TestRunScientistMessageBuffer:
     @pytest.mark.asyncio
-    @patch("auto_scientist.agents.scientist.query")
+    @patch("auto_scientist.sdk_utils.query")
     async def test_populates_message_buffer(self, mock_query, tmp_path):
-        from auto_scientist.agents.scientist import AssistantMessage, ResultMessage, TextBlock
+        from claude_code_sdk import AssistantMessage, ResultMessage, TextBlock
 
         assistant_msg = MagicMock(spec=AssistantMessage)
         text_block = MagicMock(spec=TextBlock)
@@ -216,9 +191,9 @@ class TestRunScientistMessageBuffer:
         assert "Planning hypothesis..." in buf[0]
 
     @pytest.mark.asyncio
-    @patch("auto_scientist.agents.scientist.query")
+    @patch("auto_scientist.sdk_utils.query")
     async def test_revision_populates_message_buffer(self, mock_query, tmp_path):
-        from auto_scientist.agents.scientist import AssistantMessage, ResultMessage, TextBlock
+        from claude_code_sdk import AssistantMessage, ResultMessage, TextBlock
 
         assistant_msg = MagicMock(spec=AssistantMessage)
         text_block = MagicMock(spec=TextBlock)
@@ -254,7 +229,7 @@ class TestRunScientistExploration:
     """Empty analysis + no criteria -> exploration plan."""
 
     @pytest.mark.asyncio
-    @patch("auto_scientist.agents.scientist.query")
+    @patch("auto_scientist.sdk_utils.query")
     async def test_exploration_plan(self, mock_query, tmp_path):
         exploration_plan = {
             "hypothesis": "Data exploration to establish baselines and identify patterns",
@@ -270,7 +245,7 @@ class TestRunScientistExploration:
             "success_criteria": [],
         }
 
-        from auto_scientist.agents.scientist import ResultMessage
+        from claude_code_sdk import ResultMessage
         result_msg = MagicMock(spec=ResultMessage)
         result_msg.result = json.dumps(exploration_plan)
 
@@ -293,7 +268,7 @@ class TestRunScientistCriteriaDefinition:
     """Rich analysis + no criteria -> plan includes top_level_criteria."""
 
     @pytest.mark.asyncio
-    @patch("auto_scientist.agents.scientist.query")
+    @patch("auto_scientist.sdk_utils.query")
     async def test_defines_criteria(self, mock_query, tmp_path):
         plan_with_criteria = {
             "hypothesis": "Polynomial fit will model the observed pattern",
@@ -316,7 +291,7 @@ class TestRunScientistCriteriaDefinition:
             ],
         }
 
-        from auto_scientist.agents.scientist import ResultMessage
+        from claude_code_sdk import ResultMessage
         result_msg = MagicMock(spec=ResultMessage)
         result_msg.result = json.dumps(plan_with_criteria)
 
@@ -342,7 +317,7 @@ class TestRunScientistCriteriaRevision:
     """Existing criteria -> plan may include criteria_revision."""
 
     @pytest.mark.asyncio
-    @patch("auto_scientist.agents.scientist.query")
+    @patch("auto_scientist.sdk_utils.query")
     async def test_revises_criteria(self, mock_query, tmp_path):
         plan_with_revision = {
             "hypothesis": "Lower target is more realistic given noise",
@@ -371,7 +346,7 @@ class TestRunScientistCriteriaRevision:
             },
         }
 
-        from auto_scientist.agents.scientist import ResultMessage
+        from claude_code_sdk import ResultMessage
         result_msg = MagicMock(spec=ResultMessage)
         result_msg.result = json.dumps(plan_with_revision)
 
@@ -397,10 +372,10 @@ class TestRunScientistCriteriaRevision:
         assert result["criteria_revision"]["revised_criteria"][0]["condition"] == "> 0.90"
 
     @pytest.mark.asyncio
-    @patch("auto_scientist.agents.scientist.query")
+    @patch("auto_scientist.sdk_utils.query")
     async def test_accepts_success_criteria_param(self, mock_query, tmp_path):
         """run_scientist should accept a success_criteria parameter."""
-        from auto_scientist.agents.scientist import ResultMessage
+        from claude_code_sdk import ResultMessage
         result_msg = MagicMock(spec=ResultMessage)
         result_msg.result = json.dumps(SAMPLE_PLAN)
 
@@ -427,9 +402,9 @@ class TestRunScientistCriteriaRevision:
 
 class TestRunScientistRevision:
     @pytest.mark.asyncio
-    @patch("auto_scientist.agents.scientist.query")
+    @patch("auto_scientist.sdk_utils.query")
     async def test_returns_revised_plan(self, mock_query, tmp_path):
-        from auto_scientist.agents.scientist import ResultMessage
+        from claude_code_sdk import ResultMessage
         result_msg = MagicMock(spec=ResultMessage)
         result_msg.result = json.dumps(SAMPLE_PLAN)
 
@@ -457,9 +432,9 @@ class TestRunScientistRevision:
         assert result["hypothesis"] == "test hypothesis"
 
     @pytest.mark.asyncio
-    @patch("auto_scientist.agents.scientist.query")
+    @patch("auto_scientist.sdk_utils.query")
     async def test_empty_output_raises(self, mock_query, tmp_path):
-        from auto_scientist.agents.scientist import ResultMessage
+        from claude_code_sdk import ResultMessage
         result_msg = MagicMock(spec=ResultMessage)
         result_msg.result = ""
 
@@ -480,9 +455,9 @@ class TestRunScientistRevision:
             )
 
     @pytest.mark.asyncio
-    @patch("auto_scientist.agents.scientist.query")
+    @patch("auto_scientist.sdk_utils.query")
     async def test_fallback_to_assistant_text(self, mock_query, tmp_path):
-        from auto_scientist.agents.scientist import AssistantMessage, ResultMessage, TextBlock
+        from claude_code_sdk import AssistantMessage, ResultMessage, TextBlock
 
         result_msg = MagicMock(spec=ResultMessage)
         result_msg.result = ""
@@ -512,9 +487,9 @@ class TestRunScientistRevision:
 
 class TestRunScientistAssistantFallback:
     @pytest.mark.asyncio
-    @patch("auto_scientist.agents.scientist.query")
+    @patch("auto_scientist.sdk_utils.query")
     async def test_run_scientist_fallback_to_assistant_text(self, mock_query, tmp_path):
-        from auto_scientist.agents.scientist import AssistantMessage, ResultMessage, TextBlock
+        from claude_code_sdk import AssistantMessage, ResultMessage, TextBlock
 
         result_msg = MagicMock(spec=ResultMessage)
         result_msg.result = ""
@@ -538,9 +513,9 @@ class TestRunScientistAssistantFallback:
         assert result["hypothesis"] == "test hypothesis"
 
     @pytest.mark.asyncio
-    @patch("auto_scientist.agents.scientist.query")
+    @patch("auto_scientist.sdk_utils.query")
     async def test_run_scientist_markdown_fenced_response(self, mock_query, tmp_path):
-        from auto_scientist.agents.scientist import AssistantMessage, ResultMessage, TextBlock
+        from claude_code_sdk import AssistantMessage, ResultMessage, TextBlock
 
         result_msg = MagicMock(spec=ResultMessage)
         result_msg.result = ""
@@ -563,3 +538,76 @@ class TestRunScientistAssistantFallback:
             analysis={}, notebook_path=notebook_path, version="v01",
         )
         assert result["hypothesis"] == "test hypothesis"
+
+
+class TestScientistRetry:
+    """Tests for the retry-on-validation-failure behavior."""
+
+    @pytest.mark.asyncio
+    @patch("auto_scientist.sdk_utils.query")
+    async def test_retry_on_invalid_json(self, mock_query, tmp_path):
+        call_count = 0
+
+        async def fake_query(**kwargs):
+            nonlocal call_count
+            call_count += 1
+            msg = MagicMock(spec=ResultMessage)
+            if call_count == 1:
+                msg.result = "not json"
+            else:
+                msg.result = json.dumps(SAMPLE_PLAN)
+            yield msg
+
+        mock_query.side_effect = fake_query
+        notebook_path = tmp_path / "notebook.md"
+
+        result = await run_scientist(
+            analysis={}, notebook_path=notebook_path, version="v01",
+        )
+        assert result["hypothesis"] == "test hypothesis"
+        assert call_count == 2
+
+    @pytest.mark.asyncio
+    @patch("auto_scientist.sdk_utils.query")
+    async def test_exhausts_retries_raises(self, mock_query, tmp_path):
+        async def fake_query(**kwargs):
+            msg = MagicMock(spec=ResultMessage)
+            msg.result = "always bad"
+            yield msg
+
+        mock_query.side_effect = fake_query
+        notebook_path = tmp_path / "notebook.md"
+
+        with pytest.raises(OutputValidationError, match="Scientist"):
+            await run_scientist(
+                analysis={}, notebook_path=notebook_path, version="v01",
+            )
+
+    @pytest.mark.asyncio
+    @patch("auto_scientist.sdk_utils.query")
+    async def test_revision_retry(self, mock_query, tmp_path):
+        call_count = 0
+
+        async def fake_query(**kwargs):
+            nonlocal call_count
+            call_count += 1
+            msg = MagicMock(spec=ResultMessage)
+            if call_count == 1:
+                msg.result = '{"incomplete": true}'
+            else:
+                msg.result = json.dumps(SAMPLE_PLAN)
+            yield msg
+
+        mock_query.side_effect = fake_query
+        notebook_path = tmp_path / "notebook.md"
+        notebook_path.write_text("# Notebook")
+
+        result = await run_scientist_revision(
+            original_plan=SAMPLE_PLAN,
+            debate_transcript=[{"role": "critic", "content": "weak"}],
+            analysis={},
+            notebook_path=notebook_path,
+            version="v01",
+        )
+        assert result["hypothesis"] == "test hypothesis"
+        assert call_count == 2
