@@ -1,6 +1,7 @@
-"""Scientist agent: pure prompt-in, JSON-out strategic planner.
+"""Scientist agent: prompt-in, JSON-out strategic planner with web search.
 
-No tools. Does not read Python code. Receives analysis + notebook via prompt.
+Does not read Python code. Receives analysis + notebook via prompt.
+Has web search access to ground hypotheses in real-world knowledge.
 Output: structured JSON plan with hypothesis, strategy, changes, notebook entry.
 """
 
@@ -177,8 +178,8 @@ async def run_scientist(
 
     options = ClaudeCodeOptions(
         system_prompt=SCIENTIST_SYSTEM + json_instruction,
-        allowed_tools=[],
-        max_turns=1,
+        allowed_tools=["WebSearch"],
+        max_turns=10,
         model=model,
     )
 
@@ -277,8 +278,8 @@ async def run_scientist_revision(
 
     options = ClaudeCodeOptions(
         system_prompt=SCIENTIST_REVISION_SYSTEM + json_instruction,
-        allowed_tools=[],
-        max_turns=1,
+        allowed_tools=["WebSearch"],
+        max_turns=10,
         model=model,
     )
 

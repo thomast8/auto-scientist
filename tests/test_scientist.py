@@ -164,8 +164,8 @@ class TestRunScientist:
 
     @pytest.mark.asyncio
     @patch("auto_scientist.agents.scientist.query")
-    async def test_no_tools_configured(self, mock_query, tmp_path):
-        """Scientist should have no tools (pure prompt-in/JSON-out)."""
+    async def test_web_search_only(self, mock_query, tmp_path):
+        """Scientist should only have WebSearch (no code/file tools)."""
         from auto_scientist.agents.scientist import ResultMessage
         result_msg = MagicMock(spec=ResultMessage)
         result_msg.result = json.dumps(SAMPLE_PLAN)
@@ -181,7 +181,7 @@ class TestRunScientist:
         notebook_path = tmp_path / "notebook.md"
         await run_scientist(analysis={}, notebook_path=notebook_path, version="v01")
 
-        assert captured_options["options"].allowed_tools == []
+        assert captured_options["options"].allowed_tools == ["WebSearch"]
 
 
 class TestRunScientistMessageBuffer:

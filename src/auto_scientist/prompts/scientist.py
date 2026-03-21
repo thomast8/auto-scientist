@@ -1,6 +1,6 @@
 """Prompt templates for the Scientist agent.
 
-The Scientist is a pure prompt-in, JSON-out call with no tools.
+The Scientist produces JSON plans with web search access.
 It receives the analysis, notebook, and domain knowledge via prompt injection.
 It plans from results and observations only, never from code.
 """
@@ -35,6 +35,11 @@ What you produce:
 
 You never see raw data, experiment scripts, or plot files. You plan purely
 from the Analyst's structured observations and your notebook history.
+
+You have web search access. Use it to look up domain-specific techniques,
+validate your approach against published methods, or find relevant formulas
+and constants. Search before planning when the domain is unfamiliar or
+when your hypothesis involves a technique you want to verify.
 </pipeline_context>
 
 <instructions>
@@ -615,6 +620,10 @@ You receive the original Scientist plan plus the full debate transcript
 (Critic challenges and Scientist defenses). Your revised plan goes directly
 to the Coder for implementation. The Coder never sees the debate, only your
 final revised plan, so it must be self-contained and complete.
+
+You have web search access. Use it if the debate raised factual questions
+you need to verify, or if you want to find alternative approaches suggested
+by the critic.
 </pipeline_context>
 
 <instructions>
