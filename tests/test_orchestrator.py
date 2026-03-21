@@ -1,7 +1,7 @@
 """Tests for the orchestrator state machine."""
 
 from pathlib import Path
-from unittest.mock import AsyncMock, MagicMock, patch
+from unittest.mock import AsyncMock, patch
 
 import pytest
 
@@ -25,7 +25,9 @@ def orchestrator(base_state, tmp_path):
     )
     # Set config directly for tests that need it
     o.config = DomainConfig(
-        name="test", description="Test domain", data_paths=["data.csv"],
+        name="test",
+        description="Test domain",
+        data_paths=["data.csv"],
     )
     # Domain knowledge now lives in state, not config
     base_state.domain_knowledge = "test knowledge"
@@ -42,9 +44,13 @@ class TestOrchestratorInit:
 
     def test_custom_values(self, base_state, tmp_path):
         o = Orchestrator(
-            state=base_state, data_path=tmp_path, output_dir=tmp_path,
-            max_iterations=5, critic_models=["openai:gpt-4o"],
-            debate_rounds=3, max_consecutive_failures=2,
+            state=base_state,
+            data_path=tmp_path,
+            output_dir=tmp_path,
+            max_iterations=5,
+            critic_models=["openai:gpt-4o"],
+            debate_rounds=3,
+            max_consecutive_failures=2,
         )
         assert o.max_iterations == 5
         assert o.critic_models == ["openai:gpt-4o"]
@@ -125,11 +131,14 @@ class TestRunIngestion:
         mock_ingestor.return_value = canonical
 
         state = ExperimentState(
-            domain="test", goal="g", phase="ingestion",
+            domain="test",
+            goal="g",
+            phase="ingestion",
             data_path=str(tmp_path / "raw.csv"),
         )
         o = Orchestrator(
-            state=state, data_path=tmp_path / "raw.csv",
+            state=state,
+            data_path=tmp_path / "raw.csv",
             output_dir=tmp_path / "experiments",
         )
         result = await o._run_ingestion()
@@ -142,11 +151,15 @@ class TestPhaseTransitions:
     @pytest.mark.asyncio
     async def test_max_iterations_triggers_report(self, tmp_path):
         state = ExperimentState(
-            domain="test", goal="g", phase="iteration",
+            domain="test",
+            goal="g",
+            phase="iteration",
             iteration=20,
         )
         o = Orchestrator(
-            state=state, data_path=tmp_path, output_dir=tmp_path,
+            state=state,
+            data_path=tmp_path,
+            output_dir=tmp_path,
             max_iterations=20,
         )
         o.config = DomainConfig(name="t", description="d", data_paths=[])
@@ -159,11 +172,15 @@ class TestPhaseTransitions:
     @pytest.mark.asyncio
     async def test_consecutive_failures_triggers_report(self, tmp_path):
         state = ExperimentState(
-            domain="test", goal="g", phase="iteration",
+            domain="test",
+            goal="g",
+            phase="iteration",
             consecutive_failures=5,
         )
         o = Orchestrator(
-            state=state, data_path=tmp_path, output_dir=tmp_path,
+            state=state,
+            data_path=tmp_path,
+            output_dir=tmp_path,
             max_consecutive_failures=5,
         )
         o.config = DomainConfig(name="t", description="d", data_paths=[])
@@ -177,11 +194,14 @@ class TestPhaseTransitions:
     async def test_ingestion_transitions_to_iteration(self, tmp_path):
         """After ingestion, phase should be 'iteration' (not 'discovery')."""
         state = ExperimentState(
-            domain="test", goal="g", phase="ingestion",
+            domain="test",
+            goal="g",
+            phase="ingestion",
             data_path=str(tmp_path / "raw.csv"),
         )
         o = Orchestrator(
-            state=state, data_path=tmp_path / "raw.csv",
+            state=state,
+            data_path=tmp_path / "raw.csv",
             output_dir=tmp_path / "experiments",
             max_iterations=0,
         )
@@ -204,11 +224,15 @@ class TestPhaseTransitions:
     @pytest.mark.asyncio
     async def test_resume_from_iteration_skips_ingestion(self, tmp_path):
         state = ExperimentState(
-            domain="test", goal="g", phase="iteration",
+            domain="test",
+            goal="g",
+            phase="iteration",
             iteration=20,
         )
         o = Orchestrator(
-            state=state, data_path=tmp_path, output_dir=tmp_path,
+            state=state,
+            data_path=tmp_path,
+            output_dir=tmp_path,
             max_iterations=20,
         )
         o.config = DomainConfig(name="t", description="d", data_paths=[])
@@ -233,8 +257,10 @@ class TestIteration0:
         analysis = {"success_score": None, "observations": ["200 rows"]}
 
         with patch.object(
-            orchestrator, "_run_analyst_initial",
-            new_callable=AsyncMock, return_value=analysis,
+            orchestrator,
+            "_run_analyst_initial",
+            new_callable=AsyncMock,
+            return_value=analysis,
         ) as mock_initial:
             result = await orchestrator._run_analyst()
 
@@ -256,21 +282,29 @@ class TestIteration0:
         run_result = RunResult(success=True, stdout="ok", return_code=0)
 
         with (
-            patch.object(orchestrator, "_run_analyst", new_callable=AsyncMock,
-                          return_value={"success_score": None}),
-            patch.object(orchestrator, "_run_scientist_plan", new_callable=AsyncMock,
-                          return_value=plan),
             patch.object(
-                orchestrator, "_run_debate", new_callable=AsyncMock,
+                orchestrator,
+                "_run_analyst",
+                new_callable=AsyncMock,
+                return_value={"success_score": None},
+            ),
+            patch.object(
+                orchestrator, "_run_scientist_plan", new_callable=AsyncMock, return_value=plan
+            ),
+            patch.object(
+                orchestrator,
+                "_run_debate",
+                new_callable=AsyncMock,
             ) as mock_debate,
             patch.object(
-                orchestrator, "_run_scientist_revision",
+                orchestrator,
+                "_run_scientist_revision",
                 new_callable=AsyncMock,
             ) as mock_revision,
-            patch.object(orchestrator, "_run_coder", new_callable=AsyncMock,
-                          return_value=script_path),
-            patch.object(orchestrator, "_read_run_result",
-                          return_value=run_result),
+            patch.object(
+                orchestrator, "_run_coder", new_callable=AsyncMock, return_value=script_path
+            ),
+            patch.object(orchestrator, "_read_run_result", return_value=run_result),
             patch.object(orchestrator, "_apply_criteria_updates"),
         ):
             await orchestrator._run_iteration_body()
@@ -293,27 +327,37 @@ class TestIteration0:
 
         with (
             patch.object(
-                orchestrator, "_run_analyst",
-                new_callable=AsyncMock, return_value={},
+                orchestrator,
+                "_run_analyst",
+                new_callable=AsyncMock,
+                return_value={},
             ),
             patch.object(
-                orchestrator, "_run_scientist_plan",
-                new_callable=AsyncMock, return_value=plan,
+                orchestrator,
+                "_run_scientist_plan",
+                new_callable=AsyncMock,
+                return_value=plan,
             ),
             patch.object(
-                orchestrator, "_run_debate",
+                orchestrator,
+                "_run_debate",
                 new_callable=AsyncMock,
             ),
             patch.object(
-                orchestrator, "_run_scientist_revision",
-                new_callable=AsyncMock, return_value=None,
+                orchestrator,
+                "_run_scientist_revision",
+                new_callable=AsyncMock,
+                return_value=None,
             ),
             patch.object(
-                orchestrator, "_run_coder",
-                new_callable=AsyncMock, return_value=script_path,
+                orchestrator,
+                "_run_coder",
+                new_callable=AsyncMock,
+                return_value=script_path,
             ),
             patch.object(
-                orchestrator, "_read_run_result",
+                orchestrator,
+                "_read_run_result",
                 return_value=run_result,
             ),
             patch.object(orchestrator, "_apply_criteria_updates"),
@@ -359,12 +403,21 @@ class TestParseCriterion:
         assert Orchestrator._parse_criterion(raw) is None
 
     def test_non_numeric_condition_returns_none(self, orchestrator):
-        raw = {"name": "Normal residuals", "description": "d", "metric_key": "x",
-               "condition": "approximately normal"}
+        raw = {
+            "name": "Normal residuals",
+            "description": "d",
+            "metric_key": "x",
+            "condition": "approximately normal",
+        }
         assert Orchestrator._parse_criterion(raw) is None
 
     def test_preserves_name_description(self, orchestrator):
-        raw = {"name": "Accuracy", "description": "Model accuracy", "metric_key": "acc", "condition": "> 0.9"}
+        raw = {
+            "name": "Accuracy",
+            "description": "Model accuracy",
+            "metric_key": "acc",
+            "condition": "> 0.9",
+        }
         sc = Orchestrator._parse_criterion(raw)
         assert sc.name == "Accuracy"
         assert sc.description == "Model accuracy"
@@ -377,10 +430,18 @@ class TestApplyCriteriaUpdates:
     def test_top_level_criteria_populates_state(self, orchestrator):
         plan = {
             "top_level_criteria": [
-                {"name": "RMSE", "description": "low error", "metric_key": "rmse",
-                 "condition": "< 0.5"},
-                {"name": "R-squared", "description": "high fit", "metric_key": "r2",
-                 "condition": "> 0.95"},
+                {
+                    "name": "RMSE",
+                    "description": "low error",
+                    "metric_key": "rmse",
+                    "condition": "< 0.5",
+                },
+                {
+                    "name": "R-squared",
+                    "description": "high fit",
+                    "metric_key": "r2",
+                    "condition": "> 0.95",
+                },
             ],
         }
         orchestrator.state.iteration = 1
@@ -403,8 +464,7 @@ class TestApplyCriteriaUpdates:
             "criteria_revision": {
                 "changes": "Lowered target from 0.95 to 0.90",
                 "revised_criteria": [
-                    {"name": "R2", "description": "fit", "metric_key": "r2",
-                     "condition": "> 0.90"},
+                    {"name": "R2", "description": "fit", "metric_key": "r2", "condition": "> 0.90"},
                 ],
             },
         }
@@ -444,12 +504,24 @@ class TestApplyCriteriaUpdates:
         """Criteria without numeric targets should be filtered out."""
         plan = {
             "top_level_criteria": [
-                {"name": "RMSE", "description": "low error", "metric_key": "rmse",
-                 "condition": "< 0.5"},
-                {"name": "Normal residuals", "description": "bad", "metric_key": "x",
-                 "condition": "approximately normal"},
-                {"name": "R2", "description": "high fit", "metric_key": "r2",
-                 "condition": "> 0.95"},
+                {
+                    "name": "RMSE",
+                    "description": "low error",
+                    "metric_key": "rmse",
+                    "condition": "< 0.5",
+                },
+                {
+                    "name": "Normal residuals",
+                    "description": "bad",
+                    "metric_key": "x",
+                    "condition": "approximately normal",
+                },
+                {
+                    "name": "R2",
+                    "description": "high fit",
+                    "metric_key": "r2",
+                    "condition": "> 0.95",
+                },
             ],
         }
         orchestrator.state.iteration = 1
@@ -513,8 +585,7 @@ class TestApplyCriteriaUpdates:
     def test_condition_parsing_less_than(self, orchestrator):
         plan = {
             "top_level_criteria": [
-                {"name": "Error", "description": "low", "metric_key": "err",
-                 "condition": "< 500"},
+                {"name": "Error", "description": "low", "metric_key": "err", "condition": "< 500"},
             ],
         }
         orchestrator.state.iteration = 1
@@ -525,8 +596,12 @@ class TestApplyCriteriaUpdates:
     def test_condition_parsing_greater_than(self, orchestrator):
         plan = {
             "top_level_criteria": [
-                {"name": "Accuracy", "description": "high", "metric_key": "acc",
-                 "condition": "> 0.95"},
+                {
+                    "name": "Accuracy",
+                    "description": "high",
+                    "metric_key": "acc",
+                    "condition": "> 0.95",
+                },
             ],
         }
         orchestrator.state.iteration = 1
@@ -546,7 +621,9 @@ class TestDomainKnowledgeSourcing:
         orchestrator.state.domain_knowledge = "from state"
 
         latest = VersionEntry(
-            version="v01", iteration=1, script_path=str(tmp_path / "s.py"),
+            version="v01",
+            iteration=1,
+            script_path=str(tmp_path / "s.py"),
             results_path=str(tmp_path / "results.txt"),
         )
         orchestrator.state.versions = [latest]
@@ -575,8 +652,10 @@ class TestDomainKnowledgeSourcing:
         }
 
         with patch.object(
-            orchestrator, "_run_analyst_initial",
-            new_callable=AsyncMock, return_value=analysis,
+            orchestrator,
+            "_run_analyst_initial",
+            new_callable=AsyncMock,
+            return_value=analysis,
         ):
             result = await orchestrator._run_analyst()
 
@@ -593,7 +672,9 @@ class TestRunIteration:
         orchestrator.state.phase = "iteration"
         orchestrator.state.versions = [
             VersionEntry(
-                version="v00", iteration=0, script_path="/tmp/s.py",
+                version="v00",
+                iteration=0,
+                script_path="/tmp/s.py",
                 results_path=str(tmp_path / "results.txt"),
             ),
         ]
@@ -603,12 +684,16 @@ class TestRunIteration:
 
         with (
             patch.object(
-                orchestrator, "_run_analyst",
-                new_callable=AsyncMock, return_value={},
+                orchestrator,
+                "_run_analyst",
+                new_callable=AsyncMock,
+                return_value={},
             ),
             patch.object(
-                orchestrator, "_run_scientist_plan",
-                new_callable=AsyncMock, return_value=plan,
+                orchestrator,
+                "_run_scientist_plan",
+                new_callable=AsyncMock,
+                return_value=plan,
             ),
             patch.object(orchestrator, "_apply_criteria_updates"),
         ):
@@ -624,7 +709,9 @@ class TestRunIteration:
         orchestrator.state.iteration = 1
         orchestrator.state.versions = [
             VersionEntry(
-                version="v00", iteration=0, script_path="/tmp/s.py",
+                version="v00",
+                iteration=0,
+                script_path="/tmp/s.py",
                 results_path=str(tmp_path / "results.txt"),
             ),
         ]
@@ -639,27 +726,38 @@ class TestRunIteration:
 
         with (
             patch.object(
-                orchestrator, "_run_analyst",
-                new_callable=AsyncMock, return_value={},
+                orchestrator,
+                "_run_analyst",
+                new_callable=AsyncMock,
+                return_value={},
             ),
             patch.object(
-                orchestrator, "_run_scientist_plan",
-                new_callable=AsyncMock, return_value=plan,
+                orchestrator,
+                "_run_scientist_plan",
+                new_callable=AsyncMock,
+                return_value=plan,
             ),
             patch.object(
-                orchestrator, "_run_debate",
-                new_callable=AsyncMock, return_value=None,
+                orchestrator,
+                "_run_debate",
+                new_callable=AsyncMock,
+                return_value=None,
             ) as mock_debate,
             patch.object(
-                orchestrator, "_run_scientist_revision",
-                new_callable=AsyncMock, return_value=None,
+                orchestrator,
+                "_run_scientist_revision",
+                new_callable=AsyncMock,
+                return_value=None,
             ),
             patch.object(
-                orchestrator, "_run_coder",
-                new_callable=AsyncMock, return_value=script_path,
+                orchestrator,
+                "_run_coder",
+                new_callable=AsyncMock,
+                return_value=script_path,
             ),
             patch.object(
-                orchestrator, "_read_run_result",
+                orchestrator,
+                "_read_run_result",
                 return_value=run_result,
             ),
             patch.object(orchestrator, "_apply_criteria_updates"),
@@ -686,14 +784,16 @@ class TestRunIteration:
         run_result = RunResult(success=True, stdout="ok", return_code=0)
 
         with (
-            patch.object(orchestrator, "_run_analyst", new_callable=AsyncMock,
-                          return_value=analysis),
-            patch.object(orchestrator, "_run_scientist_plan", new_callable=AsyncMock,
-                          return_value=plan),
-            patch.object(orchestrator, "_run_coder", new_callable=AsyncMock,
-                          return_value=script_path),
-            patch.object(orchestrator, "_read_run_result",
-                          return_value=run_result),
+            patch.object(
+                orchestrator, "_run_analyst", new_callable=AsyncMock, return_value=analysis
+            ),
+            patch.object(
+                orchestrator, "_run_scientist_plan", new_callable=AsyncMock, return_value=plan
+            ),
+            patch.object(
+                orchestrator, "_run_coder", new_callable=AsyncMock, return_value=script_path
+            ),
+            patch.object(orchestrator, "_read_run_result", return_value=run_result),
             patch.object(orchestrator, "_apply_criteria_updates"),
         ):
             await orchestrator._run_iteration_body()
@@ -707,7 +807,9 @@ class TestRunIteration:
         orchestrator.state.iteration = 1
         orchestrator.state.versions = [
             VersionEntry(
-                version="v00", iteration=0, script_path="/tmp/s.py",
+                version="v00",
+                iteration=0,
+                script_path="/tmp/s.py",
                 results_path=str(tmp_path / "results.txt"),
             ),
         ]
@@ -716,10 +818,10 @@ class TestRunIteration:
         plan = {"should_stop": True, "stop_reason": "criteria met"}
 
         with (
-            patch.object(orchestrator, "_run_analyst", new_callable=AsyncMock,
-                          return_value={}),
-            patch.object(orchestrator, "_run_scientist_plan", new_callable=AsyncMock,
-                          return_value=plan),
+            patch.object(orchestrator, "_run_analyst", new_callable=AsyncMock, return_value={}),
+            patch.object(
+                orchestrator, "_run_scientist_plan", new_callable=AsyncMock, return_value=plan
+            ),
             patch.object(orchestrator, "_apply_criteria_updates"),
         ):
             await orchestrator._run_iteration_body()
@@ -740,12 +842,13 @@ class TestRunIteration:
         # No run_result.json -> _read_run_result returns failure
 
         with (
-            patch.object(orchestrator, "_run_analyst", new_callable=AsyncMock,
-                          return_value={}),
-            patch.object(orchestrator, "_run_scientist_plan", new_callable=AsyncMock,
-                          return_value=plan),
-            patch.object(orchestrator, "_run_coder", new_callable=AsyncMock,
-                          return_value=script_path),
+            patch.object(orchestrator, "_run_analyst", new_callable=AsyncMock, return_value={}),
+            patch.object(
+                orchestrator, "_run_scientist_plan", new_callable=AsyncMock, return_value=plan
+            ),
+            patch.object(
+                orchestrator, "_run_coder", new_callable=AsyncMock, return_value=script_path
+            ),
             patch.object(orchestrator, "_apply_criteria_updates"),
         ):
             await orchestrator._run_iteration_body()
@@ -769,14 +872,14 @@ class TestRunIteration:
         run_result = RunResult(success=True, stdout="ok", return_code=0)
 
         with (
-            patch.object(orchestrator, "_run_analyst", new_callable=AsyncMock,
-                          return_value={}),
-            patch.object(orchestrator, "_run_scientist_plan", new_callable=AsyncMock,
-                          return_value=plan),
-            patch.object(orchestrator, "_run_coder", new_callable=AsyncMock,
-                          return_value=script_path),
-            patch.object(orchestrator, "_read_run_result",
-                          return_value=run_result),
+            patch.object(orchestrator, "_run_analyst", new_callable=AsyncMock, return_value={}),
+            patch.object(
+                orchestrator, "_run_scientist_plan", new_callable=AsyncMock, return_value=plan
+            ),
+            patch.object(
+                orchestrator, "_run_coder", new_callable=AsyncMock, return_value=script_path
+            ),
+            patch.object(orchestrator, "_read_run_result", return_value=run_result),
             patch.object(orchestrator, "_apply_criteria_updates"),
         ):
             await orchestrator._run_iteration_body()
@@ -790,8 +893,12 @@ class TestComputeScore:
 
     def test_all_required_pass_returns_100(self):
         criteria = [
-            SuccessCriterion(name="RMSE", description="d", metric_key="rmse", target_max=0.5, required=True),
-            SuccessCriterion(name="R2", description="d", metric_key="r2", target_min=0.9, required=True),
+            SuccessCriterion(
+                name="RMSE", description="d", metric_key="rmse", target_max=0.5, required=True
+            ),
+            SuccessCriterion(
+                name="R2", description="d", metric_key="r2", target_min=0.9, required=True
+            ),
         ]
         results = [
             {"name": "RMSE", "status": "pass"},
@@ -801,8 +908,12 @@ class TestComputeScore:
 
     def test_no_required_pass_returns_0(self):
         criteria = [
-            SuccessCriterion(name="RMSE", description="d", metric_key="rmse", target_max=0.5, required=True),
-            SuccessCriterion(name="R2", description="d", metric_key="r2", target_min=0.9, required=True),
+            SuccessCriterion(
+                name="RMSE", description="d", metric_key="rmse", target_max=0.5, required=True
+            ),
+            SuccessCriterion(
+                name="R2", description="d", metric_key="r2", target_min=0.9, required=True
+            ),
         ]
         results = [
             {"name": "RMSE", "status": "fail"},
@@ -812,9 +923,15 @@ class TestComputeScore:
 
     def test_mixed_returns_proportional(self):
         criteria = [
-            SuccessCriterion(name="A", description="d", metric_key="a", target_min=0.5, required=True),
-            SuccessCriterion(name="B", description="d", metric_key="b", target_max=10, required=True),
-            SuccessCriterion(name="C", description="d", metric_key="c", target_min=0.1, required=True),
+            SuccessCriterion(
+                name="A", description="d", metric_key="a", target_min=0.5, required=True
+            ),
+            SuccessCriterion(
+                name="B", description="d", metric_key="b", target_max=10, required=True
+            ),
+            SuccessCriterion(
+                name="C", description="d", metric_key="c", target_min=0.1, required=True
+            ),
         ]
         results = [
             {"name": "A", "status": "pass"},
@@ -825,8 +942,12 @@ class TestComputeScore:
 
     def test_optional_criteria_ignored(self):
         criteria = [
-            SuccessCriterion(name="A", description="d", metric_key="a", target_min=0.5, required=True),
-            SuccessCriterion(name="B", description="d", metric_key="b", target_max=10, required=False),
+            SuccessCriterion(
+                name="A", description="d", metric_key="a", target_min=0.5, required=True
+            ),
+            SuccessCriterion(
+                name="B", description="d", metric_key="b", target_max=10, required=False
+            ),
         ]
         results = [
             {"name": "A", "status": "pass"},
@@ -840,13 +961,17 @@ class TestComputeScore:
 
     def test_no_results_returns_0(self):
         criteria = [
-            SuccessCriterion(name="A", description="d", metric_key="a", target_min=0.5, required=True),
+            SuccessCriterion(
+                name="A", description="d", metric_key="a", target_min=0.5, required=True
+            ),
         ]
         assert Orchestrator._compute_score([], criteria) == 0
 
     def test_unable_to_measure_counts_as_fail(self):
         criteria = [
-            SuccessCriterion(name="A", description="d", metric_key="a", target_min=0.5, required=True),
+            SuccessCriterion(
+                name="A", description="d", metric_key="a", target_min=0.5, required=True
+            ),
         ]
         results = [
             {"name": "A", "status": "unable_to_measure"},
@@ -859,7 +984,9 @@ class TestScoreLatest:
 
     def test_scores_latest_version(self, orchestrator):
         orchestrator.state.success_criteria = [
-            SuccessCriterion(name="RMSE", description="d", metric_key="rmse", target_max=0.5, required=True),
+            SuccessCriterion(
+                name="RMSE", description="d", metric_key="rmse", target_max=0.5, required=True
+            ),
         ]
         latest = VersionEntry(version="v01", iteration=1, script_path="/tmp/s.py")
         orchestrator.state.versions = [latest]
@@ -877,7 +1004,9 @@ class TestScoreLatest:
 
     def test_none_analysis_scores_zero(self, orchestrator):
         orchestrator.state.success_criteria = [
-            SuccessCriterion(name="A", description="d", metric_key="a", target_min=0.5, required=True),
+            SuccessCriterion(
+                name="A", description="d", metric_key="a", target_min=0.5, required=True
+            ),
         ]
         latest = VersionEntry(version="v01", iteration=1, script_path="/tmp/s.py")
         orchestrator.state.versions = [latest]
@@ -892,8 +1021,12 @@ class TestScoreLatest:
 
         # Criteria defined by Scientist in same iteration
         orchestrator.state.success_criteria = [
-            SuccessCriterion(name="R2", description="d", metric_key="r2", target_min=0.9, required=True),
-            SuccessCriterion(name="RMSE", description="d", metric_key="rmse", target_max=0.5, required=True),
+            SuccessCriterion(
+                name="R2", description="d", metric_key="r2", target_min=0.9, required=True
+            ),
+            SuccessCriterion(
+                name="RMSE", description="d", metric_key="rmse", target_max=0.5, required=True
+            ),
         ]
 
         analysis = {
@@ -945,8 +1078,7 @@ class TestRunAnalystNormal:
     async def test_no_results_path_returns_none(self, orchestrator, tmp_path):
         orchestrator.output_dir.mkdir(parents=True, exist_ok=True)
         orchestrator.state.versions = [
-            VersionEntry(version="v00", iteration=0, script_path="/tmp/s.py",
-                          results_path=None),
+            VersionEntry(version="v00", iteration=0, script_path="/tmp/s.py", results_path=None),
         ]
 
         result = await orchestrator._run_analyst()
@@ -960,7 +1092,9 @@ class TestRunAnalystNormal:
         results_path = tmp_path / "results.txt"
         results_path.write_text("data")
         latest = VersionEntry(
-            version="v01", iteration=1, script_path=str(tmp_path / "s.py"),
+            version="v01",
+            iteration=1,
+            script_path=str(tmp_path / "s.py"),
             results_path=str(results_path),
         )
         orchestrator.state.versions = [latest]
@@ -982,8 +1116,12 @@ class TestRunAnalystNormal:
         results_path = tmp_path / "results.txt"
         results_path.write_text("data")
         orchestrator.state.versions = [
-            VersionEntry(version="v01", iteration=1, script_path=str(tmp_path / "s.py"),
-                          results_path=str(results_path)),
+            VersionEntry(
+                version="v01",
+                iteration=1,
+                script_path=str(tmp_path / "s.py"),
+                results_path=str(results_path),
+            ),
         ]
 
         with patch(
@@ -1000,7 +1138,11 @@ class TestRunScientistPlan:
     @pytest.mark.asyncio
     async def test_returns_plan(self, orchestrator, tmp_path):
         orchestrator.output_dir.mkdir(parents=True, exist_ok=True)
-        plan = {"hypothesis": "test", "strategy": "incremental", "notebook_entry": "Test plan\n\nNarrative"}
+        plan = {
+            "hypothesis": "test",
+            "strategy": "incremental",
+            "notebook_entry": "Test plan\n\nNarrative",
+        }
 
         with patch(
             "auto_scientist.agents.scientist.run_scientist",
@@ -1081,8 +1223,11 @@ class TestRunScientistRevisionOrchestrator:
         orchestrator.output_dir.mkdir(parents=True, exist_ok=True)
         plan = {"hypothesis": "original"}
         debate_result = [
-            {"model": "openai:gpt-4o", "critique": "weak",
-             "transcript": [{"role": "critic", "content": "weak"}]},
+            {
+                "model": "openai:gpt-4o",
+                "critique": "weak",
+                "transcript": [{"role": "critic", "content": "weak"}],
+            },
         ]
         revised = {"hypothesis": "revised", "notebook_entry": "Revised plan\n\nAdjusted approach"}
 
@@ -1104,8 +1249,11 @@ class TestRunScientistRevisionOrchestrator:
         orchestrator.output_dir.mkdir(parents=True, exist_ok=True)
         plan = {"hypothesis": "original"}
         debate_result = [
-            {"model": "openai:gpt-4o", "critique": "weak",
-             "transcript": [{"role": "critic", "content": "weak"}]},
+            {
+                "model": "openai:gpt-4o",
+                "critique": "weak",
+                "transcript": [{"role": "critic", "content": "weak"}],
+            },
         ]
 
         with patch(
@@ -1159,8 +1307,9 @@ class TestRunCoderOrchestrator:
     async def test_uses_previous_script_from_versions(self, orchestrator, tmp_path):
         orchestrator.output_dir.mkdir(parents=True, exist_ok=True)
         orchestrator.state.versions = [
-            VersionEntry(version="v00", iteration=0,
-                          script_path=str(tmp_path / "v00" / "experiment.py")),
+            VersionEntry(
+                version="v00", iteration=0, script_path=str(tmp_path / "v00" / "experiment.py")
+            ),
         ]
 
         captured_kwargs = {}
@@ -1175,15 +1324,13 @@ class TestRunCoderOrchestrator:
         assert str(captured_kwargs["previous_script"]) == str(tmp_path / "v00" / "experiment.py")
 
 
-
 class TestReadRunResult:
     def test_happy_path(self, orchestrator, tmp_path):
         """Reads valid run_result.json + results.txt into RunResult."""
         version_dir = tmp_path / "v01"
         version_dir.mkdir()
         (version_dir / "run_result.json").write_text(
-            '{"success": true, "return_code": 0, "timed_out": false, '
-            '"error": null, "attempts": 1}'
+            '{"success": true, "return_code": 0, "timed_out": false, "error": null, "attempts": 1}'
         )
         (version_dir / "results.txt").write_text("output data")
         (version_dir / "plot.png").write_text("fake png")
@@ -1238,8 +1385,7 @@ class TestReadRunResult:
         version_dir = tmp_path / "v01"
         version_dir.mkdir()
         (version_dir / "run_result.json").write_text(
-            '{"success": true, "return_code": 0, "timed_out": false, '
-            '"error": null, "attempts": 1}'
+            '{"success": true, "return_code": 0, "timed_out": false, "error": null, "attempts": 1}'
         )
         (version_dir / "experiment.py").write_text("print('hi')")
         (version_dir / "plot.png").write_text("fake")
@@ -1269,7 +1415,6 @@ class TestReadRunResult:
         assert result.success is False
         assert result.timed_out is True
         assert result.return_code == 124
-
 
 
 class TestRunReportOrchestrator:
@@ -1310,11 +1455,15 @@ class TestRunFullOrchestration:
     @pytest.mark.asyncio
     async def test_run_prints_critics(self, tmp_path, capsys):
         state = ExperimentState(
-            domain="test", goal="g", phase="iteration",
+            domain="test",
+            goal="g",
+            phase="iteration",
             iteration=20,
         )
         o = Orchestrator(
-            state=state, data_path=tmp_path, output_dir=tmp_path,
+            state=state,
+            data_path=tmp_path,
+            output_dir=tmp_path,
             max_iterations=20,
             critic_models=["openai:gpt-4o"],
         )
@@ -1329,11 +1478,15 @@ class TestRunFullOrchestration:
     @pytest.mark.asyncio
     async def test_run_iteration_loop_with_schedule(self, tmp_path):
         state = ExperimentState(
-            domain="test", goal="g", phase="iteration",
+            domain="test",
+            goal="g",
+            phase="iteration",
             iteration=0,
         )
         o = Orchestrator(
-            state=state, data_path=tmp_path, output_dir=tmp_path,
+            state=state,
+            data_path=tmp_path,
+            output_dir=tmp_path,
             max_iterations=1,
         )
         o.config = DomainConfig(name="t", description="d", data_paths=[])
@@ -1364,10 +1517,13 @@ class TestRunIngestionFull:
     @pytest.mark.asyncio
     async def test_ingestion_loads_config(self, tmp_path):
         state = ExperimentState(
-            domain="test", goal="g", phase="ingestion",
+            domain="test",
+            goal="g",
+            phase="ingestion",
         )
         o = Orchestrator(
-            state=state, data_path=tmp_path / "raw.csv",
+            state=state,
+            data_path=tmp_path / "raw.csv",
             output_dir=tmp_path / "experiments",
             max_iterations=0,
         )
@@ -1397,10 +1553,13 @@ class TestRunIngestionFull:
     @pytest.mark.asyncio
     async def test_ingestion_prints_data_files(self, tmp_path, capsys):
         state = ExperimentState(
-            domain="test", goal="g", phase="ingestion",
+            domain="test",
+            goal="g",
+            phase="ingestion",
         )
         o = Orchestrator(
-            state=state, data_path=tmp_path / "raw.csv",
+            state=state,
+            data_path=tmp_path / "raw.csv",
             output_dir=tmp_path / "experiments",
             max_iterations=0,
         )
@@ -1430,7 +1589,9 @@ class TestSummaryIntegration:
 
     def test_summary_model_set(self, base_state, tmp_path):
         o = Orchestrator(
-            state=base_state, data_path=tmp_path, output_dir=tmp_path,
+            state=base_state,
+            data_path=tmp_path,
+            output_dir=tmp_path,
             summary_model="gpt-4o-mini",
         )
         assert o.summary_model == "gpt-4o-mini"
@@ -1439,10 +1600,15 @@ class TestSummaryIntegration:
     async def test_no_summary_when_model_none(self, tmp_path):
         """When summary_model is None, summarizer is never called."""
         state = ExperimentState(
-            domain="test", goal="g", phase="iteration", iteration=0,
+            domain="test",
+            goal="g",
+            phase="iteration",
+            iteration=0,
         )
         o = Orchestrator(
-            state=state, data_path=tmp_path, output_dir=tmp_path,
+            state=state,
+            data_path=tmp_path,
+            output_dir=tmp_path,
             max_iterations=1,
         )
         o.config = DomainConfig(name="t", description="d", data_paths=[])
@@ -1462,7 +1628,9 @@ class TestSummaryIntegration:
             patch.object(o, "_read_run_result", return_value=run_result),
             patch.object(o, "_apply_criteria_updates"),
             patch.object(o, "_run_report", new_callable=AsyncMock),
-            patch("auto_scientist.orchestrator.run_with_summaries", new_callable=AsyncMock) as mock_rws,
+            patch(
+                "auto_scientist.orchestrator.run_with_summaries", new_callable=AsyncMock
+            ) as mock_rws,
         ):
             await o.run()
 
@@ -1472,11 +1640,17 @@ class TestSummaryIntegration:
     async def test_summaries_in_iteration(self, tmp_path):
         """When summary_model is set, run_with_summaries is called for agent steps."""
         state = ExperimentState(
-            domain="test", goal="g", phase="iteration", iteration=0,
+            domain="test",
+            goal="g",
+            phase="iteration",
+            iteration=0,
         )
         o = Orchestrator(
-            state=state, data_path=tmp_path, output_dir=tmp_path,
-            max_iterations=1, summary_model="gpt-4o-mini",
+            state=state,
+            data_path=tmp_path,
+            output_dir=tmp_path,
+            max_iterations=1,
+            summary_model="gpt-4o-mini",
         )
         o.config = DomainConfig(name="t", description="d", data_paths=[])
         o.output_dir.mkdir(parents=True, exist_ok=True)
@@ -1493,13 +1667,25 @@ class TestSummaryIntegration:
 
         with (
             patch("auto_scientist.orchestrator.wait_for_window", new_callable=AsyncMock),
-            patch("auto_scientist.agents.analyst.run_analyst", new_callable=AsyncMock, return_value={}),
-            patch("auto_scientist.agents.scientist.run_scientist", new_callable=AsyncMock, return_value=plan),
-            patch("auto_scientist.agents.coder.run_coder", new_callable=AsyncMock, return_value=script_path),
+            patch(
+                "auto_scientist.agents.analyst.run_analyst", new_callable=AsyncMock, return_value={}
+            ),
+            patch(
+                "auto_scientist.agents.scientist.run_scientist",
+                new_callable=AsyncMock,
+                return_value=plan,
+            ),
+            patch(
+                "auto_scientist.agents.coder.run_coder",
+                new_callable=AsyncMock,
+                return_value=script_path,
+            ),
             patch.object(o, "_read_run_result", return_value=run_result),
             patch.object(o, "_apply_criteria_updates"),
             patch.object(o, "_run_report", new_callable=AsyncMock),
-            patch("auto_scientist.orchestrator.run_with_summaries", new_callable=AsyncMock) as mock_rws,
+            patch(
+                "auto_scientist.orchestrator.run_with_summaries", new_callable=AsyncMock
+            ) as mock_rws,
         ):
             # Make run_with_summaries pass through to the actual coroutine
             mock_rws.side_effect = rws_passthrough
@@ -1530,11 +1716,19 @@ class TestSummaryIntegration:
 
         with (
             patch.object(orchestrator, "_run_analyst", new_callable=AsyncMock, return_value={}),
-            patch.object(orchestrator, "_run_scientist_plan", new_callable=AsyncMock, return_value=plan),
-            patch.object(orchestrator, "_run_coder", new_callable=AsyncMock, return_value=script_path),
+            patch.object(
+                orchestrator, "_run_scientist_plan", new_callable=AsyncMock, return_value=plan
+            ),
+            patch.object(
+                orchestrator, "_run_coder", new_callable=AsyncMock, return_value=script_path
+            ),
             patch.object(orchestrator, "_read_run_result", return_value=run_result),
             patch.object(orchestrator, "_apply_criteria_updates"),
-            patch("auto_scientist.orchestrator.summarize_results", new_callable=AsyncMock, return_value="Good results") as mock_sr,
+            patch(
+                "auto_scientist.orchestrator.summarize_results",
+                new_callable=AsyncMock,
+                return_value="Good results",
+            ) as mock_sr,
             patch("auto_scientist.orchestrator.print_summary"),
         ):
             await orchestrator._run_iteration_body()
@@ -1559,12 +1753,26 @@ class TestSummaryIntegration:
             return await coro_fn(buf)
 
         with (
-            patch("auto_scientist.agents.analyst.run_analyst", new_callable=AsyncMock, return_value={}),
-            patch("auto_scientist.agents.scientist.run_scientist", new_callable=AsyncMock, return_value=plan),
-            patch("auto_scientist.agents.coder.run_coder", new_callable=AsyncMock, return_value=script_path),
+            patch(
+                "auto_scientist.agents.analyst.run_analyst", new_callable=AsyncMock, return_value={}
+            ),
+            patch(
+                "auto_scientist.agents.scientist.run_scientist",
+                new_callable=AsyncMock,
+                return_value=plan,
+            ),
+            patch(
+                "auto_scientist.agents.coder.run_coder",
+                new_callable=AsyncMock,
+                return_value=script_path,
+            ),
             patch.object(orchestrator, "_read_run_result", return_value=run_result),
             patch.object(orchestrator, "_apply_criteria_updates"),
-            patch("auto_scientist.orchestrator.run_with_summaries", new_callable=AsyncMock, side_effect=rws_passthrough),
+            patch(
+                "auto_scientist.orchestrator.run_with_summaries",
+                new_callable=AsyncMock,
+                side_effect=rws_passthrough,
+            ),
         ):
             await orchestrator._run_iteration_body()
 

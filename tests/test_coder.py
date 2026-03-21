@@ -12,6 +12,7 @@ class TestRunCoder:
     @patch("auto_scientist.agents.coder.query")
     async def test_creates_script_at_expected_path(self, mock_query, tmp_path):
         from auto_scientist.agents.coder import ResultMessage
+
         result_msg = MagicMock(spec=ResultMessage)
 
         async def fake_query(**kwargs):
@@ -27,8 +28,10 @@ class TestRunCoder:
         previous = tmp_path / "v00" / "experiment.py"
 
         result = await run_coder(
-            plan=plan, previous_script=previous,
-            output_dir=tmp_path, version="v01",
+            plan=plan,
+            previous_script=previous,
+            output_dir=tmp_path,
+            version="v01",
         )
 
         assert result == tmp_path / "v01" / "experiment.py"
@@ -37,6 +40,7 @@ class TestRunCoder:
     @patch("auto_scientist.agents.coder.query")
     async def test_raises_when_script_not_created(self, mock_query, tmp_path):
         from auto_scientist.agents.coder import ResultMessage
+
         result_msg = MagicMock(spec=ResultMessage)
 
         async def fake_query(**kwargs):
@@ -49,14 +53,17 @@ class TestRunCoder:
 
         with pytest.raises(FileNotFoundError, match="did not create"):
             await run_coder(
-                plan=plan, previous_script=previous,
-                output_dir=tmp_path, version="v01",
+                plan=plan,
+                previous_script=previous,
+                output_dir=tmp_path,
+                version="v01",
             )
 
     @pytest.mark.asyncio
     @patch("auto_scientist.agents.coder.query")
     async def test_previous_script_exists_uses_has_previous(self, mock_query, tmp_path):
         from auto_scientist.agents.coder import ResultMessage
+
         result_msg = MagicMock(spec=ResultMessage)
 
         captured_prompt = {}
@@ -90,6 +97,7 @@ class TestRunCoder:
     @patch("auto_scientist.agents.coder.query")
     async def test_no_previous_script_uses_no_previous(self, mock_query, tmp_path):
         from auto_scientist.agents.coder import ResultMessage
+
         result_msg = MagicMock(spec=ResultMessage)
 
         captured_prompt = {}
@@ -114,12 +122,17 @@ class TestRunCoder:
 
         # Should contain the "no previous" / "from scratch" text
         prompt_lower = captured_prompt["prompt"].lower()
-        assert "first experiment" in prompt_lower or "from scratch" in prompt_lower or "no previous" in prompt_lower
+        assert (
+            "first experiment" in prompt_lower
+            or "from scratch" in prompt_lower
+            or "no previous" in prompt_lower
+        )
 
     @pytest.mark.asyncio
     @patch("auto_scientist.agents.coder.query")
     async def test_write_subdirectory_allowed(self, mock_query, tmp_path):
         from auto_scientist.agents.coder import ResultMessage
+
         result_msg = MagicMock(spec=ResultMessage)
 
         async def fake_query(**kwargs):
@@ -133,7 +146,8 @@ class TestRunCoder:
         result = await run_coder(
             plan={"hypothesis": "test", "changes": []},
             previous_script=tmp_path / "nonexistent" / "experiment.py",
-            output_dir=tmp_path, version="v01",
+            output_dir=tmp_path,
+            version="v01",
         )
         assert result == tmp_path / "v01" / "experiment.py"
 
@@ -141,6 +155,7 @@ class TestRunCoder:
     @patch("auto_scientist.agents.coder.query")
     async def test_options_configuration(self, mock_query, tmp_path):
         from auto_scientist.agents.coder import ResultMessage
+
         result_msg = MagicMock(spec=ResultMessage)
 
         captured_opts = {}
@@ -157,7 +172,8 @@ class TestRunCoder:
         await run_coder(
             plan={"hypothesis": "test", "changes": []},
             previous_script=tmp_path / "nonexistent" / "experiment.py",
-            output_dir=tmp_path, version="v01",
+            output_dir=tmp_path,
+            version="v01",
         )
         opts = captured_opts["options"]
         assert opts.allowed_tools == ["Read", "Write", "Edit", "Bash", "Glob", "Grep"]
@@ -169,6 +185,7 @@ class TestRunCoder:
     async def test_pep723_instruction_in_prompt(self, mock_query, tmp_path):
         """System prompt instructs coder to declare deps via PEP 723 inline metadata."""
         from auto_scientist.agents.coder import ResultMessage
+
         result_msg = MagicMock(spec=ResultMessage)
 
         captured_opts = {}
@@ -185,7 +202,8 @@ class TestRunCoder:
         await run_coder(
             plan={"hypothesis": "test", "changes": []},
             previous_script=tmp_path / "nonexistent" / "experiment.py",
-            output_dir=tmp_path, version="v01",
+            output_dir=tmp_path,
+            version="v01",
         )
         system = captured_opts["options"].system_prompt
         assert "# /// script" in system
@@ -196,6 +214,7 @@ class TestRunCoder:
     async def test_run_instructions_in_prompts(self, mock_query, tmp_path):
         """Prompts include run_timeout_minutes and run_command for self-execution."""
         from auto_scientist.agents.coder import ResultMessage
+
         result_msg = MagicMock(spec=ResultMessage)
 
         captured_opts = {}
@@ -212,7 +231,8 @@ class TestRunCoder:
         await run_coder(
             plan={"hypothesis": "test", "changes": []},
             previous_script=tmp_path / "nonexistent" / "experiment.py",
-            output_dir=tmp_path, version="v01",
+            output_dir=tmp_path,
+            version="v01",
             run_timeout_minutes=60,
             run_command="uv run {script_path}",
         )
@@ -251,7 +271,8 @@ class TestCoderMessageBuffer:
         await run_coder(
             plan={"hypothesis": "test", "changes": []},
             previous_script=tmp_path / "nonexistent" / "experiment.py",
-            output_dir=tmp_path, version="v01",
+            output_dir=tmp_path,
+            version="v01",
             message_buffer=buf,
         )
         assert any("Writing experiment script..." in entry for entry in buf)
@@ -282,7 +303,8 @@ class TestCoderMessageBuffer:
         await run_coder(
             plan={"hypothesis": "test", "changes": []},
             previous_script=tmp_path / "nonexistent" / "experiment.py",
-            output_dir=tmp_path, version="v01",
+            output_dir=tmp_path,
+            version="v01",
             message_buffer=buf,
         )
         assert len(buf) >= 1

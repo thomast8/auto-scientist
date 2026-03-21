@@ -86,7 +86,8 @@ plan as given.
     `python -c "import py_compile; py_compile.compile('<script_path>', doraise=True)"`
 
 11. Run the script:
-    `timeout {run_timeout_minutes}m {run_command} > results.txt 2>stderr.txt; echo $? > exitcode.txt`
+    `timeout {run_timeout_minutes}m {run_command} \
+     > results.txt 2>stderr.txt; echo $? > exitcode.txt`
     Separate stdout and stderr so that results.txt contains only the script's
     output (which the Analyst will read), and stderr.txt contains error info
     for your debugging. Read exitcode.txt to determine the exit code.
@@ -148,7 +149,8 @@ Implement the scientist's plan as a new complete experiment script.
 3. Verify syntax by running:
    `python -c "import py_compile; py_compile.compile('{new_script_path}', doraise=True)"`
 4. Run the script:
-   `timeout {run_timeout_minutes}m {run_command} > results.txt 2>stderr.txt; echo $? > exitcode.txt`
+   `timeout {run_timeout_minutes}m {run_command} \
+    > results.txt 2>stderr.txt; echo $? > exitcode.txt`
 5. If it fails (non-zero exit, not timeout), read stderr.txt, fix, and re-run
 6. Write run_result.json in the version directory
 
