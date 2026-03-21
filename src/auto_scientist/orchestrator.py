@@ -178,10 +178,6 @@ class Orchestrator:
         if plan:
             self._apply_criteria_updates(plan)
 
-        # Re-score if criteria were just defined or revised (changes the basis)
-        if plan and (plan.get("top_level_criteria") or plan.get("criteria_revision")):
-            self._score_latest(analysis)
-
         # Step 3: Check if Scientist recommends stopping
         if plan and plan.get("should_stop"):
             print(f"Scientist recommends stopping: {plan.get('stop_reason', 'unknown')}")
