@@ -48,6 +48,42 @@ class TestRunReport:
 
     @pytest.mark.asyncio
     @patch("auto_scientist.agents.report.safe_query")
+    async def test_strips_preamble_before_first_heading(self, mock_query, tmp_path):
+        """Conversational preamble before the first markdown heading is stripped."""
+        from claude_code_sdk import AssistantMessage, ResultMessage, TextBlock
+
+        preamble_msg = MagicMock(spec=AssistantMessage)
+        preamble_block = MagicMock(spec=TextBlock)
+        preamble_block.text = "Let me read the results first."
+        preamble_msg.content = [preamble_block]
+
+        report_msg = MagicMock(spec=AssistantMessage)
+        report_block = MagicMock(spec=TextBlock)
+        report_block.text = "# Final Report\n\nContent here."
+        report_msg.content = [report_block]
+
+        result_msg = MagicMock(spec=ResultMessage)
+
+        async def fake_query(**kwargs):
+            yield preamble_msg
+            yield report_msg
+            yield result_msg
+
+        mock_query.side_effect = fake_query
+
+        state = ExperimentState(domain="test", goal="test goal")
+        notebook_path = tmp_path / "lab_notebook.xml"
+        notebook_path.write_text("# Notebook")
+
+        result = await run_report(
+            state=state, notebook_path=notebook_path, output_dir=tmp_path,
+        )
+
+        assert result.startswith("# Final Report")
+        assert "Let me read" not in result
+
+    @pytest.mark.asyncio
+    @patch("auto_scientist.agents.report.safe_query")
     async def test_returns_empty_string_when_no_text(self, mock_query, tmp_path):
         """If the agent produces no text blocks, return empty string."""
         from claude_code_sdk import ResultMessage

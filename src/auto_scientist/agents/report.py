@@ -66,4 +66,11 @@ async def run_report(
         elif isinstance(message, ResultMessage):
             pass  # Agent is done
 
-    return "\n".join(report_parts)
+    full_text = "\n".join(report_parts)
+
+    # Strip any conversational preamble before the first markdown heading.
+    heading_idx = full_text.find("\n# ")
+    if heading_idx != -1:
+        full_text = full_text[heading_idx + 1:]
+
+    return full_text.strip()
