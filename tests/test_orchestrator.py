@@ -868,6 +868,58 @@ class TestComputeScore:
         assert Orchestrator._compute_score(results, criteria) == 0
 
 
+class TestScoreLatest:
+    """Test _score_latest updates version score and best tracking."""
+
+    def test_scores_latest_version(self, orchestrator):
+        orchestrator.state.success_criteria = [
+            SuccessCriterion(name="RMSE", description="d", metric_key="rmse", target_max=0.5, required=True),
+        ]
+        latest = VersionEntry(version="v01", iteration=1, script_path="/tmp/s.py")
+        orchestrator.state.versions = [latest]
+
+        analysis = {"criteria_results": [{"name": "RMSE", "status": "pass"}]}
+        orchestrator._score_latest(analysis)
+
+        assert latest.score == 100
+        assert orchestrator.state.best_score == 100
+        assert orchestrator.state.best_version == "v01"
+
+    def test_no_versions_is_noop(self, orchestrator):
+        orchestrator._score_latest({"criteria_results": []})
+        assert orchestrator.state.best_score == 0
+
+    def test_none_analysis_scores_zero(self, orchestrator):
+        orchestrator.state.success_criteria = [
+            SuccessCriterion(name="A", description="d", metric_key="a", target_min=0.5, required=True),
+        ]
+        latest = VersionEntry(version="v01", iteration=1, script_path="/tmp/s.py")
+        orchestrator.state.versions = [latest]
+
+        orchestrator._score_latest(None)
+        assert latest.score == 0
+
+    def test_scores_after_criteria_defined(self, orchestrator):
+        """Score should work even when criteria are defined in the same iteration."""
+        latest = VersionEntry(version="v01", iteration=1, script_path="/tmp/s.py")
+        orchestrator.state.versions = [latest]
+
+        # Criteria defined by Scientist in same iteration
+        orchestrator.state.success_criteria = [
+            SuccessCriterion(name="R2", description="d", metric_key="r2", target_min=0.9, required=True),
+            SuccessCriterion(name="RMSE", description="d", metric_key="rmse", target_max=0.5, required=True),
+        ]
+
+        analysis = {
+            "criteria_results": [
+                {"name": "R2", "status": "pass"},
+                {"name": "RMSE", "status": "fail"},
+            ],
+        }
+        orchestrator._score_latest(analysis)
+        assert latest.score == 50
+
+
 class TestRunAnalystInitial:
     @pytest.mark.asyncio
     async def test_calls_run_analyst_with_data_dir(self, orchestrator, tmp_path):
@@ -915,7 +967,8 @@ class TestRunAnalystNormal:
         assert result is None
 
     @pytest.mark.asyncio
-    async def test_updates_best_score(self, orchestrator, tmp_path):
+    async def test_analyst_returns_criteria_results(self, orchestrator, tmp_path):
+        """_run_analyst returns analysis with criteria_results for later scoring."""
         orchestrator.output_dir.mkdir(parents=True, exist_ok=True)
 
         results_path = tmp_path / "results.txt"
@@ -925,10 +978,6 @@ class TestRunAnalystNormal:
             results_path=str(results_path),
         )
         orchestrator.state.versions = [latest]
-        # Set up criteria so _compute_score can work
-        orchestrator.state.success_criteria = [
-            SuccessCriterion(name="RMSE", description="d", metric_key="rmse", target_max=0.5, required=True),
-        ]
 
         async def fake_analyst(**kwargs):
             return {
@@ -936,11 +985,9 @@ class TestRunAnalystNormal:
             }
 
         with patch("auto_scientist.agents.analyst.run_analyst", side_effect=fake_analyst):
-            await orchestrator._run_analyst()
+            result = await orchestrator._run_analyst()
 
-        assert latest.score == 100
-        assert orchestrator.state.best_score == 100
-        assert orchestrator.state.best_version == "v01"
+        assert result["criteria_results"] == [{"name": "RMSE", "status": "pass"}]
 
     @pytest.mark.asyncio
     async def test_error_returns_none(self, orchestrator, tmp_path):

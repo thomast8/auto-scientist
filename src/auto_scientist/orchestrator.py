@@ -175,6 +175,9 @@ class Orchestrator:
         if plan:
             self._apply_criteria_updates(plan)
 
+        # Score the latest version now that criteria are available
+        self._score_latest(analysis)
+
         # Step 3: Check if Scientist recommends stopping
         if plan and plan.get("should_stop"):
             print(f"Scientist recommends stopping: {plan.get('stop_reason', 'unknown')}")
@@ -334,17 +337,7 @@ class Orchestrator:
                 )
 
             analysis = await self._with_summaries(_analyst_coro, "Analyst", [])
-            # Compute score deterministically from criteria results
-            score = self._compute_score(
-                analysis.get("criteria_results", []),
-                self.state.success_criteria or [],
-            )
-            latest.score = score
-            # Update best tracking
-            if latest.score > self.state.best_score:
-                self.state.best_score = latest.score
-                self.state.best_version = latest.version
-            print_step(f"  ANALYZE: score={score}")
+            print_step(f"  ANALYZE: complete ({len(analysis.get('criteria_results', []))} criteria evaluated)")
             return analysis
         except Exception as e:
             print_step(f"  ANALYZE: error - {e}")
@@ -564,6 +557,25 @@ class Orchestrator:
             1 for c in required if result_by_name.get(c.name) == "pass"
         )
         return round((passing / len(required)) * 100)
+
+    def _score_latest(self, analysis: dict[str, Any] | None) -> None:
+        """Score the latest version using criteria_results and current success_criteria.
+
+        Called after _apply_criteria_updates so that criteria defined in the
+        same iteration are available for scoring.
+        """
+        if not self.state.versions:
+            return
+        latest = self.state.versions[-1]
+        criteria_results = (analysis or {}).get("criteria_results", [])
+        score = self._compute_score(
+            criteria_results, self.state.success_criteria or [],
+        )
+        latest.score = score
+        if score > self.state.best_score:
+            self.state.best_score = score
+            self.state.best_version = latest.version
+        print_step(f"  SCORE: {score}")
 
     @staticmethod
     def _parse_criterion(raw: dict[str, Any]) -> SuccessCriterion | None:
