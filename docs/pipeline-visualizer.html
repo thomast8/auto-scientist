@@ -587,11 +587,7 @@
     <span class="arrow">&rarr;</span>
     <span class="step">Critic &harr; Defender</span>
     <span class="arrow">&rarr;</span>
-    <span class="step">Coder</span>
-    <span class="arrow">&rarr;</span>
-    <span class="step" style="opacity:0.5">validate</span>
-    <span class="arrow">&rarr;</span>
-    <span class="step">Runner</span>
+    <span class="step">Coder (write + run)</span>
     <span class="arrow">&rarr;</span>
     <span class="step" style="opacity:0.5">evaluate</span>
     <span class="arrow">&rarr;</span>
@@ -700,18 +696,18 @@ Only agent that reads or writes Python code.">
                 fill="#5a6178" font-size="9">implementer</text>
         </g>
 
-        <!-- Runner -->
-        <g class="agent-group" data-agent="runner"
-           data-tooltip="Runner (subprocess)|No LLM. Runs: uv run {script_path}. Captures stdout to results.txt, discovers output plot PNGs.
+        <!-- Run phase (now handled by the Coder agent) -->
+        <g class="agent-group" data-agent="coder"
+           data-tooltip="Run phase (Coder)|The Coder agent runs the script it wrote via Bash, fixes errors, and writes run_result.json.
 
 The script itself prints structured output via print statements. No LLM post-processing of results.
-Timeout: configurable (default 120 min).">
+Timeout: configurable (default 120 min). Self-correction on errors.">
           <rect x="1040" y="280" width="155" height="58" rx="10"
                 fill="#0f1525" stroke="#8e6ed4" stroke-width="1.5"/>
           <text x="1117" y="314" text-anchor="middle"
-                fill="#e8eaf0" font-size="13" font-weight="500">Runner</text>
+                fill="#e8eaf0" font-size="13" font-weight="500">Run + Fix</text>
           <text x="1117" y="330" text-anchor="middle"
-                fill="#5a6178" font-size="9">subprocess</text>
+                fill="#5a6178" font-size="9">coder self-corrects</text>
         </g>
 
         <!-- =============== PIPELINE ARTIFACTS (top, y=130) =============== -->
@@ -1343,18 +1339,19 @@ Never modifies original data. Logs assumptions to the lab notebook.">
       </div>
     </div>
 
-    <!-- Runner -->
+    <!-- Run phase (merged into Coder) -->
     <div class="agent-card runner">
       <div class="agent-header">
         <div class="agent-icon">&#x25B6;</div>
         <div>
-          <div class="agent-name">Runner</div>
-          <div class="agent-role">Python subprocess. No LLM involved.</div>
+          <div class="agent-name">Run + Fix (Coder)</div>
+          <div class="agent-role">Coder agent runs its own script via Bash, self-corrects errors.</div>
         </div>
       </div>
       <div class="agent-detail">
-        Runs <code>uv run {script_path}</code>. Captures stdout to results.txt.
-        The script itself prints structured output (approach spec, parameters, metrics).
+        The Coder runs <code>uv run script.py</code>, reads errors, fixes code, and retries.
+        Writes <code>run_result.json</code> reporting success/failure. The script itself
+        prints structured output (approach spec, parameters, metrics).
       </div>
       <div class="data-section">
         <div class="data-section-label reads">reads</div>
@@ -1368,6 +1365,7 @@ Never modifies original data. Logs assumptions to the lab notebook.">
         <div class="data-tags">
           <span class="data-tag write">results.txt</span>
           <span class="data-tag write">plots (PNGs)</span>
+          <span class="data-tag write">run_result.json</span>
         </div>
       </div>
       <div class="boundary-note" style="color: var(--accent-violet); border-color: rgba(142,110,212,0.15);">
@@ -1441,9 +1439,9 @@ Never modifies original data. Logs assumptions to the lab notebook.">
           <td>Read, Write, Edit, Bash, Glob, Grep</td>
         </tr>
         <tr>
-          <td class="agent-col">Runner</td>
+          <td class="agent-col">Run + Fix</td>
           <td colspan="5" style="color:var(--text-dim);font-style:italic">
-            Python subprocess, no LLM. Executes script, captures stdout.
+            Coder agent runs its own script via Bash, self-corrects errors, writes run_result.json.
           </td>
         </tr>
       </tbody>

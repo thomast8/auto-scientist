@@ -158,34 +158,27 @@ The Critic and Scientist debate strategy on equal footing with symmetric context
 
 **Coder Agent** (Phase 2, step 6):
 - Uses `query()` (fresh session, reads/writes files via tools)
-- Tools: Read, Write, Edit, Bash (for syntax check), Glob, Grep
-- Input (via prompt): revised plan JSON + previous script path
-- Output: new experiment script at `{version_dir}/experiment.py`
+- Tools: Read, Write, Edit, Bash, Glob, Grep
+- Input (via prompt): revised plan JSON + previous script path + run config
+- Output: experiment script at `{version_dir}/experiment.py` + `run_result.json`
 - Role: pure implementer, follows the plan without making strategic decisions
-- Only agent that reads or writes Python code
-- `max_turns`: 30
-- Safety hooks: block writes outside experiments/ dir, block writes to data files
-
-**Runner** (Phase 2, step 7):
-- Plain Python `asyncio.create_subprocess_exec`
-- Runs: domain-configured command (e.g., `uv run {script_path}`)
-- Captures: stdout to results file, checks for output plots
+- Only agent that reads/writes and runs Python code
+- Writes the script, runs it (with timeout), fixes errors, and reports results
+- `max_turns`: 50 (to accommodate write-run-fix cycles)
 - `results.txt` is compiled by the experiment script itself via print statements.
   The Coder writes scripts that print structured output (approach spec, parameters,
   metrics, diagnostics, success criteria). No LLM post-processing needed.
-- Timeout: configurable (default 120 min)
-- Syntax validation before run: `python -m py_compile`
+- `run_result.json` reports success/failure, return code, timeout status, and attempts
+- Safety hooks: block writes outside experiments/ dir, block writes to data files
 
 ### State Machine
 
 ```
 INGESTION -> ANALYZE -> PLAN -> STOP_CHECK -> (DEBATE, skipped iter 0) ->
-             IMPLEMENT -> VALIDATE -> RUN -> EVALUATE -> ANALYZE (loop) or REPORT
+             IMPLEMENT (write + run) -> EVALUATE -> ANALYZE (loop) or REPORT
 ```
 
 Phases: `ingestion -> iteration (loop) -> report -> stopped`
-
-`VALIDATE` = syntax check on generated script. If fails, re-invoke Coder with error (max 3 retries).
 
 ### Lab Notebook
 

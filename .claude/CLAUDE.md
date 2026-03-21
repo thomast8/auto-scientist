@@ -12,9 +12,9 @@ Iteration loop (four agents, adaptive behavior):
 1. **Analyst** (observer): reads results + plots (or raw data on iteration 0), outputs structured JSON. No recommendations. On iteration 0, produces domain_knowledge + data_summary.
 2. **Scientist** (planner): pure prompt-in/JSON-out, no tools, no code access. Outputs plan + per-iteration success criteria. On iteration 1, defines top-level criteria. On iteration 2+, may revise criteria.
 3. **Critic** (challenger): multi-round debate with the Scientist. Both have web search. Symmetric context (plan + notebook + domain knowledge). Skipped on iteration 0.
-4. **Coder** (implementer): only agent that reads/writes Python code. Follows the revised plan.
+4. **Coder** (implementer): only agent that reads/writes and runs Python code. Writes the experiment script, runs it with error correction, and reports results via run_result.json.
 
-Orchestrator flow: Ingest -> Analyst -> Scientist (plan) -> criteria update -> stop check -> (Debate, iter 1+) -> Scientist (revise) -> Coder -> Validate -> Run -> Evaluate -> increment iteration
+Orchestrator flow: Ingest -> Analyst -> Scientist (plan) -> criteria update -> stop check -> (Debate, iter 1+) -> Scientist (revise) -> Coder (implement + run) -> Evaluate -> increment iteration
 
 ### Iteration Lifecycle
 - **Iteration 0** (exploration): Analyst characterizes raw data, Scientist plans exploration, no debate
