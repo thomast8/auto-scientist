@@ -6,60 +6,9 @@ import pytest
 
 from auto_scientist.agents.critic import (
     _build_critic_prompt,
-    parse_critic_spec,
-    run_critic,
     run_debate,
 )
-
-
-class TestParseCriticSpec:
-    def test_valid_openai(self):
-        assert parse_critic_spec("openai:gpt-4o") == ("openai", "gpt-4o")
-
-    def test_valid_google(self):
-        assert parse_critic_spec("google:gemini-2.0-flash") == ("google", "gemini-2.0-flash")
-
-    def test_valid_anthropic(self):
-        assert parse_critic_spec("anthropic:claude-sonnet-4-6") == (
-            "anthropic",
-            "claude-sonnet-4-6",
-        )
-
-    def test_model_with_colons(self):
-        provider, model = parse_critic_spec("openai:ft:gpt-4o:org:id")
-        assert provider == "openai"
-        assert model == "ft:gpt-4o:org:id"
-
-    def test_no_colon_raises(self):
-        with pytest.raises(ValueError, match="Invalid critic spec"):
-            parse_critic_spec("gpt4o")
-
-    def test_empty_string_raises(self):
-        with pytest.raises(ValueError):
-            parse_critic_spec("")
-
-
-class TestBuildCriticPrompt:
-    def test_includes_plan_json(self):
-        plan = {"hypothesis": "test plan"}
-        prompt = _build_critic_prompt(plan, "", "")
-        assert "test plan" in prompt
-        assert "<plan>" in prompt
-
-    def test_empty_defense_no_tag(self):
-        prompt = _build_critic_prompt({"h": "p"}, "", "", scientist_defense="")
-        assert "<scientist_defense>" not in prompt
-
-    def test_with_defense_includes_tag(self):
-        prompt = _build_critic_prompt(
-            {"h": "p"}, "", "", scientist_defense="I disagree because...",
-        )
-        assert "<scientist_defense>" in prompt
-        assert "I disagree because..." in prompt
-
-    def test_fallback_for_empty_values(self):
-        prompt = _build_critic_prompt({"h": "p"}, "", "")
-        assert "(empty)" in prompt or "(none provided)" in prompt
+from auto_scientist.model_config import AgentModelConfig, ReasoningConfig
 
 
 @pytest.fixture
@@ -91,19 +40,47 @@ def plan():
 
 
 @pytest.fixture
-def base_kwargs(plan):
+def openai_critic():
+    return AgentModelConfig(provider="openai", model="gpt-4o")
+
+
+@pytest.fixture
+def base_kwargs(plan, openai_critic):
     return {
-        "critic_specs": ["openai:gpt-4o"],
+        "critic_configs": [openai_critic],
         "plan": plan,
         "notebook_content": "# Lab Notebook\nEntry 1",
     }
 
 
+class TestBuildCriticPrompt:
+    def test_includes_plan_json(self):
+        plan = {"hypothesis": "test plan"}
+        prompt = _build_critic_prompt(plan, "", "")
+        assert "test plan" in prompt
+        assert "<plan>" in prompt
+
+    def test_empty_defense_no_tag(self):
+        prompt = _build_critic_prompt({"h": "p"}, "", "", scientist_defense="")
+        assert "<scientist_defense>" not in prompt
+
+    def test_with_defense_includes_tag(self):
+        prompt = _build_critic_prompt(
+            {"h": "p"}, "", "", scientist_defense="I disagree because...",
+        )
+        assert "<scientist_defense>" in prompt
+        assert "I disagree because..." in prompt
+
+    def test_fallback_for_empty_values(self):
+        prompt = _build_critic_prompt({"h": "p"}, "", "")
+        assert "(empty)" in prompt or "(none provided)" in prompt
+
+
 class TestRunDebate:
     @pytest.mark.asyncio
-    async def test_empty_specs_returns_empty(self, plan):
+    async def test_empty_configs_returns_empty(self, plan):
         result = await run_debate(
-            critic_specs=[],
+            critic_configs=[],
             plan=plan,
             notebook_content="",
         )
@@ -214,6 +191,10 @@ class TestRunDebate:
     @pytest.mark.asyncio
     async def test_multiple_critics(self, plan):
         """Each critic runs its own independent debate."""
+        critics = [
+            AgentModelConfig(provider="openai", model="gpt-4o"),
+            AgentModelConfig(provider="google", model="gemini-2.5-pro"),
+        ]
         with (
             patch(
                 "auto_scientist.agents.critic.query_openai",
@@ -232,7 +213,7 @@ class TestRunDebate:
             ),
         ):
             result = await run_debate(
-                critic_specs=["openai:gpt-4o", "google:gemini-2.5-pro"],
+                critic_configs=critics,
                 plan=plan,
                 notebook_content="",
                 max_rounds=2,
@@ -315,7 +296,6 @@ class TestRunDebate:
         critic_prompt = mock_openai.call_args_list[0][0][1]
         scientist_prompt = mock_anthropic.call_args[0][1]
 
-        # Neither side should see "Latest Analysis" or "Current Script" sections
         assert "Latest Analysis" not in critic_prompt
         assert "Current Script" not in scientist_prompt
 
@@ -336,11 +316,9 @@ class TestRunDebate:
         ):
             await run_debate(**base_kwargs, max_rounds=2)
 
-        # Critic calls should have web_search=True
         for call in mock_openai.call_args_list:
             assert call.kwargs.get("web_search") is True
 
-        # Scientist call should have web_search=True
         assert mock_anthropic.call_args.kwargs.get("web_search") is True
 
     @pytest.mark.asyncio
@@ -363,7 +341,6 @@ class TestRunDebate:
         critic_prompt = mock_openai.call_args_list[0][0][1]
         scientist_prompt = mock_anthropic.call_args[0][1]
 
-        # Both should see notebook and domain knowledge
         assert "<notebook>" in critic_prompt
         assert "<notebook>" in scientist_prompt
 
@@ -391,8 +368,9 @@ class TestRunDebate:
         assert "Experiment History" not in scientist_prompt
 
     @pytest.mark.asyncio
-    async def test_custom_scientist_model(self, base_kwargs):
-        """Scientist uses the specified model."""
+    async def test_custom_scientist_config(self, base_kwargs):
+        """Scientist uses the specified model and reasoning from config."""
+        scientist = AgentModelConfig(model="claude-haiku-4-5-20251001")
         with (
             patch(
                 "auto_scientist.agents.critic.query_openai",
@@ -408,29 +386,35 @@ class TestRunDebate:
             await run_debate(
                 **base_kwargs,
                 max_rounds=2,
-                scientist_model="claude-haiku-4-5-20251001",
+                scientist_config=scientist,
             )
 
         assert mock_anthropic.call_args[0][0] == "claude-haiku-4-5-20251001"
 
     @pytest.mark.asyncio
     async def test_unknown_provider_raises(self, plan):
+        bad_config = AgentModelConfig.model_validate(
+            {"provider": "openai", "model": "model"}
+        )
+        # Monkeypatch provider to bypass Pydantic validation
+        object.__setattr__(bad_config, "provider", "unknown")
         with pytest.raises(ValueError, match="Unknown critic provider"):
             await run_debate(
-                critic_specs=["unknown:model"],
+                critic_configs=[bad_config],
                 plan=plan,
                 notebook_content="",
             )
 
     @pytest.mark.asyncio
     async def test_anthropic_critic_dispatches_correctly(self, plan):
+        critic = AgentModelConfig(provider="anthropic", model="claude-sonnet-4-6")
         with patch(
             "auto_scientist.agents.critic.query_anthropic",
             new_callable=AsyncMock,
             return_value="Anthropic critique",
         ) as mock_anthropic:
             result = await run_debate(
-                critic_specs=["anthropic:claude-sonnet-4-6"],
+                critic_configs=[critic],
                 plan=plan,
                 notebook_content="",
                 max_rounds=1,
@@ -438,8 +422,28 @@ class TestRunDebate:
 
         assert len(result) == 1
         assert result[0]["critique"] == "Anthropic critique"
-        # query_anthropic called for the critic (not scientist response)
         assert mock_anthropic.call_count == 1
+
+    @pytest.mark.asyncio
+    async def test_reasoning_passed_to_critic(self, plan):
+        """Critic reasoning config is forwarded to model client."""
+        critic = AgentModelConfig(
+            provider="openai", model="o4-mini",
+            reasoning=ReasoningConfig(level="high"),
+        )
+        with patch(
+            "auto_scientist.agents.critic.query_openai",
+            new_callable=AsyncMock,
+            return_value="Critique",
+        ) as mock_openai:
+            await run_debate(
+                critic_configs=[critic],
+                plan=plan,
+                notebook_content="",
+                max_rounds=1,
+            )
+
+        assert mock_openai.call_args.kwargs["reasoning"].level == "high"
 
 
 class TestRunDebateStreaming:
@@ -494,7 +498,6 @@ class TestRunDebateStreaming:
         ):
             await run_debate(**base_kwargs, max_rounds=2, on_token_factory=factory)
 
-        # Verify on_token was passed to both model clients
         for call in mock_openai.call_args_list:
             assert call.kwargs.get("on_token") is mock_callback
         assert mock_anthropic.call_args.kwargs.get("on_token") is mock_callback
@@ -512,27 +515,3 @@ class TestRunDebateStreaming:
             await run_debate(**base_kwargs, max_rounds=1)
 
         assert mock_openai.call_args.kwargs.get("on_token") is None
-
-
-class TestRunCriticBackwardCompat:
-    @pytest.mark.asyncio
-    async def test_run_critic_calls_run_debate_with_rounds_1(self, plan):
-        """run_critic is equivalent to run_debate with max_rounds=1."""
-        with patch(
-            "auto_scientist.agents.critic.query_openai",
-            new_callable=AsyncMock,
-            return_value="Single-pass critique",
-        ) as mock_openai, patch(
-            "auto_scientist.agents.critic.query_anthropic",
-            new_callable=AsyncMock,
-        ) as mock_anthropic:
-            result = await run_critic(
-                critic_specs=["openai:gpt-4o"],
-                plan=plan,
-                notebook_content="notebook",
-            )
-
-        assert len(result) == 1
-        assert result[0]["critique"] == "Single-pass critique"
-        mock_openai.assert_called_once()
-        mock_anthropic.assert_not_called()
