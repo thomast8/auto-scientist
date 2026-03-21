@@ -1,11 +1,25 @@
-"""Anthropic API wrapper with optional streaming."""
+"""Anthropic API wrapper with optional streaming and reasoning support."""
+
+from __future__ import annotations
 
 import logging
 from collections.abc import Callable
+from typing import TYPE_CHECKING
 
 from anthropic import AsyncAnthropic
 
+if TYPE_CHECKING:
+    from auto_scientist.model_config import ReasoningConfig
+
 logger = logging.getLogger(__name__)
+
+ANTHROPIC_BUDGET_DEFAULTS: dict[str, int] = {
+    "minimal": 1024,
+    "low": 2048,
+    "medium": 4096,
+    "high": 16384,
+    "max": 32768,
+}
 
 
 async def query_anthropic(
@@ -13,6 +27,7 @@ async def query_anthropic(
     prompt: str,
     *,
     web_search: bool = False,
+    reasoning: ReasoningConfig | None = None,
     on_token: Callable[[str], None] | None = None,
 ) -> str:
     """Send a prompt to an Anthropic model and return the response text.
@@ -21,6 +36,7 @@ async def query_anthropic(
         model: Model name (e.g., 'claude-sonnet-4-6').
         prompt: The full prompt to send.
         web_search: Enable the web_search server tool.
+        reasoning: Optional reasoning config for extended thinking.
         on_token: Optional callback invoked with each text delta for live streaming.
 
     Returns:
@@ -37,6 +53,14 @@ async def query_anthropic(
 
     if web_search:
         kwargs["tools"] = [{"type": "web_search_20250305", "name": "web_search"}]
+
+    if reasoning is not None and reasoning.level != "off":
+        if reasoning.level == "adaptive":
+            kwargs["thinking"] = {"type": "adaptive"}
+        else:
+            budget = reasoning.budget or ANTHROPIC_BUDGET_DEFAULTS[reasoning.level]
+            kwargs["thinking"] = {"type": "enabled", "budget_tokens": budget}
+            kwargs["max_tokens"] = max(kwargs["max_tokens"], budget + 4096)
 
     if on_token is not None:
         parts: list[str] = []

@@ -4,6 +4,7 @@ from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
+from auto_scientist.model_config import ReasoningConfig
 from auto_scientist.models.anthropic_client import query_anthropic
 from auto_scientist.models.google_client import query_google
 from auto_scientist.models.openai_client import query_openai
@@ -382,3 +383,227 @@ class TestQueryAnthropic:
         result = await query_anthropic("claude-sonnet-4-6", "prompt")
 
         assert result == "part1\npart2"
+
+
+# ── Anthropic reasoning tests ────────────────────────────────────────────────
+
+
+class TestQueryAnthropicReasoning:
+    @pytest.mark.asyncio
+    @patch("auto_scientist.models.anthropic_client.AsyncAnthropic")
+    async def test_no_reasoning_omits_thinking(self, mock_cls):
+        mock_client = AsyncMock()
+        mock_cls.return_value = mock_client
+        mock_response = MagicMock(content=[MagicMock(text="ok")])
+        mock_client.messages.create.return_value = mock_response
+
+        await query_anthropic("claude-sonnet-4-6", "test")
+
+        call_kwargs = mock_client.messages.create.call_args.kwargs
+        assert "thinking" not in call_kwargs
+
+    @pytest.mark.asyncio
+    @patch("auto_scientist.models.anthropic_client.AsyncAnthropic")
+    async def test_off_reasoning_omits_thinking(self, mock_cls):
+        mock_client = AsyncMock()
+        mock_cls.return_value = mock_client
+        mock_response = MagicMock(content=[MagicMock(text="ok")])
+        mock_client.messages.create.return_value = mock_response
+
+        await query_anthropic("claude-sonnet-4-6", "test", reasoning=ReasoningConfig(level="off"))
+
+        call_kwargs = mock_client.messages.create.call_args.kwargs
+        assert "thinking" not in call_kwargs
+
+    @pytest.mark.asyncio
+    @patch("auto_scientist.models.anthropic_client.AsyncAnthropic")
+    async def test_adaptive_reasoning(self, mock_cls):
+        mock_client = AsyncMock()
+        mock_cls.return_value = mock_client
+        mock_response = MagicMock(content=[MagicMock(text="ok")])
+        mock_client.messages.create.return_value = mock_response
+
+        await query_anthropic("claude-sonnet-4-6", "test", reasoning=ReasoningConfig(level="adaptive"))
+
+        call_kwargs = mock_client.messages.create.call_args.kwargs
+        assert call_kwargs["thinking"] == {"type": "adaptive"}
+
+    @pytest.mark.asyncio
+    @patch("auto_scientist.models.anthropic_client.AsyncAnthropic")
+    async def test_high_reasoning_with_default_budget(self, mock_cls):
+        mock_client = AsyncMock()
+        mock_cls.return_value = mock_client
+        mock_response = MagicMock(content=[MagicMock(text="ok")])
+        mock_client.messages.create.return_value = mock_response
+
+        await query_anthropic("claude-sonnet-4-6", "test", reasoning=ReasoningConfig(level="high"))
+
+        call_kwargs = mock_client.messages.create.call_args.kwargs
+        assert call_kwargs["thinking"]["type"] == "enabled"
+        assert call_kwargs["thinking"]["budget_tokens"] == 16384
+
+    @pytest.mark.asyncio
+    @patch("auto_scientist.models.anthropic_client.AsyncAnthropic")
+    async def test_budget_override(self, mock_cls):
+        mock_client = AsyncMock()
+        mock_cls.return_value = mock_client
+        mock_response = MagicMock(content=[MagicMock(text="ok")])
+        mock_client.messages.create.return_value = mock_response
+
+        await query_anthropic(
+            "claude-sonnet-4-6", "test",
+            reasoning=ReasoningConfig(level="high", budget=8000),
+        )
+
+        call_kwargs = mock_client.messages.create.call_args.kwargs
+        assert call_kwargs["thinking"]["budget_tokens"] == 8000
+
+    @pytest.mark.asyncio
+    @patch("auto_scientist.models.anthropic_client.AsyncAnthropic")
+    async def test_max_tokens_increased_for_thinking(self, mock_cls):
+        mock_client = AsyncMock()
+        mock_cls.return_value = mock_client
+        mock_response = MagicMock(content=[MagicMock(text="ok")])
+        mock_client.messages.create.return_value = mock_response
+
+        await query_anthropic("claude-sonnet-4-6", "test", reasoning=ReasoningConfig(level="high"))
+
+        call_kwargs = mock_client.messages.create.call_args.kwargs
+        assert call_kwargs["max_tokens"] >= 16384 + 4096
+
+
+# ── OpenAI reasoning tests ───────────────────────────────────────────────────
+
+
+class TestQueryOpenAIReasoning:
+    @pytest.mark.asyncio
+    @patch("auto_scientist.models.openai_client.AsyncOpenAI")
+    async def test_no_reasoning_omits_effort(self, mock_cls):
+        mock_client = AsyncMock()
+        mock_cls.return_value = mock_client
+        mock_response = MagicMock()
+        mock_response.choices = [MagicMock(message=MagicMock(content="ok"))]
+        mock_client.chat.completions.create.return_value = mock_response
+
+        await query_openai("gpt-4o", "test")
+
+        call_kwargs = mock_client.chat.completions.create.call_args.kwargs
+        assert "reasoning_effort" not in call_kwargs
+
+    @pytest.mark.asyncio
+    @patch("auto_scientist.models.openai_client.AsyncOpenAI")
+    async def test_high_reasoning_chat_completions(self, mock_cls):
+        mock_client = AsyncMock()
+        mock_cls.return_value = mock_client
+        mock_response = MagicMock()
+        mock_response.choices = [MagicMock(message=MagicMock(content="ok"))]
+        mock_client.chat.completions.create.return_value = mock_response
+
+        await query_openai("o4-mini", "test", reasoning=ReasoningConfig(level="high"))
+
+        call_kwargs = mock_client.chat.completions.create.call_args.kwargs
+        assert call_kwargs["reasoning_effort"] == "high"
+        assert "max_completion_tokens" in call_kwargs
+        assert "max_tokens" not in call_kwargs
+
+    @pytest.mark.asyncio
+    @patch("auto_scientist.models.openai_client.AsyncOpenAI")
+    async def test_high_reasoning_responses_api(self, mock_cls):
+        mock_client = AsyncMock()
+        mock_cls.return_value = mock_client
+        mock_response = MagicMock(output_text="ok")
+        mock_client.responses.create.return_value = mock_response
+
+        await query_openai(
+            "o4-mini", "test",
+            web_search=True,
+            reasoning=ReasoningConfig(level="high"),
+        )
+
+        call_kwargs = mock_client.responses.create.call_args.kwargs
+        assert call_kwargs["reasoning"] == {"effort": "high"}
+
+    @pytest.mark.asyncio
+    @patch("auto_scientist.models.openai_client.AsyncOpenAI")
+    async def test_off_reasoning_omits_effort(self, mock_cls):
+        mock_client = AsyncMock()
+        mock_cls.return_value = mock_client
+        mock_response = MagicMock()
+        mock_response.choices = [MagicMock(message=MagicMock(content="ok"))]
+        mock_client.chat.completions.create.return_value = mock_response
+
+        await query_openai("gpt-4o", "test", reasoning=ReasoningConfig(level="off"))
+
+        call_kwargs = mock_client.chat.completions.create.call_args.kwargs
+        assert "reasoning_effort" not in call_kwargs
+
+
+# ── Google reasoning tests ───────────────────────────────────────────────────
+
+
+class TestQueryGoogleReasoning:
+    @pytest.mark.asyncio
+    @patch("auto_scientist.models.google_client.genai")
+    async def test_no_reasoning_omits_thinking(self, mock_genai):
+        mock_response = MagicMock(text="ok")
+        mock_genai.Client.return_value.aio.models.generate_content = AsyncMock(
+            return_value=mock_response
+        )
+
+        await query_google("gemini-2.5-pro", "test")
+
+        call_kwargs = mock_genai.Client.return_value.aio.models.generate_content.call_args.kwargs
+        config = call_kwargs.get("config")
+        assert config is None or getattr(config, "thinking_config", None) is None
+
+    @pytest.mark.asyncio
+    @patch("auto_scientist.models.google_client.genai")
+    @patch("auto_scientist.models.google_client.types")
+    async def test_high_reasoning_gemini_25(self, mock_types, mock_genai):
+        mock_response = MagicMock(text="ok")
+        mock_genai.Client.return_value.aio.models.generate_content = AsyncMock(
+            return_value=mock_response
+        )
+
+        await query_google(
+            "gemini-2.5-pro", "test",
+            reasoning=ReasoningConfig(level="high"),
+        )
+
+        # Should use ThinkingConfig with thinking_budget
+        mock_types.ThinkingConfig.assert_called_once_with(thinking_budget=16384)
+
+    @pytest.mark.asyncio
+    @patch("auto_scientist.models.google_client.genai")
+    @patch("auto_scientist.models.google_client.types")
+    async def test_high_reasoning_gemini_3(self, mock_types, mock_genai):
+        mock_response = MagicMock(text="ok")
+        mock_genai.Client.return_value.aio.models.generate_content = AsyncMock(
+            return_value=mock_response
+        )
+
+        await query_google(
+            "gemini-3-flash", "test",
+            reasoning=ReasoningConfig(level="high"),
+        )
+
+        # Should use ThinkingConfig with thinking_level
+        mock_types.ThinkingConfig.assert_called_once()
+        call_kwargs = mock_types.ThinkingConfig.call_args.kwargs
+        assert "thinking_level" in call_kwargs
+
+    @pytest.mark.asyncio
+    @patch("auto_scientist.models.google_client.genai")
+    @patch("auto_scientist.models.google_client.types")
+    async def test_budget_override_gemini_25(self, mock_types, mock_genai):
+        mock_response = MagicMock(text="ok")
+        mock_genai.Client.return_value.aio.models.generate_content = AsyncMock(
+            return_value=mock_response
+        )
+
+        await query_google(
+            "gemini-2.5-flash", "test",
+            reasoning=ReasoningConfig(level="high", budget=8192),
+        )
+
+        mock_types.ThinkingConfig.assert_called_once_with(thinking_budget=8192)
