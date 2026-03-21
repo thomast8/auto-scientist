@@ -269,9 +269,7 @@ class TestIteration0:
             ) as mock_revision,
             patch.object(orchestrator, "_run_coder", new_callable=AsyncMock,
                           return_value=script_path),
-            patch.object(orchestrator, "_validate_script", new_callable=AsyncMock,
-                          return_value=True),
-            patch.object(orchestrator, "_run_experiment", new_callable=AsyncMock,
+            patch.object(orchestrator, "_read_run_result",
                           return_value=run_result),
             patch.object(orchestrator, "_apply_criteria_updates"),
         ):
@@ -315,12 +313,8 @@ class TestIteration0:
                 new_callable=AsyncMock, return_value=script_path,
             ),
             patch.object(
-                orchestrator, "_validate_script",
-                new_callable=AsyncMock, return_value=True,
-            ),
-            patch.object(
-                orchestrator, "_run_experiment",
-                new_callable=AsyncMock, return_value=run_result,
+                orchestrator, "_read_run_result",
+                return_value=run_result,
             ),
             patch.object(orchestrator, "_apply_criteria_updates"),
         ):
@@ -665,12 +659,8 @@ class TestRunIteration:
                 new_callable=AsyncMock, return_value=script_path,
             ),
             patch.object(
-                orchestrator, "_validate_script",
-                new_callable=AsyncMock, return_value=True,
-            ),
-            patch.object(
-                orchestrator, "_run_experiment",
-                new_callable=AsyncMock, return_value=run_result,
+                orchestrator, "_read_run_result",
+                return_value=run_result,
             ),
             patch.object(orchestrator, "_apply_criteria_updates"),
         ):
@@ -702,9 +692,7 @@ class TestRunIteration:
                           return_value=plan),
             patch.object(orchestrator, "_run_coder", new_callable=AsyncMock,
                           return_value=script_path),
-            patch.object(orchestrator, "_validate_script", new_callable=AsyncMock,
-                          return_value=True),
-            patch.object(orchestrator, "_run_experiment", new_callable=AsyncMock,
+            patch.object(orchestrator, "_read_run_result",
                           return_value=run_result),
             patch.object(orchestrator, "_apply_criteria_updates"),
         ):
@@ -739,7 +727,8 @@ class TestRunIteration:
         assert orchestrator.state.phase == "report"
 
     @pytest.mark.asyncio
-    async def test_validation_failure_increments_iteration(self, orchestrator, tmp_path):
+    async def test_missing_run_result_records_failure(self, orchestrator, tmp_path):
+        """When coder produces script but no run_result.json, iteration is a failure."""
         orchestrator.output_dir.mkdir(parents=True, exist_ok=True)
         orchestrator.state.phase = "iteration"
         orchestrator.state.iteration = 0
@@ -747,7 +736,8 @@ class TestRunIteration:
         plan = {"should_stop": False, "hypothesis": "test"}
         script_path = tmp_path / "experiments" / "v00" / "experiment.py"
         script_path.parent.mkdir(parents=True, exist_ok=True)
-        script_path.write_text("def foo(")
+        script_path.write_text("print('hi')")
+        # No run_result.json -> _read_run_result returns failure
 
         with (
             patch.object(orchestrator, "_run_analyst", new_callable=AsyncMock,
@@ -756,8 +746,6 @@ class TestRunIteration:
                           return_value=plan),
             patch.object(orchestrator, "_run_coder", new_callable=AsyncMock,
                           return_value=script_path),
-            patch.object(orchestrator, "_validate_script", new_callable=AsyncMock,
-                          return_value=False),
             patch.object(orchestrator, "_apply_criteria_updates"),
         ):
             await orchestrator._run_iteration_body()
@@ -787,9 +775,7 @@ class TestRunIteration:
                           return_value=plan),
             patch.object(orchestrator, "_run_coder", new_callable=AsyncMock,
                           return_value=script_path),
-            patch.object(orchestrator, "_validate_script", new_callable=AsyncMock,
-                          return_value=True),
-            patch.object(orchestrator, "_run_experiment", new_callable=AsyncMock,
+            patch.object(orchestrator, "_read_run_result",
                           return_value=run_result),
             patch.object(orchestrator, "_apply_criteria_updates"),
         ):
@@ -1189,21 +1175,6 @@ class TestRunCoderOrchestrator:
         assert str(captured_kwargs["previous_script"]) == str(tmp_path / "v00" / "experiment.py")
 
 
-class TestValidateScript:
-    @pytest.mark.asyncio
-    async def test_valid_script_returns_true(self, orchestrator, tmp_path):
-        script = tmp_path / "valid.py"
-        script.write_text("x = 1 + 2\n")
-        result = await orchestrator._validate_script(script)
-        assert result is True
-
-    @pytest.mark.asyncio
-    async def test_invalid_script_returns_false(self, orchestrator, tmp_path):
-        script = tmp_path / "invalid.py"
-        script.write_text("def foo(\n")
-        result = await orchestrator._validate_script(script)
-        assert result is False
-
 
 class TestReadRunResult:
     def test_happy_path(self, orchestrator, tmp_path):
@@ -1300,86 +1271,6 @@ class TestReadRunResult:
         assert result.return_code == 124
 
 
-class TestRunExperimentOrchestrator:
-    @pytest.mark.asyncio
-    async def test_none_script_returns_none(self, orchestrator):
-        result = await orchestrator._run_experiment(None)
-        assert result is None
-
-    @pytest.mark.asyncio
-    async def test_uses_config_command(self, orchestrator, tmp_path):
-        orchestrator.config = DomainConfig(
-            name="t", description="d", data_paths=[],
-            run_command="python {script_path}",
-            run_cwd=str(tmp_path),
-            run_timeout_minutes=5,
-        )
-        script = tmp_path / "test.py"
-        script.write_text("print('hello')\n")
-
-        result = await orchestrator._run_experiment(script)
-
-        assert result.success
-        assert "hello" in result.stdout
-
-    @pytest.mark.asyncio
-    async def test_saves_stdout_to_results(self, orchestrator, tmp_path):
-        orchestrator.config = DomainConfig(
-            name="t", description="d", data_paths=[],
-            run_command="python {script_path}",
-            run_cwd=str(tmp_path),
-        )
-        script = tmp_path / "test.py"
-        script.write_text("print('output data')\n")
-
-        await orchestrator._run_experiment(script)
-
-        results_path = script.parent / "results.txt"
-        assert results_path.exists()
-        assert "output data" in results_path.read_text()
-
-    @pytest.mark.asyncio
-    async def test_timeout_prints_message(self, orchestrator, tmp_path, capsys):
-        orchestrator.config = DomainConfig(
-            name="t", description="d", data_paths=[],
-            run_command="python {script_path}",
-            run_cwd=str(tmp_path),
-            run_timeout_minutes=0,
-        )
-        script = tmp_path / "slow.py"
-        script.write_text("import time\ntime.sleep(10)\n")
-
-        result = await orchestrator._run_experiment(script)
-
-        assert result.timed_out
-        captured = capsys.readouterr()
-        assert "timed out" in captured.out
-
-    @pytest.mark.asyncio
-    async def test_failure_prints_stderr(self, orchestrator, tmp_path, capsys):
-        orchestrator.config = DomainConfig(
-            name="t", description="d", data_paths=[],
-            run_command="python {script_path}",
-            run_cwd=str(tmp_path),
-        )
-        script = tmp_path / "fail.py"
-        script.write_text("raise ValueError('test error')\n")
-
-        result = await orchestrator._run_experiment(script)
-
-        assert not result.success
-        captured = capsys.readouterr()
-        assert "failed" in captured.out
-
-    @pytest.mark.asyncio
-    async def test_default_command_without_config(self, orchestrator, tmp_path):
-        orchestrator.config = None
-        script = tmp_path / "test.py"
-        script.write_text("print('hello')\n")
-
-        result = await orchestrator._run_experiment(script)
-        assert result is not None
-
 
 class TestRunReportOrchestrator:
     @pytest.mark.asyncio
@@ -1459,8 +1350,7 @@ class TestRunFullOrchestration:
             patch.object(o, "_run_analyst", new_callable=AsyncMock, return_value={}),
             patch.object(o, "_run_scientist_plan", new_callable=AsyncMock, return_value=plan),
             patch.object(o, "_run_coder", new_callable=AsyncMock, return_value=script_path),
-            patch.object(o, "_validate_script", new_callable=AsyncMock, return_value=True),
-            patch.object(o, "_run_experiment", new_callable=AsyncMock, return_value=run_result),
+            patch.object(o, "_read_run_result", return_value=run_result),
             patch.object(o, "_apply_criteria_updates"),
             patch.object(o, "_run_report", new_callable=AsyncMock),
         ):
@@ -1569,8 +1459,7 @@ class TestSummaryIntegration:
             patch.object(o, "_run_analyst", new_callable=AsyncMock, return_value={}),
             patch.object(o, "_run_scientist_plan", new_callable=AsyncMock, return_value=plan),
             patch.object(o, "_run_coder", new_callable=AsyncMock, return_value=script_path),
-            patch.object(o, "_validate_script", new_callable=AsyncMock, return_value=True),
-            patch.object(o, "_run_experiment", new_callable=AsyncMock, return_value=run_result),
+            patch.object(o, "_read_run_result", return_value=run_result),
             patch.object(o, "_apply_criteria_updates"),
             patch.object(o, "_run_report", new_callable=AsyncMock),
             patch("auto_scientist.orchestrator.run_with_summaries", new_callable=AsyncMock) as mock_rws,
@@ -1607,8 +1496,7 @@ class TestSummaryIntegration:
             patch("auto_scientist.agents.analyst.run_analyst", new_callable=AsyncMock, return_value={}),
             patch("auto_scientist.agents.scientist.run_scientist", new_callable=AsyncMock, return_value=plan),
             patch("auto_scientist.agents.coder.run_coder", new_callable=AsyncMock, return_value=script_path),
-            patch.object(o, "_validate_script", new_callable=AsyncMock, return_value=True),
-            patch.object(o, "_run_experiment", new_callable=AsyncMock, return_value=run_result),
+            patch.object(o, "_read_run_result", return_value=run_result),
             patch.object(o, "_apply_criteria_updates"),
             patch.object(o, "_run_report", new_callable=AsyncMock),
             patch("auto_scientist.orchestrator.run_with_summaries", new_callable=AsyncMock) as mock_rws,
@@ -1637,21 +1525,18 @@ class TestSummaryIntegration:
 
         run_result = RunResult(success=True, stdout="R2=0.82", return_code=0)
 
+        # Pre-create results.txt (written by the Coder agent now)
+        results_path.write_text("R2=0.82")
+
         with (
             patch.object(orchestrator, "_run_analyst", new_callable=AsyncMock, return_value={}),
             patch.object(orchestrator, "_run_scientist_plan", new_callable=AsyncMock, return_value=plan),
             patch.object(orchestrator, "_run_coder", new_callable=AsyncMock, return_value=script_path),
-            patch.object(orchestrator, "_validate_script", new_callable=AsyncMock, return_value=True),
-            patch.object(orchestrator, "_run_experiment", new_callable=AsyncMock, return_value=run_result) as mock_run,
+            patch.object(orchestrator, "_read_run_result", return_value=run_result),
             patch.object(orchestrator, "_apply_criteria_updates"),
             patch("auto_scientist.orchestrator.summarize_results", new_callable=AsyncMock, return_value="Good results") as mock_sr,
             patch("auto_scientist.orchestrator.print_summary"),
         ):
-            # Simulate _run_experiment writing results.txt
-            async def run_and_write(*args, **kwargs):
-                results_path.write_text("R2=0.82")
-                return run_result
-            mock_run.side_effect = run_and_write
             await orchestrator._run_iteration_body()
 
         mock_sr.assert_called_once()
@@ -1677,8 +1562,7 @@ class TestSummaryIntegration:
             patch("auto_scientist.agents.analyst.run_analyst", new_callable=AsyncMock, return_value={}),
             patch("auto_scientist.agents.scientist.run_scientist", new_callable=AsyncMock, return_value=plan),
             patch("auto_scientist.agents.coder.run_coder", new_callable=AsyncMock, return_value=script_path),
-            patch.object(orchestrator, "_validate_script", new_callable=AsyncMock, return_value=True),
-            patch.object(orchestrator, "_run_experiment", new_callable=AsyncMock, return_value=run_result),
+            patch.object(orchestrator, "_read_run_result", return_value=run_result),
             patch.object(orchestrator, "_apply_criteria_updates"),
             patch("auto_scientist.orchestrator.run_with_summaries", new_callable=AsyncMock, side_effect=rws_passthrough),
         ):

@@ -230,19 +230,11 @@ class Orchestrator:
             revised_plan = await self._run_scientist_revision(plan, debate_result, analysis)
             final_plan = revised_plan or plan
 
-        # Step 5: Coder implements the plan
+        # Step 5: Coder implements and runs the plan
         new_script = await self._run_coder(final_plan)
 
-        # Step 6: Validate (syntax check)
-        if new_script:
-            valid = await self._validate_script(new_script)
-            if not valid:
-                self.state.record_failure()
-                self.state.iteration += 1
-                return
-
-        # Step 7: Run
-        run_result = await self._run_experiment(new_script)
+        # Step 6: Read run result from Coder's output files
+        run_result = self._read_run_result(new_script.parent) if new_script else None
 
         # Results summary
         if self._should_summarize() and new_script and run_result and run_result.success:
@@ -256,7 +248,7 @@ class Orchestrator:
                 except Exception:
                     logger.debug("SUMMARY: error summarizing results")
 
-        # Step 8: Evaluate
+        # Step 7: Evaluate
         version = f"v{self.state.iteration:02d}"
         version_entry = VersionEntry(
             version=version,
@@ -569,7 +561,10 @@ class Orchestrator:
         else:
             previous_script = Path("nonexistent")
 
-        print_step(f"  IMPLEMENT: coder writing {version}")
+        run_timeout = self.config.run_timeout_minutes if self.config else 120
+        run_cmd = self.config.run_command if self.config else "uv run {script_path}"
+
+        print_step(f"  IMPLEMENT: coder writing and running {version}")
         buffer: list[str] = []
         try:
             async def _coder_coro(buf):
@@ -582,6 +577,8 @@ class Orchestrator:
                     data_path=data_path,
                     model=self.model,
                     message_buffer=buf,
+                    run_timeout_minutes=run_timeout,
+                    run_command=run_cmd,
                 )
 
             new_script = await self._with_summaries(_coder_coro, "Coder", buffer)
@@ -765,61 +762,6 @@ class Orchestrator:
             stderr=stderr,
             output_files=output_files,
         )
-
-    async def _validate_script(self, script_path: Path) -> bool:
-        """Syntax-check the generated script."""
-        from auto_scientist.runner import validate_syntax
-
-        valid, error = validate_syntax(script_path)
-        if not valid:
-            print_step(f"  VALIDATE: syntax error - {error}")
-        else:
-            print_step("  VALIDATE: syntax OK")
-        return valid
-
-    async def _run_experiment(self, script_path: Path | None) -> RunResult | None:
-        """Execute the experiment script."""
-        from auto_scientist.runner import run_experiment
-
-        if script_path is None:
-            print_step("  RUN: skipped (no script)")
-            return None
-
-        command = "uv run {script_path}"
-        cwd = "."
-        timeout = 120
-
-        if self.config:
-            command = self.config.run_command
-            cwd = self.config.run_cwd
-            timeout = self.config.run_timeout_minutes
-
-        print_step(f"  RUN: executing {script_path.name} (timeout {timeout}m)")
-        result = await run_experiment(
-            script_path=script_path,
-            command_template=command,
-            cwd=cwd,
-            timeout_minutes=timeout,
-        )
-
-        if result.timed_out:
-            print_step(f"  RUN: timed out after {timeout} minutes")
-        elif not result.success:
-            print_step(f"  RUN: failed (rc={result.return_code})")
-            if result.stderr:
-                # Print last few lines of stderr
-                stderr_lines = result.stderr.strip().split("\n")
-                for line in stderr_lines[-5:]:
-                    print_step(f"  RUN: {line}")
-        else:
-            print_step(f"  RUN: success ({len(result.output_files)} output files)")
-
-        # Save stdout to results file
-        if result.stdout:
-            results_path = script_path.parent / "results.txt"
-            results_path.write_text(result.stdout)
-
-        return result
 
     def _evaluate(self, run_result: RunResult | None, version_entry: VersionEntry) -> None:
         """Evaluate results and update the version entry."""
