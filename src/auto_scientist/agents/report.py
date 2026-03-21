@@ -2,11 +2,13 @@
 
 Generates a comprehensive report covering the best model, the journey from
 first to final version, key insights, and recommendations for future work.
+
+Returns the report content as a string; the orchestrator handles file writing.
 """
 
 from pathlib import Path
 
-from claude_code_sdk import AssistantMessage, ClaudeCodeOptions, ResultMessage
+from claude_code_sdk import AssistantMessage, ClaudeCodeOptions, ResultMessage, TextBlock
 
 from auto_scientist.prompts.report import REPORT_SYSTEM, REPORT_USER
 from auto_scientist.sdk_utils import append_block_to_buffer, safe_query
@@ -19,19 +21,20 @@ async def run_report(
     output_dir: Path,
     model: str | None = None,
     message_buffer: list[str] | None = None,
-) -> Path:
+) -> str:
     """Generate the final experiment report.
 
     Args:
         state: Final experiment state with all version history.
         notebook_path: Path to the lab notebook.
-        output_dir: Directory to write the report.
+        output_dir: Directory containing experiment artifacts (for reading).
+        model: Optional model override.
+        message_buffer: Optional buffer for streaming messages.
 
     Returns:
-        Path to the generated report file.
+        Report content as a markdown string.
     """
     notebook_content = notebook_path.read_text() if notebook_path.exists() else "(no notebook)"
-    report_path = output_dir / "report.md"
 
     user_prompt = REPORT_USER.format(
         domain=state.domain,
@@ -40,29 +43,27 @@ async def run_report(
         best_version=state.best_version or "none",
         best_score=state.best_score,
         notebook_content=notebook_content,
-        report_path="report.md",
     )
 
     options = ClaudeCodeOptions(
         system_prompt=REPORT_SYSTEM,
-        allowed_tools=["Read", "Write", "Glob"],
+        allowed_tools=["Read", "Glob"],
         max_turns=10,
         permission_mode="acceptEdits",
         cwd=output_dir,
         model=model,
     )
 
+    report_parts: list[str] = []
+
     async for message in safe_query(prompt=user_prompt, options=options):
         if isinstance(message, AssistantMessage):
-            if message_buffer is not None:
-                for block in message.content:
+            for block in message.content:
+                if message_buffer is not None:
                     append_block_to_buffer(block, message_buffer)
+                if isinstance(block, TextBlock):
+                    report_parts.append(block.text)
         elif isinstance(message, ResultMessage):
             pass  # Agent is done
 
-    if not report_path.exists():
-        raise FileNotFoundError(
-            f"Report agent did not create the expected report at {report_path}"
-        )
-
-    return report_path
+    return "\n".join(report_parts)

@@ -30,6 +30,7 @@ AGENT_COLORS = {
     "Ingestor": RED,
     "Report": BLUE,
     "Debate": YELLOW,
+    "Results": DIM,
 }
 
 # Map orchestrator step prefixes to agent colors

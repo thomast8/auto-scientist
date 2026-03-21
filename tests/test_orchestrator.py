@@ -62,6 +62,113 @@ class TestOrchestratorInit:
         assert o.debate_rounds == 3
 
 
+class TestValidatePrerequisites:
+    """Pre-flight checks: directories, API keys, Claude CLI."""
+
+    _SENTINEL = object()
+
+    def _make_orchestrator(self, tmp_path, state=None, data_path=_SENTINEL, mc=None):
+        s = state or ExperimentState(domain="test", goal="g", phase="ingestion")
+        dp = tmp_path / "data.csv" if data_path is self._SENTINEL else data_path
+        return Orchestrator(
+            state=s,
+            data_path=dp,
+            output_dir=tmp_path / "out",
+            model_config=mc or ModelConfig(
+                defaults=AgentModelConfig(model="claude-sonnet-4-6"),
+                critics=[],
+            ),
+        )
+
+    def test_passes_when_everything_present(self, tmp_path, monkeypatch):
+        data = tmp_path / "data.csv"
+        data.write_text("x")
+        monkeypatch.setenv("ANTHROPIC_API_KEY", "sk-test")
+        monkeypatch.setattr("shutil.which", lambda name: "/usr/bin/claude")
+        o = self._make_orchestrator(tmp_path, data_path=data)
+        o._validate_prerequisites()  # should not raise
+
+    def test_missing_data_path(self, tmp_path, monkeypatch):
+        monkeypatch.setenv("ANTHROPIC_API_KEY", "sk-test")
+        monkeypatch.setattr("shutil.which", lambda name: "/usr/bin/claude")
+        o = self._make_orchestrator(tmp_path)
+        with pytest.raises(RuntimeError, match="Data path does not exist"):
+            o._validate_prerequisites()
+
+    def test_none_data_path(self, tmp_path, monkeypatch):
+        monkeypatch.setenv("ANTHROPIC_API_KEY", "sk-test")
+        monkeypatch.setattr("shutil.which", lambda name: "/usr/bin/claude")
+        o = self._make_orchestrator(tmp_path, data_path=None)
+        # data_path=None is only a problem during ingestion
+        o.state.phase = "ingestion"
+        with pytest.raises(RuntimeError, match="--data is required"):
+            o._validate_prerequisites()
+
+    def test_data_path_not_checked_after_ingestion(self, tmp_path, monkeypatch):
+        monkeypatch.setenv("ANTHROPIC_API_KEY", "sk-test")
+        monkeypatch.setattr("shutil.which", lambda name: "/usr/bin/claude")
+        state = ExperimentState(domain="t", goal="g", phase="iteration")
+        o = self._make_orchestrator(tmp_path, state=state, data_path=None)
+        o._validate_prerequisites()  # should not raise
+
+    def test_missing_anthropic_key(self, tmp_path, monkeypatch):
+        data = tmp_path / "data.csv"
+        data.write_text("x")
+        monkeypatch.delenv("ANTHROPIC_API_KEY", raising=False)
+        monkeypatch.setattr("shutil.which", lambda name: "/usr/bin/claude")
+        o = self._make_orchestrator(tmp_path, data_path=data)
+        with pytest.raises(RuntimeError, match="ANTHROPIC_API_KEY"):
+            o._validate_prerequisites()
+
+    def test_missing_openai_key_when_summarizer_set(self, tmp_path, monkeypatch):
+        data = tmp_path / "data.csv"
+        data.write_text("x")
+        monkeypatch.setenv("ANTHROPIC_API_KEY", "sk-test")
+        monkeypatch.delenv("OPENAI_API_KEY", raising=False)
+        monkeypatch.setattr("shutil.which", lambda name: "/usr/bin/claude")
+        mc = ModelConfig(
+            defaults=AgentModelConfig(model="claude-sonnet-4-6"),
+            summarizer=AgentModelConfig(provider="openai", model="gpt-5.4-nano"),
+            critics=[],
+        )
+        o = self._make_orchestrator(tmp_path, data_path=data, mc=mc)
+        with pytest.raises(RuntimeError, match="OPENAI_API_KEY"):
+            o._validate_prerequisites()
+
+    def test_missing_google_key_for_critic(self, tmp_path, monkeypatch):
+        data = tmp_path / "data.csv"
+        data.write_text("x")
+        monkeypatch.setenv("ANTHROPIC_API_KEY", "sk-test")
+        monkeypatch.delenv("GOOGLE_API_KEY", raising=False)
+        monkeypatch.setattr("shutil.which", lambda name: "/usr/bin/claude")
+        mc = ModelConfig(
+            defaults=AgentModelConfig(model="claude-sonnet-4-6"),
+            critics=[AgentModelConfig(provider="google", model="gemini-2.5-pro")],
+        )
+        o = self._make_orchestrator(tmp_path, data_path=data, mc=mc)
+        with pytest.raises(RuntimeError, match="GOOGLE_API_KEY"):
+            o._validate_prerequisites()
+
+    def test_multiple_errors_reported_at_once(self, tmp_path, monkeypatch):
+        monkeypatch.delenv("ANTHROPIC_API_KEY", raising=False)
+        monkeypatch.setattr("shutil.which", lambda name: None)
+        o = self._make_orchestrator(tmp_path)  # data.csv doesn't exist
+        with pytest.raises(RuntimeError, match="Data path does not exist") as exc_info:
+            o._validate_prerequisites()
+        msg = str(exc_info.value)
+        assert "ANTHROPIC_API_KEY" in msg
+        assert "Claude Code CLI not found" in msg
+
+    def test_missing_claude_cli(self, tmp_path, monkeypatch):
+        data = tmp_path / "data.csv"
+        data.write_text("x")
+        monkeypatch.setenv("ANTHROPIC_API_KEY", "sk-test")
+        monkeypatch.setattr("shutil.which", lambda name: None)
+        o = self._make_orchestrator(tmp_path, data_path=data)
+        with pytest.raises(RuntimeError, match="Claude Code CLI not found"):
+            o._validate_prerequisites()
+
+
 class TestEvaluate:
     def test_none_result_records_failure(self, orchestrator):
         entry = VersionEntry(version="v01", iteration=1, script_path="/tmp/s.py")
@@ -169,7 +276,10 @@ class TestPhaseTransitions:
         )
         o.config = DomainConfig(name="t", description="d", data_paths=[])
 
-        with patch.object(o, "_run_report", new_callable=AsyncMock):
+        with (
+            patch.object(o, "_validate_prerequisites"),
+            patch.object(o, "_run_report", new_callable=AsyncMock),
+        ):
             await o.run()
 
         assert state.phase == "stopped"
@@ -190,7 +300,10 @@ class TestPhaseTransitions:
         )
         o.config = DomainConfig(name="t", description="d", data_paths=[])
 
-        with patch.object(o, "_run_report", new_callable=AsyncMock):
+        with (
+            patch.object(o, "_validate_prerequisites"),
+            patch.object(o, "_run_report", new_callable=AsyncMock),
+        ):
             await o.run()
 
         assert state.phase == "stopped"
@@ -218,6 +331,7 @@ class TestPhaseTransitions:
         config_path.write_text('{"name":"t","description":"d","data_paths":[]}')
 
         with (
+            patch.object(o, "_validate_prerequisites"),
             patch.object(o, "_run_ingestion", new_callable=AsyncMock, return_value=canonical),
             patch.object(o, "_run_report", new_callable=AsyncMock),
         ):
@@ -242,7 +356,10 @@ class TestPhaseTransitions:
         )
         o.config = DomainConfig(name="t", description="d", data_paths=[])
 
-        with patch.object(o, "_run_report", new_callable=AsyncMock) as mock_report:
+        with (
+            patch.object(o, "_validate_prerequisites"),
+            patch.object(o, "_run_report", new_callable=AsyncMock) as mock_report,
+        ):
             await o.run()
 
         mock_report.assert_called_once()
@@ -1583,7 +1700,10 @@ class TestRunFullOrchestration:
         )
         o.config = DomainConfig(name="t", description="d", data_paths=[])
 
-        with patch.object(o, "_run_report", new_callable=AsyncMock):
+        with (
+            patch.object(o, "_validate_prerequisites"),
+            patch.object(o, "_run_report", new_callable=AsyncMock),
+        ):
             await o.run()
 
         captured = capsys.readouterr()
@@ -1613,6 +1733,7 @@ class TestRunFullOrchestration:
         run_result = RunResult(success=True, stdout="ok", return_code=0)
 
         with (
+            patch.object(o, "_validate_prerequisites"),
             patch("auto_scientist.orchestrator.wait_for_window", new_callable=AsyncMock),
             patch.object(o, "_run_analyst", new_callable=AsyncMock, return_value={}),
             patch.object(o, "_run_scientist_plan", new_callable=AsyncMock, return_value=plan),
@@ -1650,6 +1771,7 @@ class TestRunIngestionFull:
         config_path.write_text('{"name":"mydom","description":"test","data_paths":["clean.csv"]}')
 
         with (
+            patch.object(o, "_validate_prerequisites"),
             patch(
                 "auto_scientist.agents.ingestor.run_ingestor",
                 new_callable=AsyncMock,
@@ -1683,6 +1805,7 @@ class TestRunIngestionFull:
         (canonical / "data.csv").write_text("a,b\n1,2\n")
 
         with (
+            patch.object(o, "_validate_prerequisites"),
             patch(
                 "auto_scientist.agents.ingestor.run_ingestor",
                 new_callable=AsyncMock,
@@ -1738,6 +1861,7 @@ class TestSummaryIntegration:
         run_result = RunResult(success=True, stdout="ok", return_code=0)
 
         with (
+            patch.object(o, "_validate_prerequisites"),
             patch("auto_scientist.orchestrator.wait_for_window", new_callable=AsyncMock),
             patch.object(o, "_run_analyst", new_callable=AsyncMock, return_value={}),
             patch.object(o, "_run_scientist_plan", new_callable=AsyncMock, return_value=plan),
@@ -1784,6 +1908,7 @@ class TestSummaryIntegration:
             return await coro_fn(buf)
 
         with (
+            patch.object(o, "_validate_prerequisites"),
             patch("auto_scientist.orchestrator.wait_for_window", new_callable=AsyncMock),
             patch(
                 "auto_scientist.agents.analyst.run_analyst", new_callable=AsyncMock, return_value={}
