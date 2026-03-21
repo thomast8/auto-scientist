@@ -14,7 +14,7 @@ from pydantic import BaseModel, field_validator
 class ReasoningConfig(BaseModel):
     """Unified reasoning config that maps to any provider's native API."""
 
-    level: Literal["off", "minimal", "low", "medium", "high", "max", "adaptive"] = "adaptive"
+    level: Literal["default", "off", "minimal", "low", "medium", "high", "max"] = "default"
     budget: int | None = None
 
 
@@ -37,16 +37,35 @@ class AgentModelConfig(BaseModel):
 BUILTIN_PRESETS: dict[str, dict] = {
     "default": {
         "defaults": {"model": "claude-sonnet-4-6"},
-        "summarizer": {"provider": "openai", "model": "gpt-4o-mini"},
+        "analyst": {"model": "claude-opus-4-6"},
+        "scientist": {"model": "claude-opus-4-6"},
+        "summarizer": {"provider": "openai", "model": "gpt-5.4-nano"},
     },
     "fast": {
-        "defaults": {"model": "claude-haiku-4-5", "reasoning": {"level": "off"}},
-        "summarizer": {
-            "provider": "openai", "model": "gpt-5.4-nano",
-            "reasoning": {"level": "off"},
-        },
+        "defaults": {"model": "claude-haiku-4-5"},
+        "summarizer": {"provider": "openai", "model": "gpt-5.4-nano"},
     },
 }
+
+
+CC_EFFORT_MAP: dict[str, str] = {
+    "minimal": "low",
+    "low": "low",
+    "medium": "medium",
+    "high": "high",
+    "max": "max",
+}
+
+
+def reasoning_to_cc_extra_args(reasoning: ReasoningConfig) -> dict[str, str | None]:
+    """Convert a ReasoningConfig to Claude Code CLI extra_args.
+
+    Returns empty dict for 'default' and 'off' (let CC decide / no thinking).
+    """
+    effort = CC_EFFORT_MAP.get(reasoning.level)
+    if effort:
+        return {"--effort": effort}
+    return {}
 
 
 class ModelConfig(BaseModel):

@@ -16,14 +16,18 @@ def test_run_report_is_async():
 class TestRunReport:
     @pytest.mark.asyncio
     @patch("auto_scientist.agents.report.safe_query")
-    async def test_creates_report_at_expected_path(self, mock_query, tmp_path):
-        from auto_scientist.agents.report import ResultMessage
+    async def test_returns_report_content_string(self, mock_query, tmp_path):
+        """run_report should return the report text, not a Path."""
+        from claude_code_sdk import AssistantMessage, ResultMessage, TextBlock
+
+        assistant_msg = MagicMock(spec=AssistantMessage)
+        text_block = MagicMock(spec=TextBlock)
+        text_block.text = "# Final Report\n\nThis is the report."
+        assistant_msg.content = [text_block]
         result_msg = MagicMock(spec=ResultMessage)
 
         async def fake_query(**kwargs):
-            # Simulate agent writing the report
-            report_path = tmp_path / "report.md"
-            report_path.write_text("# Final Report")
+            yield assistant_msg
             yield result_msg
 
         mock_query.side_effect = fake_query
@@ -39,12 +43,15 @@ class TestRunReport:
             state=state, notebook_path=notebook_path, output_dir=tmp_path,
         )
 
-        assert result == tmp_path / "report.md"
+        assert isinstance(result, str)
+        assert "# Final Report" in result
 
     @pytest.mark.asyncio
     @patch("auto_scientist.agents.report.safe_query")
-    async def test_raises_when_report_not_created(self, mock_query, tmp_path):
-        from auto_scientist.agents.report import ResultMessage
+    async def test_returns_empty_string_when_no_text(self, mock_query, tmp_path):
+        """If the agent produces no text blocks, return empty string."""
+        from claude_code_sdk import ResultMessage
+
         result_msg = MagicMock(spec=ResultMessage)
 
         async def fake_query(**kwargs):
@@ -55,10 +62,10 @@ class TestRunReport:
         state = ExperimentState(domain="test", goal="test goal")
         notebook_path = tmp_path / "lab_notebook.xml"
 
-        with pytest.raises(FileNotFoundError, match="did not create"):
-            await run_report(
-                state=state, notebook_path=notebook_path, output_dir=tmp_path,
-            )
+        result = await run_report(
+            state=state, notebook_path=notebook_path, output_dir=tmp_path,
+        )
+        assert result == ""
 
     @pytest.mark.asyncio
     @patch("auto_scientist.agents.report.safe_query")
@@ -70,8 +77,6 @@ class TestRunReport:
 
         async def fake_query(**kwargs):
             captured_prompt["prompt"] = kwargs.get("prompt", "")
-            report_path = tmp_path / "report.md"
-            report_path.write_text("# Report")
             yield result_msg
 
         mock_query.side_effect = fake_query
@@ -93,7 +98,8 @@ class TestRunReport:
 
     @pytest.mark.asyncio
     @patch("auto_scientist.agents.report.safe_query")
-    async def test_options_configuration(self, mock_query, tmp_path):
+    async def test_options_no_write_tool(self, mock_query, tmp_path):
+        """Report agent should NOT have Write access - orchestrator writes."""
         from auto_scientist.agents.report import ResultMessage
         result_msg = MagicMock(spec=ResultMessage)
 
@@ -101,7 +107,6 @@ class TestRunReport:
 
         async def fake_query(**kwargs):
             captured_opts.update(kwargs)
-            (tmp_path / "report.md").write_text("# Report")
             yield result_msg
 
         mock_query.side_effect = fake_query
@@ -113,7 +118,9 @@ class TestRunReport:
         await run_report(state=state, notebook_path=notebook_path, output_dir=tmp_path)
 
         opts = captured_opts["options"]
-        assert opts.allowed_tools == ["Read", "Write", "Glob"]
+        assert "Write" not in opts.allowed_tools
+        assert "Read" in opts.allowed_tools
+        assert "Glob" in opts.allowed_tools
         assert opts.max_turns == 10
         assert opts.permission_mode == "acceptEdits"
 
@@ -127,7 +134,6 @@ class TestRunReport:
 
         async def fake_query(**kwargs):
             captured_prompt["prompt"] = kwargs.get("prompt", "")
-            (tmp_path / "report.md").write_text("# Report")
             yield result_msg
 
         mock_query.side_effect = fake_query
@@ -139,11 +145,11 @@ class TestRunReport:
         assert "(no notebook)" in captured_prompt["prompt"]
 
 
-class TestReportPath:
+class TestReportPrompt:
     @pytest.mark.asyncio
     @patch("auto_scientist.agents.report.safe_query")
-    async def test_prompt_contains_filename_not_full_path(self, mock_query, tmp_path):
-        """The prompt should pass just 'report.md', not the full absolute path."""
+    async def test_prompt_asks_to_output_text_not_write_file(self, mock_query, tmp_path):
+        """The prompt should instruct the agent to output the report as text."""
         from auto_scientist.agents.report import ResultMessage
         result_msg = MagicMock(spec=ResultMessage)
 
@@ -151,7 +157,6 @@ class TestReportPath:
 
         async def fake_query(**kwargs):
             captured_prompt["prompt"] = kwargs.get("prompt", "")
-            (tmp_path / "report.md").write_text("# Report")
             yield result_msg
 
         mock_query.side_effect = fake_query
@@ -163,10 +168,8 @@ class TestReportPath:
         await run_report(state=state, notebook_path=notebook_path, output_dir=tmp_path)
 
         prompt = captured_prompt["prompt"]
-        # Should contain just the filename, not the full path
-        assert "report.md" in prompt
-        # Should NOT contain the output_dir path joined with report.md
-        assert str(tmp_path / "report.md") not in prompt
+        # Should NOT instruct the agent to write a file
+        assert "Write the final report to the file" not in prompt
 
 
 class TestReportMessageBuffer:
@@ -182,7 +185,6 @@ class TestReportMessageBuffer:
         result_msg = MagicMock(spec=ResultMessage)
 
         async def fake_query(**kwargs):
-            (tmp_path / "report.md").write_text("# Report")
             yield assistant_msg
             yield result_msg
 

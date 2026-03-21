@@ -19,7 +19,6 @@ OPENAI_EFFORT_MAP: dict[str, str] = {
     "medium": "medium",
     "high": "high",
     "max": "high",
-    "adaptive": "medium",
 }
 
 
@@ -49,7 +48,7 @@ async def query_openai(
 
     # Resolve reasoning effort
     effort: str | None = None
-    if reasoning is not None and reasoning.level != "off":
+    if reasoning is not None and reasoning.level not in ("default", "off"):
         effort = OPENAI_EFFORT_MAP.get(reasoning.level)
 
     if web_search:

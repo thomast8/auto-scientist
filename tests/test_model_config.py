@@ -10,9 +10,9 @@ from auto_scientist.model_config import (
 
 
 class TestReasoningConfig:
-    def test_defaults_to_adaptive(self):
+    def test_defaults_to_default(self):
         rc = ReasoningConfig()
-        assert rc.level == "adaptive"
+        assert rc.level == "default"
         assert rc.budget is None
 
     def test_explicit_level(self):
@@ -33,7 +33,7 @@ class TestAgentModelConfig:
     def test_defaults_provider_to_anthropic(self):
         cfg = AgentModelConfig(model="claude-sonnet-4-6")
         assert cfg.provider == "anthropic"
-        assert cfg.reasoning.level == "adaptive"
+        assert cfg.reasoning.level == "default"
 
     def test_openai_provider(self):
         cfg = AgentModelConfig(provider="openai", model="o4-mini")
@@ -97,9 +97,14 @@ class TestBuiltinPresets:
     def test_default_preset(self):
         mc = ModelConfig.builtin_preset("default")
         assert mc.defaults.model == "claude-sonnet-4-6"
+        assert mc.resolve("analyst").model == "claude-opus-4-6"
+        assert mc.resolve("scientist").model == "claude-opus-4-6"
+        assert mc.resolve("coder").model == "claude-sonnet-4-6"
+        assert mc.resolve("ingestor").model == "claude-sonnet-4-6"
+        assert mc.resolve("report").model == "claude-sonnet-4-6"
         assert mc.summarizer is not None
         assert mc.summarizer.provider == "openai"
-        assert mc.summarizer.model == "gpt-4o-mini"
+        assert mc.summarizer.model == "gpt-5.4-nano"
 
     def test_fast_preset(self):
         mc = ModelConfig.builtin_preset("fast")
@@ -107,14 +112,14 @@ class TestBuiltinPresets:
         assert mc.summarizer is not None
         assert mc.summarizer.provider == "openai"
         assert mc.summarizer.model == "gpt-5.4-nano"
-        assert mc.summarizer.reasoning.level == "off"
+        assert mc.summarizer.reasoning.level == "default"
 
-    def test_fast_preset_all_agents_use_haiku_with_off_reasoning(self):
+    def test_fast_preset_all_agents_use_haiku_with_default_reasoning(self):
         mc = ModelConfig.builtin_preset("fast")
         for agent in ["analyst", "scientist", "coder", "ingestor", "report"]:
             cfg = mc.resolve(agent)
             assert cfg.model == "claude-haiku-4-5"
-            assert cfg.reasoning.level == "off"
+            assert cfg.reasoning.level == "default"
 
     def test_nonexistent_preset_raises(self):
         with pytest.raises(ValueError, match="Unknown preset"):
@@ -139,7 +144,7 @@ class TestFromToml:
         toml_file.write_text("""\
 [defaults]
 model = "claude-sonnet-4-6"
-reasoning = "adaptive"
+reasoning = "high"
 
 [agents.scientist]
 model = "claude-opus-4-6"
@@ -151,7 +156,7 @@ model = "gpt-4o-mini"
 """)
         mc = ModelConfig.from_toml(toml_file)
         assert mc.defaults.model == "claude-sonnet-4-6"
-        assert mc.defaults.reasoning.level == "adaptive"
+        assert mc.defaults.reasoning.level == "high"
         assert mc.scientist is not None
         assert mc.scientist.model == "claude-opus-4-6"
         assert mc.scientist.reasoning.level == "high"

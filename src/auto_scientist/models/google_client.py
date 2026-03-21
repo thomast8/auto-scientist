@@ -21,7 +21,6 @@ GOOGLE_BUDGET_DEFAULTS: dict[str, int] = {
     "medium": 4096,
     "high": 16384,
     "max": 32768,
-    "adaptive": -1,
 }
 
 GOOGLE_LEVEL_MAP: dict[str, str] = {
@@ -30,7 +29,6 @@ GOOGLE_LEVEL_MAP: dict[str, str] = {
     "medium": "MEDIUM",
     "high": "HIGH",
     "max": "HIGH",
-    "adaptive": "HIGH",
 }
 
 
@@ -64,7 +62,7 @@ async def query_google(
 
     # Build thinking config
     thinking_config = None
-    if reasoning is not None and reasoning.level != "off":
+    if reasoning is not None and reasoning.level not in ("default", "off"):
         if _is_gemini_25(model):
             budget = reasoning.budget or GOOGLE_BUDGET_DEFAULTS.get(reasoning.level, 4096)
             thinking_config = types.ThinkingConfig(thinking_budget=budget)

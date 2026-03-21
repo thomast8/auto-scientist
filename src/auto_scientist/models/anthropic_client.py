@@ -54,13 +54,10 @@ async def query_anthropic(
     if web_search:
         kwargs["tools"] = [{"type": "web_search_20250305", "name": "web_search"}]
 
-    if reasoning is not None and reasoning.level != "off":
-        if reasoning.level == "adaptive":
-            kwargs["thinking"] = {"type": "adaptive"}
-        else:
-            budget = reasoning.budget or ANTHROPIC_BUDGET_DEFAULTS[reasoning.level]
-            kwargs["thinking"] = {"type": "enabled", "budget_tokens": budget}
-            kwargs["max_tokens"] = max(kwargs["max_tokens"], budget + 4096)
+    if reasoning is not None and reasoning.level not in ("default", "off"):
+        budget = reasoning.budget or ANTHROPIC_BUDGET_DEFAULTS[reasoning.level]
+        kwargs["thinking"] = {"type": "enabled", "budget_tokens": budget}
+        kwargs["max_tokens"] = max(kwargs["max_tokens"], budget + 4096)
 
     if on_token is not None:
         parts: list[str] = []

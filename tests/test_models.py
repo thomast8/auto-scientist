@@ -31,7 +31,7 @@ class TestQueryOpenAIStreaming:
         mock_client.chat.completions.create.return_value = fake_stream()
 
         tokens = []
-        result = await query_openai("gpt-4o", "test", on_token=tokens.append)
+        result = await query_openai("gpt-5.4", "test", on_token=tokens.append)
 
         assert result == "hello"
         assert tokens == ["hel", "lo"]
@@ -53,7 +53,7 @@ class TestQueryOpenAIStreaming:
         mock_client.responses.create.return_value = fake_stream()
 
         tokens = []
-        result = await query_openai("gpt-4o", "q", web_search=True, on_token=tokens.append)
+        result = await query_openai("gpt-5.4", "q", web_search=True, on_token=tokens.append)
 
         assert result == "searched"
         assert tokens == ["search", "ed"]
@@ -67,7 +67,7 @@ class TestQueryOpenAIStreaming:
         mock_response.choices = [MagicMock(message=MagicMock(content="hello"))]
         mock_client.chat.completions.create.return_value = mock_response
 
-        result = await query_openai("gpt-4o", "test")
+        result = await query_openai("gpt-5.4", "test")
 
         assert result == "hello"
         call_kwargs = mock_client.chat.completions.create.call_args.kwargs
@@ -84,12 +84,12 @@ class TestQueryOpenAI:
         mock_response.choices = [MagicMock(message=MagicMock(content="hello"))]
         mock_client.chat.completions.create.return_value = mock_response
 
-        result = await query_openai("gpt-4o", "test prompt")
+        result = await query_openai("gpt-5.4", "test prompt")
 
         assert result == "hello"
         mock_client.chat.completions.create.assert_called_once()
         call_kwargs = mock_client.chat.completions.create.call_args.kwargs
-        assert call_kwargs["model"] == "gpt-4o"
+        assert call_kwargs["model"] == "gpt-5.4"
         assert call_kwargs["messages"][0]["content"] == "test prompt"
 
     @pytest.mark.asyncio
@@ -100,7 +100,7 @@ class TestQueryOpenAI:
         mock_response = MagicMock(output_text="searched result")
         mock_client.responses.create.return_value = mock_response
 
-        result = await query_openai("gpt-4o", "search this", web_search=True)
+        result = await query_openai("gpt-5.4", "search this", web_search=True)
 
         assert result == "searched result"
         mock_client.responses.create.assert_called_once()
@@ -116,7 +116,7 @@ class TestQueryOpenAI:
         mock_response.choices = [MagicMock(message=MagicMock(content=None))]
         mock_client.chat.completions.create.return_value = mock_response
 
-        result = await query_openai("gpt-4o", "prompt")
+        result = await query_openai("gpt-5.4", "prompt")
 
         assert result == ""
 
@@ -131,7 +131,7 @@ class TestQueryOpenAIMaxTokens:
         mock_response.choices = [MagicMock(message=MagicMock(content="ok"))]
         mock_client.chat.completions.create.return_value = mock_response
 
-        await query_openai("gpt-4o", "test", max_tokens=150)
+        await query_openai("gpt-5.4", "test", max_tokens=150)
 
         call_kwargs = mock_client.chat.completions.create.call_args.kwargs
         assert call_kwargs["max_tokens"] == 150
@@ -145,7 +145,7 @@ class TestQueryOpenAIMaxTokens:
         mock_response.choices = [MagicMock(message=MagicMock(content="ok"))]
         mock_client.chat.completions.create.return_value = mock_response
 
-        await query_openai("gpt-4o", "test")
+        await query_openai("gpt-5.4", "test")
 
         call_kwargs = mock_client.chat.completions.create.call_args.kwargs
         assert call_kwargs["max_tokens"] == 4096
@@ -164,7 +164,7 @@ class TestQueryOpenAIMaxTokens:
 
         mock_client.chat.completions.create.return_value = fake_stream()
 
-        await query_openai("gpt-4o", "test", max_tokens=200, on_token=lambda t: None)
+        await query_openai("gpt-5.4", "test", max_tokens=200, on_token=lambda t: None)
 
         call_kwargs = mock_client.chat.completions.create.call_args.kwargs
         assert call_kwargs["max_tokens"] == 200
@@ -183,7 +183,7 @@ class TestQueryGoogleStreaming:
         )
 
         tokens = []
-        result = await query_google("gemini-2.5-pro", "test", on_token=tokens.append)
+        result = await query_google("gemini-3.1-pro-preview", "test", on_token=tokens.append)
 
         assert result == "google"
         assert tokens == ["goo", "gle"]
@@ -200,7 +200,7 @@ class TestQueryGoogleStreaming:
         )
 
         tokens = []
-        result = await query_google("gemini-2.5-pro", "test", on_token=tokens.append)
+        result = await query_google("gemini-3.1-pro-preview", "test", on_token=tokens.append)
 
         assert result == "data"
         assert tokens == ["data"]
@@ -213,7 +213,7 @@ class TestQueryGoogleStreaming:
             return_value=mock_response
         )
 
-        result = await query_google("gemini-2.5-pro", "test")
+        result = await query_google("gemini-3.1-pro-preview", "test")
 
         assert result == "response"
         mock_genai.Client.return_value.aio.models.generate_content.assert_called_once()
@@ -228,7 +228,7 @@ class TestQueryGoogle:
             return_value=mock_response
         )
 
-        result = await query_google("gemini-2.5-pro", "test prompt")
+        result = await query_google("gemini-3.1-pro-preview", "test prompt")
 
         assert result == "google response"
 
@@ -240,7 +240,7 @@ class TestQueryGoogle:
             return_value=mock_response
         )
 
-        result = await query_google("gemini-2.5-pro", "search", web_search=True)
+        result = await query_google("gemini-3.1-pro-preview", "search", web_search=True)
 
         assert result == "searched"
         call_kwargs = mock_genai.Client.return_value.aio.models.generate_content.call_args.kwargs
@@ -254,7 +254,7 @@ class TestQueryGoogle:
             return_value=mock_response
         )
 
-        result = await query_google("gemini-2.5-pro", "prompt")
+        result = await query_google("gemini-3.1-pro-preview", "prompt")
 
         assert result == ""
 
@@ -417,16 +417,16 @@ class TestQueryAnthropicReasoning:
 
     @pytest.mark.asyncio
     @patch("auto_scientist.models.anthropic_client.AsyncAnthropic")
-    async def test_adaptive_reasoning(self, mock_cls):
+    async def test_default_reasoning_omits_thinking(self, mock_cls):
         mock_client = AsyncMock()
         mock_cls.return_value = mock_client
         mock_response = MagicMock(content=[MagicMock(text="ok")])
         mock_client.messages.create.return_value = mock_response
 
-        await query_anthropic("claude-sonnet-4-6", "test", reasoning=ReasoningConfig(level="adaptive"))
+        await query_anthropic("claude-sonnet-4-6", "test", reasoning=ReasoningConfig(level="default"))
 
         call_kwargs = mock_client.messages.create.call_args.kwargs
-        assert call_kwargs["thinking"] == {"type": "adaptive"}
+        assert "thinking" not in call_kwargs
 
     @pytest.mark.asyncio
     @patch("auto_scientist.models.anthropic_client.AsyncAnthropic")
@@ -485,7 +485,7 @@ class TestQueryOpenAIReasoning:
         mock_response.choices = [MagicMock(message=MagicMock(content="ok"))]
         mock_client.chat.completions.create.return_value = mock_response
 
-        await query_openai("gpt-4o", "test")
+        await query_openai("gpt-5.4", "test")
 
         call_kwargs = mock_client.chat.completions.create.call_args.kwargs
         assert "reasoning_effort" not in call_kwargs
@@ -499,7 +499,7 @@ class TestQueryOpenAIReasoning:
         mock_response.choices = [MagicMock(message=MagicMock(content="ok"))]
         mock_client.chat.completions.create.return_value = mock_response
 
-        await query_openai("o4-mini", "test", reasoning=ReasoningConfig(level="high"))
+        await query_openai("o3", "test", reasoning=ReasoningConfig(level="high"))
 
         call_kwargs = mock_client.chat.completions.create.call_args.kwargs
         assert call_kwargs["reasoning_effort"] == "high"
@@ -515,7 +515,7 @@ class TestQueryOpenAIReasoning:
         mock_client.responses.create.return_value = mock_response
 
         await query_openai(
-            "o4-mini", "test",
+            "o3", "test",
             web_search=True,
             reasoning=ReasoningConfig(level="high"),
         )
@@ -532,7 +532,7 @@ class TestQueryOpenAIReasoning:
         mock_response.choices = [MagicMock(message=MagicMock(content="ok"))]
         mock_client.chat.completions.create.return_value = mock_response
 
-        await query_openai("gpt-4o", "test", reasoning=ReasoningConfig(level="off"))
+        await query_openai("gpt-5.4", "test", reasoning=ReasoningConfig(level="off"))
 
         call_kwargs = mock_client.chat.completions.create.call_args.kwargs
         assert "reasoning_effort" not in call_kwargs
