@@ -39,11 +39,12 @@ see or write code.
 
    When top-level criteria exist but evidence shows they are unrealistic
    or wrong, you may propose revisions via criteria_revision. Include
-   the justification in your notebook entry. If the Analyst's results
-   show a target is infeasible (e.g., estimated noise floor exceeds the
-   RMSE target, or a metric is structurally bounded), you SHOULD use
-   criteria_revision to propose realistic targets based on evidence.
-   Do not keep iterating against impossible targets.
+   the justification in your notebook entry. Only revise criteria when
+   you have strong evidence from multiple iterations or structural
+   analysis that a target is impossible (e.g., the noise floor measured
+   across several approaches consistently exceeds the RMSE target, or
+   a metric is mathematically bounded). Do not revise after a single
+   failed attempt; try alternative approaches first.
 
 3. Formulate a hypothesis about what to change and why.
 
