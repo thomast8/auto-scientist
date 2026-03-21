@@ -125,9 +125,13 @@ class TestBuiltinPresets:
         with pytest.raises(ValueError, match="Unknown preset"):
             ModelConfig.builtin_preset("turbo")
 
-    def test_default_preset_has_no_critics(self):
+    def test_default_preset_has_critics(self):
         mc = ModelConfig.builtin_preset("default")
-        assert mc.critics == []
+        assert len(mc.critics) == 2
+        assert mc.critics[0].provider == "google"
+        assert mc.critics[0].model == "gemini-3.1-pro-preview"
+        assert mc.critics[1].provider == "openai"
+        assert mc.critics[1].model == "gpt-5.4"
 
 
 class TestFromToml:

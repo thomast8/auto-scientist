@@ -39,7 +39,7 @@ class TestOrchestratorInit:
     def test_defaults(self, base_state, tmp_path):
         o = Orchestrator(state=base_state, data_path=tmp_path, output_dir=tmp_path)
         assert o.max_iterations == 20
-        assert o.model_config.critics == []
+        assert len(o.model_config.critics) == 2
         assert o.debate_rounds == 2
         assert o.max_consecutive_failures == 5
 

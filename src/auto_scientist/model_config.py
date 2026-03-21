@@ -40,6 +40,10 @@ BUILTIN_PRESETS: dict[str, dict] = {
         "analyst": {"model": "claude-opus-4-6"},
         "scientist": {"model": "claude-opus-4-6"},
         "summarizer": {"provider": "openai", "model": "gpt-5.4-nano"},
+        "critics": [
+            {"provider": "google", "model": "gemini-3.1-pro-preview"},
+            {"provider": "openai", "model": "gpt-5.4"},
+        ],
     },
     "fast": {
         "defaults": {"model": "claude-haiku-4-5"},
