@@ -1,10 +1,10 @@
-"""Coder agent: implements the scientist's plan as a runnable experiment script.
+"""Coder agent: implements and runs the scientist's plan.
 
 Uses query() (fresh session, reads/writes files via tools).
-Tools: Read, Write, Edit, Bash (for syntax check), Glob, Grep.
-Input (via prompt): scientist's plan JSON + previous script.
-Output: new experiment script at {version_dir}/experiment.py.
-max_turns: 30
+Tools: Read, Write, Edit, Bash, Glob, Grep.
+Input (via prompt): scientist's plan JSON + previous script + run config.
+Output: experiment script + run_result.json at {version_dir}/.
+max_turns: 50
 Safety hooks: block writes outside experiments/ dir, block writes to data files.
 """
 

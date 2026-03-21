@@ -857,6 +857,44 @@ class TestRunIteration:
         assert orchestrator.state.iteration == 1
 
     @pytest.mark.asyncio
+    async def test_coder_returns_none_records_failure(self, orchestrator, tmp_path):
+        """When coder returns None, iteration records failure and returns early."""
+        orchestrator.output_dir.mkdir(parents=True, exist_ok=True)
+        orchestrator.state.phase = "iteration"
+        orchestrator.state.iteration = 0
+
+        plan = {"should_stop": False, "hypothesis": "test"}
+
+        with (
+            patch.object(
+                orchestrator,
+                "_run_analyst",
+                new_callable=AsyncMock,
+                return_value={},
+            ),
+            patch.object(
+                orchestrator,
+                "_run_scientist_plan",
+                new_callable=AsyncMock,
+                return_value=plan,
+            ),
+            patch.object(
+                orchestrator,
+                "_run_coder",
+                new_callable=AsyncMock,
+                return_value=None,
+            ),
+            patch.object(orchestrator, "_apply_criteria_updates"),
+        ):
+            await orchestrator._run_iteration_body()
+
+        assert orchestrator.state.consecutive_failures == 1
+        assert orchestrator.state.iteration == 1
+        assert len(orchestrator.state.versions) == 1
+        assert orchestrator.state.versions[0].status == "failed"
+        assert orchestrator.state.versions[0].script_path == ""
+
+    @pytest.mark.asyncio
     async def test_iteration_summary_prints_artifacts(self, orchestrator, tmp_path, capsys):
         orchestrator.output_dir.mkdir(parents=True, exist_ok=True)
         orchestrator.state.phase = "iteration"
@@ -1308,7 +1346,9 @@ class TestRunCoderOrchestrator:
         orchestrator.output_dir.mkdir(parents=True, exist_ok=True)
         orchestrator.state.versions = [
             VersionEntry(
-                version="v00", iteration=0, script_path=str(tmp_path / "v00" / "experiment.py")
+                version="v00",
+                iteration=0,
+                script_path=str(tmp_path / "v00" / "experiment.py"),
             ),
         ]
 
@@ -1318,10 +1358,63 @@ class TestRunCoderOrchestrator:
             captured_kwargs.update(kwargs)
             return tmp_path / "v01" / "experiment.py"
 
-        with patch("auto_scientist.agents.coder.run_coder", side_effect=capture_coder):
+        with patch(
+            "auto_scientist.agents.coder.run_coder",
+            side_effect=capture_coder,
+        ):
             await orchestrator._run_coder({"hypothesis": "test"})
 
-        assert str(captured_kwargs["previous_script"]) == str(tmp_path / "v00" / "experiment.py")
+        assert str(captured_kwargs["previous_script"]) == str(
+            tmp_path / "v00" / "experiment.py"
+        )
+
+    @pytest.mark.asyncio
+    async def test_forwards_run_config_from_domain(self, orchestrator, tmp_path):
+        """Orchestrator passes run_timeout_minutes and run_command to coder."""
+        orchestrator.output_dir.mkdir(parents=True, exist_ok=True)
+        orchestrator.config = DomainConfig(
+            name="t",
+            description="d",
+            data_paths=[],
+            run_command="python {script_path}",
+            run_timeout_minutes=60,
+        )
+
+        captured_kwargs = {}
+
+        async def capture_coder(**kwargs):
+            captured_kwargs.update(kwargs)
+            return tmp_path / "v00" / "experiment.py"
+
+        with patch(
+            "auto_scientist.agents.coder.run_coder",
+            side_effect=capture_coder,
+        ):
+            await orchestrator._run_coder({"hypothesis": "test"})
+
+        assert captured_kwargs["run_timeout_minutes"] == 60
+        assert captured_kwargs["run_command"] == "python {script_path}"
+
+    @pytest.mark.asyncio
+    async def test_run_config_defaults_without_config(self, orchestrator, tmp_path):
+        """Without DomainConfig, uses default run values."""
+        orchestrator.output_dir.mkdir(parents=True, exist_ok=True)
+        orchestrator.config = None
+
+        captured_kwargs = {}
+
+        async def capture_coder(**kwargs):
+            captured_kwargs.update(kwargs)
+            return tmp_path / "v00" / "experiment.py"
+
+        with patch(
+            "auto_scientist.agents.coder.run_coder",
+            side_effect=capture_coder,
+        ):
+            await orchestrator._run_coder({"hypothesis": "test"})
+
+        assert captured_kwargs["run_timeout_minutes"] == 120
+        assert captured_kwargs["run_command"] == "uv run {script_path}"
 
 
 class TestReadRunResult:
@@ -1381,25 +1474,36 @@ class TestReadRunResult:
         assert "Traceback" in result.stderr
 
     def test_discovers_output_files(self, orchestrator, tmp_path):
-        """Discovers .png, .txt, .csv, .json output files."""
+        """Discovers experiment outputs, excludes infra files."""
         version_dir = tmp_path / "v01"
         version_dir.mkdir()
         (version_dir / "run_result.json").write_text(
-            '{"success": true, "return_code": 0, "timed_out": false, "error": null, "attempts": 1}'
+            '{"success": true, "return_code": 0, "timed_out": false, '
+            '"error": null, "attempts": 1}'
         )
         (version_dir / "experiment.py").write_text("print('hi')")
         (version_dir / "plot.png").write_text("fake")
         (version_dir / "results.txt").write_text("output")
         (version_dir / "data.csv").write_text("a,b")
         (version_dir / "meta.json").write_text("{}")
+        # Infra files that should be excluded
+        (version_dir / "exitcode.txt").write_text("0")
+        (version_dir / "stderr.txt").write_text("")
 
         result = orchestrator._read_run_result(version_dir)
 
-        suffixes = {Path(f).suffix for f in result.output_files}
-        assert ".png" in suffixes
-        assert ".txt" in suffixes
-        assert ".csv" in suffixes
-        assert ".json" in suffixes
+        filenames = {Path(f).name for f in result.output_files}
+        # Experiment outputs included
+        assert "plot.png" in filenames
+        assert "results.txt" in filenames
+        assert "data.csv" in filenames
+        assert "meta.json" in filenames
+        # Infra files excluded
+        assert "run_result.json" not in filenames
+        assert "exitcode.txt" not in filenames
+        assert "stderr.txt" not in filenames
+        # Script not included
+        assert "experiment.py" not in filenames
 
     def test_timed_out(self, orchestrator, tmp_path):
         """Correctly maps timed_out field."""

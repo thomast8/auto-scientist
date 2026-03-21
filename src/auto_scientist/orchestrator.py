@@ -233,20 +233,53 @@ class Orchestrator:
         # Step 5: Coder implements and runs the plan
         new_script = await self._run_coder(final_plan)
 
+        if new_script is None:
+            # Coder failed to produce a script; record failure and move on
+            version = f"v{self.state.iteration:02d}"
+            version_entry = VersionEntry(
+                version=version,
+                iteration=self.state.iteration,
+                script_path="",
+                hypothesis=final_plan.get("hypothesis", "") if final_plan else "",
+                status="failed",
+            )
+            self.state.record_failure()
+            self.state.record_version(version_entry)
+            print_step(f"\nITERATION {self.state.iteration} complete:")
+            print_step(f"  Status:     {version_entry.status}")
+            logger.info(
+                f"Iteration {self.state.iteration} complete: "
+                f"status=failed (coder produced no script)"
+            )
+            self.state.iteration += 1
+            return
+
         # Step 6: Read run result from Coder's output files
-        run_result = self._read_run_result(new_script.parent) if new_script else None
+        run_result = self._read_run_result(new_script.parent)
+
+        if run_result.timed_out:
+            print_step("  RUN RESULT: timed out")
+        elif not run_result.success:
+            print_step(f"  RUN RESULT: failed (rc={run_result.return_code})")
+        else:
+            print_step(
+                f"  RUN RESULT: success "
+                f"({len(run_result.output_files)} output files)"
+            )
 
         # Results summary
-        if self._should_summarize() and new_script and run_result and run_result.success:
+        if self._should_summarize() and run_result.success:
             results_path = new_script.parent / "results.txt"
             if results_path.exists():
                 try:
                     results_text = results_path.read_text()
-                    summary = await summarize_results(results_text, self.summary_model)
+                    summary = await summarize_results(
+                        results_text, self.summary_model,
+                    )
                     if summary:
                         print_summary("Results", summary)
-                except Exception:
-                    logger.debug("SUMMARY: error summarizing results")
+                except Exception as e:
+                    logger.warning(f"SUMMARY: error summarizing results: {e}")
 
         # Step 7: Evaluate
         version = f"v{self.state.iteration:02d}"
@@ -484,6 +517,10 @@ class Orchestrator:
             critiques = await self._with_summaries(_debate_coro, "Debate", buffer)
             print_step(f"  DEBATE: received {len(critiques)} critique(s)")
             return critiques
+        except Exception as e:
+            logger.exception(f"Debate error: {e}")
+            print_step(f"  DEBATE: error - {e}")
+            return None
         finally:
             self._persist_buffer("debate", buffer)
 
@@ -714,6 +751,8 @@ class Orchestrator:
             target_max=target_max,
         )
 
+    _INFRA_FILES = {"run_result.json", "exitcode.txt", "stderr.txt"}
+
     def _read_run_result(self, version_dir: Path) -> RunResult:
         """Read run_result.json and companion files from a version directory.
 
@@ -722,6 +761,7 @@ class Orchestrator:
         """
         run_result_path = version_dir / "run_result.json"
         if not run_result_path.exists():
+            logger.warning(f"run_result.json missing from {version_dir}")
             return RunResult(
                 success=False,
                 stderr="Coder did not produce run_result.json",
@@ -730,6 +770,7 @@ class Orchestrator:
         try:
             data = json.loads(run_result_path.read_text())
         except (json.JSONDecodeError, OSError) as e:
+            logger.warning(f"Failed to parse run_result.json: {e}")
             return RunResult(
                 success=False,
                 stderr=f"Failed to parse run_result.json: {e}",
@@ -741,17 +782,26 @@ class Orchestrator:
             stderr_parts.append(data["error"])
         stderr_path = version_dir / "stderr.txt"
         if stderr_path.exists():
-            stderr_parts.append(stderr_path.read_text())
+            try:
+                stderr_parts.append(stderr_path.read_text())
+            except OSError as e:
+                stderr_parts.append(f"(could not read stderr.txt: {e})")
+
         stderr = "\n".join(stderr_parts)
 
         # Read stdout from results.txt
         results_path = version_dir / "results.txt"
-        stdout = results_path.read_text() if results_path.exists() else ""
+        try:
+            stdout = results_path.read_text() if results_path.exists() else ""
+        except OSError as e:
+            logger.warning(f"Could not read results.txt: {e}")
+            stdout = ""
 
-        # Discover output files
+        # Discover output files (exclude infra files)
         output_files = [
             str(f) for f in version_dir.iterdir()
             if f.suffix in (".png", ".txt", ".csv", ".json")
+            and f.name not in self._INFRA_FILES
         ]
 
         return RunResult(
