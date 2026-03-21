@@ -2,7 +2,9 @@
 
 import json
 import logging
+import os
 import re
+import shutil
 from pathlib import Path
 from typing import Any
 
@@ -68,8 +70,68 @@ class Orchestrator:
         self.stream = stream
         self.verbose = verbose
 
+    def _validate_prerequisites(self) -> None:
+        """Validate directories, API keys, and config before starting.
+
+        Raises RuntimeError with all problems at once so the user can fix
+        everything in a single pass.
+        """
+        errors: list[str] = []
+
+        # Data path must exist when starting from ingestion
+        if self.state.phase == "ingestion":
+            if self.data_path is None:
+                errors.append("--data is required for a new run")
+            elif not self.data_path.exists():
+                errors.append(f"Data path does not exist: {self.data_path}")
+
+        # Output dir parent must be writable
+        parent = self.output_dir.parent
+        if parent.exists() and not os.access(parent, os.W_OK):
+            errors.append(f"Output directory parent is not writable: {parent}")
+
+        # Claude Code CLI must be installed (powers all main agents)
+        if not shutil.which("claude"):
+            errors.append(
+                "Claude Code CLI not found on PATH. "
+                "Install with: npm install -g @anthropic-ai/claude-code"
+            )
+
+        # Collect required providers from model config
+        mc = self.model_config
+        required_providers: set[str] = set()
+
+        # Claude Code SDK powers all main agents, always needs Anthropic
+        required_providers.add("anthropic")
+
+        # Summarizer always uses OpenAI directly
+        if mc.summarizer is not None:
+            required_providers.add("openai")
+
+        # Critics use their configured provider
+        for critic in mc.critics:
+            required_providers.add(critic.provider)
+
+        # Map providers to env vars
+        provider_env_vars: dict[str, str] = {
+            "anthropic": "ANTHROPIC_API_KEY",
+            "openai": "OPENAI_API_KEY",
+            "google": "GOOGLE_API_KEY",
+        }
+
+        for provider in sorted(required_providers):
+            env_var = provider_env_vars[provider]
+            if not os.environ.get(env_var):
+                errors.append(f"{env_var} is not set (required for {provider} provider)")
+
+        if errors:
+            raise RuntimeError(
+                "Pre-flight check failed:\n  - " + "\n  - ".join(errors)
+            )
+
     async def run(self) -> None:
         """Execute the full orchestration loop."""
+        self._validate_prerequisites()
         self.output_dir.mkdir(parents=True, exist_ok=True)
         setup_file_logging(self.output_dir, verbose=self.verbose)
         init_console_log(self.output_dir / "console.log")
@@ -211,8 +273,15 @@ class Orchestrator:
         logger.info(f"=== Iteration {self.state.iteration} start ===")
         print_iteration_header(self.state.iteration)
 
+        version = f"v{self.state.iteration:02d}"
+        version_dir = self.output_dir / version
+
         # Step 1: Analyst observes latest results (or raw data on iteration 0)
         analysis = await self._run_analyst()
+
+        # Persist analysis for audit trail
+        if analysis:
+            self._persist_artifact(version_dir, "analysis.json", analysis)
 
         # Apply domain_knowledge from Analyst if present
         if analysis and analysis.get("domain_knowledge"):
@@ -231,6 +300,7 @@ class Orchestrator:
 
         # Step 3: Check if Scientist recommends stopping
         if plan and plan.get("should_stop"):
+            self._persist_artifact(version_dir, "plan.json", plan)
             print_step(
                 f"Scientist recommends stopping: {plan.get('stop_reason', 'unknown')}",
                 color=YELLOW,
@@ -246,12 +316,22 @@ class Orchestrator:
             revised_plan = await self._run_scientist_revision(plan, debate_result, analysis)
             final_plan = revised_plan or plan
 
+            # Persist debate transcript with original plan for context
+            if debate_result:
+                self._persist_artifact(version_dir, "debate.json", {
+                    "original_plan": plan,
+                    "critiques": debate_result,
+                })
+
+        # Persist the final plan (post-debate revision if applicable)
+        if final_plan:
+            self._persist_artifact(version_dir, "plan.json", final_plan)
+
         # Step 5: Coder implements and runs the plan
         new_script = await self._run_coder(final_plan)
 
         if new_script is None:
             # Coder failed to produce a script; record failure and move on
-            version = f"v{self.state.iteration:02d}"
             version_entry = VersionEntry(
                 version=version,
                 iteration=self.state.iteration,
@@ -299,7 +379,6 @@ class Orchestrator:
                     logger.warning(f"SUMMARY: error summarizing results: {e}")
 
         # Step 7: Evaluate
-        version = f"v{self.state.iteration:02d}"
         version_entry = VersionEntry(
             version=version,
             iteration=self.state.iteration,
@@ -432,6 +511,12 @@ class Orchestrator:
             iteration = self.state.iteration
         filename = f"{agent_name.lower().replace(' ', '_')}_{iteration:02d}.txt"
         (buffers_dir / filename).write_text("\n".join(buffer))
+
+    @staticmethod
+    def _persist_artifact(version_dir: Path, filename: str, data: Any) -> None:
+        """Save a structured JSON artifact to a version directory."""
+        version_dir.mkdir(parents=True, exist_ok=True)
+        (version_dir / filename).write_text(json.dumps(data, indent=2))
 
     def _notebook_content(self) -> str:
         """Return notebook content."""
@@ -847,7 +932,10 @@ class Orchestrator:
             target_max=target_max,
         )
 
-    _INFRA_FILES = {"run_result.json", "exitcode.txt", "stderr.txt"}
+    _INFRA_FILES = {
+        "run_result.json", "exitcode.txt", "stderr.txt",
+        "analysis.json", "plan.json", "debate.json",
+    }
 
     def _read_run_result(self, version_dir: Path) -> RunResult:
         """Read run_result.json and companion files from a version directory.
@@ -955,7 +1043,9 @@ class Orchestrator:
                     message_buffer=buf,
                 )
 
-            report_path = await self._with_summaries(_report_coro, "Report", buffer)
+            report_content = await self._with_summaries(_report_coro, "Report", buffer)
+            report_path = self.output_dir / "report.md"
+            report_path.write_text(report_content)
             print_step(f"REPORT: written to {report_path}")
         except Exception as e:
             logger.exception(f"Report error: {e}")
