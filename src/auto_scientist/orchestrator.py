@@ -37,6 +37,32 @@ from auto_scientist.summarizer import run_with_summaries, summarize_results
 logger = logging.getLogger(__name__)
 
 
+def _check_provider_auth(provider: str) -> str | None:
+    """Try to instantiate the SDK client for a provider. Returns error message or None."""
+    if provider == "anthropic":
+        try:
+            from anthropic import Anthropic
+
+            Anthropic()
+            return None
+        except Exception as e:
+            return f"Anthropic SDK authentication failed: {e}"
+    elif provider == "openai":
+        try:
+            from openai import OpenAI
+
+            OpenAI()
+            return None
+        except Exception as e:
+            return f"OpenAI SDK authentication failed: {e}"
+    elif provider == "google":
+        if not os.environ.get("GOOGLE_API_KEY"):
+            return "GOOGLE_API_KEY is not set (required for google provider)"
+        return None
+    else:
+        return f"Unknown provider: {provider}"
+
+
 class Orchestrator:
     """Drives the Ingestion -> Iteration -> Report pipeline.
 
@@ -112,17 +138,11 @@ class Orchestrator:
         for critic in mc.critics:
             required_providers.add(critic.provider)
 
-        # Map providers to env vars
-        provider_env_vars: dict[str, str] = {
-            "anthropic": "ANTHROPIC_API_KEY",
-            "openai": "OPENAI_API_KEY",
-            "google": "GOOGLE_API_KEY",
-        }
-
+        # Validate each provider by trying to instantiate its SDK client
         for provider in sorted(required_providers):
-            env_var = provider_env_vars[provider]
-            if not os.environ.get(env_var):
-                errors.append(f"{env_var} is not set (required for {provider} provider)")
+            err = _check_provider_auth(provider)
+            if err:
+                errors.append(err)
 
         if errors:
             raise RuntimeError(
@@ -897,6 +917,9 @@ class Orchestrator:
         analysis = await self._run_analyst()
         if analysis:
             self._score_latest(analysis)
+            if self.state.versions:
+                version_dir = self.output_dir / self.state.versions[-1].version
+                self._persist_artifact(version_dir, "final_analysis.json", analysis)
 
     @staticmethod
     def _parse_criterion(raw: dict[str, Any]) -> SuccessCriterion | None:

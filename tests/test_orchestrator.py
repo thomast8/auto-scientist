@@ -80,23 +80,39 @@ class TestValidatePrerequisites:
             ),
         )
 
+    @staticmethod
+    def _mock_auth_ok(provider):
+        """All providers authenticate successfully."""
+        return None
+
+    @staticmethod
+    def _mock_auth_fail(fail_provider):
+        """Return a factory that fails for a specific provider."""
+        _names = {"anthropic": "Anthropic", "openai": "OpenAI", "google": "Google"}
+        def _check(provider):
+            if provider == fail_provider:
+                name = _names.get(provider, provider)
+                return f"{name} SDK authentication failed: missing credentials"
+            return None
+        return _check
+
     def test_passes_when_everything_present(self, tmp_path, monkeypatch):
         data = tmp_path / "data.csv"
         data.write_text("x")
-        monkeypatch.setenv("ANTHROPIC_API_KEY", "sk-test")
+        monkeypatch.setattr("auto_scientist.orchestrator._check_provider_auth", self._mock_auth_ok)
         monkeypatch.setattr("shutil.which", lambda name: "/usr/bin/claude")
         o = self._make_orchestrator(tmp_path, data_path=data)
         o._validate_prerequisites()  # should not raise
 
     def test_missing_data_path(self, tmp_path, monkeypatch):
-        monkeypatch.setenv("ANTHROPIC_API_KEY", "sk-test")
+        monkeypatch.setattr("auto_scientist.orchestrator._check_provider_auth", self._mock_auth_ok)
         monkeypatch.setattr("shutil.which", lambda name: "/usr/bin/claude")
         o = self._make_orchestrator(tmp_path)
         with pytest.raises(RuntimeError, match="Data path does not exist"):
             o._validate_prerequisites()
 
     def test_none_data_path(self, tmp_path, monkeypatch):
-        monkeypatch.setenv("ANTHROPIC_API_KEY", "sk-test")
+        monkeypatch.setattr("auto_scientist.orchestrator._check_provider_auth", self._mock_auth_ok)
         monkeypatch.setattr("shutil.which", lambda name: "/usr/bin/claude")
         o = self._make_orchestrator(tmp_path, data_path=None)
         # data_path=None is only a problem during ingestion
@@ -105,26 +121,31 @@ class TestValidatePrerequisites:
             o._validate_prerequisites()
 
     def test_data_path_not_checked_after_ingestion(self, tmp_path, monkeypatch):
-        monkeypatch.setenv("ANTHROPIC_API_KEY", "sk-test")
+        monkeypatch.setattr("auto_scientist.orchestrator._check_provider_auth", self._mock_auth_ok)
         monkeypatch.setattr("shutil.which", lambda name: "/usr/bin/claude")
         state = ExperimentState(domain="t", goal="g", phase="iteration")
         o = self._make_orchestrator(tmp_path, state=state, data_path=None)
         o._validate_prerequisites()  # should not raise
 
-    def test_missing_anthropic_key(self, tmp_path, monkeypatch):
+    def test_missing_anthropic_auth(self, tmp_path, monkeypatch):
         data = tmp_path / "data.csv"
         data.write_text("x")
-        monkeypatch.delenv("ANTHROPIC_API_KEY", raising=False)
+        monkeypatch.setattr(
+            "auto_scientist.orchestrator._check_provider_auth",
+            self._mock_auth_fail("anthropic"),
+        )
         monkeypatch.setattr("shutil.which", lambda name: "/usr/bin/claude")
         o = self._make_orchestrator(tmp_path, data_path=data)
-        with pytest.raises(RuntimeError, match="ANTHROPIC_API_KEY"):
+        with pytest.raises(RuntimeError, match="Anthropic SDK authentication failed"):
             o._validate_prerequisites()
 
-    def test_missing_openai_key_when_summarizer_set(self, tmp_path, monkeypatch):
+    def test_missing_openai_auth_when_summarizer_set(self, tmp_path, monkeypatch):
         data = tmp_path / "data.csv"
         data.write_text("x")
-        monkeypatch.setenv("ANTHROPIC_API_KEY", "sk-test")
-        monkeypatch.delenv("OPENAI_API_KEY", raising=False)
+        monkeypatch.setattr(
+            "auto_scientist.orchestrator._check_provider_auth",
+            self._mock_auth_fail("openai"),
+        )
         monkeypatch.setattr("shutil.which", lambda name: "/usr/bin/claude")
         mc = ModelConfig(
             defaults=AgentModelConfig(model="claude-sonnet-4-6"),
@@ -132,37 +153,42 @@ class TestValidatePrerequisites:
             critics=[],
         )
         o = self._make_orchestrator(tmp_path, data_path=data, mc=mc)
-        with pytest.raises(RuntimeError, match="OPENAI_API_KEY"):
+        with pytest.raises(RuntimeError, match="OpenAI SDK authentication failed"):
             o._validate_prerequisites()
 
     def test_missing_google_key_for_critic(self, tmp_path, monkeypatch):
         data = tmp_path / "data.csv"
         data.write_text("x")
-        monkeypatch.setenv("ANTHROPIC_API_KEY", "sk-test")
-        monkeypatch.delenv("GOOGLE_API_KEY", raising=False)
+        monkeypatch.setattr(
+            "auto_scientist.orchestrator._check_provider_auth",
+            self._mock_auth_fail("google"),
+        )
         monkeypatch.setattr("shutil.which", lambda name: "/usr/bin/claude")
         mc = ModelConfig(
             defaults=AgentModelConfig(model="claude-sonnet-4-6"),
             critics=[AgentModelConfig(provider="google", model="gemini-2.5-pro")],
         )
         o = self._make_orchestrator(tmp_path, data_path=data, mc=mc)
-        with pytest.raises(RuntimeError, match="GOOGLE_API_KEY"):
+        with pytest.raises(RuntimeError, match="Google SDK authentication failed"):
             o._validate_prerequisites()
 
     def test_multiple_errors_reported_at_once(self, tmp_path, monkeypatch):
-        monkeypatch.delenv("ANTHROPIC_API_KEY", raising=False)
+        monkeypatch.setattr(
+            "auto_scientist.orchestrator._check_provider_auth",
+            self._mock_auth_fail("anthropic"),
+        )
         monkeypatch.setattr("shutil.which", lambda name: None)
         o = self._make_orchestrator(tmp_path)  # data.csv doesn't exist
         with pytest.raises(RuntimeError, match="Data path does not exist") as exc_info:
             o._validate_prerequisites()
         msg = str(exc_info.value)
-        assert "ANTHROPIC_API_KEY" in msg
+        assert "Anthropic SDK authentication failed" in msg
         assert "Claude Code CLI not found" in msg
 
     def test_missing_claude_cli(self, tmp_path, monkeypatch):
         data = tmp_path / "data.csv"
         data.write_text("x")
-        monkeypatch.setenv("ANTHROPIC_API_KEY", "sk-test")
+        monkeypatch.setattr("auto_scientist.orchestrator._check_provider_auth", self._mock_auth_ok)
         monkeypatch.setattr("shutil.which", lambda name: None)
         o = self._make_orchestrator(tmp_path, data_path=data)
         with pytest.raises(RuntimeError, match="Claude Code CLI not found"):
