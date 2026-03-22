@@ -247,9 +247,15 @@ async def run_scientist(
     for attempt in range(MAX_ATTEMPTS):
         effective_prompt = user_prompt + correction_hint
 
-        raw = await collect_text_from_query(
-            effective_prompt, options, message_buffer, agent_name="Scientist",
-        )
+        try:
+            raw = await collect_text_from_query(
+                effective_prompt, options, message_buffer, agent_name="Scientist",
+            )
+        except Exception as e:
+            if attempt == MAX_ATTEMPTS - 1:
+                raise
+            logger.warning(f"Scientist attempt {attempt + 1}: SDK error ({e}), retrying")
+            continue
 
         try:
             return validate_json_output(raw, ScientistPlanOutput, "Scientist")
@@ -326,9 +332,15 @@ async def run_scientist_revision(
     for attempt in range(MAX_ATTEMPTS):
         effective_prompt = user_prompt + correction_hint
 
-        raw = await collect_text_from_query(
-            effective_prompt, options, message_buffer, agent_name="Scientist revision",
-        )
+        try:
+            raw = await collect_text_from_query(
+                effective_prompt, options, message_buffer, agent_name="Scientist revision",
+            )
+        except Exception as e:
+            if attempt == MAX_ATTEMPTS - 1:
+                raise
+            logger.warning(f"Scientist revision attempt {attempt + 1}: SDK error ({e}), retrying")
+            continue
 
         try:
             return validate_json_output(raw, ScientistPlanOutput, "Scientist revision")

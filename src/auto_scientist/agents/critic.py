@@ -69,9 +69,16 @@ async def _query_with_retry(
     label: str = "",
     **kwargs: Any,
 ) -> str:
-    """Call a query function, retrying if the response is empty or too short."""
+    """Call a query function, retrying if the response is empty, too short, or errors."""
+    result = ""
     for attempt in range(MAX_RETRIES + 1):
-        result = await query_fn(*args, **kwargs)
+        try:
+            result = await query_fn(*args, **kwargs)
+        except Exception as e:
+            if attempt < MAX_RETRIES:
+                logger.warning(f"{label} SDK error ({e}), retrying (attempt {attempt + 1})")
+                continue
+            raise
         if result and len(result.strip()) >= MIN_RESPONSE_LENGTH:
             return result
         if attempt < MAX_RETRIES:

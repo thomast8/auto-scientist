@@ -190,9 +190,15 @@ async def run_analyst(
     for attempt in range(MAX_ATTEMPTS):
         effective_prompt = user_prompt + correction_hint
 
-        raw = await collect_text_from_query(
-            effective_prompt, options, message_buffer, agent_name="Analyst",
-        )
+        try:
+            raw = await collect_text_from_query(
+                effective_prompt, options, message_buffer, agent_name="Analyst",
+            )
+        except Exception as e:
+            if attempt == MAX_ATTEMPTS - 1:
+                raise
+            logger.warning(f"Analyst attempt {attempt + 1}: SDK error ({e}), retrying")
+            continue
 
         try:
             return validate_json_output(raw, AnalystOutput, "Analyst")

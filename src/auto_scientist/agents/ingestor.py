@@ -76,16 +76,24 @@ async def run_ingestor(
     )
 
     correction_hint = ""
+    last_error: Exception | None = None
     for attempt in range(MAX_ATTEMPTS):
         effective_prompt = prompt + correction_hint
 
-        async for msg in safe_query(prompt=effective_prompt, options=options):
-            if isinstance(msg, AssistantMessage):
-                for block in msg.content:
-                    if message_buffer is not None:
-                        append_block_to_buffer(block, message_buffer)
-                    elif isinstance(block, TextBlock):
-                        print(f"  [ingestor] {block.text[:200]}")
+        try:
+            async for msg in safe_query(prompt=effective_prompt, options=options):
+                if isinstance(msg, AssistantMessage):
+                    for block in msg.content:
+                        if message_buffer is not None:
+                            append_block_to_buffer(block, message_buffer)
+                        elif isinstance(block, TextBlock):
+                            print(f"  [ingestor] {block.text[:200]}")
+        except Exception as e:
+            last_error = e
+            if attempt == MAX_ATTEMPTS - 1:
+                raise
+            logger.warning(f"Ingestor attempt {attempt + 1}: SDK error ({e}), retrying")
+            continue
 
         # Verify something was produced in data_dir
         data_files = list(data_dir.iterdir())

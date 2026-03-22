@@ -113,13 +113,19 @@ async def run_coder(
     for attempt in range(MAX_ATTEMPTS):
         effective_prompt = user_prompt + correction_hint
 
-        async for message in query(prompt=effective_prompt, options=options):
-            if isinstance(message, AssistantMessage):
-                if message_buffer is not None:
-                    for block in message.content:
-                        append_block_to_buffer(block, message_buffer)
-            elif isinstance(message, ResultMessage):
-                pass  # Agent is done
+        try:
+            async for message in query(prompt=effective_prompt, options=options):
+                if isinstance(message, AssistantMessage):
+                    if message_buffer is not None:
+                        for block in message.content:
+                            append_block_to_buffer(block, message_buffer)
+                elif isinstance(message, ResultMessage):
+                    pass  # Agent is done
+        except Exception as e:
+            if attempt == MAX_ATTEMPTS - 1:
+                raise
+            logger.warning(f"Coder attempt {attempt + 1}: SDK error ({e}), retrying")
+            continue
 
         # Validate: script must exist
         if not new_script_path.exists():

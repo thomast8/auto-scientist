@@ -68,15 +68,21 @@ async def run_report(
 
         report_parts: list[str] = []
 
-        async for message in safe_query(prompt=effective_prompt, options=options):
-            if isinstance(message, AssistantMessage):
-                for block in message.content:
-                    if message_buffer is not None:
-                        append_block_to_buffer(block, message_buffer)
-                    if isinstance(block, TextBlock):
-                        report_parts.append(block.text)
-            elif isinstance(message, ResultMessage):
-                pass  # Agent is done
+        try:
+            async for message in safe_query(prompt=effective_prompt, options=options):
+                if isinstance(message, AssistantMessage):
+                    for block in message.content:
+                        if message_buffer is not None:
+                            append_block_to_buffer(block, message_buffer)
+                        if isinstance(block, TextBlock):
+                            report_parts.append(block.text)
+                elif isinstance(message, ResultMessage):
+                    pass  # Agent is done
+        except Exception as e:
+            if attempt == MAX_ATTEMPTS - 1:
+                raise
+            logger.warning(f"Report attempt {attempt + 1}: SDK error ({e}), retrying")
+            continue
 
         full_text = "\n".join(report_parts)
 
