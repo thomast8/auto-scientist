@@ -1,4 +1,4 @@
-"""OpenAI API wrapper with optional streaming and reasoning support."""
+"""OpenAI API wrapper with optional streaming, reasoning, and structured output."""
 
 from __future__ import annotations
 
@@ -7,6 +7,7 @@ from collections.abc import Callable
 from typing import TYPE_CHECKING
 
 from openai import AsyncOpenAI
+from pydantic import BaseModel
 
 if TYPE_CHECKING:
     from auto_scientist.model_config import ReasoningConfig
@@ -30,6 +31,8 @@ async def query_openai(
     reasoning: ReasoningConfig | None = None,
     on_token: Callable[[str], None] | None = None,
     max_tokens: int = 4096,
+    system_prompt: str | None = None,
+    response_schema: type[BaseModel] | None = None,
 ) -> str:
     """Send a prompt to an OpenAI model and return the response text.
 
@@ -75,10 +78,25 @@ async def query_openai(
         logger.debug(f"OpenAI response: {len(result)} chars")
         return result
 
+    messages: list[dict] = []
+    if system_prompt:
+        messages.append({"role": "system", "content": system_prompt})
+    messages.append({"role": "user", "content": prompt})
+
     chat_kwargs: dict = {
         "model": model,
-        "messages": [{"role": "user", "content": prompt}],
+        "messages": messages,
     }
+
+    if response_schema is not None:
+        chat_kwargs["response_format"] = {
+            "type": "json_schema",
+            "json_schema": {
+                "name": "response",
+                "schema": response_schema.model_json_schema(),
+            },
+        }
+
     if effort:
         chat_kwargs["reasoning_effort"] = effort
         chat_kwargs["max_completion_tokens"] = max_tokens

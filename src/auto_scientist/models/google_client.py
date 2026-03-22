@@ -1,4 +1,4 @@
-"""Google AI wrapper with optional streaming and reasoning support."""
+"""Google AI wrapper with optional streaming, reasoning, and structured output."""
 
 from __future__ import annotations
 
@@ -8,6 +8,7 @@ from typing import TYPE_CHECKING
 
 from google import genai
 from google.genai import types
+from pydantic import BaseModel
 
 if TYPE_CHECKING:
     from auto_scientist.model_config import ReasoningConfig
@@ -44,6 +45,8 @@ async def query_google(
     web_search: bool = False,
     reasoning: ReasoningConfig | None = None,
     on_token: Callable[[str], None] | None = None,
+    system_prompt: str | None = None,
+    response_schema: type[BaseModel] | None = None,
 ) -> str:
     """Send a prompt to a Google AI model and return the response text.
 
@@ -78,6 +81,11 @@ async def query_google(
         config_kwargs["tools"] = [types.Tool(google_search=types.GoogleSearch())]
     if thinking_config is not None:
         config_kwargs["thinking_config"] = thinking_config
+    if system_prompt:
+        config_kwargs["system_instruction"] = system_prompt
+    if response_schema is not None:
+        config_kwargs["response_mime_type"] = "application/json"
+        config_kwargs["response_schema"] = response_schema.model_json_schema()
 
     config = types.GenerateContentConfig(**config_kwargs) if config_kwargs else None
 

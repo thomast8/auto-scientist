@@ -1,12 +1,14 @@
-"""Anthropic API wrapper with optional streaming and reasoning support."""
+"""Anthropic API wrapper with optional streaming, reasoning, and structured output."""
 
 from __future__ import annotations
 
+import json
 import logging
 from collections.abc import Callable
 from typing import TYPE_CHECKING
 
 from anthropic import AsyncAnthropic
+from pydantic import BaseModel
 
 if TYPE_CHECKING:
     from auto_scientist.model_config import ReasoningConfig
@@ -29,6 +31,8 @@ async def query_anthropic(
     web_search: bool = False,
     reasoning: ReasoningConfig | None = None,
     on_token: Callable[[str], None] | None = None,
+    system_prompt: str | None = None,
+    response_schema: type[BaseModel] | None = None,
 ) -> str:
     """Send a prompt to an Anthropic model and return the response text.
 
@@ -51,8 +55,22 @@ async def query_anthropic(
         "messages": [{"role": "user", "content": prompt}],
     }
 
+    if system_prompt:
+        kwargs["system"] = system_prompt
+
     if web_search:
-        kwargs["tools"] = [{"type": "web_search_20250305", "name": "web_search"}]
+        kwargs.setdefault("tools", [])
+        kwargs["tools"].append({"type": "web_search_20250305", "name": "web_search"})
+
+    if response_schema is not None:
+        schema = response_schema.model_json_schema()
+        kwargs.setdefault("tools", [])
+        kwargs["tools"].append({
+            "name": "submit_response",
+            "description": "Submit your structured response.",
+            "input_schema": schema,
+        })
+        kwargs["tool_choice"] = {"type": "tool", "name": "submit_response"}
 
     if reasoning is not None and reasoning.level not in ("default", "off"):
         budget = reasoning.budget or ANTHROPIC_BUDGET_DEFAULTS[reasoning.level]
@@ -70,6 +88,14 @@ async def query_anthropic(
         return result
 
     response = await client.messages.create(**kwargs)
+
+    # When using structured output via tool_use, extract the tool input
+    if response_schema is not None:
+        for block in response.content:
+            if getattr(block, "type", None) == "tool_use":
+                result = json.dumps(block.input)
+                logger.debug(f"Anthropic response (structured): {len(result)} chars")
+                return result
 
     # Extract text blocks (skip tool_use/web_search result blocks)
     text_parts = []

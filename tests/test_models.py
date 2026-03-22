@@ -1,5 +1,6 @@
 """Tests for LLM model client wrappers."""
 
+import json
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
@@ -8,6 +9,7 @@ from auto_scientist.model_config import ReasoningConfig
 from auto_scientist.models.anthropic_client import query_anthropic
 from auto_scientist.models.google_client import query_google
 from auto_scientist.models.openai_client import query_openai
+from auto_scientist.schemas import ScientistPlanOutput
 
 
 class TestQueryOpenAIStreaming:
@@ -607,3 +609,130 @@ class TestQueryGoogleReasoning:
         )
 
         mock_types.ThinkingConfig.assert_called_once_with(thinking_budget=8192)
+
+
+# ── Structured output tests ─────────────────────────────────────────────────
+
+
+class TestAnthropicStructuredOutput:
+    @pytest.mark.asyncio
+    @patch("auto_scientist.models.anthropic_client.AsyncAnthropic")
+    async def test_response_schema_uses_tool_use(self, mock_cls):
+        mock_client = AsyncMock()
+        mock_cls.return_value = mock_client
+
+        # Simulate tool_use response
+        tool_block = MagicMock()
+        tool_block.type = "tool_use"
+        tool_block.input = {"hypothesis": "test", "strategy": "incremental"}
+        mock_response = MagicMock(content=[tool_block])
+        mock_client.messages.create.return_value = mock_response
+
+        result = await query_anthropic(
+            "claude-sonnet-4-6", "plan something",
+            response_schema=ScientistPlanOutput,
+        )
+
+        call_kwargs = mock_client.messages.create.call_args.kwargs
+        # Should have a tool defined with the schema
+        tools = call_kwargs.get("tools", [])
+        assert any(t.get("name") == "submit_response" for t in tools)
+        # Should force tool choice
+        assert call_kwargs.get("tool_choice", {}).get("type") == "tool"
+        # Result should be JSON string of tool input
+        parsed = json.loads(result)
+        assert parsed["hypothesis"] == "test"
+
+    @pytest.mark.asyncio
+    @patch("auto_scientist.models.anthropic_client.AsyncAnthropic")
+    async def test_system_prompt_passed(self, mock_cls):
+        mock_client = AsyncMock()
+        mock_cls.return_value = mock_client
+        mock_response = MagicMock(content=[MagicMock(text="ok")])
+        mock_client.messages.create.return_value = mock_response
+
+        await query_anthropic(
+            "claude-sonnet-4-6", "test",
+            system_prompt="You are a scientist.",
+        )
+
+        call_kwargs = mock_client.messages.create.call_args.kwargs
+        assert call_kwargs.get("system") == "You are a scientist."
+
+
+class TestOpenAIStructuredOutput:
+    @pytest.mark.asyncio
+    @patch("auto_scientist.models.openai_client.AsyncOpenAI")
+    async def test_response_schema_uses_response_format(self, mock_cls):
+        mock_client = AsyncMock()
+        mock_cls.return_value = mock_client
+        mock_response = MagicMock()
+        mock_response.choices = [MagicMock(message=MagicMock(content='{"hypothesis": "test"}'))]
+        mock_client.chat.completions.create.return_value = mock_response
+
+        result = await query_openai(
+            "gpt-5.4", "plan something",
+            response_schema=ScientistPlanOutput,
+        )
+
+        call_kwargs = mock_client.chat.completions.create.call_args.kwargs
+        rf = call_kwargs.get("response_format")
+        assert rf is not None
+        assert rf["type"] == "json_schema"
+        assert result == '{"hypothesis": "test"}'
+
+    @pytest.mark.asyncio
+    @patch("auto_scientist.models.openai_client.AsyncOpenAI")
+    async def test_system_prompt_passed(self, mock_cls):
+        mock_client = AsyncMock()
+        mock_cls.return_value = mock_client
+        mock_response = MagicMock()
+        mock_response.choices = [MagicMock(message=MagicMock(content="ok"))]
+        mock_client.chat.completions.create.return_value = mock_response
+
+        await query_openai(
+            "gpt-5.4", "test",
+            system_prompt="You are a scientist.",
+        )
+
+        call_kwargs = mock_client.chat.completions.create.call_args.kwargs
+        messages = call_kwargs["messages"]
+        assert messages[0]["role"] == "system"
+        assert messages[0]["content"] == "You are a scientist."
+
+
+class TestGoogleStructuredOutput:
+    @pytest.mark.asyncio
+    @patch("auto_scientist.models.google_client.genai")
+    async def test_response_schema_adds_config(self, mock_genai):
+        mock_response = MagicMock(text='{"hypothesis": "test"}')
+        mock_genai.Client.return_value.aio.models.generate_content = AsyncMock(
+            return_value=mock_response
+        )
+
+        result = await query_google(
+            "gemini-2.5-pro", "plan something",
+            response_schema=ScientistPlanOutput,
+        )
+
+        call_kwargs = mock_genai.Client.return_value.aio.models.generate_content.call_args.kwargs
+        config = call_kwargs.get("config")
+        assert config is not None
+        assert result == '{"hypothesis": "test"}'
+
+    @pytest.mark.asyncio
+    @patch("auto_scientist.models.google_client.genai")
+    async def test_system_prompt_passed(self, mock_genai):
+        mock_response = MagicMock(text="ok")
+        mock_genai.Client.return_value.aio.models.generate_content = AsyncMock(
+            return_value=mock_response
+        )
+
+        await query_google(
+            "gemini-2.5-pro", "test",
+            system_prompt="You are a scientist.",
+        )
+
+        call_kwargs = mock_genai.Client.return_value.aio.models.generate_content.call_args.kwargs
+        config = call_kwargs.get("config")
+        assert config is not None
