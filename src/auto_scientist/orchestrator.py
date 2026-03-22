@@ -205,6 +205,15 @@ class Orchestrator:
                 "Install with: npm install -g @anthropic-ai/claude-code"
             )
 
+        # uv must be installed (runs experiment scripts)
+        run_cmd = self.config.run_command if self.config else "uv run {script_path}"
+        exe = run_cmd.split()[0] if run_cmd.strip() else ""
+        if exe and not shutil.which(exe):
+            errors.append(
+                f"'{exe}' not found on PATH (needed for run_command: {run_cmd}). "
+                f"Install uv with: curl -LsSf https://astral.sh/uv/install.sh | sh"
+            )
+
         # SDK agents must use Anthropic models (they run through claude CLI)
         mc = self.model_config
         sdk_agents = ["analyst", "scientist", "coder", "ingestor", "report"]
@@ -916,20 +925,28 @@ class Orchestrator:
 
         # Resolve the executable to an absolute path so the coder's Bash
         # subprocess can find it even when ~/.local/bin isn't in PATH.
-        exe = run_cmd.split()[0]
-        abs_exe = shutil.which(exe)
-        if abs_exe and abs_exe != exe:
-            run_cmd = abs_exe + run_cmd[len(exe):]
+        parts = run_cmd.split()
+        if parts:
+            exe = parts[0]
+            abs_exe = shutil.which(exe)
+            if abs_exe and abs_exe != exe:
+                run_cmd = abs_exe + run_cmd[len(exe):]
+            elif not abs_exe:
+                logger.warning(
+                    f"Executable '{exe}' not found on PATH; "
+                    f"coder may fail to run the experiment script"
+                )
 
         cfg = self.model_config.resolve("coder")
+
+        # Serialize top-level criteria before entering coder try block
+        top_criteria = [
+            c.model_dump() for c in (self.state.success_criteria or [])
+        ]
 
         print_step(f"  IMPLEMENT: coder writing and running {version}")
         buffer: list[str] = []
         try:
-            # Serialize top-level criteria for the coder
-            top_criteria = [
-                c.model_dump() for c in (self.state.success_criteria or [])
-            ]
 
             async def _coder_coro(buf):
                 return await run_coder(

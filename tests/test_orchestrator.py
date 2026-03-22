@@ -1623,17 +1623,18 @@ class TestRunCoderOrchestrator:
             captured_kwargs.update(kwargs)
             return tmp_path / "v00" / "experiment.py"
 
-        with patch(
-            "auto_scientist.agents.coder.run_coder",
-            side_effect=capture_coder,
+        with (
+            patch(
+                "auto_scientist.agents.coder.run_coder",
+                side_effect=capture_coder,
+            ),
+            patch("shutil.which", return_value="/usr/bin/python"),
         ):
             await orchestrator._run_coder({"hypothesis": "test"})
 
         assert captured_kwargs["run_timeout_minutes"] == 60
         # Orchestrator resolves the executable to an absolute path
-        cmd = captured_kwargs["run_command"]
-        assert cmd.endswith(" {script_path}")
-        assert "python" in cmd
+        assert captured_kwargs["run_command"] == "/usr/bin/python {script_path}"
 
     @pytest.mark.asyncio
     async def test_run_config_defaults_without_config(self, orchestrator, tmp_path):
@@ -1647,17 +1648,42 @@ class TestRunCoderOrchestrator:
             captured_kwargs.update(kwargs)
             return tmp_path / "v00" / "experiment.py"
 
-        with patch(
-            "auto_scientist.agents.coder.run_coder",
-            side_effect=capture_coder,
+        with (
+            patch(
+                "auto_scientist.agents.coder.run_coder",
+                side_effect=capture_coder,
+            ),
+            patch("shutil.which", return_value="/usr/local/bin/uv"),
         ):
             await orchestrator._run_coder({"hypothesis": "test"})
 
         assert captured_kwargs["run_timeout_minutes"] == 120
         # Orchestrator resolves the executable to an absolute path
-        cmd = captured_kwargs["run_command"]
-        assert cmd.endswith("uv run {script_path}")
-        assert "/" in cmd  # absolute path
+        assert captured_kwargs["run_command"] == "/usr/local/bin/uv run {script_path}"
+
+    @pytest.mark.asyncio
+    async def test_run_command_warns_when_exe_not_found(self, orchestrator, tmp_path):
+        """When shutil.which returns None, logs a warning and passes command through."""
+        orchestrator.output_dir.mkdir(parents=True, exist_ok=True)
+        orchestrator.config = None
+
+        captured_kwargs = {}
+
+        async def capture_coder(**kwargs):
+            captured_kwargs.update(kwargs)
+            return tmp_path / "v00" / "experiment.py"
+
+        with (
+            patch(
+                "auto_scientist.agents.coder.run_coder",
+                side_effect=capture_coder,
+            ),
+            patch("shutil.which", return_value=None),
+        ):
+            await orchestrator._run_coder({"hypothesis": "test"})
+
+        # Falls through with original command when which returns None
+        assert captured_kwargs["run_command"] == "uv run {script_path}"
 
 
 class TestReadRunResult:

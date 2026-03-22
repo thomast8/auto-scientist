@@ -174,6 +174,7 @@ def _make_coder_mock():
         domain_knowledge="", data_path="", model=None,
         message_buffer=None, run_timeout_minutes=120,
         run_command="uv run {script_path}",
+        top_level_criteria=None,
     ):
         version_dir = output_dir / version
         version_dir.mkdir(parents=True, exist_ok=True)
