@@ -90,7 +90,6 @@ class TestAnalystOutput:
 
     def test_minimal_valid(self, minimal_valid):
         a = AnalystOutput.model_validate(minimal_valid)
-        assert a.success_score is None
         assert a.domain_knowledge == ""
         assert a.data_summary is None
 
@@ -106,10 +105,8 @@ class TestAnalystOutput:
             {"name": "accuracy", "measured_value": 0.95, "target": ">= 0.9", "status": "pass"},
             {"name": "latency", "measured_value": None, "target": "< 500", "status": "unable_to_measure"},
         ]
-        minimal_valid["success_score"] = 50
         a = AnalystOutput.model_validate(minimal_valid)
         assert len(a.criteria_results) == 2
-        assert a.success_score == 50
 
     def test_missing_required_field(self):
         with pytest.raises(ValidationError):
@@ -127,7 +124,6 @@ class TestAnalystOutput:
         d = a.model_dump()
         assert isinstance(d, dict)
         assert d.get("observations") == ["data loaded"]
-        assert d.get("success_score") is None
 
 
 # ---------------------------------------------------------------------------

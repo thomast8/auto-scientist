@@ -3,7 +3,7 @@
 Uses query() (fresh session each iteration, bounded context).
 Tools: Read (results file + plot PNGs), Glob (find output files).
 Input: results text + lab notebook + success criteria.
-Output: structured JSON with success_score, criteria_results, metrics, observations.
+Output: structured JSON with criteria_results, metrics, observations.
 max_turns: 30
 """
 
@@ -31,7 +31,6 @@ MAX_ATTEMPTS = 3
 ANALYST_SCHEMA = {
     "type": "object",
     "properties": {
-        "success_score": {"type": ["integer", "null"], "minimum": 0, "maximum": 100},
         "criteria_results": {
             "type": "array",
             "items": {
@@ -119,7 +118,6 @@ async def run_analyst(
 
     Returns:
         Structured dict with keys:
-            success_score: int | None (None on iteration 0)
             criteria_results: list[dict] (name, measured_value, target, status)
             key_metrics: dict[str, float]
             improvements: list[str]
@@ -184,6 +182,7 @@ async def run_analyst(
         permission_mode="acceptEdits",
         cwd=cwd,
         model=model,
+        extra_args={"bare": None},
     )
 
     correction_hint = ""

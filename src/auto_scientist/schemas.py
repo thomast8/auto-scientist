@@ -40,7 +40,6 @@ class AnalystOutput(BaseModel):
 
     model_config = ConfigDict(extra="ignore")
 
-    success_score: int | None = None
     criteria_results: list[CriterionResult]
     key_metrics: dict[str, float]
     improvements: list[str]

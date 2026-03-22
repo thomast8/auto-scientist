@@ -490,7 +490,7 @@ class TestIteration0:
         orchestrator.state.phase = "iteration"
         orchestrator.state.iteration = 0
 
-        analysis = {"success_score": None, "observations": ["200 rows"]}
+        analysis = {"observations": ["200 rows"]}
 
         with patch.object(
             orchestrator,
@@ -869,7 +869,7 @@ class TestDomainKnowledgeSourcing:
 
         async def capture_analyst(**kwargs):
             captured_kwargs.update(kwargs)
-            return {"success_score": 50}
+            return {"observations": []}
 
         with patch("auto_scientist.agents.analyst.run_analyst", side_effect=capture_analyst):
             await orchestrator._run_analyst()
@@ -1323,14 +1323,14 @@ class TestRunAnalystInitial:
 
         async def capture_analyst(**kwargs):
             captured_kwargs.update(kwargs)
-            return {"success_score": None}
+            return {"observations": []}
 
         with patch("auto_scientist.agents.analyst.run_analyst", side_effect=capture_analyst):
             result = await orchestrator._run_analyst_initial()
 
         assert captured_kwargs["results_path"] is None
         assert captured_kwargs["data_dir"] == tmp_path / "data"
-        assert result["success_score"] is None
+        assert "success_score" not in result
 
     @pytest.mark.asyncio
     async def test_error_returns_none(self, orchestrator, tmp_path):
@@ -1423,7 +1423,7 @@ class TestRunScientistPlan:
             new_callable=AsyncMock,
             return_value=plan,
         ):
-            result = await orchestrator._run_scientist_plan({"success_score": 50})
+            result = await orchestrator._run_scientist_plan({"observations": []})
 
         assert result["hypothesis"] == "test"
         notebook = orchestrator.output_dir / "lab_notebook.xml"
@@ -1630,7 +1630,10 @@ class TestRunCoderOrchestrator:
             await orchestrator._run_coder({"hypothesis": "test"})
 
         assert captured_kwargs["run_timeout_minutes"] == 60
-        assert captured_kwargs["run_command"] == "python {script_path}"
+        # Orchestrator resolves the executable to an absolute path
+        cmd = captured_kwargs["run_command"]
+        assert cmd.endswith(" {script_path}")
+        assert "python" in cmd
 
     @pytest.mark.asyncio
     async def test_run_config_defaults_without_config(self, orchestrator, tmp_path):
@@ -1651,7 +1654,10 @@ class TestRunCoderOrchestrator:
             await orchestrator._run_coder({"hypothesis": "test"})
 
         assert captured_kwargs["run_timeout_minutes"] == 120
-        assert captured_kwargs["run_command"] == "uv run {script_path}"
+        # Orchestrator resolves the executable to an absolute path
+        cmd = captured_kwargs["run_command"]
+        assert cmd.endswith("uv run {script_path}")
+        assert "/" in cmd  # absolute path
 
 
 class TestReadRunResult:

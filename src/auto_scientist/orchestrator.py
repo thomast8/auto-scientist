@@ -906,6 +906,13 @@ class Orchestrator:
         run_timeout = self.config.run_timeout_minutes if self.config else 120
         run_cmd = self.config.run_command if self.config else "uv run {script_path}"
 
+        # Resolve the executable to an absolute path so the coder's Bash
+        # subprocess can find it even when ~/.local/bin isn't in PATH.
+        exe = run_cmd.split()[0]
+        abs_exe = shutil.which(exe)
+        if abs_exe and abs_exe != exe:
+            run_cmd = abs_exe + run_cmd[len(exe):]
+
         cfg = self.model_config.resolve("coder")
 
         print_step(f"  IMPLEMENT: coder writing and running {version}")

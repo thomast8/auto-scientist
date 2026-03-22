@@ -398,7 +398,7 @@ quality, correlations, and diagnostic plots.",
 <input>
 Domain: Physiological sensor dataset with 200 rows, columns x
   (float, evenly spaced 0-10) and y (float, range -2.7 to 9.8)
-Analysis: success_score=null, observations=["200 rows, 2 float \
+Analysis: observations=["200 rows, 2 float \
   columns", "x evenly spaced 0-10", "y range -2.7 to 9.8", \
   "no missing values"]
 Notebook: v00 exploration found 200 data points, x is linspace,

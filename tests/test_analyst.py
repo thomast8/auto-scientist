@@ -60,7 +60,7 @@ class TestRunAnalyst:
     @patch("auto_scientist.sdk_utils.query")
     async def test_returns_parsed_json(self, mock_query, tmp_path):
         analysis = {
-            "success_score": 75,
+
             "criteria_results": [],
             "key_metrics": {"rmse": 0.5},
             "improvements": ["better"],
@@ -89,14 +89,13 @@ class TestRunAnalyst:
             notebook_path=notebook_path,
         )
 
-        assert result["success_score"] == 75
         assert result["key_metrics"]["rmse"] == 0.5
 
     @pytest.mark.asyncio
     @patch("auto_scientist.sdk_utils.query")
     async def test_handles_markdown_fenced_json(self, mock_query, tmp_path):
         analysis = {
-            "success_score": 50, "criteria_results": [], "key_metrics": {},
+            "criteria_results": [], "key_metrics": {},
             "improvements": [], "regressions": [], "observations": [],
             "iteration_criteria_results": [],
         }
@@ -118,7 +117,7 @@ class TestRunAnalyst:
         result = await run_analyst(
             results_path=results_path, plot_paths=[], notebook_path=notebook_path,
         )
-        assert result["success_score"] == 50
+        assert result["criteria_results"] == []
 
     @pytest.mark.asyncio
     @patch("auto_scientist.sdk_utils.query")
@@ -177,7 +176,6 @@ class TestRunAnalyst:
             notebook_path=notebook_path,
             data_dir=data_dir,
         )
-        assert result["success_score"] is None
         assert result["domain_knowledge"] == "Environmental sensor data"
 
     @pytest.mark.asyncio
@@ -185,7 +183,7 @@ class TestRunAnalyst:
     async def test_data_dir_in_prompt(self, mock_query, tmp_path):
         """When data_dir is provided, it should appear in the prompt."""
         analysis = {
-            "success_score": None, "criteria_results": [], "key_metrics": {},
+            "criteria_results": [], "key_metrics": {},
             "improvements": [], "regressions": [], "observations": [],
             "iteration_criteria_results": [],
         }
@@ -254,7 +252,6 @@ class TestRunAnalyst:
             notebook_path=notebook_path,
             data_dir=data_dir,
         )
-        assert result["success_score"] is None
         assert result["domain_knowledge"] == "This dataset contains sensor readings"
         assert result["data_summary"]["total_rows"] == 200
 
@@ -262,7 +259,7 @@ class TestRunAnalyst:
     @patch("auto_scientist.sdk_utils.query")
     async def test_missing_results_file_uses_fallback(self, mock_query, tmp_path):
         analysis = {
-            "success_score": 0, "criteria_results": [], "key_metrics": {},
+            "criteria_results": [], "key_metrics": {},
             "improvements": [], "regressions": [], "observations": [],
             "iteration_criteria_results": [],
         }
@@ -282,13 +279,13 @@ class TestRunAnalyst:
         result = await run_analyst(
             results_path=results_path, plot_paths=[], notebook_path=notebook_path,
         )
-        assert result["success_score"] == 0
+        assert "success_score" not in result
 
     @pytest.mark.asyncio
     @patch("auto_scientist.sdk_utils.query")
     async def test_populates_message_buffer(self, mock_query, tmp_path):
         analysis = {
-            "success_score": 50, "criteria_results": [], "key_metrics": {},
+            "criteria_results": [], "key_metrics": {},
             "improvements": [], "regressions": [], "observations": [],
             "iteration_criteria_results": [],
         }
@@ -331,7 +328,7 @@ class TestRunAnalyst:
     @patch("auto_scientist.sdk_utils.query")
     async def test_fallback_to_assistant_text(self, mock_query, tmp_path):
         analysis = {
-            "success_score": 42, "criteria_results": [], "key_metrics": {},
+            "criteria_results": [], "key_metrics": {},
             "improvements": [], "regressions": [], "observations": [],
             "iteration_criteria_results": [],
         }
@@ -359,13 +356,13 @@ class TestRunAnalyst:
         result = await run_analyst(
             results_path=results_path, plot_paths=[], notebook_path=notebook_path,
         )
-        assert result["success_score"] == 42
+        assert "success_score" not in result
 
     @pytest.mark.asyncio
     @patch("auto_scientist.sdk_utils.query")
     async def test_iteration0_uses_data_dir(self, mock_query, tmp_path):
         analysis = {
-            "success_score": None, "criteria_results": [], "key_metrics": {},
+            "criteria_results": [], "key_metrics": {},
             "improvements": [], "regressions": [], "observations": [],
             "iteration_criteria_results": [],
         }
@@ -399,7 +396,7 @@ class TestRunAnalyst:
         from claude_code_sdk import ResultMessage
         result_msg = MagicMock(spec=ResultMessage)
         result_msg.result = json.dumps({
-            "success_score": 50, "criteria_results": [], "key_metrics": {},
+            "criteria_results": [], "key_metrics": {},
             "improvements": [], "regressions": [], "observations": [],
             "iteration_criteria_results": [],
         })
@@ -432,7 +429,7 @@ class TestAnalystRetry:
     async def test_retry_on_invalid_json_then_succeed(self, mock_query, tmp_path):
         """First attempt returns invalid JSON, second returns valid."""
         valid_analysis = {
-            "success_score": 50, "criteria_results": [], "key_metrics": {},
+            "criteria_results": [], "key_metrics": {},
             "improvements": [], "regressions": [], "observations": ["ok"],
             "iteration_criteria_results": [],
         }
@@ -467,7 +464,7 @@ class TestAnalystRetry:
     async def test_retry_on_schema_violation_then_succeed(self, mock_query, tmp_path):
         """First attempt returns JSON missing required fields, second is valid."""
         valid_analysis = {
-            "success_score": 50, "criteria_results": [], "key_metrics": {},
+            "criteria_results": [], "key_metrics": {},
             "improvements": [], "regressions": [], "observations": [],
             "iteration_criteria_results": [],
         }
@@ -523,7 +520,7 @@ class TestAnalystRetry:
     async def test_correction_hint_in_retry_prompt(self, mock_query, tmp_path):
         """On retry, the prompt should include a validation_error correction hint."""
         valid_analysis = {
-            "success_score": 50, "criteria_results": [], "key_metrics": {},
+            "criteria_results": [], "key_metrics": {},
             "improvements": [], "regressions": [], "observations": [],
             "iteration_criteria_results": [],
         }

@@ -91,7 +91,7 @@ class TestRunScientist:
         notebook_path.write_text("# Notebook content")
 
         result = await run_scientist(
-            analysis={"success_score": 50},
+            analysis={"observations": []},
             notebook_path=notebook_path,
             version="v01",
         )
@@ -304,7 +304,7 @@ class TestRunScientistCriteriaDefinition:
         notebook_path.write_text("# Notebook\n## v00 exploration results")
 
         result = await run_scientist(
-            analysis={"success_score": None, "observations": ["200 rows, polynomial shape"]},
+            analysis={"observations": ["200 rows, polynomial shape"]},
             notebook_path=notebook_path,
             version="v01",
         )
@@ -363,7 +363,7 @@ class TestRunScientistCriteriaRevision:
                              metric_key="r_squared", target_min=0.95),
         ]
         result = await run_scientist(
-            analysis={"success_score": 75},
+            analysis={"observations": []},
             notebook_path=notebook_path,
             version="v03",
             success_criteria=existing_criteria,
@@ -424,7 +424,7 @@ class TestRunScientistRevision:
         result = await run_scientist_revision(
             original_plan=SAMPLE_PLAN,
             debate_transcript=transcript,
-            analysis={"success_score": 50},
+            analysis={"observations": []},
             notebook_path=notebook_path,
             version="v01",
         )
