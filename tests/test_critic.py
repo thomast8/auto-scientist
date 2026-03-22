@@ -11,6 +11,8 @@ from auto_scientist.agents.critic import (
 )
 from auto_scientist.model_config import AgentModelConfig, ReasoningConfig
 
+SCIENTIST_SDK_PATH = "auto_scientist.agents.critic.collect_text_from_query"
+
 
 def _pad(text: str) -> str:
     """Pad a response to meet MIN_RESPONSE_LENGTH for tests."""
@@ -104,9 +106,9 @@ class TestRunDebate:
                 return_value=_pad("Initial critique"),
             ) as mock_openai,
             patch(
-                "auto_scientist.agents.critic.query_anthropic",
+                SCIENTIST_SDK_PATH,
                 new_callable=AsyncMock,
-            ) as mock_anthropic,
+            ) as mock_scientist,
         ):
             result = await run_debate(**base_kwargs, max_rounds=1)
 
@@ -116,7 +118,7 @@ class TestRunDebate:
         assert len(result[0]["transcript"]) == 1
         assert result[0]["transcript"][0]["role"] == "critic"
         mock_openai.assert_called_once()
-        mock_anthropic.assert_not_called()
+        mock_scientist.assert_not_called()
 
     @pytest.mark.asyncio
     async def test_two_rounds_calls_scientist_then_refines(self, base_kwargs):
@@ -128,20 +130,20 @@ class TestRunDebate:
                 side_effect=[_pad("Initial critique"), _pad("Refined critique")],
             ) as mock_openai,
             patch(
-                "auto_scientist.agents.critic.query_anthropic",
+                SCIENTIST_SDK_PATH,
                 new_callable=AsyncMock,
                 return_value=_pad("Scientist response"),
-            ) as mock_anthropic,
+            ) as mock_scientist,
         ):
             result = await run_debate(**base_kwargs, max_rounds=2)
 
         assert len(result) == 1
         assert "Refined critique" in result[0]["critique"]
         assert mock_openai.call_count == 2
-        mock_anthropic.assert_called_once()
+        mock_scientist.assert_called_once()
 
         # Scientist prompt should contain the initial critique
-        scientist_prompt = mock_anthropic.call_args[0][1]
+        scientist_prompt = mock_scientist.call_args[0][0]
         assert "Initial critique" in scientist_prompt
 
         # Round 2 critic prompt should contain the scientist's defense
@@ -158,16 +160,16 @@ class TestRunDebate:
                 side_effect=[_pad("Critique R1"), _pad("Critique R2"), _pad("Critique R3")],
             ) as mock_openai,
             patch(
-                "auto_scientist.agents.critic.query_anthropic",
+                SCIENTIST_SDK_PATH,
                 new_callable=AsyncMock,
                 side_effect=[_pad("Scientist R1"), _pad("Scientist R2")],
-            ) as mock_anthropic,
+            ) as mock_scientist,
         ):
             result = await run_debate(**base_kwargs, max_rounds=3)
 
         assert "Critique R3" in result[0]["critique"]
         assert mock_openai.call_count == 3
-        assert mock_anthropic.call_count == 2
+        assert mock_scientist.call_count == 2
 
     @pytest.mark.asyncio
     async def test_debate_returns_transcript(self, base_kwargs):
@@ -179,7 +181,7 @@ class TestRunDebate:
                 side_effect=[_pad("Critique R1"), _pad("Critique R2")],
             ),
             patch(
-                "auto_scientist.agents.critic.query_anthropic",
+                SCIENTIST_SDK_PATH,
                 new_callable=AsyncMock,
                 return_value=_pad("Scientist response"),
             ),
@@ -215,7 +217,7 @@ class TestRunDebate:
                 side_effect=[_pad("Google initial"), _pad("Google refined")],
             ),
             patch(
-                "auto_scientist.agents.critic.query_anthropic",
+                SCIENTIST_SDK_PATH,
                 new_callable=AsyncMock,
                 side_effect=[_pad("Scientist for OAI"), _pad("Scientist for Google")],
             ),
@@ -259,14 +261,14 @@ class TestRunDebate:
                 side_effect=[_pad("Critique"), _pad("Refined")],
             ),
             patch(
-                "auto_scientist.agents.critic.query_anthropic",
+                SCIENTIST_SDK_PATH,
                 new_callable=AsyncMock,
                 return_value=_pad("Response"),
-            ) as mock_anthropic,
+            ) as mock_scientist,
         ):
             await run_debate(**base_kwargs, max_rounds=2)
 
-        scientist_prompt = mock_anthropic.call_args[0][1]
+        scientist_prompt = mock_scientist.call_args[0][0]
         assert "<plan>" in scientist_prompt
         assert "Adjusting learning rate" in scientist_prompt
 
@@ -294,22 +296,22 @@ class TestRunDebate:
                 side_effect=[_pad("Critique"), _pad("Refined")],
             ) as mock_openai,
             patch(
-                "auto_scientist.agents.critic.query_anthropic",
+                SCIENTIST_SDK_PATH,
                 new_callable=AsyncMock,
                 return_value=_pad("Response"),
-            ) as mock_anthropic,
+            ) as mock_scientist,
         ):
             await run_debate(**base_kwargs, max_rounds=2)
 
         critic_prompt = mock_openai.call_args_list[0][0][1]
-        scientist_prompt = mock_anthropic.call_args[0][1]
+        scientist_prompt = mock_scientist.call_args[0][0]
 
         assert "Latest Analysis" not in critic_prompt
         assert "Current Script" not in scientist_prompt
 
     @pytest.mark.asyncio
     async def test_web_search_enabled(self, base_kwargs):
-        """Critic and scientist calls pass web_search=True."""
+        """Critic calls pass web_search=True; scientist gets WebSearch tool via SDK."""
         with (
             patch(
                 "auto_scientist.agents.critic.query_openai",
@@ -317,17 +319,19 @@ class TestRunDebate:
                 side_effect=[_pad("Critique"), _pad("Refined")],
             ) as mock_openai,
             patch(
-                "auto_scientist.agents.critic.query_anthropic",
+                SCIENTIST_SDK_PATH,
                 new_callable=AsyncMock,
                 return_value=_pad("Response"),
-            ) as mock_anthropic,
+            ) as mock_scientist,
         ):
             await run_debate(**base_kwargs, max_rounds=2)
 
         for call in mock_openai.call_args_list:
             assert call.kwargs.get("web_search") is True
 
-        assert mock_anthropic.call_args.kwargs.get("web_search") is True
+        # Scientist uses SDK with WebSearch tool (passed via ClaudeCodeOptions)
+        options = mock_scientist.call_args[0][1]
+        assert "WebSearch" in options.allowed_tools
 
     @pytest.mark.asyncio
     async def test_symmetric_context(self, base_kwargs):
@@ -339,15 +343,15 @@ class TestRunDebate:
                 side_effect=[_pad("Critique"), _pad("Refined")],
             ) as mock_openai,
             patch(
-                "auto_scientist.agents.critic.query_anthropic",
+                SCIENTIST_SDK_PATH,
                 new_callable=AsyncMock,
                 return_value=_pad("Response"),
-            ) as mock_anthropic,
+            ) as mock_scientist,
         ):
             await run_debate(**base_kwargs, max_rounds=2)
 
         critic_prompt = mock_openai.call_args_list[0][0][1]
-        scientist_prompt = mock_anthropic.call_args[0][1]
+        scientist_prompt = mock_scientist.call_args[0][0]
 
         assert "<notebook>" in critic_prompt
         assert "<notebook>" in scientist_prompt
@@ -362,22 +366,22 @@ class TestRunDebate:
                 side_effect=[_pad("Critique"), _pad("Refined")],
             ) as mock_openai,
             patch(
-                "auto_scientist.agents.critic.query_anthropic",
+                SCIENTIST_SDK_PATH,
                 new_callable=AsyncMock,
                 return_value=_pad("Response"),
-            ) as mock_anthropic,
+            ) as mock_scientist,
         ):
             await run_debate(**base_kwargs, max_rounds=2)
 
         critic_prompt = mock_openai.call_args_list[0][0][1]
-        scientist_prompt = mock_anthropic.call_args[0][1]
+        scientist_prompt = mock_scientist.call_args[0][0]
 
         assert "Experiment History" not in critic_prompt
         assert "Experiment History" not in scientist_prompt
 
     @pytest.mark.asyncio
     async def test_custom_scientist_config(self, base_kwargs):
-        """Scientist uses the specified model and reasoning from config."""
+        """Scientist uses the specified model from config via SDK options."""
         scientist = AgentModelConfig(model="claude-haiku-4-5-20251001")
         with (
             patch(
@@ -386,10 +390,10 @@ class TestRunDebate:
                 side_effect=[_pad("Critique"), _pad("Refined")],
             ),
             patch(
-                "auto_scientist.agents.critic.query_anthropic",
+                SCIENTIST_SDK_PATH,
                 new_callable=AsyncMock,
                 return_value=_pad("Response"),
-            ) as mock_anthropic,
+            ) as mock_scientist,
         ):
             await run_debate(
                 **base_kwargs,
@@ -397,7 +401,8 @@ class TestRunDebate:
                 scientist_config=scientist,
             )
 
-        assert mock_anthropic.call_args[0][0] == "claude-haiku-4-5-20251001"
+        options = mock_scientist.call_args[0][1]
+        assert options.model == "claude-haiku-4-5-20251001"
 
     @pytest.mark.asyncio
     async def test_unknown_provider_raises(self, plan):
@@ -456,8 +461,8 @@ class TestRunDebate:
 
 class TestRunDebateStreaming:
     @pytest.mark.asyncio
-    async def test_on_token_factory_called_with_labels(self, base_kwargs):
-        """Factory is called with correct labels for critic and scientist."""
+    async def test_on_token_factory_called_for_critics(self, base_kwargs):
+        """Factory is called with correct labels for critic rounds (not scientist, which uses SDK)."""
         labels_seen = []
 
         def factory(label):
@@ -471,21 +476,20 @@ class TestRunDebateStreaming:
                 side_effect=[_pad("Critique R1"), _pad("Critique R2")],
             ),
             patch(
-                "auto_scientist.agents.critic.query_anthropic",
+                SCIENTIST_SDK_PATH,
                 new_callable=AsyncMock,
                 return_value=_pad("Scientist response"),
             ),
         ):
             await run_debate(**base_kwargs, max_rounds=2, on_token_factory=factory)
 
-        assert len(labels_seen) == 3  # critic R1, scientist R1, critic R2
+        assert len(labels_seen) == 2  # critic R1, critic R2 (scientist uses SDK)
         assert "Critic" in labels_seen[0]
-        assert "Scientist" in labels_seen[1]
-        assert "Critic" in labels_seen[2]
+        assert "Critic" in labels_seen[1]
 
     @pytest.mark.asyncio
-    async def test_on_token_passed_to_model_clients(self, base_kwargs):
-        """The callback from factory is passed as on_token to model clients."""
+    async def test_on_token_passed_to_critic_clients(self, base_kwargs):
+        """The callback from factory is passed as on_token to critic model clients."""
         def mock_callback(token):
             pass
 
@@ -499,16 +503,15 @@ class TestRunDebateStreaming:
                 return_value=_pad("Critique"),
             ) as mock_openai,
             patch(
-                "auto_scientist.agents.critic.query_anthropic",
+                SCIENTIST_SDK_PATH,
                 new_callable=AsyncMock,
                 return_value=_pad("Response"),
-            ) as mock_anthropic,
+            ),
         ):
             await run_debate(**base_kwargs, max_rounds=2, on_token_factory=factory)
 
         for call in mock_openai.call_args_list:
             assert call.kwargs.get("on_token") is mock_callback
-        assert mock_anthropic.call_args.kwargs.get("on_token") is mock_callback
 
     @pytest.mark.asyncio
     async def test_no_factory_passes_none(self, base_kwargs):
@@ -542,8 +545,8 @@ class TestCriticRetry:
         assert mock_openai.call_count == 2
 
     @pytest.mark.asyncio
-    async def test_retry_on_empty_scientist_response(self, base_kwargs):
-        """Empty scientist debate response triggers retry."""
+    async def test_sdk_error_propagates_from_scientist(self, base_kwargs):
+        """SDK error in scientist debate response propagates up."""
         with (
             patch(
                 "auto_scientist.agents.critic.query_openai",
@@ -551,15 +554,13 @@ class TestCriticRetry:
                 side_effect=[_pad("Critique"), _pad("Refined")],
             ),
             patch(
-                "auto_scientist.agents.critic.query_anthropic",
+                SCIENTIST_SDK_PATH,
                 new_callable=AsyncMock,
-                side_effect=["", _pad("Valid defense")],
-            ) as mock_anthropic,
+                side_effect=RuntimeError("SDK error"),
+            ),
         ):
-            result = await run_debate(**base_kwargs, max_rounds=2)
-
-        assert mock_anthropic.call_count == 2
-        assert "Valid defense" in result[0]["transcript"][1]["content"]
+            with pytest.raises(RuntimeError, match="SDK error"):
+                await run_debate(**base_kwargs, max_rounds=2)
 
     @pytest.mark.asyncio
     async def test_exhausted_retries_uses_whatever_we_have(self, base_kwargs):

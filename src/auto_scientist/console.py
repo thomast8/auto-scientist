@@ -50,6 +50,22 @@ def _use_color() -> bool:
     return "NO_COLOR" not in os.environ
 
 
+def colorize(text: str, color: str) -> str:
+    """Wrap *text* in ANSI color codes, or return it unchanged if NO_COLOR is set."""
+    if not _use_color():
+        return text
+    return f"{color}{text}{RESET}"
+
+
+def score_color(score: int) -> str:
+    """Return an ANSI color for a 0-100 score: green >= 70, yellow >= 40, red < 40."""
+    if score >= 70:
+        return GREEN
+    if score >= 40:
+        return YELLOW
+    return RED
+
+
 # ---------------------------------------------------------------------------
 # Console log file tee (mirrors print_step / print_summary to a file)
 # ---------------------------------------------------------------------------

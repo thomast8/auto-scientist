@@ -19,6 +19,8 @@ import logging
 from collections.abc import Callable
 from typing import Any
 
+from claude_code_sdk import ClaudeCodeOptions
+
 from auto_scientist.console import stream_separator
 from auto_scientist.model_config import AgentModelConfig
 from auto_scientist.models.anthropic_client import query_anthropic
@@ -30,6 +32,7 @@ from auto_scientist.prompts.critic import (
     SCIENTIST_DEBATE_SYSTEM,
     SCIENTIST_DEBATE_USER,
 )
+from auto_scientist.sdk_utils import collect_text_from_query
 
 logger = logging.getLogger(__name__)
 
@@ -92,6 +95,7 @@ async def run_debate(
     plan: dict[str, Any],
     notebook_content: str,
     domain_knowledge: str = "",
+    success_criteria: str = "",
     max_rounds: int = 2,
     scientist_config: AgentModelConfig | None = None,
     on_token_factory: Callable[[str], Callable[[str], None]] | None = None,
@@ -104,13 +108,15 @@ async def run_debate(
     with the scientist's defense as additional context).
 
     Both Critic and Scientist receive symmetric context: the plan, notebook,
-    and domain knowledge. Neither sees the analysis JSON or experiment scripts.
+    domain knowledge, and success criteria. Neither sees the analysis JSON
+    or experiment scripts.
 
     Args:
         critic_configs: List of AgentModelConfig for each critic.
         plan: Scientist's plan dict (hypothesis, strategy, changes).
         notebook_content: Current lab notebook content.
         domain_knowledge: Domain-specific context.
+        success_criteria: Formatted top-level success criteria.
         max_rounds: Number of critique rounds (1 = no debate, 2 = default).
         scientist_config: Config for the Scientist's debate responses.
 
@@ -132,7 +138,8 @@ async def run_debate(
 
         # Round 1: initial critique (no defense context)
         critic_prompt = _build_critic_prompt(
-            plan, notebook_content, domain_knowledge
+            plan, notebook_content, domain_knowledge,
+            success_criteria=success_criteria,
         )
         on_token = on_token_factory(f"Critic ({label}) round 1") if on_token_factory else None
         critique_text = await _query_with_retry(
@@ -147,26 +154,23 @@ async def run_debate(
 
         # Rounds 2+: scientist responds, then critic critiques again (stateless)
         for round_num in range(1, max_rounds):
-            on_token = (
-                on_token_factory(f"Scientist round {round_num}")
-                if on_token_factory else None
+            scientist_user_prompt = _build_scientist_debate_user_prompt(
+                plan=plan,
+                notebook_content=notebook_content,
+                domain_knowledge=domain_knowledge,
+                success_criteria=success_criteria,
+                critique=critique_text,
             )
-            scientist_response = await _query_with_retry(
-                query_anthropic,
-                scientist_config.model,
-                _build_scientist_debate_prompt(
-                    plan=plan,
-                    notebook_content=notebook_content,
-                    domain_knowledge=domain_knowledge,
-                    critique=critique_text,
-                ),
-                web_search=True,
-                reasoning=scientist_config.reasoning,
-                on_token=on_token,
-                label=f"Scientist round {round_num}",
+            options = ClaudeCodeOptions(
+                system_prompt=SCIENTIST_DEBATE_SYSTEM,
+                allowed_tools=["WebSearch"],
+                max_turns=10,
+                model=scientist_config.model,
             )
-            if on_token:
-                stream_separator()
+            scientist_response = await collect_text_from_query(
+                scientist_user_prompt, options, message_buffer,
+                agent_name=f"Scientist debate round {round_num}",
+            )
             transcript.append({"role": "scientist", "content": scientist_response})
             if message_buffer is not None:
                 message_buffer.append(f"[Scientist] {scientist_response}")
@@ -174,6 +178,7 @@ async def run_debate(
             # Stateless: critic gets the defense but not their own prior critique
             critic_prompt = _build_critic_prompt(
                 plan, notebook_content, domain_knowledge,
+                success_criteria=success_criteria,
                 scientist_defense=scientist_response,
             )
             on_token = (
@@ -203,6 +208,7 @@ def _build_critic_prompt(
     plan: dict[str, Any],
     notebook_content: str,
     domain_knowledge: str,
+    success_criteria: str = "",
     scientist_defense: str = "",
 ) -> str:
     """Build the prompt sent to critic models.
@@ -219,6 +225,7 @@ def _build_critic_prompt(
 
     user = CRITIC_USER.format(
         domain_knowledge=domain_knowledge or "(none provided)",
+        success_criteria=success_criteria or "(none defined yet)",
         notebook_content=notebook_content or "(empty)",
         plan_json=json.dumps(plan, indent=2),
         scientist_defense=defense_section,
@@ -226,17 +233,18 @@ def _build_critic_prompt(
     return f"{CRITIC_SYSTEM}\n\n{user}"
 
 
-def _build_scientist_debate_prompt(
+def _build_scientist_debate_user_prompt(
     plan: dict[str, Any],
     notebook_content: str,
     domain_knowledge: str,
-    critique: str,
+    success_criteria: str = "",
+    critique: str = "",
 ) -> str:
-    """Build the prompt for the Scientist responding to a critique during debate."""
-    user = SCIENTIST_DEBATE_USER.format(
+    """Build the user prompt for the Scientist responding to a critique during debate."""
+    return SCIENTIST_DEBATE_USER.format(
         domain_knowledge=domain_knowledge or "(none provided)",
+        success_criteria=success_criteria or "(none defined yet)",
         notebook_content=notebook_content or "(empty)",
         plan_json=json.dumps(plan, indent=2),
         critique=critique,
     )
-    return f"{SCIENTIST_DEBATE_SYSTEM}\n\n{user}"

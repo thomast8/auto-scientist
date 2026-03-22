@@ -49,6 +49,7 @@ data or experiment code, so the debate stays at the strategic level.
 CRITIC_USER = """\
 <context>
 <domain_knowledge>{domain_knowledge}</domain_knowledge>
+<success_criteria>{success_criteria}</success_criteria>
 <notebook>{notebook_content}</notebook>
 </context>
 
@@ -101,6 +102,7 @@ debate, so focus on substance rather than posturing.
 SCIENTIST_DEBATE_USER = """\
 <context>
 <domain_knowledge>{domain_knowledge}</domain_knowledge>
+<success_criteria>{success_criteria}</success_criteria>
 <notebook>{notebook_content}</notebook>
 </context>
 

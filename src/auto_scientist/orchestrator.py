@@ -20,11 +20,13 @@ from auto_scientist.console import (
     YELLOW,
     _use_color,
     close_console_log,
+    colorize,
     init_console_log,
     print_header,
     print_iteration_header,
     print_step,
     print_summary,
+    score_color,
 )
 from auto_scientist.log_setup import setup_file_logging
 from auto_scientist.model_config import ModelConfig
@@ -328,7 +330,8 @@ class Orchestrator:
                 self.state.phase = "stopped"
                 self.state.save(state_path)
 
-            print_step(f"Experiment completed. Final state saved to {state_path}", color=GREEN)
+            status = colorize("completed", GREEN)
+            print_step(f"Experiment {status}. Final state saved to {state_path}")
             logger.info("Run finished successfully")
         finally:
             close_console_log()
@@ -457,7 +460,7 @@ class Orchestrator:
             self.state.record_failure()
             self.state.record_version(version_entry)
             print_step(f"\nITERATION {self.state.iteration} complete:", color=BOLD)
-            print_step(f"  Status:     {version_entry.status}", color=RED)
+            print_step(f"  Status:     {colorize(version_entry.status, RED)}")
             logger.info(
                 f"Iteration {self.state.iteration} complete: "
                 f"status=failed (coder produced no script)"
@@ -469,14 +472,13 @@ class Orchestrator:
         run_result = self._read_run_result(new_script.parent)
 
         if run_result.timed_out:
-            print_step("  RUN RESULT: timed out", color=RED)
+            print_step(f"  RUN RESULT: {colorize('timed out', RED)}")
         elif not run_result.success:
-            print_step(f"  RUN RESULT: failed (rc={run_result.return_code})", color=RED)
+            print_step(f"  RUN RESULT: {colorize(f'failed (rc={run_result.return_code})', RED)}")
         else:
             print_step(
-                f"  RUN RESULT: success "
-                f"({len(run_result.output_files)} output files)",
-                color=GREEN,
+                f"  RUN RESULT: {colorize('success', GREEN)} "
+                f"({len(run_result.output_files)} output files)"
             )
 
         # Results summary
@@ -509,13 +511,13 @@ class Orchestrator:
         print_step(f"\nITERATION {self.state.iteration} complete:", color=BOLD)
         if new_script:
             print_step(f"  Script:     {new_script}", color=DIM)
-        print_step(f"  Status:     {version_entry.status}", color=status_color)
+        print_step(f"  Status:     {colorize(version_entry.status, status_color)}")
         if version_entry.score is not None:
-            print_step(f"  Score:      {version_entry.score}", color=BOLD)
-        print_step(
-            f"  Best:       {self.state.best_version} (score {self.state.best_score})",
-            color=BOLD,
-        )
+            sc = score_color(version_entry.score)
+            print_step(f"  Score:      {colorize(str(version_entry.score), sc)}")
+        best = self.state.best_score
+        best_colored = colorize(str(best), score_color(best))
+        print_step(f"  Best:       {self.state.best_version} (score {best_colored})")
         if version_dir and version_dir.exists():
             suffixes = (".png", ".txt", ".json")
             artifacts = sorted(
@@ -779,14 +781,22 @@ class Orchestrator:
             return None
 
         from auto_scientist.agents.critic import run_debate
+        from auto_scientist.agents.scientist import _format_criteria_for_prompt
 
         notebook_content = self._notebook_content()
         domain_knowledge = self.state.domain_knowledge
+        success_criteria = _format_criteria_for_prompt(self.state.success_criteria)
         scientist_cfg = self.model_config.resolve("scientist")
 
         from auto_scientist.console import make_stream_printer
 
-        factory = make_stream_printer if self.stream else None
+        # Skip raw streaming when summaries are enabled; the summarizer
+        # already provides condensed progress updates for debate rounds.
+        factory = (
+            make_stream_printer
+            if self.stream and not self._should_summarize()
+            else None
+        )
 
         n_critics = len(self.model_config.critics)
         print_step(f"  DEBATE: {n_critics} critic(s), {self.debate_rounds} round(s)")
@@ -799,6 +809,7 @@ class Orchestrator:
                 plan=plan,
                 notebook_content=notebook_content,
                 domain_knowledge=domain_knowledge,
+                success_criteria=success_criteria,
                 max_rounds=self.debate_rounds,
                 scientist_config=scientist_cfg,
                 on_token_factory=factory,
@@ -1004,7 +1015,7 @@ class Orchestrator:
         if score > self.state.best_score:
             self.state.best_score = score
             self.state.best_version = latest.version
-        print_step(f"  SCORE: {score}", color=GREEN)
+        print_step(f"  SCORE: {colorize(str(score), score_color(score))}")
 
     async def _score_final_version(self) -> None:
         """Run the Analyst on the last version so it gets a score before report."""
