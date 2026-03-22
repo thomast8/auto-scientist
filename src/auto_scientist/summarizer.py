@@ -164,28 +164,24 @@ async def run_with_summaries(
     Returns:
         The result of the agent coroutine.
     """
-    last_summarized_index = 0
     elapsed = 0
 
     async def poll_loop():
-        nonlocal last_summarized_index, elapsed
+        nonlocal elapsed
         while True:
             await asyncio.sleep(interval)
             elapsed += interval
 
-            # Only summarize new content
-            if len(message_buffer) <= last_summarized_index:
+            if not message_buffer:
                 continue
 
-            new_content = "\n".join(message_buffer[last_summarized_index:])
-            last_summarized_index = len(message_buffer)
-
+            tail = "\n".join(message_buffer[-10:])
+            label = f"{int(elapsed)}s"
             try:
                 summary = await summarize_agent_output(
-                    agent_name, new_content, summary_model, progress=True,
+                    agent_name, tail, summary_model, progress=True,
                 )
                 if summary:
-                    label = f"{int(elapsed)}s"
                     print_summary(agent_name, summary, label=label)
             except Exception as e:
                 logger.warning(f"Periodic poll error for {agent_name}: {e}")
