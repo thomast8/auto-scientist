@@ -194,6 +194,33 @@ class TestValidatePrerequisites:
         with pytest.raises(RuntimeError, match="Claude Code CLI not found"):
             o._validate_prerequisites()
 
+    def test_non_anthropic_sdk_agent_rejected(self, tmp_path, monkeypatch):
+        """SDK agents (analyst, coder, etc.) must use Anthropic models."""
+        data = tmp_path / "data.csv"
+        data.write_text("x")
+        monkeypatch.setattr("auto_scientist.orchestrator._check_provider_auth", self._mock_auth_ok)
+        monkeypatch.setattr("shutil.which", lambda name: "/usr/bin/claude")
+        mc = ModelConfig(
+            defaults=AgentModelConfig(provider="google", model="gemini-3.1-flash-lite-preview"),
+            critics=[],
+        )
+        o = self._make_orchestrator(tmp_path, data_path=data, mc=mc)
+        with pytest.raises(RuntimeError, match="require provider 'anthropic'"):
+            o._validate_prerequisites()
+
+    def test_non_anthropic_critic_allowed(self, tmp_path, monkeypatch):
+        """Critics can use non-Anthropic models."""
+        data = tmp_path / "data.csv"
+        data.write_text("x")
+        monkeypatch.setattr("auto_scientist.orchestrator._check_provider_auth", self._mock_auth_ok)
+        monkeypatch.setattr("shutil.which", lambda name: "/usr/bin/claude")
+        mc = ModelConfig(
+            defaults=AgentModelConfig(model="claude-sonnet-4-6"),
+            critics=[AgentModelConfig(provider="google", model="gemini-2.5-pro")],
+        )
+        o = self._make_orchestrator(tmp_path, data_path=data, mc=mc)
+        o._validate_prerequisites()  # should not raise
+
 
 class TestEvaluate:
     def test_none_result_records_failure(self, orchestrator):

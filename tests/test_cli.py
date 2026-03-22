@@ -81,7 +81,7 @@ class TestRunCommandPresets:
 
         assert result.exit_code == 0
         mc = mock_orch.call_args.kwargs["model_config"]
-        assert mc.defaults.model == "claude-haiku-4-5"
+        assert mc.defaults.model == "claude-haiku-4-5-20251001"
 
     @patch("auto_scientist.cli.asyncio.run")
     @patch("auto_scientist.cli.Orchestrator")
@@ -286,4 +286,4 @@ class TestResumeCommand:
 
         assert result.exit_code == 0
         loaded_mc = mock_orch.call_args.kwargs["model_config"]
-        assert loaded_mc.defaults.model == "claude-haiku-4-5"
+        assert loaded_mc.defaults.model == "claude-haiku-4-5-20251001"

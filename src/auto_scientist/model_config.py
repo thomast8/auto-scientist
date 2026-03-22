@@ -46,8 +46,12 @@ BUILTIN_PRESETS: dict[str, dict] = {
         ],
     },
     "fast": {
-        "defaults": {"model": "claude-haiku-4-5"},
+        "defaults": {"model": "claude-haiku-4-5-20251001"},
         "summarizer": {"provider": "openai", "model": "gpt-5.4-nano"},
+        "critics": [
+            {"provider": "google", "model": "gemini-3.1-flash-lite-preview"},
+            {"provider": "openai", "model": "gpt-5.4-nano"},
+        ],
     },
 }
 

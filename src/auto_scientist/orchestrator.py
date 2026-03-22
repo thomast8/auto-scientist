@@ -123,8 +123,19 @@ class Orchestrator:
                 "Install with: npm install -g @anthropic-ai/claude-code"
             )
 
-        # Collect required providers from model config
+        # SDK agents must use Anthropic models (they run through claude CLI)
         mc = self.model_config
+        sdk_agents = ["analyst", "scientist", "coder", "ingestor", "report"]
+        for agent_name in sdk_agents:
+            cfg = mc.resolve(agent_name)
+            if cfg.provider != "anthropic":
+                errors.append(
+                    f"{agent_name} uses provider '{cfg.provider}' (model: {cfg.model}), "
+                    f"but SDK agents require provider 'anthropic'. "
+                    f"Non-Anthropic models can only be used for critics and summarizer."
+                )
+
+        # Collect required providers from model config
         required_providers: set[str] = set()
 
         # Claude Code SDK powers all main agents, always needs Anthropic

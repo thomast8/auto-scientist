@@ -108,7 +108,7 @@ class TestBuiltinPresets:
 
     def test_fast_preset(self):
         mc = ModelConfig.builtin_preset("fast")
-        assert mc.defaults.model == "claude-haiku-4-5"
+        assert mc.defaults.model == "claude-haiku-4-5-20251001"
         assert mc.summarizer is not None
         assert mc.summarizer.provider == "openai"
         assert mc.summarizer.model == "gpt-5.4-nano"
@@ -118,7 +118,7 @@ class TestBuiltinPresets:
         mc = ModelConfig.builtin_preset("fast")
         for agent in ["analyst", "scientist", "coder", "ingestor", "report"]:
             cfg = mc.resolve(agent)
-            assert cfg.model == "claude-haiku-4-5"
+            assert cfg.model == "claude-haiku-4-5-20251001"
             assert cfg.reasoning.level == "default"
 
     def test_nonexistent_preset_raises(self):
