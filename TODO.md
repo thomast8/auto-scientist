@@ -7,6 +7,7 @@
 
 ## Completed
 
+- [x] Agent output validation + retry: Pydantic models for Analyst/Scientist JSON outputs, validation + retry (3 attempts) for JSON agents, syntax check + retry for Coder, data/content validation + retry for Ingestor/Report, provider-native structured output (Anthropic tool_use, OpenAI json_schema, Google response_schema) with direct API path for Scientist - 2026-03-22
 - [x] Retrospective notebook entries: Scientist reflects on investigation arc (breakthroughs, dead ends, diagnostic indicators) alongside forward-looking plans; synthesis module removed (redundant with 1M context windows + self-compressing retrospective entries) - 2026-03-18
 - [x] Debate restructuring: Scientist replaces Defender, critique flows back to Scientist for revision, compressed history removed - 2026-03-17
 - [x] Per-iteration success criteria: Scientist defines testable predictions, Coder evaluates in script, Analyst reports both tiers - 2026-03-14
