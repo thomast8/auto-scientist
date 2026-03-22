@@ -49,8 +49,9 @@ SUMMARY_PROMPTS: dict[str, str] = {
     ),
     "Debate": (
         "You are summarizing a Debate phase's output. "
-        "Focus on: what is being challenged and what positions are forming? "
-        "What changed as a result?"
+        "Messages are prefixed [Critic] or [Scientist]. "
+        "Always lead with who is speaking (Critic: ... / Scientist: ...). "
+        "Focus on: what is being challenged and what positions are forming?"
     ),
     "Coder": (
         "You are summarizing a Coder agent's output. "

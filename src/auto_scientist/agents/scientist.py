@@ -241,6 +241,7 @@ async def run_scientist(
         allowed_tools=["WebSearch"],
         max_turns=10,
         model=model,
+        extra_args={"setting-sources": ""},
     )
 
     correction_hint = ""
@@ -326,6 +327,7 @@ async def run_scientist_revision(
         allowed_tools=["WebSearch"],
         max_turns=10,
         model=model,
+        extra_args={"setting-sources": ""},
     )
 
     correction_hint = ""

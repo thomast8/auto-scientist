@@ -182,7 +182,7 @@ async def run_analyst(
         permission_mode="acceptEdits",
         cwd=cwd,
         model=model,
-        extra_args={"bare": None},
+        extra_args={"setting-sources": ""},
     )
 
     correction_hint = ""

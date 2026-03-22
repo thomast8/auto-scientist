@@ -65,14 +65,25 @@ See [docs/architecture.md](docs/architecture.md) for the full specification.
 
 ## Status
 
-This project is under active development. Current state:
-- [x] Project scaffold and structure
-- [ ] Runner + Scheduler + History
-- [ ] Analyst Agent
-- [x] Critic (multi-model, multi-round debate)
-- [ ] Scientist Agent
-- [ ] Orchestrator + Iteration Loop
-- [ ] Discovery Agent
-- [ ] Report Agent
-- [ ] SpO2 domain integration
-- [ ] CLI polish
+This project is in **alpha** (v0.1.0-alpha). The core pipeline works end-to-end but expect breaking changes.
+
+### Implemented
+- [x] Project scaffold, CLI, and state machine
+- [x] Ingestor agent (data canonicalization with human-in-the-loop)
+- [x] Analyst agent (structured observation, no recommendations)
+- [x] Scientist agent (pure prompt-in/JSON-out planning)
+- [x] Critic agent (multi-model, multi-round debate with web search)
+- [x] Coder agent (experiment implementation with error correction)
+- [x] Report agent (final summary generation)
+- [x] Orchestrator with adaptive iteration loop
+- [x] Two-tier success criteria (top-level + per-iteration)
+- [x] Strict information boundaries (only Coder sees code)
+- [x] Retrospective notebook entries
+- [x] Multi-provider LLM support (OpenAI, Anthropic, Google)
+- [x] Agent output validation with structured output and retry
+- [x] Pre-flight model validation with user-friendly error messages
+
+### Planned
+- [ ] Interactive report visualizations (HTML charts, explorable data views)
+- [ ] Redis + Celery integration (state store, caching, task queue)
+- [ ] Criteria revision reliability improvements

@@ -166,6 +166,7 @@ async def run_debate(
                 allowed_tools=["WebSearch"],
                 max_turns=10,
                 model=scientist_config.model,
+                extra_args={"setting-sources": ""},
             )
             scientist_response = await collect_text_from_query(
                 scientist_user_prompt, options, message_buffer,

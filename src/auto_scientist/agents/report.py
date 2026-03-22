@@ -60,6 +60,7 @@ async def run_report(
         permission_mode="acceptEdits",
         cwd=output_dir,
         model=model,
+        extra_args={"setting-sources": ""},
     )
 
     correction_hint = ""

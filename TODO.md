@@ -3,6 +3,7 @@
 ## Future
 
 - [ ] Criteria revision reliability: In toy_function_022, v02 regressed (score 17 from 33) but criteria revision was never triggered because the loop hit max iterations before the Scientist could see the regression analysis. Investigate whether (a) the iteration budget is too tight, (b) the Scientist needs stronger prompting to revise criteria on regression, or (c) the mechanism needs restructuring (e.g., automatic revision consideration after score drops). Needs more data from runs to confirm the pattern.
+- [ ] Interactive report visualizations: Evolve the report phase to generate interactive HTML visualizations (charts, explorable data views). This likely requires a dedicated post-report sub-pipeline (Analyst to identify what to visualize, Coder to generate the data/JS), or a new "visualization" agent. Scope and approach TBD.
 - [ ] Redis + Celery integration: Redis for state store (replace JSON), LLM response caching, pub/sub progress events; Celery (with Redis as broker) for experiment runner tasks and critic fan-out via group/chord; Docker Compose for infrastructure (Redis, Celery worker, Flower monitoring); graceful degradation to current local-only mode when infra not running
 
 ## Completed
