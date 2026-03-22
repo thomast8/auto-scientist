@@ -45,6 +45,26 @@ BUILTIN_PRESETS: dict[str, dict] = {
             {"provider": "openai", "model": "gpt-5.4"},
         ],
     },
+    "high": {
+        "defaults": {"model": "claude-sonnet-4-6"},
+        "analyst": {"model": "claude-opus-4-6", "reasoning": "high"},
+        "scientist": {"model": "claude-opus-4-6", "reasoning": "high"},
+        "summarizer": {"provider": "openai", "model": "gpt-5.4-nano"},
+        "critics": [
+            {"provider": "google", "model": "gemini-3.1-pro-preview", "reasoning": "high"},
+            {"provider": "openai", "model": "gpt-5.4", "reasoning": "high"},
+        ],
+    },
+    "max": {
+        "defaults": {"model": "claude-opus-4-6", "reasoning": "high"},
+        "analyst": {"model": "claude-opus-4-6", "reasoning": "max"},
+        "scientist": {"model": "claude-opus-4-6", "reasoning": "max"},
+        "summarizer": {"provider": "openai", "model": "gpt-5.4-mini"},
+        "critics": [
+            {"provider": "google", "model": "gemini-3.1-pro-preview", "reasoning": "max"},
+            {"provider": "openai", "model": "gpt-5.4", "reasoning": "max"},
+        ],
+    },
     "fast": {
         "defaults": {"model": "claude-haiku-4-5-20251001"},
         "summarizer": {"provider": "openai", "model": "gpt-5.4-nano"},

@@ -19,7 +19,7 @@ OPENAI_EFFORT_MAP: dict[str, str] = {
     "low": "low",
     "medium": "medium",
     "high": "high",
-    "max": "high",
+    "max": "xhigh",
 }
 
 

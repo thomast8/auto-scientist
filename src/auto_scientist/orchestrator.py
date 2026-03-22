@@ -29,7 +29,7 @@ from auto_scientist.console import (
     score_color,
 )
 from auto_scientist.log_setup import setup_file_logging
-from auto_scientist.model_config import ModelConfig
+from auto_scientist.model_config import AgentModelConfig, ModelConfig
 from auto_scientist.notebook import NOTEBOOK_FILENAME, append_entry, read_notebook
 from auto_scientist.runner import RunResult
 from auto_scientist.scheduler import wait_for_window
@@ -63,6 +63,80 @@ def _check_provider_auth(provider: str) -> str | None:
         return None
     else:
         return f"Unknown provider: {provider}"
+
+
+def _validate_reasoning_configs(mc: ModelConfig) -> list[str]:
+    """Validate reasoning configs are compatible with their provider and model.
+
+    Returns a list of error messages for invalid configurations.
+    """
+    from auto_scientist.models.anthropic_client import ANTHROPIC_BUDGET_DEFAULTS
+    from auto_scientist.models.google_client import GOOGLE_LEVEL_MAP
+    from auto_scientist.models.openai_client import OPENAI_EFFORT_MAP
+
+    errors: list[str] = []
+
+    # Collect (agent_name, AgentModelConfig) pairs
+    entries: list[tuple[str, AgentModelConfig]] = []
+    for agent_name in ["analyst", "scientist", "coder", "ingestor", "report", "summarizer"]:
+        entries.append((agent_name, mc.resolve(agent_name)))
+    for i, critic in enumerate(mc.critics):
+        entries.append((f"critic[{i}]", critic))
+
+    for agent_name, cfg in entries:
+        r = cfg.reasoning
+        if r.level in ("default", "off"):
+            continue
+
+        label = f"{agent_name} ({cfg.provider}/{cfg.model}, reasoning={r.level})"
+
+        if cfg.provider == "anthropic":
+            budget = r.budget or ANTHROPIC_BUDGET_DEFAULTS.get(r.level)
+            if budget is None:
+                errors.append(
+                    f"{label}: no budget_tokens mapping for level '{r.level}'"
+                )
+            elif budget < 1024:
+                errors.append(
+                    f"{label}: budget_tokens={budget} is below Anthropic minimum (1024)"
+                )
+            elif budget > 128_000:
+                errors.append(
+                    f"{label}: budget_tokens={budget} exceeds Anthropic maximum (128000)"
+                )
+
+        elif cfg.provider == "openai":
+            effort = OPENAI_EFFORT_MAP.get(r.level)
+            if effort is None:
+                errors.append(
+                    f"{label}: no reasoning effort mapping for level '{r.level}'"
+                )
+
+        elif cfg.provider == "google":
+            model = cfg.model
+            is_3x = "3" in model and "2.5" not in model and "2.0" not in model
+            is_25 = "2.5" in model
+
+            if is_3x:
+                mapped = GOOGLE_LEVEL_MAP.get(r.level)
+                if mapped is None:
+                    errors.append(
+                        f"{label}: no thinkingLevel mapping for level '{r.level}'"
+                    )
+                elif mapped in ("MINIMAL", "MEDIUM") and "flash" not in model.lower():
+                    errors.append(
+                        f"{label}: thinkingLevel={mapped} is only valid for Gemini 3 Flash models"
+                    )
+            elif is_25:
+                # Budget-based; just verify we have a default
+                if r.budget is None:
+                    from auto_scientist.models.google_client import GOOGLE_BUDGET_DEFAULTS
+                    if r.level not in GOOGLE_BUDGET_DEFAULTS:
+                        errors.append(
+                            f"{label}: no thinkingBudget mapping for level '{r.level}'"
+                        )
+
+    return errors
 
 
 def _validate_model_names(mc: ModelConfig) -> list[str]:
@@ -229,6 +303,10 @@ class Orchestrator:
         # Validate model names against provider APIs
         model_errors = _validate_model_names(mc)
         errors.extend(model_errors)
+
+        # Validate reasoning configs against provider constraints
+        reasoning_errors = _validate_reasoning_configs(mc)
+        errors.extend(reasoning_errors)
 
         # Collect required providers from model config
         required_providers: set[str] = set()

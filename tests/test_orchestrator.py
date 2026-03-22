@@ -6,7 +6,7 @@ from unittest.mock import AsyncMock, patch
 import pytest
 
 from auto_scientist.config import DomainConfig, SuccessCriterion
-from auto_scientist.model_config import AgentModelConfig, ModelConfig
+from auto_scientist.model_config import AgentModelConfig, ModelConfig, ReasoningConfig
 from auto_scientist.orchestrator import Orchestrator
 from auto_scientist.runner import RunResult
 from auto_scientist.state import ExperimentState, VersionEntry
@@ -69,9 +69,12 @@ class TestValidatePrerequisites:
 
     @pytest.fixture(autouse=True)
     def _skip_model_validation(self, monkeypatch):
-        """Skip model name API validation in prerequisite tests."""
+        """Skip model name and reasoning API validation in prerequisite tests."""
         monkeypatch.setattr(
             "auto_scientist.orchestrator._validate_model_names", lambda mc: [],
+        )
+        monkeypatch.setattr(
+            "auto_scientist.orchestrator._validate_reasoning_configs", lambda mc: [],
         )
 
     def _make_orchestrator(self, tmp_path, state=None, data_path=_SENTINEL, mc=None):
@@ -281,6 +284,108 @@ class TestValidateModelNames:
         _validate_model_names(mc)
         # All 5 SDK agents use defaults, so only 1 unique check
         assert call_count == 1
+
+
+class TestValidateReasoningConfigs:
+    """Test reasoning config validation against provider constraints."""
+
+    def test_valid_anthropic_reasoning_returns_no_errors(self):
+        from auto_scientist.orchestrator import _validate_reasoning_configs
+
+        mc = ModelConfig(
+            defaults=AgentModelConfig(model="claude-sonnet-4-6", reasoning=ReasoningConfig(level="high")),
+            critics=[],
+        )
+        errors = _validate_reasoning_configs(mc)
+        assert errors == []
+
+    def test_valid_openai_reasoning_returns_no_errors(self):
+        from auto_scientist.orchestrator import _validate_reasoning_configs
+
+        mc = ModelConfig(
+            defaults=AgentModelConfig(model="claude-sonnet-4-6"),
+            critics=[AgentModelConfig(provider="openai", model="gpt-5.4", reasoning=ReasoningConfig(level="high"))],
+        )
+        errors = _validate_reasoning_configs(mc)
+        assert errors == []
+
+    def test_valid_google_3x_reasoning_returns_no_errors(self):
+        from auto_scientist.orchestrator import _validate_reasoning_configs
+
+        mc = ModelConfig(
+            defaults=AgentModelConfig(model="claude-sonnet-4-6"),
+            critics=[AgentModelConfig(provider="google", model="gemini-3.1-pro-preview", reasoning=ReasoningConfig(level="high"))],
+        )
+        errors = _validate_reasoning_configs(mc)
+        assert errors == []
+
+    def test_google_3x_medium_only_flash(self):
+        """MEDIUM thinkingLevel is only valid for Gemini 3 Flash models."""
+        from auto_scientist.orchestrator import _validate_reasoning_configs
+
+        mc = ModelConfig(
+            defaults=AgentModelConfig(model="claude-sonnet-4-6"),
+            critics=[AgentModelConfig(provider="google", model="gemini-3.1-pro-preview", reasoning=ReasoningConfig(level="medium"))],
+        )
+        errors = _validate_reasoning_configs(mc)
+        assert len(errors) == 1
+        assert "MEDIUM" in errors[0]
+        assert "Flash" in errors[0]
+
+    def test_google_3x_minimal_only_flash(self):
+        """MINIMAL thinkingLevel is only valid for Gemini 3 Flash models."""
+        from auto_scientist.orchestrator import _validate_reasoning_configs
+
+        mc = ModelConfig(
+            defaults=AgentModelConfig(model="claude-sonnet-4-6"),
+            critics=[AgentModelConfig(provider="google", model="gemini-3-flash-preview", reasoning=ReasoningConfig(level="minimal"))],
+        )
+        errors = _validate_reasoning_configs(mc)
+        assert errors == []
+
+    def test_default_and_off_skip_validation(self):
+        from auto_scientist.orchestrator import _validate_reasoning_configs
+
+        mc = ModelConfig(
+            defaults=AgentModelConfig(model="claude-sonnet-4-6", reasoning=ReasoningConfig(level="default")),
+            critics=[AgentModelConfig(provider="openai", model="gpt-5.4", reasoning=ReasoningConfig(level="off"))],
+        )
+        errors = _validate_reasoning_configs(mc)
+        assert errors == []
+
+    def test_all_builtin_presets_pass_validation(self):
+        from auto_scientist.orchestrator import _validate_reasoning_configs
+
+        for preset_name in ["default", "fast", "high", "max"]:
+            mc = ModelConfig.builtin_preset(preset_name)
+            errors = _validate_reasoning_configs(mc)
+            assert errors == [], f"Preset '{preset_name}' has reasoning errors: {errors}"
+
+    def test_anthropic_budget_too_low_returns_error(self):
+        from auto_scientist.orchestrator import _validate_reasoning_configs
+
+        mc = ModelConfig(
+            defaults=AgentModelConfig(model="claude-sonnet-4-6"),
+            analyst=AgentModelConfig(model="claude-sonnet-4-6", reasoning=ReasoningConfig(level="high", budget=50)),
+            critics=[],
+        )
+        errors = _validate_reasoning_configs(mc)
+        assert len(errors) == 1
+        assert "budget_tokens" in errors[0]
+        assert "below" in errors[0]
+
+    def test_anthropic_budget_too_high_returns_error(self):
+        from auto_scientist.orchestrator import _validate_reasoning_configs
+
+        mc = ModelConfig(
+            defaults=AgentModelConfig(model="claude-sonnet-4-6"),
+            analyst=AgentModelConfig(model="claude-sonnet-4-6", reasoning=ReasoningConfig(level="high", budget=200_000)),
+            critics=[],
+        )
+        errors = _validate_reasoning_configs(mc)
+        assert len(errors) == 1
+        assert "budget_tokens" in errors[0]
+        assert "exceeds" in errors[0]
 
 
 class TestEvaluate:
