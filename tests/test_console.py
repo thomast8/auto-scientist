@@ -100,8 +100,14 @@ class TestPrintSummary:
         # No brackets when label is empty (check without ANSI codes)
         assert "[" not in captured.out
 
-    def test_truncates_long_text(self, capsys):
+    def test_truncates_long_progress_text(self, capsys):
         long_text = "x" * 250
+        print_summary("Analyst", long_text, label="15s")
+        captured = capsys.readouterr()
+        assert "..." in captured.out
+
+    def test_truncates_long_final_text(self, capsys):
+        long_text = "x" * 450
         print_summary("Analyst", long_text, label="done")
         captured = capsys.readouterr()
         assert "..." in captured.out

@@ -23,8 +23,9 @@ PROGRESS_PREFIX = (
     "Use present participle (-ing) voice: 'Inspecting...', 'Writing...', 'Computing...'."
 )
 FINAL_PREFIX = (
-    "Reply with ONE sentence, max 15 words. "
-    "Use past tense: 'Ingested...', 'Wrote...', 'Computed...'."
+    "Reply with 2-3 sentences, max 40 words total. "
+    "Use past tense. First sentence: the main outcome. "
+    "Remaining sentences: key metrics, notable findings, or comparisons to prior iterations."
 )
 
 SUMMARY_PROMPTS: dict[str, str] = {
@@ -70,14 +71,16 @@ SUMMARY_PROMPTS: dict[str, str] = {
 }
 
 
-async def _query_summary(model: str, instructions: str, input_text: str) -> str:
+async def _query_summary(
+    model: str, instructions: str, input_text: str, *, max_tokens: int = 60,
+) -> str:
     """Call the OpenAI Responses API for a short summary."""
     client = AsyncOpenAI()
     response = await client.responses.create(
         model=model,
         instructions=instructions,
         input=input_text,
-        max_output_tokens=60,
+        max_output_tokens=max_tokens,
     )
     return response.output_text or ""
 
@@ -108,7 +111,10 @@ async def summarize_agent_output(
         instruction = SUMMARY_PROMPTS.get(agent_name, fallback)
         prefix = PROGRESS_PREFIX if progress else FINAL_PREFIX
         instructions = f"{instruction}\n\n{prefix}"
-        return await _query_summary(model, instructions, f"Agent output:\n{output}")
+        max_tokens = 60 if progress else 150
+        return await _query_summary(
+            model, instructions, f"Agent output:\n{output}", max_tokens=max_tokens,
+        )
     except Exception as e:
         logger.warning(f"Error summarizing {agent_name}: {e}")
         return ""
@@ -133,7 +139,9 @@ async def summarize_results(
     try:
         instruction = SUMMARY_PROMPTS["Results"]
         instructions = f"{instruction}\n\n{FINAL_PREFIX}"
-        return await _query_summary(model, instructions, f"Results:\n{results_text}")
+        return await _query_summary(
+            model, instructions, f"Results:\n{results_text}", max_tokens=150,
+        )
     except Exception as e:
         logger.warning(f"Error summarizing results: {e}")
         return ""

@@ -248,8 +248,9 @@ def print_summary(agent_name: str, summary: str, label: str = "") -> None:
 
     # Clean up: collapse whitespace, strip to one line
     summary = " ".join(summary.split())
-    if len(summary) > 200:
-        summary = summary[:197] + "..."
+    max_len = 400 if label == "done" else 200
+    if len(summary) > max_len:
+        summary = summary[:max_len - 3] + "..."
 
     prefix = f"  > [{label}] " if label else "  > "
     line = _wrap(f"{prefix}{summary}", subsequent_indent=" " * len(prefix))
