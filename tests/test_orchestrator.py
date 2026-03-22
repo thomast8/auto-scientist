@@ -67,6 +67,13 @@ class TestValidatePrerequisites:
 
     _SENTINEL = object()
 
+    @pytest.fixture(autouse=True)
+    def _skip_model_validation(self, monkeypatch):
+        """Skip model name API validation in prerequisite tests."""
+        monkeypatch.setattr(
+            "auto_scientist.orchestrator._validate_model_names", lambda mc: [],
+        )
+
     def _make_orchestrator(self, tmp_path, state=None, data_path=_SENTINEL, mc=None):
         s = state or ExperimentState(domain="test", goal="g", phase="ingestion")
         dp = tmp_path / "data.csv" if data_path is self._SENTINEL else data_path
@@ -220,6 +227,60 @@ class TestValidatePrerequisites:
         )
         o = self._make_orchestrator(tmp_path, data_path=data, mc=mc)
         o._validate_prerequisites()  # should not raise
+
+
+class TestValidateModelNames:
+    """Test model name validation against provider APIs."""
+
+    def test_invalid_model_returns_error(self, monkeypatch):
+        monkeypatch.setattr(
+            "auto_scientist.orchestrator._check_model_exists",
+            lambda provider, model: "not found" if model == "bad-model" else None,
+        )
+        from auto_scientist.orchestrator import _validate_model_names
+
+        mc = ModelConfig(
+            defaults=AgentModelConfig(model="bad-model"),
+            critics=[],
+        )
+        errors = _validate_model_names(mc)
+        assert len(errors) == 1
+        assert "bad-model" in errors[0]
+        assert "not found" in errors[0]
+
+    def test_valid_models_return_no_errors(self, monkeypatch):
+        monkeypatch.setattr(
+            "auto_scientist.orchestrator._check_model_exists",
+            lambda provider, model: None,
+        )
+        from auto_scientist.orchestrator import _validate_model_names
+
+        mc = ModelConfig(
+            defaults=AgentModelConfig(model="claude-sonnet-4-6"),
+            critics=[AgentModelConfig(provider="openai", model="gpt-5.4")],
+        )
+        errors = _validate_model_names(mc)
+        assert errors == []
+
+    def test_deduplicates_same_model(self, monkeypatch):
+        """Same model used by multiple agents should only be checked once."""
+        call_count = 0
+
+        def mock_check(provider, model):
+            nonlocal call_count
+            call_count += 1
+            return None
+
+        monkeypatch.setattr("auto_scientist.orchestrator._check_model_exists", mock_check)
+        from auto_scientist.orchestrator import _validate_model_names
+
+        mc = ModelConfig(
+            defaults=AgentModelConfig(model="claude-sonnet-4-6"),
+            critics=[],
+        )
+        _validate_model_names(mc)
+        # All 5 SDK agents use defaults, so only 1 unique check
+        assert call_count == 1
 
 
 class TestEvaluate:

@@ -63,6 +63,72 @@ def _check_provider_auth(provider: str) -> str | None:
         return f"Unknown provider: {provider}"
 
 
+def _validate_model_names(mc: ModelConfig) -> list[str]:
+    """Validate all configured model names against their provider APIs.
+
+    Returns a list of error messages for invalid models.
+    """
+    errors: list[str] = []
+
+    # Collect unique (provider, model) pairs to avoid duplicate checks
+    pairs: dict[tuple[str, str], list[str]] = {}
+    for agent_name in ["analyst", "scientist", "coder", "ingestor", "report"]:
+        cfg = mc.resolve(agent_name)
+        key = (cfg.provider, cfg.model)
+        pairs.setdefault(key, []).append(agent_name)
+
+    for critic in mc.critics:
+        key = (critic.provider, critic.model)
+        pairs.setdefault(key, []).append("critic")
+
+    if mc.summarizer:
+        key = (mc.summarizer.provider, mc.summarizer.model)
+        pairs.setdefault(key, []).append("summarizer")
+
+    for (provider, model), agents in pairs.items():
+        err = _check_model_exists(provider, model)
+        if err:
+            agent_list = ", ".join(sorted(set(agents)))
+            errors.append(f"Model '{model}' ({provider}) not found (used by: {agent_list}): {err}")
+
+    return errors
+
+
+def _check_model_exists(provider: str, model: str) -> str | None:
+    """Check if a model exists by querying the provider API.
+
+    Returns an error message if the model doesn't exist, None if it does.
+    """
+    if provider == "anthropic":
+        try:
+            from anthropic import Anthropic
+
+            client = Anthropic()
+            client.models.retrieve(model)
+            return None
+        except Exception as e:
+            return str(e)
+    elif provider == "openai":
+        try:
+            from openai import OpenAI
+
+            client = OpenAI()
+            client.models.retrieve(model)
+            return None
+        except Exception as e:
+            return str(e)
+    elif provider == "google":
+        try:
+            from google import genai
+
+            client = genai.Client()
+            client.models.get(model=model)
+            return None
+        except Exception as e:
+            return str(e)
+    return None  # unknown provider, skip validation
+
+
 class Orchestrator:
     """Drives the Ingestion -> Iteration -> Report pipeline.
 
@@ -134,6 +200,10 @@ class Orchestrator:
                     f"but SDK agents require provider 'anthropic'. "
                     f"Non-Anthropic models can only be used for critics and summarizer."
                 )
+
+        # Validate model names against provider APIs
+        model_errors = _validate_model_names(mc)
+        errors.extend(model_errors)
 
         # Collect required providers from model config
         required_providers: set[str] = set()
