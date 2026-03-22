@@ -17,8 +17,9 @@ What you receive:
   changes, and success criteria
 - The previous iteration's script (if any) to build on
 - A data path: an absolute path to a directory containing canonical data
-  files prepared by the Ingestor. Discover what is inside (CSV, SQLite,
-  Parquet, images, etc.) and load accordingly.
+  files prepared by the Ingestor. The previous script (if any) already
+  loads the data correctly; reuse its loading code. For the first
+  iteration, list the data directory once to see what files are available.
 
 What you produce:
 - A self-contained Python script run via `uv run script.py`. The script
@@ -102,6 +103,14 @@ plan as given.
     in the same directory as the script:
     {{"success": true/false, "return_code": N, "timed_out": true/false,
      "error": "..." or null, "attempts": N}}
+
+14. Always run the script in the foreground (synchronously). Never use
+    background execution (`&`), `nohup`, or `sleep` to wait for results.
+    These scripts process small datasets and finish in seconds.
+
+15. Be concise. Do not write long summaries or status reports in your text
+    output. Your deliverables are the script, results.txt, plots, and
+    run_result.json. Text output is not read by any downstream agent.
 </instructions>
 
 <motivation>
