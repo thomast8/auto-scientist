@@ -14,6 +14,51 @@ from auto_scientist.orchestrator import Orchestrator
 from auto_scientist.state import ExperimentState
 
 
+def _run_orchestrator(orchestrator: Orchestrator) -> None:
+    """Run the orchestrator with user-friendly error handling."""
+    try:
+        asyncio.run(orchestrator.run())
+    except RuntimeError as e:
+        msg = str(e)
+        if "Pre-flight check failed" not in msg:
+            raise
+
+        # Format pre-flight errors with guidance
+        lines = msg.split("\n")
+        header = lines[0]
+        issues = [line.strip("- ").strip() for line in lines[1:] if line.strip()]
+
+        parts = [f"\n{header}\n"]
+        for issue in issues:
+            if "not found" in issue and "openai" in issue.lower():
+                parts.append(f"  - {issue}")
+                parts.append("    Fix: check the model ID at https://platform.openai.com/docs/models")
+            elif "not found" in issue and "google" in issue.lower():
+                parts.append(f"  - {issue}")
+                parts.append("    Fix: check the model ID at https://ai.google.dev/gemini-api/docs/models")
+            elif "require provider 'anthropic'" in issue:
+                parts.append(f"  - {issue}")
+                parts.append(
+                    "    Fix: SDK agents (analyst, scientist, coder, ingestor, report) must use "
+                    "Anthropic models (claude-*). Use non-Anthropic models only for critics "
+                    "and summarizer."
+                )
+            elif "authentication failed" in issue.lower() or "API_KEY" in issue:
+                parts.append(f"  - {issue}")
+                parts.append("    Fix: set the required API key in your environment or .env file")
+            elif "Claude Code CLI not found" in issue:
+                parts.append(f"  - {issue}")
+                parts.append("    Fix: npm install -g @anthropic-ai/claude-code")
+            else:
+                parts.append(f"  - {issue}")
+
+        parts.append(
+            "\nSee --config or --preset options to change model assignments. "
+            "Run with --help for details."
+        )
+        raise click.ClickException("\n".join(parts)) from None
+
+
 def _next_output_dir(base: Path) -> Path:
     """If *base* already contains a state.json, return base_001, base_002, etc."""
     if not (base / "state.json").exists():
@@ -135,7 +180,7 @@ def run(
         verbose=verbose,
     )
 
-    asyncio.run(orchestrator.run())
+    _run_orchestrator(orchestrator)
 
 
 @cli.command()
@@ -190,7 +235,7 @@ def resume(
         verbose=verbose,
     )
 
-    asyncio.run(orchestrator.run())
+    _run_orchestrator(orchestrator)
 
 
 @cli.command()
