@@ -135,6 +135,15 @@ SUCCESS CRITERIA
 
 Score: X/Y PASS, Z FAIL
 
+If top-level success criteria are provided, also print a TOP-LEVEL SUCCESS
+CRITERIA section with those metrics computed for the best method. These are
+the investigation-wide criteria that the Analyst uses to score the version.
+
+TOP-LEVEL SUCCESS CRITERIA
+--------------------------
+1. {{name}}: PASS ({{measured_value}})
+2. {{name}}: FAIL ({{measured_value}})
+
 Dataset location:
 {data_path}
 </output_format>
@@ -149,6 +158,7 @@ CODER_USER = """\
 <plan>{plan_json}</plan>
 <previous_script>{previous_script_section}</previous_script>
 </data>
+{top_level_section}
 
 <task>
 Implement the scientist's plan as a new complete experiment script.

@@ -267,11 +267,13 @@ class Orchestrator:
 
         goal_preview = self.state.goal[:80] + ("..." if len(self.state.goal) > 80 else "")
         fields = {
+            "Input": str(self.data_path) if self.data_path else "(none)",
             "Output": str(self.output_dir),
             "Goal": goal_preview,
         }
         print_header("Auto-Scientist", fields)
         self._print_model_banner()
+        print_step("Running", color=BOLD)
 
         try:
             # Phase 0: Ingestion
@@ -554,6 +556,12 @@ class Orchestrator:
             ("Coder", "Coder", "coder"),
             ("Report", "Report", "report"),
         ]
+
+        heading = "Configured Agents"
+        if use_color:
+            sys.stdout.write(f"{DIM}{heading}{RESET}\n")
+        else:
+            sys.stdout.write(f"{heading}\n")
 
         lines: list[str] = []
         for display_name, color_key, field_name in agent_map:
@@ -918,6 +926,11 @@ class Orchestrator:
         print_step(f"  IMPLEMENT: coder writing and running {version}")
         buffer: list[str] = []
         try:
+            # Serialize top-level criteria for the coder
+            top_criteria = [
+                c.model_dump() for c in (self.state.success_criteria or [])
+            ]
+
             async def _coder_coro(buf):
                 return await run_coder(
                     plan=plan,
@@ -930,6 +943,7 @@ class Orchestrator:
                     message_buffer=buf,
                     run_timeout_minutes=run_timeout,
                     run_command=run_cmd,
+                    top_level_criteria=top_criteria or None,
                 )
 
             new_script = await self._with_summaries(_coder_coro, "Coder", buffer)
