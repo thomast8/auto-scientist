@@ -34,6 +34,7 @@ from auto_scientist.prompts.critic import (
 logger = logging.getLogger(__name__)
 
 MAX_RETRIES = 1  # 1 retry = 2 total attempts for empty responses
+MIN_RESPONSE_LENGTH = 50  # minimum chars for a substantive response
 
 
 async def _query_critic(
@@ -68,14 +69,15 @@ async def _query_with_retry(
     label: str = "",
     **kwargs: Any,
 ) -> str:
-    """Call a query function, retrying once if the response is empty."""
+    """Call a query function, retrying if the response is empty or too short."""
     for attempt in range(MAX_RETRIES + 1):
         result = await query_fn(*args, **kwargs)
-        if result and result.strip():
+        if result and len(result.strip()) >= MIN_RESPONSE_LENGTH:
             return result
         if attempt < MAX_RETRIES:
-            logger.warning(f"{label} returned empty response, retrying (attempt {attempt + 1})")
-    return result  # return whatever we got, even empty
+            reason = "empty" if not result or not result.strip() else "too short"
+            logger.warning(f"{label} returned {reason} response, retrying (attempt {attempt + 1})")
+    return result  # return whatever we got
 
 
 async def run_debate(

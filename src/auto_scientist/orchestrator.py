@@ -974,14 +974,22 @@ class Orchestrator:
                 stderr="Coder did not produce run_result.json",
             )
 
+        from auto_scientist.schemas import CoderRunResult
+
         try:
-            data = json.loads(run_result_path.read_text())
+            raw = json.loads(run_result_path.read_text())
+            validated = CoderRunResult.model_validate(raw)
+            data = validated.model_dump()
         except (json.JSONDecodeError, OSError) as e:
             logger.warning(f"Failed to parse run_result.json: {e}")
             return RunResult(
                 success=False,
                 stderr=f"Failed to parse run_result.json: {e}",
             )
+        except Exception as e:
+            logger.warning(f"run_result.json schema validation failed: {e}")
+            # Fall back to raw data if schema validation fails
+            data = raw  # type: ignore[possibly-undefined]
 
         # Build stderr from error field + stderr.txt
         stderr_parts = []

@@ -5,6 +5,7 @@ from pydantic import ValidationError
 
 from auto_scientist.schemas import (
     AnalystOutput,
+    CoderRunResult,
     CriteriaRevisionOutput,
     CriterionDefinition,
     CriterionResult,
@@ -127,6 +128,50 @@ class TestAnalystOutput:
         assert isinstance(d, dict)
         assert d.get("observations") == ["data loaded"]
         assert d.get("success_score") is None
+
+
+# ---------------------------------------------------------------------------
+# PlanChange
+# ---------------------------------------------------------------------------
+
+# ---------------------------------------------------------------------------
+# CoderRunResult
+# ---------------------------------------------------------------------------
+
+class TestCoderRunResult:
+    def test_valid_success(self):
+        r = CoderRunResult(success=True, return_code=0, timed_out=False, error=None, attempts=1)
+        assert r.success is True
+        assert r.return_code == 0
+
+    def test_valid_failure(self):
+        r = CoderRunResult(success=False, return_code=1, error="ImportError: no module named foo")
+        assert r.success is False
+        assert r.error == "ImportError: no module named foo"
+
+    def test_defaults(self):
+        r = CoderRunResult(success=True)
+        assert r.return_code == -1
+        assert r.timed_out is False
+        assert r.error is None
+        assert r.attempts == 1
+
+    def test_missing_success_raises(self):
+        with pytest.raises(ValidationError):
+            CoderRunResult.model_validate({})
+
+    def test_extra_fields_ignored(self):
+        r = CoderRunResult.model_validate({"success": True, "extra": "ignored"})
+        assert not hasattr(r, "extra")
+
+    def test_timed_out(self):
+        r = CoderRunResult(success=False, return_code=124, timed_out=True, error="Timed out after 120 minutes")
+        assert r.timed_out is True
+
+    def test_bool_coercion_from_string(self):
+        """LLM might write 'true' as a string in some edge cases."""
+        r = CoderRunResult.model_validate({"success": True, "timed_out": False})
+        assert r.success is True
 
 
 # ---------------------------------------------------------------------------

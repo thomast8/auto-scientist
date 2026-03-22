@@ -5,10 +5,18 @@ from unittest.mock import AsyncMock, patch
 import pytest
 
 from auto_scientist.agents.critic import (
+    MIN_RESPONSE_LENGTH,
     _build_critic_prompt,
     run_debate,
 )
 from auto_scientist.model_config import AgentModelConfig, ReasoningConfig
+
+
+def _pad(text: str) -> str:
+    """Pad a response to meet MIN_RESPONSE_LENGTH for tests."""
+    if len(text) >= MIN_RESPONSE_LENGTH:
+        return text
+    return text + " " + "x" * (MIN_RESPONSE_LENGTH - len(text) - 1)
 
 
 @pytest.fixture
@@ -93,7 +101,7 @@ class TestRunDebate:
             patch(
                 "auto_scientist.agents.critic.query_openai",
                 new_callable=AsyncMock,
-                return_value="Initial critique",
+                return_value=_pad("Initial critique"),
             ) as mock_openai,
             patch(
                 "auto_scientist.agents.critic.query_anthropic",
@@ -104,7 +112,7 @@ class TestRunDebate:
 
         assert len(result) == 1
         assert result[0]["model"] == "openai:gpt-4o"
-        assert result[0]["critique"] == "Initial critique"
+        assert "Initial critique" in result[0]["critique"]
         assert len(result[0]["transcript"]) == 1
         assert result[0]["transcript"][0]["role"] == "critic"
         mock_openai.assert_called_once()
@@ -117,18 +125,18 @@ class TestRunDebate:
             patch(
                 "auto_scientist.agents.critic.query_openai",
                 new_callable=AsyncMock,
-                side_effect=["Initial critique", "Refined critique"],
+                side_effect=[_pad("Initial critique"), _pad("Refined critique")],
             ) as mock_openai,
             patch(
                 "auto_scientist.agents.critic.query_anthropic",
                 new_callable=AsyncMock,
-                return_value="Scientist response",
+                return_value=_pad("Scientist response"),
             ) as mock_anthropic,
         ):
             result = await run_debate(**base_kwargs, max_rounds=2)
 
         assert len(result) == 1
-        assert result[0]["critique"] == "Refined critique"
+        assert "Refined critique" in result[0]["critique"]
         assert mock_openai.call_count == 2
         mock_anthropic.assert_called_once()
 
@@ -147,17 +155,17 @@ class TestRunDebate:
             patch(
                 "auto_scientist.agents.critic.query_openai",
                 new_callable=AsyncMock,
-                side_effect=["Critique R1", "Critique R2", "Critique R3"],
+                side_effect=[_pad("Critique R1"), _pad("Critique R2"), _pad("Critique R3")],
             ) as mock_openai,
             patch(
                 "auto_scientist.agents.critic.query_anthropic",
                 new_callable=AsyncMock,
-                side_effect=["Scientist R1", "Scientist R2"],
+                side_effect=[_pad("Scientist R1"), _pad("Scientist R2")],
             ) as mock_anthropic,
         ):
             result = await run_debate(**base_kwargs, max_rounds=3)
 
-        assert result[0]["critique"] == "Critique R3"
+        assert "Critique R3" in result[0]["critique"]
         assert mock_openai.call_count == 3
         assert mock_anthropic.call_count == 2
 
@@ -168,12 +176,12 @@ class TestRunDebate:
             patch(
                 "auto_scientist.agents.critic.query_openai",
                 new_callable=AsyncMock,
-                side_effect=["Critique R1", "Critique R2"],
+                side_effect=[_pad("Critique R1"), _pad("Critique R2")],
             ),
             patch(
                 "auto_scientist.agents.critic.query_anthropic",
                 new_callable=AsyncMock,
-                return_value="Scientist response",
+                return_value=_pad("Scientist response"),
             ),
         ):
             result = await run_debate(**base_kwargs, max_rounds=2)
@@ -182,11 +190,11 @@ class TestRunDebate:
         transcript = result[0]["transcript"]
         assert len(transcript) == 3  # critic, scientist, critic
         assert transcript[0]["role"] == "critic"
-        assert transcript[0]["content"] == "Critique R1"
+        assert "Critique R1" in transcript[0]["content"]
         assert transcript[1]["role"] == "scientist"
-        assert transcript[1]["content"] == "Scientist response"
+        assert "Scientist response" in transcript[1]["content"]
         assert transcript[2]["role"] == "critic"
-        assert transcript[2]["content"] == "Critique R2"
+        assert "Critique R2" in transcript[2]["content"]
 
     @pytest.mark.asyncio
     async def test_multiple_critics(self, plan):
@@ -199,17 +207,17 @@ class TestRunDebate:
             patch(
                 "auto_scientist.agents.critic.query_openai",
                 new_callable=AsyncMock,
-                side_effect=["OAI initial", "OAI refined"],
+                side_effect=[_pad("OAI initial"), _pad("OAI refined")],
             ),
             patch(
                 "auto_scientist.agents.critic.query_google",
                 new_callable=AsyncMock,
-                side_effect=["Google initial", "Google refined"],
+                side_effect=[_pad("Google initial"), _pad("Google refined")],
             ),
             patch(
                 "auto_scientist.agents.critic.query_anthropic",
                 new_callable=AsyncMock,
-                side_effect=["Scientist for OAI", "Scientist for Google"],
+                side_effect=[_pad("Scientist for OAI"), _pad("Scientist for Google")],
             ),
         ):
             result = await run_debate(
@@ -221,9 +229,9 @@ class TestRunDebate:
 
         assert len(result) == 2
         assert result[0]["model"] == "openai:gpt-4o"
-        assert result[0]["critique"] == "OAI refined"
+        assert "OAI refined" in result[0]["critique"]
         assert result[1]["model"] == "google:gemini-2.5-pro"
-        assert result[1]["critique"] == "Google refined"
+        assert "Google refined" in result[1]["critique"]
 
     @pytest.mark.asyncio
     async def test_plan_in_critic_prompt(self, base_kwargs):
@@ -232,7 +240,7 @@ class TestRunDebate:
             patch(
                 "auto_scientist.agents.critic.query_openai",
                 new_callable=AsyncMock,
-                return_value="Critique of plan",
+                return_value=_pad("Critique of plan"),
             ) as mock_openai,
         ):
             await run_debate(**base_kwargs, max_rounds=1)
@@ -248,12 +256,12 @@ class TestRunDebate:
             patch(
                 "auto_scientist.agents.critic.query_openai",
                 new_callable=AsyncMock,
-                side_effect=["Critique", "Refined"],
+                side_effect=[_pad("Critique"), _pad("Refined")],
             ),
             patch(
                 "auto_scientist.agents.critic.query_anthropic",
                 new_callable=AsyncMock,
-                return_value="Response",
+                return_value=_pad("Response"),
             ) as mock_anthropic,
         ):
             await run_debate(**base_kwargs, max_rounds=2)
@@ -268,7 +276,7 @@ class TestRunDebate:
         with patch(
             "auto_scientist.agents.critic.query_openai",
             new_callable=AsyncMock,
-            return_value="Critique",
+            return_value=_pad("Critique"),
         ) as mock_openai:
             await run_debate(**base_kwargs, max_rounds=1)
 
@@ -283,12 +291,12 @@ class TestRunDebate:
             patch(
                 "auto_scientist.agents.critic.query_openai",
                 new_callable=AsyncMock,
-                side_effect=["Critique", "Refined"],
+                side_effect=[_pad("Critique"), _pad("Refined")],
             ) as mock_openai,
             patch(
                 "auto_scientist.agents.critic.query_anthropic",
                 new_callable=AsyncMock,
-                return_value="Response",
+                return_value=_pad("Response"),
             ) as mock_anthropic,
         ):
             await run_debate(**base_kwargs, max_rounds=2)
@@ -306,12 +314,12 @@ class TestRunDebate:
             patch(
                 "auto_scientist.agents.critic.query_openai",
                 new_callable=AsyncMock,
-                side_effect=["Critique", "Refined"],
+                side_effect=[_pad("Critique"), _pad("Refined")],
             ) as mock_openai,
             patch(
                 "auto_scientist.agents.critic.query_anthropic",
                 new_callable=AsyncMock,
-                return_value="Response",
+                return_value=_pad("Response"),
             ) as mock_anthropic,
         ):
             await run_debate(**base_kwargs, max_rounds=2)
@@ -328,12 +336,12 @@ class TestRunDebate:
             patch(
                 "auto_scientist.agents.critic.query_openai",
                 new_callable=AsyncMock,
-                side_effect=["Critique", "Refined"],
+                side_effect=[_pad("Critique"), _pad("Refined")],
             ) as mock_openai,
             patch(
                 "auto_scientist.agents.critic.query_anthropic",
                 new_callable=AsyncMock,
-                return_value="Response",
+                return_value=_pad("Response"),
             ) as mock_anthropic,
         ):
             await run_debate(**base_kwargs, max_rounds=2)
@@ -351,12 +359,12 @@ class TestRunDebate:
             patch(
                 "auto_scientist.agents.critic.query_openai",
                 new_callable=AsyncMock,
-                side_effect=["Critique", "Refined"],
+                side_effect=[_pad("Critique"), _pad("Refined")],
             ) as mock_openai,
             patch(
                 "auto_scientist.agents.critic.query_anthropic",
                 new_callable=AsyncMock,
-                return_value="Response",
+                return_value=_pad("Response"),
             ) as mock_anthropic,
         ):
             await run_debate(**base_kwargs, max_rounds=2)
@@ -375,12 +383,12 @@ class TestRunDebate:
             patch(
                 "auto_scientist.agents.critic.query_openai",
                 new_callable=AsyncMock,
-                side_effect=["Critique", "Refined"],
+                side_effect=[_pad("Critique"), _pad("Refined")],
             ),
             patch(
                 "auto_scientist.agents.critic.query_anthropic",
                 new_callable=AsyncMock,
-                return_value="Response",
+                return_value=_pad("Response"),
             ) as mock_anthropic,
         ):
             await run_debate(
@@ -411,7 +419,7 @@ class TestRunDebate:
         with patch(
             "auto_scientist.agents.critic.query_anthropic",
             new_callable=AsyncMock,
-            return_value="Anthropic critique",
+            return_value=_pad("Anthropic critique"),
         ) as mock_anthropic:
             result = await run_debate(
                 critic_configs=[critic],
@@ -421,7 +429,7 @@ class TestRunDebate:
             )
 
         assert len(result) == 1
-        assert result[0]["critique"] == "Anthropic critique"
+        assert "Anthropic critique" in result[0]["critique"]
         assert mock_anthropic.call_count == 1
 
     @pytest.mark.asyncio
@@ -434,7 +442,7 @@ class TestRunDebate:
         with patch(
             "auto_scientist.agents.critic.query_openai",
             new_callable=AsyncMock,
-            return_value="Critique",
+            return_value=_pad("Critique"),
         ) as mock_openai:
             await run_debate(
                 critic_configs=[critic],
@@ -460,12 +468,12 @@ class TestRunDebateStreaming:
             patch(
                 "auto_scientist.agents.critic.query_openai",
                 new_callable=AsyncMock,
-                side_effect=["Critique R1", "Critique R2"],
+                side_effect=[_pad("Critique R1"), _pad("Critique R2")],
             ),
             patch(
                 "auto_scientist.agents.critic.query_anthropic",
                 new_callable=AsyncMock,
-                return_value="Scientist response",
+                return_value=_pad("Scientist response"),
             ),
         ):
             await run_debate(**base_kwargs, max_rounds=2, on_token_factory=factory)
@@ -488,12 +496,12 @@ class TestRunDebateStreaming:
             patch(
                 "auto_scientist.agents.critic.query_openai",
                 new_callable=AsyncMock,
-                return_value="Critique",
+                return_value=_pad("Critique"),
             ) as mock_openai,
             patch(
                 "auto_scientist.agents.critic.query_anthropic",
                 new_callable=AsyncMock,
-                return_value="Response",
+                return_value=_pad("Response"),
             ) as mock_anthropic,
         ):
             await run_debate(**base_kwargs, max_rounds=2, on_token_factory=factory)
@@ -509,7 +517,7 @@ class TestRunDebateStreaming:
             patch(
                 "auto_scientist.agents.critic.query_openai",
                 new_callable=AsyncMock,
-                return_value="Critique",
+                return_value=_pad("Critique"),
             ) as mock_openai,
         ):
             await run_debate(**base_kwargs, max_rounds=1)
@@ -525,12 +533,12 @@ class TestCriticRetry:
             patch(
                 "auto_scientist.agents.critic.query_openai",
                 new_callable=AsyncMock,
-                side_effect=["", "Valid critique"],
+                side_effect=["", _pad("Valid critique")],
             ) as mock_openai,
         ):
             result = await run_debate(**base_kwargs, max_rounds=1)
 
-        assert result[0]["critique"] == "Valid critique"
+        assert "Valid critique" in result[0]["critique"]
         assert mock_openai.call_count == 2
 
     @pytest.mark.asyncio
@@ -540,22 +548,22 @@ class TestCriticRetry:
             patch(
                 "auto_scientist.agents.critic.query_openai",
                 new_callable=AsyncMock,
-                side_effect=["Critique", "Refined"],
+                side_effect=[_pad("Critique"), _pad("Refined")],
             ),
             patch(
                 "auto_scientist.agents.critic.query_anthropic",
                 new_callable=AsyncMock,
-                side_effect=["", "Valid defense"],
+                side_effect=["", _pad("Valid defense")],
             ) as mock_anthropic,
         ):
             result = await run_debate(**base_kwargs, max_rounds=2)
 
         assert mock_anthropic.call_count == 2
-        assert result[0]["transcript"][1]["content"] == "Valid defense"
+        assert "Valid defense" in result[0]["transcript"][1]["content"]
 
     @pytest.mark.asyncio
-    async def test_exhausted_retries_uses_empty(self, base_kwargs):
-        """If all retries return empty, use what we have."""
+    async def test_exhausted_retries_uses_whatever_we_have(self, base_kwargs):
+        """If all retries return empty/short, use what we have."""
         with (
             patch(
                 "auto_scientist.agents.critic.query_openai",
@@ -566,3 +574,18 @@ class TestCriticRetry:
             result = await run_debate(**base_kwargs, max_rounds=1)
 
         assert result[0]["critique"] == ""
+
+    @pytest.mark.asyncio
+    async def test_retry_on_too_short_response(self, base_kwargs):
+        """Response shorter than MIN_RESPONSE_LENGTH triggers retry."""
+        with (
+            patch(
+                "auto_scientist.agents.critic.query_openai",
+                new_callable=AsyncMock,
+                side_effect=["OK", "This is a substantive critique that addresses the hypothesis, strategy, and provides alternative approaches to consider."],
+            ) as mock_openai,
+        ):
+            result = await run_debate(**base_kwargs, max_rounds=1)
+
+        assert mock_openai.call_count == 2
+        assert "substantive" in result[0]["critique"]

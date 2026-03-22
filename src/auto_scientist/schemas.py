@@ -82,6 +82,18 @@ class CriteriaRevisionOutput(BaseModel):
     revised_criteria: list[CriterionDefinition]
 
 
+class CoderRunResult(BaseModel):
+    """Validated schema for run_result.json written by the Coder's experiment script."""
+
+    model_config = ConfigDict(extra="ignore")
+
+    success: bool
+    return_code: int = -1
+    timed_out: bool = False
+    error: str | None = None
+    attempts: int = 1
+
+
 class ScientistPlanOutput(BaseModel):
     """Validated output from the Scientist agent (plan and revision)."""
 
