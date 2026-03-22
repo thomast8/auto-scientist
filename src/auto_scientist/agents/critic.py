@@ -15,6 +15,7 @@ bias and lets the critic form a fresh assessment each round.
 """
 
 import json
+import logging
 from collections.abc import Callable
 from typing import Any
 
@@ -29,6 +30,10 @@ from auto_scientist.prompts.critic import (
     SCIENTIST_DEBATE_SYSTEM,
     SCIENTIST_DEBATE_USER,
 )
+
+logger = logging.getLogger(__name__)
+
+MAX_RETRIES = 1  # 1 retry = 2 total attempts for empty responses
 
 
 async def _query_critic(
@@ -55,6 +60,22 @@ async def _query_critic(
         )
     else:
         raise ValueError(f"Unknown critic provider: {config.provider!r}")
+
+
+async def _query_with_retry(
+    query_fn: Callable[..., Any],
+    *args: Any,
+    label: str = "",
+    **kwargs: Any,
+) -> str:
+    """Call a query function, retrying once if the response is empty."""
+    for attempt in range(MAX_RETRIES + 1):
+        result = await query_fn(*args, **kwargs)
+        if result and result.strip():
+            return result
+        if attempt < MAX_RETRIES:
+            logger.warning(f"{label} returned empty response, retrying (attempt {attempt + 1})")
+    return result  # return whatever we got, even empty
 
 
 async def run_debate(
@@ -105,7 +126,10 @@ async def run_debate(
             plan, notebook_content, domain_knowledge
         )
         on_token = on_token_factory(f"Critic ({label}) round 1") if on_token_factory else None
-        critique_text = await _query_critic(config, critic_prompt, on_token=on_token)
+        critique_text = await _query_with_retry(
+            _query_critic, config, critic_prompt, on_token=on_token,
+            label=f"Critic ({label}) round 1",
+        )
         if on_token:
             stream_separator()
         transcript.append({"role": "critic", "content": critique_text})
@@ -118,7 +142,8 @@ async def run_debate(
                 on_token_factory(f"Scientist round {round_num}")
                 if on_token_factory else None
             )
-            scientist_response = await query_anthropic(
+            scientist_response = await _query_with_retry(
+                query_anthropic,
                 scientist_config.model,
                 _build_scientist_debate_prompt(
                     plan=plan,
@@ -129,6 +154,7 @@ async def run_debate(
                 web_search=True,
                 reasoning=scientist_config.reasoning,
                 on_token=on_token,
+                label=f"Scientist round {round_num}",
             )
             if on_token:
                 stream_separator()
@@ -145,7 +171,10 @@ async def run_debate(
                 on_token_factory(f"Critic ({label}) round {round_num + 1}")
                 if on_token_factory else None
             )
-            critique_text = await _query_critic(config, critic_prompt, on_token=on_token)
+            critique_text = await _query_with_retry(
+                _query_critic, config, critic_prompt, on_token=on_token,
+                label=f"Critic ({label}) round {round_num + 1}",
+            )
             if on_token:
                 stream_separator()
             transcript.append({"role": "critic", "content": critique_text})

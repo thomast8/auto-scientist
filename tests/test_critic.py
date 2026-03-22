@@ -515,3 +515,54 @@ class TestRunDebateStreaming:
             await run_debate(**base_kwargs, max_rounds=1)
 
         assert mock_openai.call_args.kwargs.get("on_token") is None
+
+
+class TestCriticRetry:
+    @pytest.mark.asyncio
+    async def test_retry_on_empty_critic_response(self, base_kwargs):
+        """Empty critic response triggers retry."""
+        with (
+            patch(
+                "auto_scientist.agents.critic.query_openai",
+                new_callable=AsyncMock,
+                side_effect=["", "Valid critique"],
+            ) as mock_openai,
+        ):
+            result = await run_debate(**base_kwargs, max_rounds=1)
+
+        assert result[0]["critique"] == "Valid critique"
+        assert mock_openai.call_count == 2
+
+    @pytest.mark.asyncio
+    async def test_retry_on_empty_scientist_response(self, base_kwargs):
+        """Empty scientist debate response triggers retry."""
+        with (
+            patch(
+                "auto_scientist.agents.critic.query_openai",
+                new_callable=AsyncMock,
+                side_effect=["Critique", "Refined"],
+            ),
+            patch(
+                "auto_scientist.agents.critic.query_anthropic",
+                new_callable=AsyncMock,
+                side_effect=["", "Valid defense"],
+            ) as mock_anthropic,
+        ):
+            result = await run_debate(**base_kwargs, max_rounds=2)
+
+        assert mock_anthropic.call_count == 2
+        assert result[0]["transcript"][1]["content"] == "Valid defense"
+
+    @pytest.mark.asyncio
+    async def test_exhausted_retries_uses_empty(self, base_kwargs):
+        """If all retries return empty, use what we have."""
+        with (
+            patch(
+                "auto_scientist.agents.critic.query_openai",
+                new_callable=AsyncMock,
+                return_value="",
+            ),
+        ):
+            result = await run_debate(**base_kwargs, max_rounds=1)
+
+        assert result[0]["critique"] == ""
