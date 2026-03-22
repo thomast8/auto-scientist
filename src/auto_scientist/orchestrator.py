@@ -85,7 +85,16 @@ def _validate_model_names(mc: ModelConfig) -> list[str]:
         key = (mc.summarizer.provider, mc.summarizer.model)
         pairs.setdefault(key, []).append("summarizer")
 
+    # Only validate models for providers that authenticate successfully
+    # (auth failures are reported separately by _check_provider_auth)
+    authenticated_providers: set[str] = set()
+    for provider in {p for p, _ in pairs}:
+        if _check_provider_auth(provider) is None:
+            authenticated_providers.add(provider)
+
     for (provider, model), agents in pairs.items():
+        if provider not in authenticated_providers:
+            continue
         err = _check_model_exists(provider, model)
         if err:
             agent_list = ", ".join(sorted(set(agents)))
@@ -98,32 +107,37 @@ def _check_model_exists(provider: str, model: str) -> str | None:
     """Check if a model exists by querying the provider API.
 
     Returns an error message if the model doesn't exist, None if it does.
+    Ignores auth errors (handled separately by _check_provider_auth).
     """
     if provider == "anthropic":
-        try:
-            from anthropic import Anthropic
-
-            client = Anthropic()
-            client.models.retrieve(model)
-            return None
-        except Exception as e:
-            return str(e)
+        # Anthropic SDK agents run through the Claude Code CLI which handles
+        # its own auth (OAuth/session). The Anthropic SDK's models.retrieve()
+        # requires an API key which may not be set. Skip validation here;
+        # the CLI will catch invalid model names at runtime.
+        return None
     elif provider == "openai":
         try:
-            from openai import OpenAI
+            from openai import AuthenticationError, OpenAI
 
             client = OpenAI()
             client.models.retrieve(model)
             return None
+        except AuthenticationError:
+            return None  # auth handled separately
         except Exception as e:
             return str(e)
     elif provider == "google":
         try:
             from google import genai
+            from google.genai import errors as genai_errors
 
             client = genai.Client()
             client.models.get(model=model)
             return None
+        except genai_errors.APIError as e:
+            if e.code == 401 or e.code == 403:
+                return None  # auth handled separately
+            return str(e)
         except Exception as e:
             return str(e)
     return None  # unknown provider, skip validation
