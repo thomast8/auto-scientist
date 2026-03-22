@@ -6,6 +6,7 @@ first to final version, key insights, and recommendations for future work.
 Returns the report content as a string; the orchestrator handles file writing.
 """
 
+import logging
 from pathlib import Path
 
 from claude_code_sdk import AssistantMessage, ClaudeCodeOptions, ResultMessage, TextBlock
@@ -13,6 +14,13 @@ from claude_code_sdk import AssistantMessage, ClaudeCodeOptions, ResultMessage, 
 from auto_scientist.prompts.report import REPORT_SYSTEM, REPORT_USER
 from auto_scientist.sdk_utils import append_block_to_buffer, safe_query
 from auto_scientist.state import ExperimentState
+
+logger = logging.getLogger(__name__)
+
+MAX_ATTEMPTS = 2
+
+# Minimum report length to consider valid (characters)
+MIN_REPORT_LENGTH = 100
 
 
 async def run_report(
@@ -54,23 +62,44 @@ async def run_report(
         model=model,
     )
 
-    report_parts: list[str] = []
+    correction_hint = ""
+    for attempt in range(MAX_ATTEMPTS):
+        effective_prompt = user_prompt + correction_hint
 
-    async for message in safe_query(prompt=user_prompt, options=options):
-        if isinstance(message, AssistantMessage):
-            for block in message.content:
-                if message_buffer is not None:
-                    append_block_to_buffer(block, message_buffer)
-                if isinstance(block, TextBlock):
-                    report_parts.append(block.text)
-        elif isinstance(message, ResultMessage):
-            pass  # Agent is done
+        report_parts: list[str] = []
 
-    full_text = "\n".join(report_parts)
+        async for message in safe_query(prompt=effective_prompt, options=options):
+            if isinstance(message, AssistantMessage):
+                for block in message.content:
+                    if message_buffer is not None:
+                        append_block_to_buffer(block, message_buffer)
+                    if isinstance(block, TextBlock):
+                        report_parts.append(block.text)
+            elif isinstance(message, ResultMessage):
+                pass  # Agent is done
 
-    # Strip any conversational preamble before the first markdown heading.
-    heading_idx = full_text.find("\n# ")
-    if heading_idx != -1:
-        full_text = full_text[heading_idx + 1:]
+        full_text = "\n".join(report_parts)
 
-    return full_text.strip()
+        # Strip any conversational preamble before the first markdown heading.
+        heading_idx = full_text.find("\n# ")
+        if heading_idx != -1:
+            full_text = full_text[heading_idx + 1:]
+
+        full_text = full_text.strip()
+
+        # Validate: report should be non-empty and substantial
+        if len(full_text) >= MIN_REPORT_LENGTH:
+            return full_text
+
+        if attempt < MAX_ATTEMPTS - 1:
+            correction_hint = (
+                "\n\n<validation_error>\n"
+                "Your previous output was too short or empty. "
+                "Please generate a comprehensive markdown report with headings, "
+                "covering the experiment journey, key findings, and recommendations.\n"
+                "</validation_error>"
+            )
+            logger.warning(f"Report attempt {attempt + 1}: output too short, retrying")
+
+    # Return whatever we have, even if short
+    return full_text

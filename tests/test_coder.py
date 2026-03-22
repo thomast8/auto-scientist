@@ -3,6 +3,7 @@
 from unittest.mock import MagicMock, patch
 
 import pytest
+from claude_code_sdk import AssistantMessage, ResultMessage, TextBlock, ToolUseBlock
 
 from auto_scientist.agents.coder import run_coder
 
@@ -309,3 +310,80 @@ class TestCoderMessageBuffer:
         )
         assert len(buf) >= 1
         assert any("Write" in entry for entry in buf)
+
+
+class TestCoderRetry:
+    @pytest.mark.asyncio
+    @patch("auto_scientist.agents.coder.query")
+    async def test_retry_on_syntax_error(self, mock_query, tmp_path):
+        """First attempt produces script with syntax error, second succeeds."""
+        result_msg = MagicMock(spec=ResultMessage)
+        call_count = 0
+
+        async def fake_query(**kwargs):
+            nonlocal call_count
+            call_count += 1
+            script_path = tmp_path / "v01" / "experiment.py"
+            script_path.parent.mkdir(parents=True, exist_ok=True)
+            if call_count == 1:
+                script_path.write_text("def broken(\n")  # syntax error
+            else:
+                script_path.write_text("print('hello')")
+            yield result_msg
+
+        mock_query.side_effect = fake_query
+
+        result = await run_coder(
+            plan={"hypothesis": "test", "changes": []},
+            previous_script=tmp_path / "nonexistent" / "experiment.py",
+            output_dir=tmp_path,
+            version="v01",
+        )
+        assert result == tmp_path / "v01" / "experiment.py"
+        assert call_count == 2
+
+    @pytest.mark.asyncio
+    @patch("auto_scientist.agents.coder.query")
+    async def test_retry_on_missing_script(self, mock_query, tmp_path):
+        """First attempt doesn't create script, second does."""
+        result_msg = MagicMock(spec=ResultMessage)
+        call_count = 0
+
+        async def fake_query(**kwargs):
+            nonlocal call_count
+            call_count += 1
+            if call_count == 2:
+                script_path = tmp_path / "v01" / "experiment.py"
+                script_path.parent.mkdir(parents=True, exist_ok=True)
+                script_path.write_text("print('hello')")
+            yield result_msg
+
+        mock_query.side_effect = fake_query
+
+        result = await run_coder(
+            plan={"hypothesis": "test", "changes": []},
+            previous_script=tmp_path / "nonexistent" / "experiment.py",
+            output_dir=tmp_path,
+            version="v01",
+        )
+        assert result == tmp_path / "v01" / "experiment.py"
+        assert call_count == 2
+
+    @pytest.mark.asyncio
+    @patch("auto_scientist.agents.coder.query")
+    async def test_exhausts_retries_raises(self, mock_query, tmp_path):
+        """All attempts fail to create script."""
+        result_msg = MagicMock(spec=ResultMessage)
+
+        async def fake_query(**kwargs):
+            yield result_msg
+
+        mock_query.side_effect = fake_query
+
+        with pytest.raises(FileNotFoundError):
+            await run_coder(
+                plan={"hypothesis": "test", "changes": []},
+                previous_script=tmp_path / "nonexistent" / "experiment.py",
+                output_dir=tmp_path,
+                version="v01",
+            )

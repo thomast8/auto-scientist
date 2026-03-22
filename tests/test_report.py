@@ -4,6 +4,7 @@ import asyncio
 from unittest.mock import MagicMock, patch
 
 import pytest
+from claude_code_sdk import AssistantMessage, ResultMessage, TextBlock
 
 from auto_scientist.agents.report import run_report
 from auto_scientist.state import ExperimentState
@@ -212,11 +213,10 @@ class TestReportMessageBuffer:
     @pytest.mark.asyncio
     @patch("auto_scientist.agents.report.safe_query")
     async def test_populates_message_buffer(self, mock_query, tmp_path):
-        from claude_code_sdk import AssistantMessage, ResultMessage, TextBlock
-
         assistant_msg = MagicMock(spec=AssistantMessage)
         text_block = MagicMock(spec=TextBlock)
-        text_block.text = "Generating report..."
+        # Must be >= MIN_REPORT_LENGTH (100) to avoid retry
+        text_block.text = "# Final Report\n\n" + "This is a comprehensive report. " * 5
         assistant_msg.content = [text_block]
         result_msg = MagicMock(spec=ResultMessage)
 
@@ -236,4 +236,55 @@ class TestReportMessageBuffer:
             message_buffer=buf,
         )
         assert len(buf) == 1
-        assert "Generating report..." in buf[0]
+        assert "Final Report" in buf[0]
+
+
+class TestReportRetry:
+    @pytest.mark.asyncio
+    @patch("auto_scientist.agents.report.safe_query")
+    async def test_retry_on_empty_output(self, mock_query, tmp_path):
+        """First attempt returns empty, second returns valid report."""
+        call_count = 0
+
+        async def fake_query(**kwargs):
+            nonlocal call_count
+            call_count += 1
+            if call_count == 1:
+                result_msg = MagicMock(spec=ResultMessage)
+                yield result_msg
+            else:
+                assistant_msg = MagicMock(spec=AssistantMessage)
+                text_block = MagicMock(spec=TextBlock)
+                text_block.text = "# Report\n\nThis is a valid report with enough content."
+                assistant_msg.content = [text_block]
+                yield assistant_msg
+                yield MagicMock(spec=ResultMessage)
+
+        mock_query.side_effect = fake_query
+
+        state = ExperimentState(domain="test", goal="test goal")
+        notebook_path = tmp_path / "lab_notebook.xml"
+        notebook_path.write_text("# Notebook")
+
+        result = await run_report(
+            state=state, notebook_path=notebook_path, output_dir=tmp_path,
+        )
+        assert "# Report" in result
+        assert call_count == 2
+
+    @pytest.mark.asyncio
+    @patch("auto_scientist.agents.report.safe_query")
+    async def test_exhausts_retries_returns_empty(self, mock_query, tmp_path):
+        """All attempts return empty, should return empty string."""
+        async def fake_query(**kwargs):
+            yield MagicMock(spec=ResultMessage)
+
+        mock_query.side_effect = fake_query
+
+        state = ExperimentState(domain="test", goal="test goal")
+        notebook_path = tmp_path / "lab_notebook.xml"
+
+        result = await run_report(
+            state=state, notebook_path=notebook_path, output_dir=tmp_path,
+        )
+        assert result == ""

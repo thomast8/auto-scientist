@@ -6,6 +6,7 @@ When interactive: also AskUserQuestion.
 Produces: canonical dataset in {output_dir}/data/.
 """
 
+import logging
 from pathlib import Path
 
 from claude_code_sdk import (
@@ -17,6 +18,10 @@ from claude_code_sdk import (
 from auto_scientist.notebook import NOTEBOOK_FILENAME
 from auto_scientist.prompts.ingestor import INGESTOR_SYSTEM, INGESTOR_USER
 from auto_scientist.sdk_utils import append_block_to_buffer, safe_query
+
+logger = logging.getLogger(__name__)
+
+MAX_ATTEMPTS = 2
 
 
 async def run_ingestor(
@@ -70,20 +75,35 @@ async def run_ingestor(
         mode=mode,
     )
 
-    async for msg in safe_query(prompt=prompt, options=options):
-        if isinstance(msg, AssistantMessage):
-            for block in msg.content:
-                if message_buffer is not None:
-                    append_block_to_buffer(block, message_buffer)
-                elif isinstance(block, TextBlock):
-                    print(f"  [ingestor] {block.text[:200]}")
+    correction_hint = ""
+    for attempt in range(MAX_ATTEMPTS):
+        effective_prompt = prompt + correction_hint
 
-    # Verify something was produced in data_dir
-    data_files = list(data_dir.iterdir())
-    output_files = [f for f in data_files if f.name != "ingest.py"]
-    if not output_files:
-        raise FileNotFoundError(
-            f"Ingestor agent did not produce any data files in {data_dir}"
+        async for msg in safe_query(prompt=effective_prompt, options=options):
+            if isinstance(msg, AssistantMessage):
+                for block in msg.content:
+                    if message_buffer is not None:
+                        append_block_to_buffer(block, message_buffer)
+                    elif isinstance(block, TextBlock):
+                        print(f"  [ingestor] {block.text[:200]}")
+
+        # Verify something was produced in data_dir
+        data_files = list(data_dir.iterdir())
+        output_files = [f for f in data_files if f.name != "ingest.py"]
+        if output_files:
+            return data_dir
+
+        if attempt == MAX_ATTEMPTS - 1:
+            raise FileNotFoundError(
+                f"Ingestor agent did not produce any data files in {data_dir}"
+            )
+
+        correction_hint = (
+            "\n\n<validation_error>\n"
+            f"No data files were produced in {data_dir}. "
+            "You must write at least one canonical data file to the data directory.\n"
+            "</validation_error>"
         )
+        logger.warning(f"Ingestor attempt {attempt + 1}: no data files, retrying")
 
-    return data_dir
+    return data_dir  # unreachable

@@ -302,3 +302,49 @@ class TestRunIngestorOptions:
         call_kwargs = mock_query.call_args
         options = call_kwargs.kwargs["options"]
         assert options.model == "claude-haiku-4-5-20251001"
+
+
+class TestIngestorRetry:
+    @pytest.mark.asyncio
+    @patch("auto_scientist.agents.ingestor.safe_query")
+    async def test_retry_on_empty_data_dir(self, mock_query, tmp_path):
+        """First attempt produces no files, second produces data."""
+        raw_data = tmp_path / "data.csv"
+        raw_data.write_text("a,b\n1,2\n")
+        output_dir = tmp_path / "experiments"
+        output_dir.mkdir()
+        call_count = 0
+
+        async def fake_query(**kwargs):
+            nonlocal call_count
+            call_count += 1
+            if call_count == 2:
+                data_dir = output_dir / "data"
+                data_dir.mkdir(exist_ok=True)
+                (data_dir / "output.csv").write_text("a,b\n1,2\n")
+            return
+            yield  # make it an async generator
+
+        mock_query.side_effect = fake_query
+
+        result = await run_ingestor(raw_data, output_dir, "test goal")
+        assert result == output_dir / "data"
+        assert call_count == 2
+
+    @pytest.mark.asyncio
+    @patch("auto_scientist.agents.ingestor.safe_query")
+    async def test_exhausts_retries_raises(self, mock_query, tmp_path):
+        """All attempts produce no files."""
+        raw_data = tmp_path / "data.csv"
+        raw_data.write_text("a,b\n1,2\n")
+        output_dir = tmp_path / "experiments"
+        output_dir.mkdir()
+
+        async def fake_query(**kwargs):
+            return
+            yield  # make it an async generator
+
+        mock_query.side_effect = fake_query
+
+        with pytest.raises(FileNotFoundError, match="did not produce any data files"):
+            await run_ingestor(raw_data, output_dir, "test goal")
