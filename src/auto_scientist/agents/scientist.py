@@ -13,6 +13,9 @@ from typing import Any
 from claude_code_sdk import ClaudeCodeOptions
 
 from auto_scientist.config import SuccessCriterion
+from auto_scientist.models.anthropic_client import query_anthropic
+from auto_scientist.models.google_client import query_google
+from auto_scientist.models.openai_client import query_openai
 from auto_scientist.prompts.scientist import (
     SCIENTIST_REVISION_SYSTEM,
     SCIENTIST_REVISION_USER,
@@ -27,6 +30,43 @@ from auto_scientist.sdk_utils import (
 )
 
 logger = logging.getLogger(__name__)
+
+
+def _detect_provider(model: str | None) -> str | None:
+    """Detect the LLM provider from a model name string."""
+    if not model:
+        return None
+    m = model.lower()
+    if m.startswith("claude-"):
+        return "anthropic"
+    if m.startswith(("gpt-", "o1", "o3", "o4")):
+        return "openai"
+    if m.startswith("gemini-"):
+        return "google"
+    return None
+
+
+async def _query_direct(
+    provider: str,
+    model: str,
+    prompt: str,
+    system_prompt: str | None = None,
+    response_schema: type | None = None,
+) -> str:
+    """Call the direct API client for a given provider."""
+    kwargs: dict[str, Any] = {
+        "model": model,
+        "prompt": prompt,
+        "system_prompt": system_prompt,
+        "response_schema": response_schema,
+    }
+    if provider == "anthropic":
+        return await query_anthropic(**kwargs)
+    if provider == "openai":
+        return await query_openai(**kwargs)
+    if provider == "google":
+        return await query_google(**kwargs)
+    raise ValueError(f"Unknown provider: {provider}")
 
 MAX_ATTEMPTS = 3
 
@@ -141,6 +181,7 @@ async def run_scientist(
     success_criteria: list[SuccessCriterion] | None = None,
     model: str | None = None,
     message_buffer: list[str] | None = None,
+    use_structured_output: bool = False,
 ) -> dict[str, Any]:
     """Formulate hypothesis and plan based on analysis.
 
@@ -155,6 +196,7 @@ async def run_scientist(
         success_criteria: Existing top-level criteria (None if not yet defined).
         model: Model override.
         message_buffer: Optional buffer for streaming messages.
+        use_structured_output: Route through direct API with schema enforcement.
 
     Returns:
         Structured plan dict with keys: hypothesis, strategy, changes,
@@ -174,6 +216,8 @@ async def run_scientist(
         version=version,
     )
 
+    system_prompt = SCIENTIST_SYSTEM
+
     json_instruction = (
         "\n\n## Output Format\n"
         "You MUST respond with ONLY valid JSON matching the schema below.\n"
@@ -181,8 +225,19 @@ async def run_scientist(
         f"Schema:\n{json.dumps(SCIENTIST_PLAN_SCHEMA, indent=2)}"
     )
 
+    # Direct API path with structured output (provider-native schema enforcement)
+    provider = _detect_provider(model) if use_structured_output else None
+    if provider is not None:
+        raw = await _query_direct(
+            provider, model, user_prompt,
+            system_prompt=system_prompt,
+            response_schema=ScientistPlanOutput,
+        )
+        return validate_json_output(raw, ScientistPlanOutput, "Scientist")
+
+    # SDK path with retry
     options = ClaudeCodeOptions(
-        system_prompt=SCIENTIST_SYSTEM + json_instruction,
+        system_prompt=system_prompt + json_instruction,
         allowed_tools=["WebSearch"],
         max_turns=10,
         model=model,
