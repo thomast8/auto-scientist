@@ -68,6 +68,8 @@ class AgentPanel:
         self.start_time = time.monotonic()
         self.input_tokens = 0
         self.output_tokens = 0
+        self.num_turns = 0
+        self.cost_usd: float | None = None
         self.done = False
         self.done_summary = ""
         self.error_msg = ""
@@ -101,6 +103,19 @@ class AgentPanel:
         self.input_tokens = input_tokens
         self.output_tokens = output_tokens
 
+    def set_stats(
+        self,
+        input_tokens: int = 0,
+        output_tokens: int = 0,
+        num_turns: int = 0,
+        cost_usd: float | None = None,
+    ) -> None:
+        """Set rich usage stats from SDK ResultMessage or direct API calls."""
+        self.input_tokens = input_tokens
+        self.output_tokens = output_tokens
+        self.num_turns = num_turns
+        self.cost_usd = cost_usd
+
     @property
     def elapsed(self) -> float:
         """Elapsed seconds since panel creation."""
@@ -111,7 +126,11 @@ class AgentPanel:
         """Build the footer subtitle string."""
         parts = [_format_elapsed(self.elapsed)]
         if self.input_tokens or self.output_tokens:
-            parts.append(f"{self.input_tokens:,} in / {self.output_tokens:,} out tokens")
+            parts.append(f"{self.input_tokens:,} in / {self.output_tokens:,} out")
+        if self.num_turns:
+            parts.append(f"{self.num_turns} turns")
+        if self.cost_usd is not None:
+            parts.append(f"${self.cost_usd:.4f}")
         return " | ".join(parts)
 
     def _build_body(self) -> RenderableType:
@@ -131,7 +150,7 @@ class AgentPanel:
     def __rich_console__(self, console: Console, options):
         """Rich console protocol: render as a Panel."""
         border_style = "red" if self.error_msg else self.style
-        subtitle = self._build_footer() if self.done else None
+        subtitle = self._build_footer()
 
         panel = Panel(
             self._build_body(),

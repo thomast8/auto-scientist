@@ -661,7 +661,10 @@ class Orchestrator:
         summary_collector callback instead of being printed directly.
         """
         if not self._should_summarize():
-            return await coro_fn(message_buffer)
+            result = await coro_fn(message_buffer)
+            if panel is not None:
+                self._apply_sdk_usage(panel)
+            return result
 
         if panel is not None:
             import asyncio
@@ -687,6 +690,7 @@ class Orchestrator:
                     coro_fn, agent_name, self._summary_model, message_buffer,
                     summary_collector=summary_collector,
                 )
+                self._apply_sdk_usage(panel)
             finally:
                 poll_task.cancel()
                 with contextlib.suppress(asyncio.CancelledError):
@@ -699,6 +703,21 @@ class Orchestrator:
 
         return await run_with_summaries(
             coro_fn, agent_name, self._summary_model, message_buffer,
+        )
+
+    @staticmethod
+    def _apply_sdk_usage(panel: AgentPanel) -> None:
+        """Read token usage from the last SDK query and apply it to a panel."""
+        from auto_scientist.sdk_utils import collect_text_from_query
+
+        usage = getattr(collect_text_from_query, "last_usage", {})
+        if not usage:
+            return
+        panel.set_stats(
+            input_tokens=usage.get("input_tokens", 0),
+            output_tokens=usage.get("output_tokens", 0),
+            num_turns=usage.get("num_turns", 0),
+            cost_usd=usage.get("total_cost_usd"),
         )
 
     def _persist_buffer(
