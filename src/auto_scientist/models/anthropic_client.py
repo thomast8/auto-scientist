@@ -10,6 +10,8 @@ from typing import TYPE_CHECKING
 from anthropic import AsyncAnthropic
 from pydantic import BaseModel
 
+from auto_scientist.agent_result import AgentResult
+
 if TYPE_CHECKING:
     from auto_scientist.images import ImageData
     from auto_scientist.model_config import ReasoningConfig
@@ -35,8 +37,8 @@ async def query_anthropic(
     system_prompt: str | None = None,
     response_schema: type[BaseModel] | None = None,
     images: list[ImageData] | None = None,
-) -> str:
-    """Send a prompt to an Anthropic model and return the response text.
+) -> AgentResult:
+    """Send a prompt to an Anthropic model and return the response.
 
     Args:
         model: Model name (e.g., 'claude-sonnet-4-6').
@@ -46,7 +48,7 @@ async def query_anthropic(
         on_token: Optional callback invoked with each text delta for live streaming.
 
     Returns:
-        The model's text response.
+        AgentResult with text and token counts (zero for streaming).
     """
     logger.debug(f"Anthropic call: model={model}, prompt_len={len(prompt)}, ws={web_search}")
     client = AsyncAnthropic()
@@ -98,9 +100,12 @@ async def query_anthropic(
                 parts.append(text)
         result = "".join(parts)
         logger.debug(f"Anthropic response: {len(result)} chars")
-        return result
+        return AgentResult(text=result)
 
     response = await client.messages.create(**kwargs)
+    usage = getattr(response, "usage", None)
+    in_tok = getattr(usage, "input_tokens", 0) or 0
+    out_tok = getattr(usage, "output_tokens", 0) or 0
 
     # When using structured output via tool_use, extract the tool input
     if response_schema is not None:
@@ -108,7 +113,7 @@ async def query_anthropic(
             if getattr(block, "type", None) == "tool_use":
                 result = json.dumps(block.input)
                 logger.debug(f"Anthropic response (structured): {len(result)} chars")
-                return result
+                return AgentResult(text=result, input_tokens=in_tok, output_tokens=out_tok)
 
     # Extract text blocks (skip tool_use/web_search result blocks)
     text_parts = []
@@ -116,5 +121,5 @@ async def query_anthropic(
         if hasattr(block, "text"):
             text_parts.append(block.text)
     result = "\n".join(text_parts) if text_parts else ""
-    logger.debug(f"Anthropic response: {len(result)} chars")
-    return result
+    logger.debug(f"Anthropic response: {len(result)} chars, {in_tok} in / {out_tok} out tokens")
+    return AgentResult(text=result, input_tokens=in_tok, output_tokens=out_tok)

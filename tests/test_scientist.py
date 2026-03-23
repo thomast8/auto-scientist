@@ -6,6 +6,7 @@ from unittest.mock import MagicMock, patch
 import pytest
 from claude_code_sdk import AssistantMessage, ResultMessage, TextBlock
 
+from auto_scientist.agent_result import AgentResult
 from auto_scientist.agents.scientist import (
     _format_criteria_for_prompt,
     run_scientist,
@@ -619,7 +620,7 @@ class TestScientistStructuredOutput:
     @pytest.mark.asyncio
     @patch("auto_scientist.agents.scientist.query_anthropic")
     async def test_anthropic_model_uses_direct_api(self, mock_query, tmp_path):
-        mock_query.return_value = json.dumps(SAMPLE_PLAN)
+        mock_query.return_value = AgentResult(text=json.dumps(SAMPLE_PLAN))
         notebook_path = tmp_path / "notebook.md"
 
         result = await run_scientist(
@@ -636,7 +637,7 @@ class TestScientistStructuredOutput:
     @pytest.mark.asyncio
     @patch("auto_scientist.agents.scientist.query_openai")
     async def test_openai_model_uses_direct_api(self, mock_query, tmp_path):
-        mock_query.return_value = json.dumps(SAMPLE_PLAN)
+        mock_query.return_value = AgentResult(text=json.dumps(SAMPLE_PLAN))
         notebook_path = tmp_path / "notebook.md"
 
         result = await run_scientist(
@@ -650,7 +651,7 @@ class TestScientistStructuredOutput:
     @pytest.mark.asyncio
     @patch("auto_scientist.agents.scientist.query_google")
     async def test_google_model_uses_direct_api(self, mock_query, tmp_path):
-        mock_query.return_value = json.dumps(SAMPLE_PLAN)
+        mock_query.return_value = AgentResult(text=json.dumps(SAMPLE_PLAN))
         notebook_path = tmp_path / "notebook.md"
 
         result = await run_scientist(

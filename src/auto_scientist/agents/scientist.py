@@ -53,7 +53,10 @@ async def _query_direct(
     system_prompt: str | None = None,
     response_schema: type | None = None,
 ) -> str:
-    """Call the direct API client for a given provider."""
+    """Call the direct API client for a given provider.
+
+    Returns the text response only (token metadata is discarded).
+    """
     kwargs: dict[str, Any] = {
         "model": model,
         "prompt": prompt,
@@ -61,11 +64,14 @@ async def _query_direct(
         "response_schema": response_schema,
     }
     if provider == "anthropic":
-        return await query_anthropic(**kwargs)
+        result = await query_anthropic(**kwargs)
+        return result.text
     if provider == "openai":
-        return await query_openai(**kwargs)
+        result = await query_openai(**kwargs)
+        return result.text
     if provider == "google":
-        return await query_google(**kwargs)
+        result = await query_google(**kwargs)
+        return result.text
     raise ValueError(f"Unknown provider: {provider}")
 
 MAX_ATTEMPTS = 3

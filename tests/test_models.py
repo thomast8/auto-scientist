@@ -38,7 +38,7 @@ class TestQueryOpenAIStreaming:
         tokens = []
         result = await query_openai("gpt-5.4", "test", on_token=tokens.append)
 
-        assert result == "hello"
+        assert result.text == "hello"
         assert tokens == ["hel", "lo"]
 
     @pytest.mark.asyncio
@@ -60,7 +60,7 @@ class TestQueryOpenAIStreaming:
         tokens = []
         result = await query_openai("gpt-5.4", "q", web_search=True, on_token=tokens.append)
 
-        assert result == "searched"
+        assert result.text == "searched"
         assert tokens == ["search", "ed"]
 
     @pytest.mark.asyncio
@@ -74,7 +74,7 @@ class TestQueryOpenAIStreaming:
 
         result = await query_openai("gpt-5.4", "test")
 
-        assert result == "hello"
+        assert result.text == "hello"
         call_kwargs = mock_client.chat.completions.create.call_args.kwargs
         assert "stream" not in call_kwargs
 
@@ -91,7 +91,7 @@ class TestQueryOpenAI:
 
         result = await query_openai("gpt-5.4", "test prompt")
 
-        assert result == "hello"
+        assert result.text == "hello"
         mock_client.chat.completions.create.assert_called_once()
         call_kwargs = mock_client.chat.completions.create.call_args.kwargs
         assert call_kwargs["model"] == "gpt-5.4"
@@ -107,7 +107,7 @@ class TestQueryOpenAI:
 
         result = await query_openai("gpt-5.4", "search this", web_search=True)
 
-        assert result == "searched result"
+        assert result.text == "searched result"
         mock_client.responses.create.assert_called_once()
         call_kwargs = mock_client.responses.create.call_args.kwargs
         assert any(t["type"] == "web_search_preview" for t in call_kwargs["tools"])
@@ -123,7 +123,7 @@ class TestQueryOpenAI:
 
         result = await query_openai("gpt-5.4", "prompt")
 
-        assert result == ""
+        assert result.text == ""
 
 
 class TestQueryOpenAIMaxTokens:
@@ -190,7 +190,7 @@ class TestQueryGoogleStreaming:
         tokens = []
         result = await query_google("gemini-3.1-pro-preview", "test", on_token=tokens.append)
 
-        assert result == "google"
+        assert result.text == "google"
         assert tokens == ["goo", "gle"]
 
     @pytest.mark.asyncio
@@ -207,7 +207,7 @@ class TestQueryGoogleStreaming:
         tokens = []
         result = await query_google("gemini-3.1-pro-preview", "test", on_token=tokens.append)
 
-        assert result == "data"
+        assert result.text == "data"
         assert tokens == ["data"]
 
     @pytest.mark.asyncio
@@ -220,7 +220,7 @@ class TestQueryGoogleStreaming:
 
         result = await query_google("gemini-3.1-pro-preview", "test")
 
-        assert result == "response"
+        assert result.text == "response"
         mock_genai.Client.return_value.aio.models.generate_content.assert_called_once()
 
 
@@ -235,7 +235,7 @@ class TestQueryGoogle:
 
         result = await query_google("gemini-3.1-pro-preview", "test prompt")
 
-        assert result == "google response"
+        assert result.text == "google response"
 
     @pytest.mark.asyncio
     @patch("auto_scientist.models.google_client.genai")
@@ -247,7 +247,7 @@ class TestQueryGoogle:
 
         result = await query_google("gemini-3.1-pro-preview", "search", web_search=True)
 
-        assert result == "searched"
+        assert result.text == "searched"
         call_kwargs = mock_genai.Client.return_value.aio.models.generate_content.call_args.kwargs
         assert call_kwargs["config"] is not None
 
@@ -261,7 +261,7 @@ class TestQueryGoogle:
 
         result = await query_google("gemini-3.1-pro-preview", "prompt")
 
-        assert result == ""
+        assert result.text == ""
 
 
 def _make_anthropic_stream_mock(chunks):
@@ -291,7 +291,7 @@ class TestQueryAnthropicStreaming:
         tokens = []
         result = await query_anthropic("claude-sonnet-4-6", "test", on_token=tokens.append)
 
-        assert result == "anthropic"
+        assert result.text == "anthropic"
         assert tokens == ["anthro", "pic"]
         mock_client.messages.stream.assert_called_once()
 
@@ -308,7 +308,7 @@ class TestQueryAnthropicStreaming:
             "claude-sonnet-4-6", "q", web_search=True, on_token=tokens.append
         )
 
-        assert result == "result"
+        assert result.text == "result"
         call_kwargs = mock_client.messages.stream.call_args.kwargs
         assert any(t["type"] == "web_search_20250305" for t in call_kwargs["tools"])
 
@@ -324,7 +324,7 @@ class TestQueryAnthropicStreaming:
 
         result = await query_anthropic("claude-sonnet-4-6", "test")
 
-        assert result == "hello"
+        assert result.text == "hello"
         mock_client.messages.create.assert_called_once()
         mock_client.messages.stream.assert_not_called()
 
@@ -341,7 +341,7 @@ class TestQueryAnthropic:
 
         result = await query_anthropic("claude-sonnet-4-6", "test prompt")
 
-        assert result == "anthropic response"
+        assert result.text == "anthropic response"
         call_kwargs = mock_client.messages.create.call_args.kwargs
         assert call_kwargs["model"] == "claude-sonnet-4-6"
         assert "tools" not in call_kwargs
@@ -357,7 +357,7 @@ class TestQueryAnthropic:
 
         result = await query_anthropic("claude-sonnet-4-6", "search", web_search=True)
 
-        assert result == "searched"
+        assert result.text == "searched"
         call_kwargs = mock_client.messages.create.call_args.kwargs
         assert any(t["type"] == "web_search_20250305" for t in call_kwargs["tools"])
 
@@ -373,7 +373,7 @@ class TestQueryAnthropic:
 
         result = await query_anthropic("claude-sonnet-4-6", "prompt")
 
-        assert result == ""
+        assert result.text == ""
 
     @pytest.mark.asyncio
     @patch("auto_scientist.models.anthropic_client.AsyncAnthropic")
@@ -387,7 +387,7 @@ class TestQueryAnthropic:
 
         result = await query_anthropic("claude-sonnet-4-6", "prompt")
 
-        assert result == "part1\npart2"
+        assert result.text == "part1\npart2"
 
 
 # ── Anthropic reasoning tests ────────────────────────────────────────────────
@@ -643,7 +643,7 @@ class TestAnthropicStructuredOutput:
         # Should force tool choice
         assert call_kwargs.get("tool_choice", {}).get("type") == "tool"
         # Result should be JSON string of tool input
-        parsed = json.loads(result)
+        parsed = json.loads(result.text)
         assert parsed["hypothesis"] == "test"
 
     @pytest.mark.asyncio
@@ -682,7 +682,7 @@ class TestOpenAIStructuredOutput:
         rf = call_kwargs.get("response_format")
         assert rf is not None
         assert rf["type"] == "json_schema"
-        assert result == '{"hypothesis": "test"}'
+        assert result.text =='{"hypothesis": "test"}'
 
     @pytest.mark.asyncio
     @patch("auto_scientist.models.openai_client.AsyncOpenAI")
@@ -721,7 +721,7 @@ class TestGoogleStructuredOutput:
         call_kwargs = mock_genai.Client.return_value.aio.models.generate_content.call_args.kwargs
         config = call_kwargs.get("config")
         assert config is not None
-        assert result == '{"hypothesis": "test"}'
+        assert result.text =='{"hypothesis": "test"}'
 
     @pytest.mark.asyncio
     @patch("auto_scientist.models.google_client.genai")

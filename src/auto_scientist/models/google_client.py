@@ -11,6 +11,8 @@ from google import genai
 from google.genai import types
 from pydantic import BaseModel
 
+from auto_scientist.agent_result import AgentResult
+
 if TYPE_CHECKING:
     from auto_scientist.images import ImageData
     from auto_scientist.model_config import ReasoningConfig
@@ -50,8 +52,8 @@ async def query_google(
     system_prompt: str | None = None,
     response_schema: type[BaseModel] | None = None,
     images: list[ImageData] | None = None,
-) -> str:
-    """Send a prompt to a Google AI model and return the response text.
+) -> AgentResult:
+    """Send a prompt to a Google AI model and return the response.
 
     Args:
         model: Model name (e.g., 'gemini-2.5-pro').
@@ -61,7 +63,7 @@ async def query_google(
         on_token: Optional callback invoked with each text delta for live streaming.
 
     Returns:
-        The model's text response.
+        AgentResult with text and token counts (zero for streaming).
     """
     logger.debug(f"Google call: model={model}, prompt_len={len(prompt)}, web_search={web_search}")
     client = genai.Client()
@@ -114,7 +116,7 @@ async def query_google(
                 parts.append(text)
         result = "".join(parts)
         logger.debug(f"Google response: {len(result)} chars")
-        return result
+        return AgentResult(text=result)
 
     response = await client.aio.models.generate_content(
         model=model,
@@ -122,5 +124,8 @@ async def query_google(
         config=config,
     )
     result = response.text or ""
-    logger.debug(f"Google response: {len(result)} chars")
-    return result
+    usage = getattr(response, "usage_metadata", None)
+    in_tok = getattr(usage, "prompt_token_count", 0) or 0
+    out_tok = getattr(usage, "candidates_token_count", 0) or 0
+    logger.debug(f"Google response: {len(result)} chars, {in_tok} in / {out_tok} out tokens")
+    return AgentResult(text=result, input_tokens=in_tok, output_tokens=out_tok)
