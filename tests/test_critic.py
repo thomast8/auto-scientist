@@ -5,6 +5,7 @@ from unittest.mock import AsyncMock, patch
 
 import pytest
 
+from auto_scientist.agent_result import AgentResult
 from auto_scientist.agents.critic import (
     MIN_RESPONSE_LENGTH,
     _build_critic_prompt,
@@ -22,6 +23,11 @@ def _pad(text: str) -> str:
     if len(text) >= MIN_RESPONSE_LENGTH:
         return text
     return text + " " + "x" * (MIN_RESPONSE_LENGTH - len(text) - 1)
+
+
+def _critic_result(text: str) -> AgentResult:
+    """Create an AgentResult from padded text for critic mock returns."""
+    return AgentResult(text=_pad(text), input_tokens=10, output_tokens=5)
 
 
 @pytest.fixture
@@ -106,7 +112,7 @@ class TestRunDebate:
             patch(
                 "auto_scientist.agents.critic.query_openai",
                 new_callable=AsyncMock,
-                return_value=_pad("Initial critique"),
+                return_value=_critic_result("Initial critique"),
             ) as mock_openai,
             patch(
                 SCIENTIST_SDK_PATH,
@@ -130,7 +136,7 @@ class TestRunDebate:
             patch(
                 "auto_scientist.agents.critic.query_openai",
                 new_callable=AsyncMock,
-                side_effect=[_pad("Initial critique"), _pad("Refined critique")],
+                side_effect=[_critic_result("Initial critique"), _critic_result("Refined critique")],
             ) as mock_openai,
             patch(
                 SCIENTIST_SDK_PATH,
@@ -160,7 +166,7 @@ class TestRunDebate:
             patch(
                 "auto_scientist.agents.critic.query_openai",
                 new_callable=AsyncMock,
-                side_effect=[_pad("Critique R1"), _pad("Critique R2"), _pad("Critique R3")],
+                side_effect=[_critic_result("Critique R1"), _critic_result("Critique R2"), _critic_result("Critique R3")],
             ) as mock_openai,
             patch(
                 SCIENTIST_SDK_PATH,
@@ -181,7 +187,7 @@ class TestRunDebate:
             patch(
                 "auto_scientist.agents.critic.query_openai",
                 new_callable=AsyncMock,
-                side_effect=[_pad("Critique R1"), _pad("Critique R2")],
+                side_effect=[_critic_result("Critique R1"), _critic_result("Critique R2")],
             ),
             patch(
                 SCIENTIST_SDK_PATH,
@@ -212,12 +218,12 @@ class TestRunDebate:
             patch(
                 "auto_scientist.agents.critic.query_openai",
                 new_callable=AsyncMock,
-                side_effect=[_pad("OAI initial"), _pad("OAI refined")],
+                side_effect=[_critic_result("OAI initial"), _critic_result("OAI refined")],
             ),
             patch(
                 "auto_scientist.agents.critic.query_google",
                 new_callable=AsyncMock,
-                side_effect=[_pad("Google initial"), _pad("Google refined")],
+                side_effect=[_critic_result("Google initial"), _critic_result("Google refined")],
             ),
             patch(
                 SCIENTIST_SDK_PATH,
@@ -245,7 +251,7 @@ class TestRunDebate:
             patch(
                 "auto_scientist.agents.critic.query_openai",
                 new_callable=AsyncMock,
-                return_value=_pad("Critique of plan"),
+                return_value=_critic_result("Critique of plan"),
             ) as mock_openai,
         ):
             await run_debate(**base_kwargs, max_rounds=1)
@@ -261,7 +267,7 @@ class TestRunDebate:
             patch(
                 "auto_scientist.agents.critic.query_openai",
                 new_callable=AsyncMock,
-                side_effect=[_pad("Critique"), _pad("Refined")],
+                side_effect=[_critic_result("Critique"), _critic_result("Refined")],
             ),
             patch(
                 SCIENTIST_SDK_PATH,
@@ -281,7 +287,7 @@ class TestRunDebate:
         with patch(
             "auto_scientist.agents.critic.query_openai",
             new_callable=AsyncMock,
-            return_value=_pad("Critique"),
+            return_value=_critic_result("Critique"),
         ) as mock_openai:
             await run_debate(**base_kwargs, max_rounds=1)
 
@@ -296,7 +302,7 @@ class TestRunDebate:
             patch(
                 "auto_scientist.agents.critic.query_openai",
                 new_callable=AsyncMock,
-                side_effect=[_pad("Critique"), _pad("Refined")],
+                side_effect=[_critic_result("Critique"), _critic_result("Refined")],
             ) as mock_openai,
             patch(
                 SCIENTIST_SDK_PATH,
@@ -319,7 +325,7 @@ class TestRunDebate:
             patch(
                 "auto_scientist.agents.critic.query_openai",
                 new_callable=AsyncMock,
-                side_effect=[_pad("Critique"), _pad("Refined")],
+                side_effect=[_critic_result("Critique"), _critic_result("Refined")],
             ) as mock_openai,
             patch(
                 SCIENTIST_SDK_PATH,
@@ -343,7 +349,7 @@ class TestRunDebate:
             patch(
                 "auto_scientist.agents.critic.query_openai",
                 new_callable=AsyncMock,
-                side_effect=[_pad("Critique"), _pad("Refined")],
+                side_effect=[_critic_result("Critique"), _critic_result("Refined")],
             ) as mock_openai,
             patch(
                 SCIENTIST_SDK_PATH,
@@ -366,7 +372,7 @@ class TestRunDebate:
             patch(
                 "auto_scientist.agents.critic.query_openai",
                 new_callable=AsyncMock,
-                side_effect=[_pad("Critique"), _pad("Refined")],
+                side_effect=[_critic_result("Critique"), _critic_result("Refined")],
             ) as mock_openai,
             patch(
                 SCIENTIST_SDK_PATH,
@@ -390,7 +396,7 @@ class TestRunDebate:
             patch(
                 "auto_scientist.agents.critic.query_openai",
                 new_callable=AsyncMock,
-                side_effect=[_pad("Critique"), _pad("Refined")],
+                side_effect=[_critic_result("Critique"), _critic_result("Refined")],
             ),
             patch(
                 SCIENTIST_SDK_PATH,
@@ -427,7 +433,7 @@ class TestRunDebate:
         with patch(
             "auto_scientist.agents.critic.query_anthropic",
             new_callable=AsyncMock,
-            return_value=_pad("Anthropic critique"),
+            return_value=_critic_result("Anthropic critique"),
         ) as mock_anthropic:
             result = await run_debate(
                 critic_configs=[critic],
@@ -450,7 +456,7 @@ class TestRunDebate:
         with patch(
             "auto_scientist.agents.critic.query_openai",
             new_callable=AsyncMock,
-            return_value=_pad("Critique"),
+            return_value=_critic_result("Critique"),
         ) as mock_openai:
             await run_debate(
                 critic_configs=[critic],
@@ -462,75 +468,6 @@ class TestRunDebate:
         assert mock_openai.call_args.kwargs["reasoning"].level == "high"
 
 
-class TestRunDebateStreaming:
-    @pytest.mark.asyncio
-    async def test_on_token_factory_called_for_critics(self, base_kwargs):
-        """Factory is called with correct labels for critic rounds (not scientist, which uses SDK)."""
-        labels_seen = []
-
-        def factory(label):
-            labels_seen.append(label)
-            return lambda token: None
-
-        with (
-            patch(
-                "auto_scientist.agents.critic.query_openai",
-                new_callable=AsyncMock,
-                side_effect=[_pad("Critique R1"), _pad("Critique R2")],
-            ),
-            patch(
-                SCIENTIST_SDK_PATH,
-                new_callable=AsyncMock,
-                return_value=_pad("Scientist response"),
-            ),
-        ):
-            await run_debate(**base_kwargs, max_rounds=2, on_token_factory=factory)
-
-        assert len(labels_seen) == 2  # critic R1, critic R2 (scientist uses SDK)
-        assert "Critic" in labels_seen[0]
-        assert "Critic" in labels_seen[1]
-
-    @pytest.mark.asyncio
-    async def test_on_token_passed_to_critic_clients(self, base_kwargs):
-        """The callback from factory is passed as on_token to critic model clients."""
-        def mock_callback(token):
-            pass
-
-        def factory(label):
-            return mock_callback
-
-        with (
-            patch(
-                "auto_scientist.agents.critic.query_openai",
-                new_callable=AsyncMock,
-                return_value=_pad("Critique"),
-            ) as mock_openai,
-            patch(
-                SCIENTIST_SDK_PATH,
-                new_callable=AsyncMock,
-                return_value=_pad("Response"),
-            ),
-        ):
-            await run_debate(**base_kwargs, max_rounds=2, on_token_factory=factory)
-
-        for call in mock_openai.call_args_list:
-            assert call.kwargs.get("on_token") is mock_callback
-
-    @pytest.mark.asyncio
-    async def test_no_factory_passes_none(self, base_kwargs):
-        """Without a factory, on_token=None is passed (or not passed)."""
-        with (
-            patch(
-                "auto_scientist.agents.critic.query_openai",
-                new_callable=AsyncMock,
-                return_value=_pad("Critique"),
-            ) as mock_openai,
-        ):
-            await run_debate(**base_kwargs, max_rounds=1)
-
-        assert mock_openai.call_args.kwargs.get("on_token") is None
-
-
 class TestCriticRetry:
     @pytest.mark.asyncio
     async def test_retry_on_empty_critic_response(self, base_kwargs):
@@ -539,7 +476,7 @@ class TestCriticRetry:
             patch(
                 "auto_scientist.agents.critic.query_openai",
                 new_callable=AsyncMock,
-                side_effect=["", _pad("Valid critique")],
+                side_effect=[AgentResult(text=""), _critic_result("Valid critique")],
             ) as mock_openai,
         ):
             result = await run_debate(**base_kwargs, max_rounds=1)
@@ -554,7 +491,7 @@ class TestCriticRetry:
             patch(
                 "auto_scientist.agents.critic.query_openai",
                 new_callable=AsyncMock,
-                side_effect=[_pad("Critique"), _pad("Refined")],
+                side_effect=[_critic_result("Critique"), _critic_result("Refined")],
             ),
             patch(
                 SCIENTIST_SDK_PATH,
@@ -572,7 +509,7 @@ class TestCriticRetry:
             patch(
                 "auto_scientist.agents.critic.query_openai",
                 new_callable=AsyncMock,
-                return_value="",
+                return_value=AgentResult(text=""),
             ),
         ):
             result = await run_debate(**base_kwargs, max_rounds=1)
@@ -586,7 +523,7 @@ class TestCriticRetry:
             patch(
                 "auto_scientist.agents.critic.query_openai",
                 new_callable=AsyncMock,
-                side_effect=["OK", "This is a substantive critique that addresses the hypothesis, strategy, and provides alternative approaches to consider."],
+                side_effect=[AgentResult(text="OK"), AgentResult(text="This is a substantive critique that addresses the hypothesis, strategy, and provides alternative approaches to consider.")],
             ) as mock_openai,
         ):
             result = await run_debate(**base_kwargs, max_rounds=1)
@@ -641,7 +578,7 @@ class TestRunDebateWithPlots:
             patch(
                 "auto_scientist.agents.critic.query_openai",
                 new_callable=AsyncMock,
-                return_value=_pad("Critique with plots"),
+                return_value=_critic_result("Critique with plots"),
             ) as mock_openai,
             patch(
                 "auto_scientist.agents.critic.encode_images_from_paths",
@@ -667,7 +604,7 @@ class TestRunDebateWithPlots:
         with patch(
             "auto_scientist.agents.critic.query_openai",
             new_callable=AsyncMock,
-            return_value=_pad("Critique"),
+            return_value=_critic_result("Critique"),
         ) as mock_openai:
             await run_debate(
                 critic_configs=[critic],
@@ -686,7 +623,7 @@ class TestRunDebateWithPlots:
             patch(
                 "auto_scientist.agents.critic.query_openai",
                 new_callable=AsyncMock,
-                side_effect=[_pad("Critique"), _pad("Refined")],
+                side_effect=[_critic_result("Critique"), _critic_result("Refined")],
             ),
             patch(
                 SCIENTIST_SDK_PATH,
@@ -714,7 +651,7 @@ class TestRunDebateWithPlots:
             patch(
                 "auto_scientist.agents.critic.query_openai",
                 new_callable=AsyncMock,
-                side_effect=[_pad("Critique"), _pad("Refined")],
+                side_effect=[_critic_result("Critique"), _critic_result("Refined")],
             ),
             patch(
                 SCIENTIST_SDK_PATH,
@@ -742,7 +679,7 @@ class TestRunDebateWithPlots:
             patch(
                 "auto_scientist.agents.critic.query_openai",
                 new_callable=AsyncMock,
-                return_value=_pad("Critique"),
+                return_value=_critic_result("Critique"),
             ) as mock_openai,
             patch(
                 "auto_scientist.agents.critic.encode_images_from_paths",

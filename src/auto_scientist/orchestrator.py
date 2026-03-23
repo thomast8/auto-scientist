@@ -883,16 +883,6 @@ class Orchestrator:
         success_criteria = _format_criteria_for_prompt(self.state.success_criteria)
         scientist_cfg = self.model_config.resolve("scientist")
 
-        from auto_scientist.console import make_stream_printer
-
-        # Skip raw streaming when summaries are enabled; the summarizer
-        # already provides condensed progress updates for debate rounds.
-        factory = (
-            make_stream_printer
-            if self.stream and not self._should_summarize()
-            else None
-        )
-
         # Gather plot PNGs from the latest version directory
         plot_paths: list[Path] = []
         if self.state.versions:
@@ -928,7 +918,6 @@ class Orchestrator:
                     success_criteria=success_criteria,
                     max_rounds=self.debate_rounds,
                     scientist_config=scientist_cfg,
-                    on_token_factory=factory,
                     message_buffers=buffers,
                     plot_paths=plot_paths,
                 )

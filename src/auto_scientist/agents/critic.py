@@ -23,7 +23,7 @@ from typing import Any
 
 from claude_code_sdk import ClaudeCodeOptions
 
-from auto_scientist.console import stream_separator
+from auto_scientist.agent_result import AgentResult
 from auto_scientist.images import ImageData, encode_images_from_paths
 from auto_scientist.model_config import AgentModelConfig
 from auto_scientist.models.anthropic_client import query_anthropic
@@ -48,25 +48,24 @@ async def _query_critic(
     prompt: str,
     *,
     images: list[ImageData] | None = None,
-    on_token: Callable[[str], None] | None = None,
-) -> str:
+) -> AgentResult:
     """Dispatch a prompt to the appropriate provider with web search enabled."""
     if config.provider == "openai":
         return await query_openai(
             config.model, prompt,
-            web_search=True, reasoning=config.reasoning, on_token=on_token,
+            web_search=True, reasoning=config.reasoning,
             images=images or [],
         )
     elif config.provider == "google":
         return await query_google(
             config.model, prompt,
-            web_search=True, reasoning=config.reasoning, on_token=on_token,
+            web_search=True, reasoning=config.reasoning,
             images=images or [],
         )
     elif config.provider == "anthropic":
         return await query_anthropic(
             config.model, prompt,
-            web_search=True, reasoning=config.reasoning, on_token=on_token,
+            web_search=True, reasoning=config.reasoning,
             images=images or [],
         )
     else:
@@ -78,9 +77,9 @@ async def _query_with_retry(
     *args: Any,
     label: str = "",
     **kwargs: Any,
-) -> str:
+) -> AgentResult:
     """Call a query function, retrying if the response is empty, too short, or errors."""
-    result = ""
+    result = AgentResult(text="")
     for attempt in range(MAX_RETRIES + 1):
         try:
             result = await query_fn(*args, **kwargs)
@@ -89,10 +88,10 @@ async def _query_with_retry(
                 logger.warning(f"{label} SDK error ({e}), retrying (attempt {attempt + 1})")
                 continue
             raise
-        if result and len(result.strip()) >= MIN_RESPONSE_LENGTH:
+        if result.text and len(result.text.strip()) >= MIN_RESPONSE_LENGTH:
             return result
         if attempt < MAX_RETRIES:
-            reason = "empty" if not result or not result.strip() else "too short"
+            reason = "empty" if not result.text or not result.text.strip() else "too short"
             logger.warning(f"{label} returned {reason} response, retrying (attempt {attempt + 1})")
     return result  # return whatever we got
 
@@ -105,7 +104,6 @@ async def run_single_critic_debate(
     success_criteria: str = "",
     max_rounds: int = 2,
     scientist_config: AgentModelConfig | None = None,
-    on_token_factory: Callable[[str], Callable[[str], None]] | None = None,
     message_buffer: list[str] | None = None,
     plot_paths: list[Path] | None = None,
     images: list[ImageData] | None = None,
@@ -113,13 +111,16 @@ async def run_single_critic_debate(
 ) -> dict[str, Any]:
     """Run a multi-round debate between one critic and the scientist.
 
-    Returns a single dict with keys 'model', 'critique', and 'transcript'.
+    Returns a dict with keys 'model', 'critique', 'transcript',
+    'input_tokens', and 'output_tokens'.
     """
     if scientist_config is None:
         scientist_config = AgentModelConfig(model="claude-sonnet-4-6")
 
     label = f"{config.provider}:{config.model}"
     transcript: list[dict[str, str]] = []
+    total_in = 0
+    total_out = 0
 
     # Round 1: initial critique (no defense context)
     critic_prompt = _build_critic_prompt(
@@ -127,13 +128,13 @@ async def run_single_critic_debate(
         success_criteria=success_criteria,
         has_plots=has_plots,
     )
-    on_token = on_token_factory(f"Critic ({label}) round 1") if on_token_factory else None
-    critique_text = await _query_with_retry(
-        _query_critic, config, critic_prompt, images=images or [], on_token=on_token,
+    critique_result = await _query_with_retry(
+        _query_critic, config, critic_prompt, images=images or [],
         label=f"Critic ({label}) round 1",
     )
-    if on_token:
-        stream_separator()
+    total_in += critique_result.input_tokens
+    total_out += critique_result.output_tokens
+    critique_text = critique_result.text
     transcript.append({"role": "critic", "content": critique_text})
     if message_buffer is not None:
         message_buffer.append(f"[Critic] {critique_text}")
@@ -174,16 +175,13 @@ async def run_single_critic_debate(
             scientist_defense=scientist_response,
             has_plots=has_plots,
         )
-        on_token = (
-            on_token_factory(f"Critic ({label}) round {round_num + 1}")
-            if on_token_factory else None
-        )
-        critique_text = await _query_with_retry(
-            _query_critic, config, critic_prompt, images=images or [], on_token=on_token,
+        critique_result = await _query_with_retry(
+            _query_critic, config, critic_prompt, images=images or [],
             label=f"Critic ({label}) round {round_num + 1}",
         )
-        if on_token:
-            stream_separator()
+        total_in += critique_result.input_tokens
+        total_out += critique_result.output_tokens
+        critique_text = critique_result.text
         transcript.append({"role": "critic", "content": critique_text})
         if message_buffer is not None:
             message_buffer.append(f"[Critic] {critique_text}")
@@ -192,6 +190,8 @@ async def run_single_critic_debate(
         "model": label,
         "critique": critique_text,
         "transcript": transcript,
+        "input_tokens": total_in,
+        "output_tokens": total_out,
     }
 
 
@@ -203,7 +203,6 @@ async def run_debate(
     success_criteria: str = "",
     max_rounds: int = 2,
     scientist_config: AgentModelConfig | None = None,
-    on_token_factory: Callable[[str], Callable[[str], None]] | None = None,
     message_buffer: list[str] | None = None,
     message_buffers: dict[str, list[str]] | None = None,
     plot_paths: list[Path] | None = None,
@@ -221,14 +220,13 @@ async def run_debate(
         success_criteria: Formatted top-level success criteria.
         max_rounds: Number of critique rounds (1 = no debate, 2 = default).
         scientist_config: Config for the Scientist's debate responses.
-        on_token_factory: Factory for token streaming callbacks.
         message_buffer: Legacy single shared buffer (used if message_buffers not provided).
         message_buffers: Per-critic buffers keyed by "provider:model" label.
         plot_paths: Paths to plot images to forward to critics.
 
     Returns:
-        List of dicts with keys 'model', 'critique', and 'transcript'.
-        transcript is a list of {"role": "critic"|"scientist", "content": str}.
+        List of dicts with keys 'model', 'critique', 'transcript',
+        'input_tokens', and 'output_tokens'.
     """
     if not critic_configs:
         return []
@@ -261,7 +259,6 @@ async def run_debate(
                 success_criteria=success_criteria,
                 max_rounds=max_rounds,
                 scientist_config=scientist_config,
-                on_token_factory=on_token_factory,
                 message_buffer=buf,
                 plot_paths=plot_paths,
                 images=images,

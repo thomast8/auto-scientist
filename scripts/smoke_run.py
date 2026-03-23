@@ -17,6 +17,7 @@ import tempfile
 from pathlib import Path
 from unittest.mock import AsyncMock, patch
 
+from auto_scientist.agent_result import AgentResult
 from auto_scientist.agents.critic import MIN_RESPONSE_LENGTH
 from auto_scientist.model_config import AgentModelConfig, ModelConfig
 from auto_scientist.orchestrator import Orchestrator
@@ -266,16 +267,16 @@ async def run_smoke(output_dir: Path) -> None:
             "auto_scientist.agents.critic.query_openai",
             new_callable=AsyncMock,
             side_effect=[
-                _pad("OAI Critique R1: The hypothesis lacks specificity about what linear means."),
-                _pad("OAI Critique R2: Revised, sample size concern addressed."),
+                AgentResult(text=_pad("OAI Critique R1: The hypothesis lacks specificity about what linear means."), input_tokens=100, output_tokens=50),
+                AgentResult(text=_pad("OAI Critique R2: Revised, sample size concern addressed."), input_tokens=100, output_tokens=50),
             ],
         ),
         patch(
             "auto_scientist.agents.critic.query_google",
             new_callable=AsyncMock,
             side_effect=[
-                _pad("Google Critique R1: Consider confounding variables in the x-y relationship."),
-                _pad("Google Critique R2: Methodology concerns partially addressed."),
+                AgentResult(text=_pad("Google Critique R1: Consider confounding variables in the x-y relationship."), input_tokens=80, output_tokens=40),
+                AgentResult(text=_pad("Google Critique R2: Methodology concerns partially addressed."), input_tokens=80, output_tokens=40),
             ],
         ),
         patch(
