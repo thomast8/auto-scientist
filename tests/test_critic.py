@@ -414,18 +414,19 @@ class TestRunDebate:
         assert options.model == "claude-haiku-4-5-20251001"
 
     @pytest.mark.asyncio
-    async def test_unknown_provider_raises(self, plan):
+    async def test_unknown_provider_returns_empty(self, plan):
+        """Unknown provider is captured as a failed debate, returns empty results."""
         bad_config = AgentModelConfig.model_validate(
             {"provider": "openai", "model": "model"}
         )
         # Monkeypatch provider to bypass Pydantic validation
         object.__setattr__(bad_config, "provider", "unknown")
-        with pytest.raises(ValueError, match="Unknown critic provider"):
-            await run_debate(
-                critic_configs=[bad_config],
-                plan=plan,
-                notebook_content="",
-            )
+        result = await run_debate(
+            critic_configs=[bad_config],
+            plan=plan,
+            notebook_content="",
+        )
+        assert result == []  # error captured, no successful debates
 
     @pytest.mark.asyncio
     async def test_anthropic_critic_dispatches_correctly(self, plan):
@@ -499,8 +500,8 @@ class TestCriticRetry:
                 side_effect=RuntimeError("SDK error"),
             ),
         ):
-            with pytest.raises(RuntimeError, match="SDK error"):
-                await run_debate(**base_kwargs, max_rounds=2)
+            result = await run_debate(**base_kwargs, max_rounds=2)
+            assert result == []  # error captured, no successful debates
 
     @pytest.mark.asyncio
     async def test_exhausted_retries_uses_whatever_we_have(self, base_kwargs):

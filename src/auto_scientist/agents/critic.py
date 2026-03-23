@@ -266,8 +266,14 @@ async def run_debate(
             )
         )
 
-    results = await asyncio.gather(*tasks)
-    return list(results)
+    raw_results = await asyncio.gather(*tasks, return_exceptions=True)
+    successful = []
+    for r in raw_results:
+        if isinstance(r, BaseException):
+            logger.error(f"Critic debate failed: {r}")
+        else:
+            successful.append(r)
+    return successful
 
 
 def _build_critic_prompt(

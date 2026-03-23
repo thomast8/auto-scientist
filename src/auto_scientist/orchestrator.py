@@ -18,7 +18,6 @@ from auto_scientist.console import (
     AGENT_STYLES,
     AgentPanel,
     PipelineLive,
-    _score_style,
     console,
 )
 from auto_scientist.log_setup import setup_file_logging
@@ -661,37 +660,27 @@ class Orchestrator:
         When a panel is provided, summaries are routed to it via
         summary_collector callback instead of being printed directly.
         """
-        collector = None
-        if panel is not None:
-            collector_list: list[tuple[str, str, str]] = []
-
-            def _panel_collector(name: str, summary: str, label: str) -> None:
-                panel.add_line(f"[{label}] {summary}")
-                self._live._refresh()
-
-            collector = collector_list  # type: ignore[assignment]
-
         if not self._should_summarize():
             return await coro_fn(message_buffer)
 
         if panel is not None:
-            # Use summary_collector to route to panel
+            import asyncio
+            import contextlib
+
             summary_collector: list[tuple[str, str, str]] = []
+            seen = 0
 
             async def _poll_collector():
                 """Poll collector and push to panel."""
-                import asyncio
-                seen = 0
+                nonlocal seen
                 while True:
                     await asyncio.sleep(0.5)
                     new_entries = summary_collector[seen:]
                     for _name, summary, label in new_entries:
                         panel.add_line(f"[{label}] {summary}")
-                        self._live._refresh()
+                        self._live.refresh()
                     seen = len(summary_collector)
 
-            import asyncio
-            import contextlib
             poll_task = asyncio.create_task(_poll_collector())
             try:
                 result = await run_with_summaries(
@@ -702,9 +691,10 @@ class Orchestrator:
                 poll_task.cancel()
                 with contextlib.suppress(asyncio.CancelledError):
                     await poll_task
-                # Flush remaining entries
-                for _name, summary, label in summary_collector[len(summary_collector):]:
+                # Flush entries added since last poll drain
+                for _name, summary, label in summary_collector[seen:]:
                     panel.add_line(f"[{label}] {summary}")
+                self._live.refresh()
             return result
 
         return await run_with_summaries(
@@ -900,8 +890,9 @@ class Orchestrator:
         plot_paths: list[Path] = []
         if self.state.versions:
             latest = self.state.versions[-1]
-            version_dir = Path(latest.script_path).parent
-            plot_paths = sorted(version_dir.glob("*.png"))
+            if latest.script_path:
+                version_dir = Path(latest.script_path).parent
+                plot_paths = sorted(version_dir.glob("*.png"))
 
         self._live.update_status(phase="DEBATE")
 
@@ -987,7 +978,7 @@ class Orchestrator:
                 for _agent_name, summary, time_label in new_entries:
                     panels[label].add_line(f"[{time_label}] {summary}")
                 seen[label] = len(entries)
-            self._live._refresh()
+            self._live.refresh()
 
         async def _drain_loop():
             while True:
@@ -1016,6 +1007,7 @@ class Orchestrator:
             )
 
         drain_task = asyncio.create_task(_drain_loop())
+        raw_results: list[dict[str, Any] | BaseException] = []
         try:
             tasks = [
                 _summarized_debate(config, label)
@@ -1023,7 +1015,7 @@ class Orchestrator:
                     self.model_config.critics, critic_labels, strict=True,
                 )
             ]
-            results = await asyncio.gather(*tasks)
+            raw_results = await asyncio.gather(*tasks, return_exceptions=True)
         finally:
             drain_task.cancel()
             with contextlib.suppress(asyncio.CancelledError):
@@ -1032,14 +1024,28 @@ class Orchestrator:
             # Collapse all critic panels with token data
             for label in critic_labels:
                 panel = panels[label]
-                # Find matching result for token data
-                for r in results:
-                    if r["model"] == label:
-                        panel.set_tokens(r.get("input_tokens", 0), r.get("output_tokens", 0))
-                        break
-                self._live.collapse_panel(panel, "Debate complete")
+                matching = [
+                    r for r in raw_results
+                    if isinstance(r, dict) and r.get("model") == label
+                ]
+                if matching:
+                    panel.set_tokens(
+                        matching[0].get("input_tokens", 0),
+                        matching[0].get("output_tokens", 0),
+                    )
+                    self._live.collapse_panel(panel, "Debate complete")
+                else:
+                    panel.error("Debate failed or cancelled")
+                    self._live.collapse_panel(panel)
 
-        return list(results)
+        # Log failures, return successes
+        successful = []
+        for r in raw_results:
+            if isinstance(r, BaseException):
+                logger.error(f"Critic debate failed: {r}")
+            else:
+                successful.append(r)
+        return successful
 
     async def _run_scientist_revision(
         self,

@@ -3,7 +3,7 @@
 from dataclasses import dataclass
 
 
-@dataclass
+@dataclass(frozen=True, slots=True)
 class AgentResult:
     """Response from a model client, including optional token usage metadata.
 

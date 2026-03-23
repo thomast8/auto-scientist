@@ -169,9 +169,9 @@ class TestPipelineLive:
         live.start()
         panel = AgentPanel(name="Analyst", model="claude-sonnet-4-6", style="green")
         live.add_panel(panel)
-        assert panel in live._panels
+        assert live.has_panel(panel)
         live.remove_panel(panel)
-        assert panel not in live._panels
+        assert not live.has_panel(panel)
         live.stop()
 
     def test_collapse_panel(self):

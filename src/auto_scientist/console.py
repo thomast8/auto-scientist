@@ -74,18 +74,24 @@ class AgentPanel:
         self._end_time: float | None = None
 
     def add_line(self, text: str) -> None:
-        """Append a summary line. Older lines scroll off."""
+        """Append a summary line. Older lines scroll off. No-op after done."""
+        if self.done:
+            return
         cleaned = " ".join(text.split())
         self.lines.append(cleaned)
 
     def complete(self, done_summary: str) -> None:
         """Mark this panel as done. Collapses to the summary line."""
+        if self.done:
+            return
         self.done = True
         self.done_summary = done_summary
         self._end_time = time.monotonic()
 
     def error(self, msg: str) -> None:
         """Mark this panel as errored."""
+        if self.done:
+            return
         self.done = True
         self.error_msg = msg
         self._end_time = time.monotonic()
@@ -214,19 +220,29 @@ class PipelineLive:
 
     def start(self, log_path: Path | None = None) -> None:
         """Start the Live display and optionally open a log file."""
+        if self._live is not None:
+            return  # already started
+
         if log_path:
             self._file_handle = open(log_path, "a")
             self._file_console = Console(
                 file=self._file_handle, no_color=True, width=120,
             )
 
-        self._live = Live(
-            self._build_renderable(),
-            refresh_per_second=4,
-            transient=False,
-            console=console,
-        )
-        self._live.start()
+        try:
+            self._live = Live(
+                self._build_renderable(),
+                refresh_per_second=4,
+                transient=False,
+                console=console,
+            )
+            self._live.start()
+        except Exception:
+            if self._file_handle is not None:
+                self._file_handle.close()
+                self._file_handle = None
+                self._file_console = None
+            raise
 
     def stop(self) -> None:
         """Stop the Live display and close the log file."""
@@ -241,24 +257,24 @@ class PipelineLive:
     def add_panel(self, panel: AgentPanel) -> None:
         """Add an agent panel to the live display."""
         self._panels.append(panel)
-        self._refresh()
+        self.refresh()
 
     def remove_panel(self, panel: AgentPanel) -> None:
         """Remove an agent panel from the live display."""
         if panel in self._panels:
             self._panels.remove(panel)
-            self._refresh()
+            self.refresh()
 
     def collapse_panel(self, panel: AgentPanel, done_summary: str = "") -> None:
         """Mark a panel as complete and refresh."""
         if done_summary:
             panel.complete(done_summary)
-        self._refresh()
+        self.refresh()
 
     def update_status(self, **kwargs) -> None:
         """Update the status bar fields and refresh."""
         self._status_bar.update(**kwargs)
-        self._refresh()
+        self.refresh()
 
     def log(self, message: str) -> None:
         """Write a message to the log file (no terminal output)."""
@@ -279,14 +295,23 @@ class PipelineLive:
         if self._file_console is not None:
             self._file_console.print(renderable)
 
+    def has_panel(self, panel: AgentPanel) -> bool:
+        """Check if a panel is in the live display."""
+        return panel in self._panels
+
+    @property
+    def panel_count(self) -> int:
+        """Number of active panels."""
+        return len(self._panels)
+
+    def refresh(self) -> None:
+        """Rebuild and push the renderable to Live."""
+        if self._live is not None:
+            self._live.update(self._build_renderable())
+
     def _build_renderable(self) -> RenderableType:
         """Build the full Live renderable: panels + status bar."""
         parts: list[RenderableType] = list(self._panels)
         parts.append(Rule(style="dim"))
         parts.append(self._status_bar)
         return Group(*parts)
-
-    def _refresh(self) -> None:
-        """Rebuild and push the renderable to Live."""
-        if self._live is not None:
-            self._live.update(self._build_renderable())
