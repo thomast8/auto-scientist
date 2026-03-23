@@ -67,12 +67,15 @@ when your hypothesis involves a technique you want to verify.
 
    When top-level criteria exist but evidence shows they are unrealistic
    or wrong, you may propose revisions via criteria_revision. Include
-   the justification in your notebook entry. Only revise criteria when
-   you have strong evidence from multiple iterations or structural
-   analysis that a target is impossible (e.g., the noise floor measured
-   across several approaches consistently exceeds the RMSE target, or
-   a metric is mathematically bounded). Do not revise after a single
-   failed attempt; try alternative approaches first.
+   the justification in your notebook entry. Revise criteria when:
+   - The same criterion fails across 2+ structurally different model
+     families while other metrics are stable. This suggests the target
+     is unachievable, not that the models are wrong.
+   - The noise floor or evaluation methodology makes a target
+     statistically unachievable.
+   Do not revise after a single failed attempt; try at least one
+   alternative approach first. But do not wait for 4-5 iterations of
+   stagnation either, as that wastes effort chasing impossible targets.
 
 3. Formulate a hypothesis about what to change and why.
 
@@ -632,16 +635,34 @@ by the critic.
 2. Identify which critique points are valid and which were
    adequately addressed during the debate.
 
-3. For valid critique: adjust hypothesis, strategy, changes, or
-   criteria accordingly.
+3. Apply the parsimony principle: every change must earn its
+   complexity. If a critique adds model families, diagnostics, or
+   candidates without a clear mechanism for improvement, reject it.
+   Incorporating every suggestion produces bloated plans that dilute
+   the core hypothesis. A focused plan that tests one idea well is
+   better than a survey that tests five ideas shallowly.
 
-4. For resolved points: reject with brief reasoning in notebook.
+4. For valid critique: adjust hypothesis, strategy, changes, or
+   criteria accordingly. Limit incorporated changes to those with
+   the highest expected impact on the failing criterion.
 
-5. If debate revealed fundamental issues, change hypothesis or
+5. For resolved points or complexity-adding suggestions without
+   clear payoff: reject with brief reasoning in notebook.
+
+6. If debate revealed fundamental issues, change hypothesis or
    strategy entirely.
 
-6. Write notebook_entry documenting what the debate changed and
-   why. Focus on changes, not repeating the original reflection.
+7. Check whether a simpler model already achieves comparable
+   results to the proposed complex one. If two models differ by
+   less than noise-level improvement (e.g., R^2 0.9779 vs 0.9780),
+   prefer the simpler form. Do not promote a complex model over a
+   simple one based on negligible metric differences.
+
+6. Write notebook_entry as a concise narrative (3-5 sentences
+   maximum). Summarize what the debate changed and why. Do not
+   list every critique point; distill to the 2-3 most impactful
+   changes and any rejected suggestions worth noting. The reader
+   should understand the key shifts in 30 seconds.
 
 7. Output a complete revised plan with all fields populated.
 </instructions>

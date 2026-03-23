@@ -173,16 +173,30 @@ async def run_with_summaries(
     Returns:
         The result of the agent coroutine.
     """
-    elapsed = 0
+    elapsed = 0.0
+    max_interval = interval * 16  # Cap backoff at 16x base interval
 
     async def poll_loop():
         nonlocal elapsed
-        while True:
-            await asyncio.sleep(interval)
-            elapsed += interval
+        current_interval = interval
+        last_seen_len = 0
 
-            if not message_buffer:
+        while True:
+            await asyncio.sleep(current_interval)
+            elapsed += current_interval
+
+            buf_len = len(message_buffer)
+            if buf_len == 0:
                 continue
+
+            if buf_len == last_seen_len:
+                # Buffer unchanged, back off
+                current_interval = min(current_interval * 2, max_interval)
+                continue
+
+            # New content arrived, reset backoff
+            last_seen_len = buf_len
+            current_interval = interval
 
             tail = "\n".join(message_buffer[-10:])
             label = f"{int(elapsed)}s"

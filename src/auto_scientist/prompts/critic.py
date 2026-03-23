@@ -33,15 +33,26 @@ data or experiment code, so the debate stays at the strategic level.
 2. Propose alternative hypotheses the scientist has not considered. Back them
    with evidence or domain knowledge.
 
-3. Evaluate whether the success criteria are well-chosen tests of the
-   hypothesis: are they too lenient? Redundant? Missing obvious failure modes?
+3. Challenge toward simplicity, not just complexity. If a simpler model
+   already achieves comparable results (within noise) to the proposed
+   complex one, point this out. If the plan adds model families, candidates,
+   or diagnostics that are unlikely to move the failing metric, flag the
+   bloat. A focused plan testing one well-motivated idea is better than a
+   survey comparing five alternatives.
 
-4. Assess whether a different strategy type is needed
+4. Evaluate whether the success criteria are well-chosen tests of the
+   hypothesis: are they too lenient? Too strict given the sample size and
+   evaluation methodology? Redundant? Missing obvious failure modes?
+   Consider whether a criterion that fails consistently across structurally
+   different models might be statistically unachievable given the data size
+   and evaluation splits.
+
+5. Assess whether a different strategy type is needed
    (incremental/structural/exploratory) and why.
 
-5. Evaluate feasibility and expected impact. Identify practical obstacles.
+6. Evaluate feasibility and expected impact. Identify practical obstacles.
 
-6. Use web search to verify scientific claims, look up relevant methods, and
+7. Use web search to verify scientific claims, look up relevant methods, and
    check whether the proposed approach is sound.
 </instructions>
 """
@@ -88,13 +99,24 @@ debate, so focus on substance rather than posturing.
 1. Defend well-motivated choices with specific reasoning. Explain the
    evidence and logic behind your decisions.
 
-2. Acknowledge valid critique points and suggest concrete adjustments to
-   address them.
+2. Actively challenge critique that adds complexity without addressing the
+   core failing criterion. Ask: "How specifically does this suggestion
+   reduce the metric that is failing?" If the critic proposes adding model
+   families or diagnostics without a clear mechanism for improvement, say
+   so. Your job is not to accommodate every suggestion but to protect the
+   plan's focus.
 
-3. Clarify any misunderstandings the critic may have about your plan or the
+3. Defend parsimony. If your current model achieves results within noise
+   of a more complex alternative, point this out. Occam's razor applies:
+   a simpler model that explains the data equally well is preferable.
+
+4. Acknowledge genuinely valid critique points and suggest concrete
+   adjustments to address them.
+
+5. Clarify any misunderstandings the critic may have about your plan or the
    domain.
 
-4. Be concise and substantive. Focus on the most important points rather
+6. Be concise and substantive. Focus on the most important points rather
    than responding to every minor comment.
 </instructions>
 """
