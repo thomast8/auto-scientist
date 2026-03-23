@@ -1,7 +1,7 @@
-"""Scientist agent: prompt-in, JSON-out strategic planner with web search.
+"""Scientist agent: prompt-in, JSON-out strategic planner with file and web access.
 
 Does not read Python code. Receives analysis + notebook via prompt.
-Has web search access to ground hypotheses in real-world knowledge.
+Has file read and web search access to ground hypotheses in real-world knowledge.
 Output: structured JSON plan with hypothesis, strategy, changes, notebook entry.
 """
 
@@ -13,9 +13,6 @@ from typing import Any
 from claude_code_sdk import ClaudeCodeOptions
 
 from auto_scientist.config import SuccessCriterion
-from auto_scientist.models.anthropic_client import query_anthropic
-from auto_scientist.models.google_client import query_google
-from auto_scientist.models.openai_client import query_openai
 from auto_scientist.prompts.scientist import (
     SCIENTIST_REVISION_SYSTEM,
     SCIENTIST_REVISION_USER,
@@ -31,50 +28,9 @@ from auto_scientist.sdk_utils import (
 
 logger = logging.getLogger(__name__)
 
-
-def _detect_provider(model: str | None) -> str | None:
-    """Detect the LLM provider from a model name string."""
-    if not model:
-        return None
-    m = model.lower()
-    if m.startswith("claude-"):
-        return "anthropic"
-    if m.startswith(("gpt-", "o1", "o3", "o4")):
-        return "openai"
-    if m.startswith("gemini-"):
-        return "google"
-    return None
-
-
-async def _query_direct(
-    provider: str,
-    model: str,
-    prompt: str,
-    system_prompt: str | None = None,
-    response_schema: type | None = None,
-) -> str:
-    """Call the direct API client for a given provider.
-
-    Returns the text response only (token metadata is discarded).
-    """
-    kwargs: dict[str, Any] = {
-        "model": model,
-        "prompt": prompt,
-        "system_prompt": system_prompt,
-        "response_schema": response_schema,
-    }
-    if provider == "anthropic":
-        result = await query_anthropic(**kwargs)
-        return result.text
-    if provider == "openai":
-        result = await query_openai(**kwargs)
-        return result.text
-    if provider == "google":
-        result = await query_google(**kwargs)
-        return result.text
-    raise ValueError(f"Unknown provider: {provider}")
-
 MAX_ATTEMPTS = 3
+
+SCIENTIST_TOOLS = ["Read", "Glob", "WebSearch"]
 
 # JSON schema for structured output (injected into the prompt for LLM guidance)
 SCIENTIST_PLAN_SCHEMA = {
@@ -187,12 +143,12 @@ async def run_scientist(
     success_criteria: list[SuccessCriterion] | None = None,
     model: str | None = None,
     message_buffer: list[str] | None = None,
-    use_structured_output: bool = False,
 ) -> dict[str, Any]:
     """Formulate hypothesis and plan based on analysis.
 
     The Scientist does not read code. It receives the analysis JSON and
     notebook content via prompt injection and returns a structured plan.
+    Has file read and web search access.
 
     Args:
         analysis: Structured analysis JSON from the Analyst.
@@ -202,7 +158,6 @@ async def run_scientist(
         success_criteria: Existing top-level criteria (None if not yet defined).
         model: Model override.
         message_buffer: Optional buffer for streaming messages.
-        use_structured_output: Route through direct API with schema enforcement.
 
     Returns:
         Structured plan dict with keys: hypothesis, strategy, changes,
@@ -231,20 +186,9 @@ async def run_scientist(
         f"Schema:\n{json.dumps(SCIENTIST_PLAN_SCHEMA, indent=2)}"
     )
 
-    # Direct API path with structured output (provider-native schema enforcement)
-    provider = _detect_provider(model) if use_structured_output else None
-    if provider is not None:
-        raw = await _query_direct(
-            provider, model, user_prompt,
-            system_prompt=system_prompt,
-            response_schema=ScientistPlanOutput,
-        )
-        return validate_json_output(raw, ScientistPlanOutput, "Scientist")
-
-    # SDK path with retry
     options = ClaudeCodeOptions(
         system_prompt=system_prompt + json_instruction,
-        allowed_tools=["WebSearch"],
+        allowed_tools=SCIENTIST_TOOLS,
         max_turns=10,
         model=model,
         extra_args={"setting-sources": ""},
@@ -330,7 +274,7 @@ async def run_scientist_revision(
 
     options = ClaudeCodeOptions(
         system_prompt=SCIENTIST_REVISION_SYSTEM + json_instruction,
-        allowed_tools=["WebSearch"],
+        allowed_tools=SCIENTIST_TOOLS,
         max_turns=10,
         model=model,
         extra_args={"setting-sources": ""},

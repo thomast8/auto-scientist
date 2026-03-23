@@ -6,7 +6,6 @@ from unittest.mock import MagicMock, patch
 import pytest
 from claude_code_sdk import AssistantMessage, ResultMessage, TextBlock
 
-from auto_scientist.agent_result import AgentResult
 from auto_scientist.agents.scientist import (
     _format_criteria_for_prompt,
     run_scientist,
@@ -140,8 +139,8 @@ class TestRunScientist:
 
     @pytest.mark.asyncio
     @patch("auto_scientist.sdk_utils.query")
-    async def test_web_search_only(self, mock_query, tmp_path):
-        """Scientist should only have WebSearch (no code/file tools)."""
+    async def test_has_file_and_web_tools(self, mock_query, tmp_path):
+        """Scientist should have Read, Glob, and WebSearch tools."""
         from claude_code_sdk import ResultMessage
         result_msg = MagicMock(spec=ResultMessage)
         result_msg.result = json.dumps(SAMPLE_PLAN)
@@ -157,7 +156,7 @@ class TestRunScientist:
         notebook_path = tmp_path / "notebook.md"
         await run_scientist(analysis={}, notebook_path=notebook_path, version="v01")
 
-        assert captured_options["options"].allowed_tools == ["WebSearch"]
+        assert captured_options["options"].allowed_tools == ["Read", "Glob", "WebSearch"]
 
 
 class TestRunScientistMessageBuffer:
@@ -614,69 +613,3 @@ class TestScientistRetry:
         assert call_count == 2
 
 
-class TestScientistStructuredOutput:
-    """Tests for the direct API structured output path."""
-
-    @pytest.mark.asyncio
-    @patch("auto_scientist.agents.scientist.query_anthropic")
-    async def test_anthropic_model_uses_direct_api(self, mock_query, tmp_path):
-        mock_query.return_value = AgentResult(text=json.dumps(SAMPLE_PLAN))
-        notebook_path = tmp_path / "notebook.md"
-
-        result = await run_scientist(
-            analysis={}, notebook_path=notebook_path, version="v01",
-            model="claude-sonnet-4-6",
-            use_structured_output=True,
-        )
-        assert result["hypothesis"] == "test hypothesis"
-        mock_query.assert_called_once()
-        call_kwargs = mock_query.call_args.kwargs
-        assert call_kwargs.get("system_prompt") is not None
-        assert call_kwargs.get("response_schema") is not None
-
-    @pytest.mark.asyncio
-    @patch("auto_scientist.agents.scientist.query_openai")
-    async def test_openai_model_uses_direct_api(self, mock_query, tmp_path):
-        mock_query.return_value = AgentResult(text=json.dumps(SAMPLE_PLAN))
-        notebook_path = tmp_path / "notebook.md"
-
-        result = await run_scientist(
-            analysis={}, notebook_path=notebook_path, version="v01",
-            model="gpt-5.4",
-            use_structured_output=True,
-        )
-        assert result["hypothesis"] == "test hypothesis"
-        mock_query.assert_called_once()
-
-    @pytest.mark.asyncio
-    @patch("auto_scientist.agents.scientist.query_google")
-    async def test_google_model_uses_direct_api(self, mock_query, tmp_path):
-        mock_query.return_value = AgentResult(text=json.dumps(SAMPLE_PLAN))
-        notebook_path = tmp_path / "notebook.md"
-
-        result = await run_scientist(
-            analysis={}, notebook_path=notebook_path, version="v01",
-            model="gemini-2.5-pro",
-            use_structured_output=True,
-        )
-        assert result["hypothesis"] == "test hypothesis"
-        mock_query.assert_called_once()
-
-    @pytest.mark.asyncio
-    @patch("auto_scientist.sdk_utils.query")
-    async def test_unknown_model_falls_back_to_sdk(self, mock_query, tmp_path):
-        """Unknown provider with use_structured_output falls back to SDK path."""
-        async def fake_query(**kwargs):
-            msg = MagicMock(spec=ResultMessage)
-            msg.result = json.dumps(SAMPLE_PLAN)
-            yield msg
-
-        mock_query.side_effect = fake_query
-        notebook_path = tmp_path / "notebook.md"
-
-        result = await run_scientist(
-            analysis={}, notebook_path=notebook_path, version="v01",
-            model="unknown-model",
-            use_structured_output=True,
-        )
-        assert result["hypothesis"] == "test hypothesis"
