@@ -1051,7 +1051,17 @@ class Orchestrator:
                         matching[0].get("input_tokens", 0),
                         matching[0].get("output_tokens", 0),
                     )
-                    self._live.collapse_panel(panel, "Debate complete")
+                    # Use the last collector "done" entry as the summary,
+                    # or fall back to a truncated final critique
+                    done_entries = [
+                        e for e in collectors[label] if e[2].endswith("done")
+                    ]
+                    if done_entries:
+                        done_summary = done_entries[-1][1]
+                    else:
+                        critique = matching[0].get("critique", "")
+                        done_summary = critique[:200] + "..." if len(critique) > 200 else critique
+                    self._live.collapse_panel(panel, done_summary or "Debate complete")
                 else:
                     panel.error("Debate failed or cancelled")
                     self._live.collapse_panel(panel)

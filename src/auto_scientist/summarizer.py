@@ -48,9 +48,9 @@ SUMMARY_PROMPTS: dict[str, str] = {
         "What revisions were adopted from the debate?"
     ),
     "Debate": (
-        "You are summarizing a Debate phase's output. "
+        "You are summarizing a single critic's debate output. "
         "Messages are prefixed [Critic] or [Scientist]. "
-        "Always lead with who is speaking (Critic: ... / Scientist: ...). "
+        "Do not prefix with 'Critic:' since the panel already identifies who this is. "
         "Focus on: what is being challenged and what positions are forming?"
     ),
     "Coder": (
@@ -184,6 +184,7 @@ async def run_with_summaries(
     """
     elapsed = 0.0
     max_interval = interval * 16  # Cap backoff at 16x base interval
+    progress_summaries: list[str] = []
 
     async def poll_loop():
         nonlocal elapsed
@@ -214,6 +215,7 @@ async def run_with_summaries(
                     agent_name, tail, summary_model, progress=True,
                 )
                 if summary:
+                    progress_summaries.append(summary)
                     if summary_collector is not None:
                         summary_collector.append((agent_name, summary, label))
                     else:
@@ -229,12 +231,15 @@ async def run_with_summaries(
         with contextlib.suppress(asyncio.CancelledError):
             await poll_task
 
-        # Final summary of all output
-        if message_buffer:
+        # Final summary: summarize the progress summaries (not the raw buffer)
+        # to keep cost low and provide a coherent recap
+        if progress_summaries:
             try:
-                full_output = "\n".join(message_buffer)
+                recap_input = "\n".join(
+                    f"- {s}" for s in progress_summaries
+                )
                 summary = await summarize_agent_output(
-                    agent_name, full_output, summary_model, progress=False,
+                    agent_name, recap_input, summary_model, progress=False,
                 )
                 if summary:
                     done_label = f"{label_prefix}done"

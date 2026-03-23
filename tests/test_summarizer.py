@@ -195,16 +195,18 @@ class TestRunWithSummaries:
 
     @pytest.mark.asyncio
     async def test_final_summary_collected(self):
+        """Final summary recaps progress summaries, not raw buffer."""
         buf: list[str] = []
         collector: list[tuple[str, str, str]] = []
 
-        async def fast_coro(message_buffer):
+        async def slow_coro(message_buffer):
             message_buffer.append("output")
+            await asyncio.sleep(0.3)
             return 42
 
-        with patch("auto_scientist.summarizer.summarize_agent_output", new_callable=AsyncMock, return_value="final result"):
+        with patch("auto_scientist.summarizer.summarize_agent_output", new_callable=AsyncMock, return_value="summary"):
             result = await run_with_summaries(
-                fast_coro, "Coder", "gpt-4o-mini", buf, interval=100,
+                slow_coro, "Coder", "gpt-4o-mini", buf, interval=0.1,
                 summary_collector=collector,
             )
             assert result == 42
