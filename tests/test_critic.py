@@ -1,5 +1,6 @@
 """Tests for the critic debate loop."""
 
+from pathlib import Path
 from unittest.mock import AsyncMock, patch
 
 import pytest
@@ -7,8 +8,10 @@ import pytest
 from auto_scientist.agents.critic import (
     MIN_RESPONSE_LENGTH,
     _build_critic_prompt,
+    _build_scientist_debate_user_prompt,
     run_debate,
 )
+from auto_scientist.images import ImageData
 from auto_scientist.model_config import AgentModelConfig, ReasoningConfig
 
 SCIENTIST_SDK_PATH = "auto_scientist.agents.critic.collect_text_from_query"
@@ -590,3 +593,167 @@ class TestCriticRetry:
 
         assert mock_openai.call_count == 2
         assert "substantive" in result[0]["critique"]
+
+
+# Minimal valid 1x1 PNG for test fixtures
+TINY_PNG = (
+    b"\x89PNG\r\n\x1a\n\x00\x00\x00\rIHDR\x00\x00\x00\x01"
+    b"\x00\x00\x00\x01\x08\x02\x00\x00\x00\x90wS\xde\x00"
+    b"\x00\x00\x0cIDATx\x9cc\xf8\x0f\x00\x00\x01\x01\x00"
+    b"\x05\x18\xd8N\x00\x00\x00\x00IEND\xaeB`\x82"
+)
+
+
+class TestBuildCriticPromptPlots:
+    def test_has_plots_adds_section(self):
+        prompt = _build_critic_prompt({"h": "p"}, "", "", has_plots=True)
+        assert "<plots_attached>" in prompt
+
+    def test_no_plots_omits_section(self):
+        prompt = _build_critic_prompt({"h": "p"}, "", "", has_plots=False)
+        assert "<plots_attached>" not in prompt
+
+    def test_default_no_plots_section(self):
+        prompt = _build_critic_prompt({"h": "p"}, "", "")
+        assert "<plots_attached>" not in prompt
+
+
+class TestBuildScientistDebatePromptPlots:
+    def test_has_plots_adds_section(self):
+        prompt = _build_scientist_debate_user_prompt(
+            {"h": "p"}, "", "", critique="test", has_plots=True,
+        )
+        assert "<plots_attached>" in prompt
+
+    def test_no_plots_omits_section(self):
+        prompt = _build_scientist_debate_user_prompt(
+            {"h": "p"}, "", "", critique="test", has_plots=False,
+        )
+        assert "<plots_attached>" not in prompt
+
+
+class TestRunDebateWithPlots:
+    @pytest.mark.asyncio
+    async def test_images_forwarded_to_critic(self, plan):
+        """When plot_paths are provided, encoded images are forwarded to critic."""
+        critic = AgentModelConfig(provider="openai", model="gpt-4o")
+        with (
+            patch(
+                "auto_scientist.agents.critic.query_openai",
+                new_callable=AsyncMock,
+                return_value=_pad("Critique with plots"),
+            ) as mock_openai,
+            patch(
+                "auto_scientist.agents.critic.encode_images_from_paths",
+                return_value=[ImageData(data="abc", media_type="image/png")],
+            ) as mock_encode,
+        ):
+            await run_debate(
+                critic_configs=[critic],
+                plan=plan,
+                notebook_content="",
+                max_rounds=1,
+                plot_paths=[Path("/fake/plot.png")],
+            )
+
+        mock_encode.assert_called_once_with([Path("/fake/plot.png")])
+        call_kwargs = mock_openai.call_args.kwargs
+        assert call_kwargs["images"] == [ImageData(data="abc", media_type="image/png")]
+
+    @pytest.mark.asyncio
+    async def test_no_plots_passes_no_images(self, plan):
+        """Without plot_paths, images kwarg is empty list."""
+        critic = AgentModelConfig(provider="openai", model="gpt-4o")
+        with patch(
+            "auto_scientist.agents.critic.query_openai",
+            new_callable=AsyncMock,
+            return_value=_pad("Critique"),
+        ) as mock_openai:
+            await run_debate(
+                critic_configs=[critic],
+                plan=plan,
+                notebook_content="",
+                max_rounds=1,
+            )
+
+        call_kwargs = mock_openai.call_args.kwargs
+        assert call_kwargs.get("images") == []
+
+    @pytest.mark.asyncio
+    async def test_scientist_gets_read_tool_with_plots(self, base_kwargs):
+        """When plots are provided, scientist gets Read tool access."""
+        with (
+            patch(
+                "auto_scientist.agents.critic.query_openai",
+                new_callable=AsyncMock,
+                side_effect=[_pad("Critique"), _pad("Refined")],
+            ),
+            patch(
+                SCIENTIST_SDK_PATH,
+                new_callable=AsyncMock,
+                return_value=_pad("Response"),
+            ) as mock_scientist,
+            patch(
+                "auto_scientist.agents.critic.encode_images_from_paths",
+                return_value=[ImageData(data="abc", media_type="image/png")],
+            ),
+        ):
+            await run_debate(
+                **base_kwargs,
+                max_rounds=2,
+                plot_paths=[Path("/fake/plot.png")],
+            )
+
+        options = mock_scientist.call_args[0][1]
+        assert "Read" in options.allowed_tools
+
+    @pytest.mark.asyncio
+    async def test_scientist_prompt_lists_plot_paths(self, base_kwargs):
+        """When plots are provided, scientist prompt includes plot file paths."""
+        with (
+            patch(
+                "auto_scientist.agents.critic.query_openai",
+                new_callable=AsyncMock,
+                side_effect=[_pad("Critique"), _pad("Refined")],
+            ),
+            patch(
+                SCIENTIST_SDK_PATH,
+                new_callable=AsyncMock,
+                return_value=_pad("Response"),
+            ) as mock_scientist,
+            patch(
+                "auto_scientist.agents.critic.encode_images_from_paths",
+                return_value=[ImageData(data="abc", media_type="image/png")],
+            ),
+        ):
+            await run_debate(
+                **base_kwargs,
+                max_rounds=2,
+                plot_paths=[Path("/fake/plot.png")],
+            )
+
+        scientist_prompt = mock_scientist.call_args[0][0]
+        assert "/fake/plot.png" in scientist_prompt
+
+    @pytest.mark.asyncio
+    async def test_critic_prompt_has_plots_section(self, base_kwargs):
+        """When plots are provided, critic prompt includes <plots_attached> section."""
+        with (
+            patch(
+                "auto_scientist.agents.critic.query_openai",
+                new_callable=AsyncMock,
+                return_value=_pad("Critique"),
+            ) as mock_openai,
+            patch(
+                "auto_scientist.agents.critic.encode_images_from_paths",
+                return_value=[ImageData(data="abc", media_type="image/png")],
+            ),
+        ):
+            await run_debate(
+                **base_kwargs,
+                max_rounds=1,
+                plot_paths=[Path("/fake/plot.png")],
+            )
+
+        critic_prompt = mock_openai.call_args[0][1]
+        assert "<plots_attached>" in critic_prompt

@@ -11,6 +11,7 @@ from anthropic import AsyncAnthropic
 from pydantic import BaseModel
 
 if TYPE_CHECKING:
+    from auto_scientist.images import ImageData
     from auto_scientist.model_config import ReasoningConfig
 
 logger = logging.getLogger(__name__)
@@ -33,6 +34,7 @@ async def query_anthropic(
     on_token: Callable[[str], None] | None = None,
     system_prompt: str | None = None,
     response_schema: type[BaseModel] | None = None,
+    images: list[ImageData] | None = None,
 ) -> str:
     """Send a prompt to an Anthropic model and return the response text.
 
@@ -49,10 +51,21 @@ async def query_anthropic(
     logger.debug(f"Anthropic call: model={model}, prompt_len={len(prompt)}, ws={web_search}")
     client = AsyncAnthropic()
 
+    # Build user message content (multimodal when images provided)
+    if images:
+        user_content: str | list[dict] = [{"type": "text", "text": prompt}]
+        for img in images:
+            user_content.append({
+                "type": "image",
+                "source": {"type": "base64", "media_type": img.media_type, "data": img.data},
+            })
+    else:
+        user_content = prompt
+
     kwargs: dict = {
         "model": model,
         "max_tokens": 4096,
-        "messages": [{"role": "user", "content": prompt}],
+        "messages": [{"role": "user", "content": user_content}],
     }
 
     if system_prompt:

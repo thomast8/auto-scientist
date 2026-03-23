@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import base64
 import logging
 from collections.abc import Callable
 from typing import TYPE_CHECKING
@@ -11,6 +12,7 @@ from google.genai import types
 from pydantic import BaseModel
 
 if TYPE_CHECKING:
+    from auto_scientist.images import ImageData
     from auto_scientist.model_config import ReasoningConfig
 
 logger = logging.getLogger(__name__)
@@ -47,6 +49,7 @@ async def query_google(
     on_token: Callable[[str], None] | None = None,
     system_prompt: str | None = None,
     response_schema: type[BaseModel] | None = None,
+    images: list[ImageData] | None = None,
 ) -> str:
     """Send a prompt to a Google AI model and return the response text.
 
@@ -89,11 +92,20 @@ async def query_google(
 
     config = types.GenerateContentConfig(**config_kwargs) if config_kwargs else None
 
+    # Build contents (multimodal when images provided)
+    contents: str | list = prompt
+    if images:
+        contents = [prompt]
+        for img in images:
+            contents.append(
+                types.Part.from_bytes(data=base64.b64decode(img.data), mime_type=img.media_type)
+            )
+
     if on_token is not None:
         parts: list[str] = []
         async for chunk in await client.aio.models.generate_content_stream(
             model=model,
-            contents=prompt,
+            contents=contents,
             config=config,
         ):
             text = chunk.text
@@ -106,7 +118,7 @@ async def query_google(
 
     response = await client.aio.models.generate_content(
         model=model,
-        contents=prompt,
+        contents=contents,
         config=config,
     )
     result = response.text or ""

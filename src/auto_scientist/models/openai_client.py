@@ -10,6 +10,7 @@ from openai import AsyncOpenAI
 from pydantic import BaseModel
 
 if TYPE_CHECKING:
+    from auto_scientist.images import ImageData
     from auto_scientist.model_config import ReasoningConfig
 
 logger = logging.getLogger(__name__)
@@ -33,6 +34,7 @@ async def query_openai(
     max_tokens: int = 4096,
     system_prompt: str | None = None,
     response_schema: type[BaseModel] | None = None,
+    images: list[ImageData] | None = None,
 ) -> str:
     """Send a prompt to an OpenAI model and return the response text.
 
@@ -55,9 +57,21 @@ async def query_openai(
         effort = OPENAI_EFFORT_MAP.get(reasoning.level)
 
     if web_search:
+        # Build input (multimodal when images provided)
+        if images:
+            resp_content: list[dict] = [{"type": "input_text", "text": prompt}]
+            for img in images:
+                resp_content.append({
+                    "type": "input_image",
+                    "image_url": f"data:{img.media_type};base64,{img.data}",
+                })
+            resp_input: str | list[dict] = [{"role": "user", "content": resp_content}]
+        else:
+            resp_input = prompt
+
         resp_kwargs: dict = {
             "model": model,
-            "input": prompt,
+            "input": resp_input,
             "tools": [{"type": "web_search_preview"}],
         }
         if effort:
@@ -78,10 +92,21 @@ async def query_openai(
         logger.debug(f"OpenAI response: {len(result)} chars")
         return result
 
+    # Build user message content (multimodal when images provided)
+    if images:
+        user_content: str | list[dict] = [{"type": "text", "text": prompt}]
+        for img in images:
+            user_content.append({
+                "type": "image_url",
+                "image_url": {"url": f"data:{img.media_type};base64,{img.data}"},
+            })
+    else:
+        user_content = prompt
+
     messages: list[dict] = []
     if system_prompt:
         messages.append({"role": "system", "content": system_prompt})
-    messages.append({"role": "user", "content": prompt})
+    messages.append({"role": "user", "content": user_content})
 
     chat_kwargs: dict = {
         "model": model,

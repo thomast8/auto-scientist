@@ -893,8 +893,16 @@ class Orchestrator:
             else None
         )
 
+        # Gather plot PNGs from the latest version directory
+        plot_paths: list[Path] = []
+        if self.state.versions:
+            latest = self.state.versions[-1]
+            version_dir = Path(latest.script_path).parent
+            plot_paths = sorted(version_dir.glob("*.png"))
+
         n_critics = len(self.model_config.critics)
-        print_step(f"  DEBATE: {n_critics} critic(s), {self.debate_rounds} round(s)")
+        n_plots = len(plot_paths)
+        print_step(f"  DEBATE: {n_critics} critic(s), {self.debate_rounds} round(s), {n_plots} plot(s)")
 
         buffer: list[str] = []
 
@@ -909,6 +917,7 @@ class Orchestrator:
                 scientist_config=scientist_cfg,
                 on_token_factory=factory,
                 message_buffer=buf,
+                plot_paths=plot_paths,
             )
 
         try:

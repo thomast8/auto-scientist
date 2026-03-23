@@ -1585,6 +1585,45 @@ class TestRunDebateOrchestrator:
         assert len(call_kwargs["critic_configs"]) == 1
         assert call_kwargs["critic_configs"][0].model == "gpt-4o"
         assert call_kwargs["domain_knowledge"] == "test knowledge"
+        assert call_kwargs["plot_paths"] == []  # no versions => no plots
+
+    @pytest.mark.asyncio
+    async def test_passes_plot_paths_from_version_dir(self, orchestrator, tmp_path):
+        """When versions exist with PNGs, plot_paths are gathered and passed."""
+        orchestrator.output_dir.mkdir(parents=True, exist_ok=True)
+        orchestrator.model_config.critics = [AgentModelConfig(provider="openai", model="gpt-4o")]
+
+        # Create a version directory with plot PNGs
+        version_dir = orchestrator.output_dir / "v01"
+        version_dir.mkdir()
+        script_path = version_dir / "experiment.py"
+        script_path.write_text("pass")
+        (version_dir / "loss_curve.png").write_bytes(b"\x89PNG")
+        (version_dir / "scatter.png").write_bytes(b"\x89PNG")
+
+        orchestrator.state.versions = [
+            VersionEntry(
+                version="v01",
+                iteration=1,
+                script_path=str(script_path),
+                results_path=str(version_dir / "results.txt"),
+            )
+        ]
+
+        critique = [{"model": "openai:gpt-4o", "critique": "ok", "transcript": []}]
+
+        with patch(
+            "auto_scientist.agents.critic.run_debate",
+            new_callable=AsyncMock,
+            return_value=critique,
+        ) as mock_debate:
+            await orchestrator._run_debate({"hypothesis": "test"})
+
+        call_kwargs = mock_debate.call_args.kwargs
+        plot_paths = call_kwargs["plot_paths"]
+        assert len(plot_paths) == 2
+        plot_names = sorted(p.name for p in plot_paths)
+        assert plot_names == ["loss_curve.png", "scatter.png"]
 
 
 class TestRunScientistRevisionOrchestrator:

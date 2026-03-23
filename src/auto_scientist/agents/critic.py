@@ -17,11 +17,13 @@ bias and lets the critic form a fresh assessment each round.
 import json
 import logging
 from collections.abc import Callable
+from pathlib import Path
 from typing import Any
 
 from claude_code_sdk import ClaudeCodeOptions
 
 from auto_scientist.console import stream_separator
+from auto_scientist.images import ImageData, encode_images_from_paths
 from auto_scientist.model_config import AgentModelConfig
 from auto_scientist.models.anthropic_client import query_anthropic
 from auto_scientist.models.google_client import query_google
@@ -44,6 +46,7 @@ async def _query_critic(
     config: AgentModelConfig,
     prompt: str,
     *,
+    images: list[ImageData] | None = None,
     on_token: Callable[[str], None] | None = None,
 ) -> str:
     """Dispatch a prompt to the appropriate provider with web search enabled."""
@@ -51,16 +54,19 @@ async def _query_critic(
         return await query_openai(
             config.model, prompt,
             web_search=True, reasoning=config.reasoning, on_token=on_token,
+            images=images or [],
         )
     elif config.provider == "google":
         return await query_google(
             config.model, prompt,
             web_search=True, reasoning=config.reasoning, on_token=on_token,
+            images=images or [],
         )
     elif config.provider == "anthropic":
         return await query_anthropic(
             config.model, prompt,
             web_search=True, reasoning=config.reasoning, on_token=on_token,
+            images=images or [],
         )
     else:
         raise ValueError(f"Unknown critic provider: {config.provider!r}")
@@ -100,6 +106,7 @@ async def run_debate(
     scientist_config: AgentModelConfig | None = None,
     on_token_factory: Callable[[str], Callable[[str], None]] | None = None,
     message_buffer: list[str] | None = None,
+    plot_paths: list[Path] | None = None,
 ) -> list[dict[str, Any]]:
     """Run a multi-round critic-scientist debate for each critic model.
 
@@ -131,6 +138,13 @@ async def run_debate(
     if scientist_config is None:
         scientist_config = AgentModelConfig(model="claude-sonnet-4-6")
 
+    # Encode plot images once for all critics
+    images: list[ImageData] = []
+    if plot_paths:
+        images = encode_images_from_paths(plot_paths)
+    has_plots = bool(images)
+    logger.info(f"Debate: {len(images)} plot image(s) will be forwarded to critics")
+
     critiques = []
     for config in critic_configs:
         label = f"{config.provider}:{config.model}"
@@ -140,10 +154,11 @@ async def run_debate(
         critic_prompt = _build_critic_prompt(
             plan, notebook_content, domain_knowledge,
             success_criteria=success_criteria,
+            has_plots=has_plots,
         )
         on_token = on_token_factory(f"Critic ({label}) round 1") if on_token_factory else None
         critique_text = await _query_with_retry(
-            _query_critic, config, critic_prompt, on_token=on_token,
+            _query_critic, config, critic_prompt, images=images, on_token=on_token,
             label=f"Critic ({label}) round 1",
         )
         if on_token:
@@ -160,10 +175,15 @@ async def run_debate(
                 domain_knowledge=domain_knowledge,
                 success_criteria=success_criteria,
                 critique=critique_text,
+                has_plots=has_plots,
+                plot_paths=plot_paths,
             )
+            scientist_tools = ["WebSearch"]
+            if has_plots:
+                scientist_tools.append("Read")
             options = ClaudeCodeOptions(
                 system_prompt=SCIENTIST_DEBATE_SYSTEM,
-                allowed_tools=["WebSearch"],
+                allowed_tools=scientist_tools,
                 max_turns=10,
                 model=scientist_config.model,
                 extra_args={"setting-sources": ""},
@@ -181,13 +201,14 @@ async def run_debate(
                 plan, notebook_content, domain_knowledge,
                 success_criteria=success_criteria,
                 scientist_defense=scientist_response,
+                has_plots=has_plots,
             )
             on_token = (
                 on_token_factory(f"Critic ({label}) round {round_num + 1}")
                 if on_token_factory else None
             )
             critique_text = await _query_with_retry(
-                _query_critic, config, critic_prompt, on_token=on_token,
+                _query_critic, config, critic_prompt, images=images, on_token=on_token,
                 label=f"Critic ({label}) round {round_num + 1}",
             )
             if on_token:
@@ -211,6 +232,7 @@ def _build_critic_prompt(
     domain_knowledge: str,
     success_criteria: str = "",
     scientist_defense: str = "",
+    has_plots: bool = False,
 ) -> str:
     """Build the prompt sent to critic models.
 
@@ -224,12 +246,15 @@ def _build_critic_prompt(
             f"<scientist_defense>{scientist_defense}</scientist_defense>"
         )
 
+    plots_section = _plots_section_text() if has_plots else ""
+
     user = CRITIC_USER.format(
         domain_knowledge=domain_knowledge or "(none provided)",
         success_criteria=success_criteria or "(none defined yet)",
         notebook_content=notebook_content or "(empty)",
         plan_json=json.dumps(plan, indent=2),
         scientist_defense=defense_section,
+        plots_section=plots_section,
     )
     return f"{CRITIC_SYSTEM}\n\n{user}"
 
@@ -240,12 +265,42 @@ def _build_scientist_debate_user_prompt(
     domain_knowledge: str,
     success_criteria: str = "",
     critique: str = "",
+    has_plots: bool = False,
+    plot_paths: list[Path] | None = None,
 ) -> str:
-    """Build the user prompt for the Scientist responding to a critique during debate."""
+    """Build the user prompt for the Scientist responding to a critique during debate.
+
+    When plots are available, includes file paths so the SDK agent can read them
+    with the Read tool (vision).
+    """
+    plots_section = ""
+    if has_plots:
+        plots_section = _plots_section_text()
+        if plot_paths:
+            path_list = "\n".join(f"- {p}" for p in plot_paths)
+            plots_section += (
+                f"\n<plot_files>\n"
+                f"Use the Read tool to examine each plot file:\n"
+                f"{path_list}\n"
+                f"</plot_files>"
+            )
+
     return SCIENTIST_DEBATE_USER.format(
         domain_knowledge=domain_knowledge or "(none provided)",
         success_criteria=success_criteria or "(none defined yet)",
         notebook_content=notebook_content or "(empty)",
         plan_json=json.dumps(plan, indent=2),
         critique=critique,
+        plots_section=plots_section,
+    )
+
+
+def _plots_section_text() -> str:
+    """Return the standard plots-attached section for debate prompts."""
+    return (
+        "<plots_attached>\n"
+        "Experimental plots from the latest iteration are attached as images.\n"
+        "Examine them for trends, patterns, anomalies, and numeric values.\n"
+        "Reference specific plots when they support or contradict the plan.\n"
+        "</plots_attached>"
     )
