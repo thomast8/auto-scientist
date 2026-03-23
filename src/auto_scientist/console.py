@@ -34,6 +34,17 @@ AGENT_STYLES = {
     "Results": "dim",
 }
 
+# Maps orchestrator phase names to colors (matches the active agent)
+PHASE_STYLES = {
+    "INGESTION": "red",
+    "ANALYZE": "green",
+    "PLAN": "cyan",
+    "DEBATE": "yellow",
+    "REVISE": "cyan",
+    "IMPLEMENT": "magenta",
+    "REPORT": "blue",
+}
+
 
 def _score_style(score: int) -> str:
     """Return a Rich style string for a 0-100 score."""
@@ -150,7 +161,7 @@ class AgentPanel:
     def __rich_console__(self, console: Console, options):
         """Rich console protocol: render as a Panel."""
         border_style = "red" if self.error_msg else self.style
-        subtitle = self._build_footer()
+        subtitle = Text(self._build_footer(), style=border_style)
 
         panel = Panel(
             self._build_body(),
@@ -198,10 +209,11 @@ class StatusBar:
     def __rich_console__(self, console: Console, options):
         """Rich console protocol: render as a single-row Table."""
         elapsed = _format_elapsed(time.monotonic() - self.start_time)
+        phase_style = PHASE_STYLES.get(self.phase, "cyan")
 
         table = Table(show_header=False, expand=True, box=None, padding=(0, 1))
         table.add_column("iter", style="bold", no_wrap=True)
-        table.add_column("phase", style="cyan", no_wrap=True)
+        table.add_column("phase", style=phase_style, no_wrap=True)
         table.add_column("elapsed", style="dim", no_wrap=True)
         table.add_column("best", no_wrap=True, justify="right")
 
