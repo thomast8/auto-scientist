@@ -136,7 +136,7 @@ class AgentPanel:
         if self.input_tokens or self.output_tokens:
             parts.append(f"{self.input_tokens:,} in / {self.output_tokens:,} out")
         if self.num_turns:
-            parts.append(f"{self.num_turns} turns")
+            parts.append(f"{self.num_turns} {'turn' if self.num_turns == 1 else 'turns'}")
         return " | ".join(parts)
 
     def _build_body(self) -> RenderableType:
@@ -243,7 +243,7 @@ class StatusBar:
         if total_tokens > 0:
             stats_parts = [f"{self.total_input_tokens:,} in / {self.total_output_tokens:,} out"]
             if self.total_turns:
-                stats_parts.append(f"{self.total_turns} turns")
+                stats_parts.append(f"{self.total_turns} {'turn' if self.total_turns == 1 else 'turns'}")
             table.add_row(
                 "",
                 "",
