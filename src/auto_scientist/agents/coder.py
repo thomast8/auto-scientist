@@ -26,7 +26,7 @@ from auto_scientist.prompts.coder import (
     CODER_SYSTEM,
     CODER_USER,
 )
-from auto_scientist.sdk_utils import append_block_to_buffer
+from auto_scientist.sdk_utils import append_block_to_buffer, collect_text_from_query
 
 logger = logging.getLogger(__name__)
 
@@ -138,7 +138,9 @@ async def run_coder(
                         for block in message.content:
                             append_block_to_buffer(block, message_buffer)
                 elif isinstance(message, ResultMessage):
-                    pass  # Agent is done
+                    usage = getattr(message, "usage", None) or {}
+                    usage["num_turns"] = getattr(message, "num_turns", 0)
+                    collect_text_from_query.last_usage = usage  # type: ignore[attr-defined]
         except Exception as e:
             if attempt == MAX_ATTEMPTS - 1:
                 raise

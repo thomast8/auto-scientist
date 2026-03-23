@@ -375,16 +375,18 @@ class Orchestrator:
             # Phase 1: Unified iteration loop
             while self.state.phase == "iteration":
                 if self.state.iteration >= self.max_iterations:
-                    self._live.print_static(
+                    self._live.add_rule(
                         Rule(f"Reached max iterations ({self.max_iterations}). Stopping.", style="yellow")
                     )
+                    self._live.flush_completed()
                     self.state.phase = "report"
                     break
 
                 if self.state.should_stop_on_failures(self.max_consecutive_failures):
-                    self._live.print_static(
+                    self._live.add_rule(
                         Rule(f"Hit {self.max_consecutive_failures} consecutive failures. Stopping.", style="red")
                     )
+                    self._live.flush_completed()
                     self.state.phase = "report"
                     break
 
@@ -405,9 +407,10 @@ class Orchestrator:
                 self.state.phase = "stopped"
                 self.state.save(state_path)
 
-            self._live.print_static(
+            self._live.add_rule(
                 Rule("Experiment completed", style="bold green")
             )
+            self._live.flush_completed()
             logger.info("Run finished successfully")
         finally:
             self._live.stop()
@@ -462,7 +465,7 @@ class Orchestrator:
     async def _run_iteration_body(self) -> None:
         """Run one iteration of the pipeline (inlined, not _run_iteration)."""
         logger.info(f"=== Iteration {self.state.iteration} start ===")
-        self._live.print_static(Rule(f"Iteration {self.state.iteration}", style="bold"))
+        self._live.add_rule(Rule(f"Iteration {self.state.iteration}", style="bold"))
         self._live.update_status(iteration=self.state.iteration)
 
         version = f"v{self.state.iteration:02d}"
@@ -493,11 +496,12 @@ class Orchestrator:
         # Step 3: Check if Scientist recommends stopping
         if plan and plan.get("should_stop"):
             self._persist_artifact(version_dir, "plan.json", plan)
-            self._live.print_static(
+            self._live.add_rule(
                 Rule(f"Scientist recommends stopping: {plan.get('stop_reason', 'unknown')}", style="yellow")
             )
             logger.info(f"Scientist stop: {plan.get('stop_reason', 'unknown')}")
             self.state.phase = "report"
+            self._live.flush_completed()
             return
 
         # Step 4: Debate (skip on iteration 0, nothing to challenge)
@@ -532,13 +536,14 @@ class Orchestrator:
             )
             self.state.record_failure()
             self.state.record_version(version_entry)
-            self._live.print_static(
+            self._live.add_rule(
                 Rule(f"Iteration {self.state.iteration}: failed (no script)", style="red")
             )
             logger.info(
                 f"Iteration {self.state.iteration} complete: "
                 f"status=failed (coder produced no script)"
             )
+            self._live.flush_completed()
             self.state.iteration += 1
             return
 
@@ -580,7 +585,7 @@ class Orchestrator:
         # Iteration summary as a Rule + optional criteria line
         status_style = "green" if version_entry.status == "completed" else "red"
         score_str = f" (score {version_entry.score})" if version_entry.score is not None else ""
-        self._live.print_static(
+        self._live.add_rule(
             Rule(f"Iteration {self.state.iteration}: {version_entry.status}{score_str}", style=status_style)
         )
         # Update status bar with best score
@@ -588,6 +593,7 @@ class Orchestrator:
             best_version=self.state.best_version,
             best_score=self.state.best_score,
         )
+        self._live.flush_completed()
 
         # Increment at end of loop body
         logger.info(
@@ -1020,6 +1026,31 @@ class Orchestrator:
                 await asyncio.sleep(0.5)
                 _flush_collectors()
 
+        def _collapse_critic(label: str, result: dict[str, Any]) -> None:
+            """Collapse a critic panel with stats from its result."""
+            panel = panels[label]
+            panel.set_stats(
+                input_tokens=result.get("input_tokens", 0),
+                output_tokens=result.get("output_tokens", 0),
+                num_turns=len(result.get("transcript", [])),
+            )
+            # Flush collector entries before collapsing
+            entries = collectors[label]
+            new_entries = entries[seen[label]:]
+            for _agent_name, summary, time_label in new_entries:
+                panel.add_line(f"[{time_label}] {summary}")
+            seen[label] = len(entries)
+
+            done_entries = [
+                e for e in collectors[label] if e[2].endswith("done")
+            ]
+            if done_entries:
+                done_summary = done_entries[-1][1]
+            else:
+                critique = result.get("critique", "")
+                done_summary = critique[:200] + "..." if len(critique) > 200 else critique
+            self._live.collapse_panel(panel, done_summary or "Debate complete")
+
         async def _summarized_debate(config, label):
             async def coro(buf):
                 return await run_single_critic_debate(
@@ -1035,11 +1066,18 @@ class Orchestrator:
                     images=images,
                     has_plots=has_plots,
                 )
-            return await run_with_summaries(
-                coro, f"Debate: {label}", summary_model, buffers[label],
-                label_prefix="",
-                summary_collector=collectors[label],
-            )
+            try:
+                result = await run_with_summaries(
+                    coro, f"Debate: {label}", summary_model, buffers[label],
+                    label_prefix="",
+                    summary_collector=collectors[label],
+                )
+                _collapse_critic(label, result)
+                return result
+            except Exception as e:
+                panels[label].error(str(e))
+                self._live.collapse_panel(panels[label])
+                raise
 
         drain_task = asyncio.create_task(_drain_loop())
         raw_results: list[dict[str, Any] | BaseException] = []
@@ -1055,33 +1093,6 @@ class Orchestrator:
             drain_task.cancel()
             with contextlib.suppress(asyncio.CancelledError):
                 await drain_task
-            _flush_collectors()
-            # Collapse all critic panels with token data
-            for label in critic_labels:
-                panel = panels[label]
-                matching = [
-                    r for r in raw_results
-                    if isinstance(r, dict) and r.get("model") == label
-                ]
-                if matching:
-                    panel.set_tokens(
-                        matching[0].get("input_tokens", 0),
-                        matching[0].get("output_tokens", 0),
-                    )
-                    # Use the last collector "done" entry as the summary,
-                    # or fall back to a truncated final critique
-                    done_entries = [
-                        e for e in collectors[label] if e[2].endswith("done")
-                    ]
-                    if done_entries:
-                        done_summary = done_entries[-1][1]
-                    else:
-                        critique = matching[0].get("critique", "")
-                        done_summary = critique[:200] + "..." if len(critique) > 200 else critique
-                    self._live.collapse_panel(panel, done_summary or "Debate complete")
-                else:
-                    panel.error("Debate failed or cancelled")
-                    self._live.collapse_panel(panel)
 
         # Log failures, return successes
         successful = []
@@ -1313,7 +1324,7 @@ class Orchestrator:
 
     async def _score_final_version(self) -> None:
         """Run the Analyst on the last version so it gets a score before report."""
-        self._live.print_static(Rule("Scoring final version before report", style="bold"))
+        self._live.add_rule(Rule("Scoring final version before report", style="bold"))
         analysis = await self._run_analyst()
         if analysis:
             self._score_latest(analysis)

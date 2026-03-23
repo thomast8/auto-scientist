@@ -274,7 +274,7 @@ class PipelineLive:
     """
 
     def __init__(self) -> None:
-        self._panels: list[AgentPanel] = []
+        self._items: list[RenderableType] = []
         self._status_bar = StatusBar()
         self._live: Live | None = None
         self._file_console: Console | None = None
@@ -318,20 +318,53 @@ class PipelineLive:
 
     def add_panel(self, panel: AgentPanel) -> None:
         """Add an agent panel to the live display."""
-        self._panels.append(panel)
+        self._items.append(panel)
         self.refresh()
+
+    def add_rule(self, rule: Rule) -> None:
+        """Add a Rule inline with panels (renders in chronological order)."""
+        self._items.append(rule)
+        self.refresh()
+        if self._file_console is not None:
+            self._file_console.print(rule)
 
     def remove_panel(self, panel: AgentPanel) -> None:
         """Remove an agent panel from the live display."""
-        if panel in self._panels:
-            self._panels.remove(panel)
+        if panel in self._items:
+            self._items.remove(panel)
             self.refresh()
 
     def collapse_panel(self, panel: AgentPanel, done_summary: str = "") -> None:
-        """Mark a panel as complete, accumulate stats, and refresh."""
-        if done_summary:
-            panel.complete(done_summary)
+        """Mark a panel as complete, accumulate stats, flush it out of live.
+
+        Prints everything up to and including this panel statically (rules
+        that precede it + the panel itself), then removes them from the
+        live display so only active panels remain.
+        """
+        panel.complete(done_summary)
         self._status_bar.add_agent_stats(panel)
+
+        # Flush everything up to and including this panel
+        if panel in self._items:
+            idx = self._items.index(panel)
+            to_flush = self._items[:idx + 1]
+            target = self._live.console if self._live is not None else console
+            for item in to_flush:
+                target.print(item)
+            del self._items[:idx + 1]
+
+        self.refresh()
+
+    def flush_completed(self) -> None:
+        """Print all remaining items statically and clear the live area.
+
+        Used for iteration-end rules and other items that don't have a
+        panel collapse event.
+        """
+        target = self._live.console if self._live is not None else console
+        for item in self._items:
+            target.print(item)
+        self._items.clear()
         self.refresh()
 
     def update_status(self, **kwargs) -> None:
@@ -360,12 +393,12 @@ class PipelineLive:
 
     def has_panel(self, panel: AgentPanel) -> bool:
         """Check if a panel is in the live display."""
-        return panel in self._panels
+        return panel in self._items
 
     @property
     def panel_count(self) -> int:
-        """Number of active panels."""
-        return len(self._panels)
+        """Number of active panels (excludes rules)."""
+        return sum(1 for item in self._items if isinstance(item, AgentPanel))
 
     def refresh(self) -> None:
         """Rebuild and push the renderable to Live."""
@@ -373,8 +406,8 @@ class PipelineLive:
             self._live.update(self._build_renderable())
 
     def _build_renderable(self) -> RenderableType:
-        """Build the full Live renderable: panels + status bar."""
-        parts: list[RenderableType] = list(self._panels)
+        """Build the full Live renderable: items + status bar."""
+        parts: list[RenderableType] = list(self._items)
         parts.append(Rule(style="dim"))
         parts.append(self._status_bar)
         return Group(*parts)
