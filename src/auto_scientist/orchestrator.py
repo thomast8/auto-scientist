@@ -614,7 +614,7 @@ class Orchestrator:
         # Agent models
         agent_map = [
             ("Ingestor", "ingestor"), ("Analyst", "analyst"),
-            ("Scientist", "scientist"), ("Coder", "coder"), ("Report", "report"),
+            ("Scientist", "scientist"),
         ]
         for display_name, field_name in agent_map:
             cfg = mc.resolve(field_name)
@@ -629,6 +629,15 @@ class Orchestrator:
             table.add_row(
                 Text(label, style="yellow"),
                 Text(f"{critic.provider}:{critic.model}  [{critic.reasoning.level}]", style="yellow"),
+            )
+
+        # Coder + Report go after critics
+        for display_name, field_name in [("Coder", "coder"), ("Report", "report")]:
+            cfg = mc.resolve(field_name)
+            style = AGENT_STYLES.get(display_name, "")
+            table.add_row(
+                Text(display_name, style=style),
+                Text(f"{cfg.model}  [{cfg.reasoning.level}]", style=style),
             )
 
         if mc.summarizer:

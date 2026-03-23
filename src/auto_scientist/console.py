@@ -151,13 +151,18 @@ class AgentPanel:
         if self.error_msg:
             return Text(f"[error] {self.error_msg}", style="red")
 
+        done_style = f"bold {self.style}"
+
         if self.done and self.done_summary:
-            return Text(f"[done] {self.done_summary}", style="bold")
+            return Text(f"[done] {self.done_summary}", style=done_style)
 
         if not self.lines:
             return Text("  working...", style="dim")
 
-        body_lines = [Text(line) for line in self.lines]
+        body_lines = [
+            Text(line, style=done_style) if line.startswith("[done]") else Text(line)
+            for line in self.lines
+        ]
         return Group(*body_lines)
 
     def __rich_console__(self, console: Console, options):
