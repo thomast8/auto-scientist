@@ -150,6 +150,9 @@ class TestRunDebate:
         assert "Refined critique" in result[0]["critique"]
         assert mock_openai.call_count == 2
         mock_scientist.assert_called_once()
+        # Token counts accumulate across 2 critic rounds (10 in + 10 in, 5 out + 5 out)
+        assert result[0]["input_tokens"] == 20
+        assert result[0]["output_tokens"] == 10
 
         # Scientist prompt should contain the initial critique
         scientist_prompt = mock_scientist.call_args[0][0]

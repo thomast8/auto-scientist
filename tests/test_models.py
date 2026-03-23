@@ -87,11 +87,14 @@ class TestQueryOpenAI:
         mock_cls.return_value = mock_client
         mock_response = MagicMock()
         mock_response.choices = [MagicMock(message=MagicMock(content="hello"))]
+        mock_response.usage = MagicMock(prompt_tokens=50, completion_tokens=20)
         mock_client.chat.completions.create.return_value = mock_response
 
         result = await query_openai("gpt-5.4", "test prompt")
 
         assert result.text == "hello"
+        assert result.input_tokens == 50
+        assert result.output_tokens == 20
         mock_client.chat.completions.create.assert_called_once()
         call_kwargs = mock_client.chat.completions.create.call_args.kwargs
         assert call_kwargs["model"] == "gpt-5.4"
@@ -229,6 +232,7 @@ class TestQueryGoogle:
     @patch("auto_scientist.models.google_client.genai")
     async def test_standard_call(self, mock_genai):
         mock_response = MagicMock(text="google response")
+        mock_response.usage_metadata = MagicMock(prompt_token_count=80, candidates_token_count=30)
         mock_genai.Client.return_value.aio.models.generate_content = AsyncMock(
             return_value=mock_response
         )
@@ -236,6 +240,8 @@ class TestQueryGoogle:
         result = await query_google("gemini-3.1-pro-preview", "test prompt")
 
         assert result.text == "google response"
+        assert result.input_tokens == 80
+        assert result.output_tokens == 30
 
     @pytest.mark.asyncio
     @patch("auto_scientist.models.google_client.genai")
@@ -337,11 +343,14 @@ class TestQueryAnthropic:
         mock_cls.return_value = mock_client
         mock_block = MagicMock(text="anthropic response")
         mock_response = MagicMock(content=[mock_block])
+        mock_response.usage = MagicMock(input_tokens=120, output_tokens=45)
         mock_client.messages.create.return_value = mock_response
 
         result = await query_anthropic("claude-sonnet-4-6", "test prompt")
 
         assert result.text == "anthropic response"
+        assert result.input_tokens == 120
+        assert result.output_tokens == 45
         call_kwargs = mock_client.messages.create.call_args.kwargs
         assert call_kwargs["model"] == "claude-sonnet-4-6"
         assert "tools" not in call_kwargs
