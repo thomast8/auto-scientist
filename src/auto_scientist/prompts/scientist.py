@@ -658,13 +658,13 @@ by the critic.
    prefer the simpler form. Do not promote a complex model over a
    simple one based on negligible metric differences.
 
-6. Write notebook_entry as a concise narrative (3-5 sentences
+8. Write notebook_entry as a concise narrative (3-5 sentences
    maximum). Summarize what the debate changed and why. Do not
    list every critique point; distill to the 2-3 most impactful
    changes and any rejected suggestions worth noting. The reader
    should understand the key shifts in 30 seconds.
 
-7. Output a complete revised plan with all fields populated.
+9. Output a complete revised plan with all fields populated.
 </instructions>
 
 <examples>

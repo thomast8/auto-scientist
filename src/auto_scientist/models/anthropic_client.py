@@ -88,7 +88,12 @@ async def query_anthropic(
         kwargs["tool_choice"] = {"type": "tool", "name": "submit_response"}
 
     if reasoning is not None and reasoning.level not in ("default", "off"):
-        budget = reasoning.budget or ANTHROPIC_BUDGET_DEFAULTS[reasoning.level]
+        budget = reasoning.budget or ANTHROPIC_BUDGET_DEFAULTS.get(reasoning.level)
+        if budget is None:
+            valid = ", ".join(ANTHROPIC_BUDGET_DEFAULTS.keys())
+            raise ValueError(
+                f"Unknown Anthropic reasoning level: {reasoning.level!r}. Valid levels: {valid}"
+            )
         kwargs["thinking"] = {"type": "enabled", "budget_tokens": budget}
         kwargs["max_tokens"] = max(kwargs["max_tokens"], budget + 4096)
 

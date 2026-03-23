@@ -1331,6 +1331,8 @@ class Orchestrator:
 
         from auto_scientist.schemas import CoderRunResult
 
+        from pydantic import ValidationError
+
         try:
             raw = json.loads(run_result_path.read_text())
             validated = CoderRunResult.model_validate(raw)
@@ -1341,10 +1343,10 @@ class Orchestrator:
                 success=False,
                 stderr=f"Failed to parse run_result.json: {e}",
             )
-        except Exception as e:
+        except ValidationError as e:
             logger.warning(f"run_result.json schema validation failed: {e}")
             # Fall back to raw data if schema validation fails
-            data = raw  # type: ignore[possibly-undefined]
+            data = raw
 
         # Build stderr from error field + stderr.txt
         stderr_parts = []

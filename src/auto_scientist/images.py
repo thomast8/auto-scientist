@@ -26,7 +26,11 @@ def encode_images_from_paths(paths: list[Path]) -> list[ImageData]:
         if not path.exists():
             logger.warning(f"Image file not found, skipping: {path}")
             continue
+        try:
+            raw = path.read_bytes()
+        except OSError as e:
+            logger.warning(f"Could not read image file, skipping: {path} ({e})")
+            continue
         mime = mimetypes.guess_type(str(path))[0] or "image/png"
-        raw = path.read_bytes()
         images.append(ImageData(data=base64.b64encode(raw).decode(), media_type=mime))
     return images

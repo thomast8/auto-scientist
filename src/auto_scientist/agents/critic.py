@@ -93,6 +93,11 @@ async def _query_with_retry(
         if attempt < MAX_RETRIES:
             reason = "empty" if not result.text or not result.text.strip() else "too short"
             logger.warning(f"{label} returned {reason} response, retrying (attempt {attempt + 1})")
+        elif result.text and len(result.text.strip()) < MIN_RESPONSE_LENGTH:
+            logger.warning(
+                f"{label} retries exhausted, returning short response "
+                f"({len(result.text.strip())} chars)"
+            )
     return result  # return whatever we got
 
 
