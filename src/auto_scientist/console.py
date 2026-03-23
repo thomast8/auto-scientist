@@ -92,12 +92,19 @@ class AgentPanel:
         cleaned = " ".join(text.split())
         self.lines.append(cleaned)
 
-    def complete(self, done_summary: str) -> None:
-        """Mark this panel as done. Collapses to the summary line."""
+    def complete(self, done_summary: str = "") -> None:
+        """Mark this panel as done. Collapses to the summary line.
+
+        If done_summary is empty and the panel has lines, the last line
+        is used as the done summary (preserves the summarizer's [done] entry).
+        """
         if self.done:
             return
         self.done = True
-        self.done_summary = done_summary
+        if done_summary:
+            self.done_summary = done_summary
+        elif self.lines:
+            self.done_summary = self.lines[-1]
         self._end_time = time.monotonic()
 
     def error(self, msg: str) -> None:

@@ -453,7 +453,7 @@ class Orchestrator:
             )
             data_files = sorted(canonical_data_dir.iterdir())
             file_list = ", ".join(f.name for f in data_files)
-            self._live.collapse_panel(panel, f"Canonicalized {len(data_files)} files: {file_list}")
+            self._collapse(panel, f"Canonicalized {len(data_files)} files: {file_list}")
         finally:
             self._persist_buffer("ingestor", buffer)
 
@@ -705,6 +705,14 @@ class Orchestrator:
             coro_fn, agent_name, self._summary_model, message_buffer,
         )
 
+    def _collapse(self, panel: AgentPanel, fallback: str = "") -> None:
+        """Collapse a panel, preferring the summarizer's done line over a fallback."""
+        if self._should_summarize() and panel.lines:
+            # Summarizer populated the panel; let complete() use the last line
+            self._live.collapse_panel(panel)
+        else:
+            self._live.collapse_panel(panel, fallback)
+
     @staticmethod
     def _apply_sdk_usage(panel: AgentPanel) -> None:
         """Read token usage from the last SDK query and apply it to a panel."""
@@ -770,7 +778,7 @@ class Orchestrator:
 
             analysis = await self._with_summaries(_analyst_coro, "Analyst", buffer, panel=panel)
             logger.info("Analyst initial: data characterization complete")
-            self._live.collapse_panel(panel, "Data characterization complete")
+            self._collapse(panel, "Data characterization complete")
             return analysis
         except Exception as e:
             logger.exception(f"Analyst initial error: {e}")
@@ -829,7 +837,7 @@ class Orchestrator:
                 f"Analyst complete: {n_criteria} criteria evaluated, "
                 f"data_summary={'yes' if analysis.get('data_summary') else 'no'}"
             )
-            self._live.collapse_panel(panel, f"Complete ({n_criteria} criteria evaluated)")
+            self._collapse(panel, f"Complete ({n_criteria} criteria evaluated)")
             return analysis
         except Exception as e:
             logger.exception(f"Analyst error: {e}")
@@ -878,7 +886,7 @@ class Orchestrator:
                 f"hypothesis={plan.get('hypothesis', '?')[:100]}, "
                 f"should_stop={plan.get('should_stop', False)}"
             )
-            self._live.collapse_panel(
+            self._collapse(
                 panel, f"strategy={plan.get('strategy', '?')}, changes={len(plan.get('changes', []))}"
             )
             return plan
@@ -1126,7 +1134,7 @@ class Orchestrator:
             if revised.get("notebook_entry"):
                 append_entry(notebook_path, revised["notebook_entry"], version, "revision")
 
-            self._live.collapse_panel(panel, f"strategy={revised.get('strategy', '?')}")
+            self._collapse(panel, f"strategy={revised.get('strategy', '?')}")
             return revised
         except Exception as e:
             logger.exception(f"Scientist revision error: {e}")
@@ -1202,7 +1210,7 @@ class Orchestrator:
                 )
 
             new_script = await self._with_summaries(_coder_coro, "Coder", buffer, panel=panel)
-            self._live.collapse_panel(panel, f"Created {new_script}")
+            self._collapse(panel, f"Created {new_script}")
             return new_script
         except Exception as e:
             logger.exception(f"Coder error: {e}")
@@ -1464,7 +1472,7 @@ class Orchestrator:
             report_content = await self._with_summaries(_report_coro, "Report", buffer, panel=panel)
             report_path = self.output_dir / "report.md"
             report_path.write_text(report_content)
-            self._live.collapse_panel(panel, f"Written to {report_path}")
+            self._collapse(panel, f"Written to {report_path}")
         except Exception as e:
             logger.exception(f"Report error: {e}")
             panel.error(str(e))
