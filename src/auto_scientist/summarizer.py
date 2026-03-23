@@ -12,7 +12,6 @@ from typing import Any, TypeVar
 
 from openai import AsyncOpenAI
 
-from auto_scientist.console import print_summary
 
 T = TypeVar("T")
 
@@ -218,7 +217,7 @@ async def run_with_summaries(
                     if summary_collector is not None:
                         summary_collector.append((agent_name, summary, label))
                     else:
-                        print_summary(agent_name, summary, label=label)
+                        logger.info(f"{agent_name} [{label}]: {summary}")
             except Exception as e:
                 logger.warning(f"Periodic poll error for {agent_name}: {e}")
 
@@ -242,7 +241,7 @@ async def run_with_summaries(
                     if summary_collector is not None:
                         summary_collector.append((agent_name, summary, done_label))
                     else:
-                        print_summary(agent_name, summary, label=done_label)
+                        logger.info(f"{agent_name} [{done_label}]: {summary}")
             except Exception as e:
                 logger.warning(f"Final summary error for {agent_name}: {e}")
 

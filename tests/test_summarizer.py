@@ -176,6 +176,7 @@ class TestRunWithSummaries:
     async def test_periodic_polls_fire(self):
         """Fake coroutine that takes ~0.6s with 0.2s interval should get >= 2 polls."""
         buf: list[str] = []
+        collector: list[tuple[str, str, str]] = []
 
         async def slow_coro(message_buffer):
             for i in range(3):
@@ -183,41 +184,32 @@ class TestRunWithSummaries:
                 await asyncio.sleep(0.2)
             return "done"
 
-        with (
-            patch("auto_scientist.summarizer.summarize_agent_output", new_callable=AsyncMock, return_value="progress"),
-            patch("auto_scientist.summarizer.print_summary") as mock_print,
-        ):
+        with patch("auto_scientist.summarizer.summarize_agent_output", new_callable=AsyncMock, return_value="progress"):
             result = await run_with_summaries(
                 slow_coro, "Analyst", "gpt-4o-mini", buf, interval=0.2,
+                summary_collector=collector,
             )
             assert result == "done"
-            periodic_calls = [
-                c for c in mock_print.call_args_list
-                if c[1].get("label") != "done"
-            ]
-            assert len(periodic_calls) >= 2
+            periodic = [c for c in collector if not c[2].endswith("done")]
+            assert len(periodic) >= 2
 
     @pytest.mark.asyncio
-    async def test_final_summary_printed(self):
+    async def test_final_summary_collected(self):
         buf: list[str] = []
+        collector: list[tuple[str, str, str]] = []
 
         async def fast_coro(message_buffer):
             message_buffer.append("output")
             return 42
 
-        with (
-            patch("auto_scientist.summarizer.summarize_agent_output", new_callable=AsyncMock, return_value="final result"),
-            patch("auto_scientist.summarizer.print_summary") as mock_print,
-        ):
+        with patch("auto_scientist.summarizer.summarize_agent_output", new_callable=AsyncMock, return_value="final result"):
             result = await run_with_summaries(
                 fast_coro, "Coder", "gpt-4o-mini", buf, interval=100,
+                summary_collector=collector,
             )
             assert result == 42
-            final_calls = [
-                c for c in mock_print.call_args_list
-                if c[1].get("label") == "done"
-            ]
-            assert len(final_calls) == 1
+            final = [c for c in collector if c[2].endswith("done")]
+            assert len(final) == 1
 
     @pytest.mark.asyncio
     async def test_empty_buffer_skips_poll(self):
@@ -230,7 +222,6 @@ class TestRunWithSummaries:
 
         with (
             patch("auto_scientist.summarizer.summarize_agent_output", new_callable=AsyncMock, return_value="summary") as mock_summarize,
-            patch("auto_scientist.summarizer.print_summary"),
         ):
             await run_with_summaries(
                 empty_coro, "Analyst", "gpt-4o-mini", buf, interval=0.1,
@@ -263,7 +254,6 @@ class TestRunWithSummaries:
 
         with (
             patch("auto_scientist.summarizer.summarize_agent_output", new_callable=AsyncMock, side_effect=count_summarize),
-            patch("auto_scientist.summarizer.print_summary"),
         ):
             await run_with_summaries(
                 staged_coro, "Analyst", "gpt-4o-mini", buf, interval=0.1,
@@ -281,7 +271,6 @@ class TestRunWithSummaries:
 
         with (
             patch("auto_scientist.summarizer.summarize_agent_output", new_callable=AsyncMock, return_value="summary"),
-            patch("auto_scientist.summarizer.print_summary"),
         ):
             with pytest.raises(ValueError, match="boom"):
                 await run_with_summaries(
@@ -299,7 +288,6 @@ class TestRunWithSummaries:
 
         with (
             patch("auto_scientist.summarizer.summarize_agent_output", new_callable=AsyncMock, side_effect=RuntimeError("API down")),
-            patch("auto_scientist.summarizer.print_summary"),
         ):
             result = await run_with_summaries(
                 coro, "Analyst", "gpt-4o-mini", buf, interval=100,
@@ -326,7 +314,6 @@ class TestRunWithSummaries:
 
         with (
             patch("auto_scientist.summarizer.summarize_agent_output", new_callable=AsyncMock, side_effect=track_summarize),
-            patch("auto_scientist.summarizer.print_summary"),
         ):
             await run_with_summaries(
                 long_coro, "Coder", "gpt-4o-mini", buf, interval=0.1,
@@ -363,7 +350,6 @@ class TestRunWithSummaries:
 
         with (
             patch("auto_scientist.summarizer.summarize_agent_output", new_callable=AsyncMock, side_effect=count_summarize),
-            patch("auto_scientist.summarizer.print_summary"),
         ):
             await run_with_summaries(
                 staged_coro, "Coder", "gpt-4o-mini", buf, interval=0.1,
