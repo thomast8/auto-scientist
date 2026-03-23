@@ -80,7 +80,6 @@ class AgentPanel:
         self.input_tokens = 0
         self.output_tokens = 0
         self.num_turns = 0
-        self.cost_usd: float | None = None
         self.done = False
         self.done_summary = ""
         self.error_msg = ""
@@ -119,13 +118,11 @@ class AgentPanel:
         input_tokens: int = 0,
         output_tokens: int = 0,
         num_turns: int = 0,
-        cost_usd: float | None = None,
     ) -> None:
         """Set rich usage stats from SDK ResultMessage or direct API calls."""
         self.input_tokens = input_tokens
         self.output_tokens = output_tokens
         self.num_turns = num_turns
-        self.cost_usd = cost_usd
 
     @property
     def elapsed(self) -> float:
@@ -140,8 +137,6 @@ class AgentPanel:
             parts.append(f"{self.input_tokens:,} in / {self.output_tokens:,} out")
         if self.num_turns:
             parts.append(f"{self.num_turns} turns")
-        if self.cost_usd is not None:
-            parts.append(f"${self.cost_usd:.4f}")
         return " | ".join(parts)
 
     def _build_body(self) -> RenderableType:
@@ -188,6 +183,9 @@ class StatusBar:
         self.phase = ""
         self.best_version = ""
         self.best_score: int | None = None
+        self.total_input_tokens = 0
+        self.total_output_tokens = 0
+        self.total_turns = 0
 
     def update(
         self,
@@ -205,6 +203,12 @@ class StatusBar:
             self.best_version = best_version
         if best_score is not None:
             self.best_score = best_score
+
+    def add_agent_stats(self, panel: "AgentPanel") -> None:
+        """Accumulate a completed agent's stats into the running totals."""
+        self.total_input_tokens += panel.input_tokens
+        self.total_output_tokens += panel.output_tokens
+        self.total_turns += panel.num_turns
 
     def __rich_console__(self, console: Console, options):
         """Rich console protocol: render as a single-row Table."""
@@ -226,12 +230,27 @@ class StatusBar:
         else:
             score_text = Text("-", style="dim")
 
+        # Row 1: iteration, phase, elapsed, best score
         table.add_row(
             f"Iteration {self.iteration}",
             self.phase,
             elapsed,
             score_text,
         )
+
+        # Row 2: running totals (tokens, turns, cost)
+        total_tokens = self.total_input_tokens + self.total_output_tokens
+        if total_tokens > 0:
+            stats_parts = [f"{self.total_input_tokens:,} in / {self.total_output_tokens:,} out"]
+            if self.total_turns:
+                stats_parts.append(f"{self.total_turns} turns")
+            table.add_row(
+                "",
+                "",
+                Text(" | ".join(stats_parts), style="dim"),
+                "",
+            )
+
         yield from table.__rich_console__(console, options)
 
 
@@ -297,9 +316,10 @@ class PipelineLive:
             self.refresh()
 
     def collapse_panel(self, panel: AgentPanel, done_summary: str = "") -> None:
-        """Mark a panel as complete and refresh."""
+        """Mark a panel as complete, accumulate stats, and refresh."""
         if done_summary:
             panel.complete(done_summary)
+        self._status_bar.add_agent_stats(panel)
         self.refresh()
 
     def update_status(self, **kwargs) -> None:

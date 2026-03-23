@@ -717,7 +717,6 @@ class Orchestrator:
             input_tokens=usage.get("input_tokens", 0),
             output_tokens=usage.get("output_tokens", 0),
             num_turns=usage.get("num_turns", 0),
-            cost_usd=usage.get("total_cost_usd"),
         )
 
     def _persist_buffer(
