@@ -8,7 +8,7 @@ from dotenv import load_dotenv
 
 load_dotenv()
 
-from auto_scientist.console import YELLOW, print_step
+from auto_scientist.console import console
 from auto_scientist.model_config import ModelConfig
 from auto_scientist.orchestrator import Orchestrator
 from auto_scientist.state import ExperimentState
@@ -154,10 +154,10 @@ def run(
 
     resolved_output = _next_output_dir(Path(output_dir))
     if resolved_output != Path(output_dir):
-        print_step(
+        console.print(
             f"Previous run detected in {output_dir}/. "
             f"Using {resolved_output}/ instead.",
-            color=YELLOW,
+            style="yellow",
         )
 
     state = ExperimentState(

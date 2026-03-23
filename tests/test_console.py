@@ -1,144 +1,228 @@
-"""Tests for console streaming helpers."""
+"""Tests for Rich console components: AgentPanel, StatusBar, PipelineLive."""
 
-import os
-from unittest.mock import patch
+import time
+from io import StringIO
+from unittest.mock import MagicMock, patch
 
-from auto_scientist.console import (
-    BLUE,
-    CYAN,
-    GREEN,
-    MAGENTA,
-    RED,
-    YELLOW,
-    _color_for_label,
-    make_stream_printer,
-    print_summary,
-    stream_separator,
-)
+from rich.console import Console
+
+from auto_scientist.console import AgentPanel, PipelineLive, StatusBar
 
 
-class TestColorForLabel:
-    def test_critic_gets_yellow(self):
-        assert _color_for_label("Critic (openai:gpt-4o) round 1") == YELLOW
+class TestAgentPanel:
+    def test_construction(self):
+        panel = AgentPanel(name="Analyst", model="claude-sonnet-4-6", style="green")
+        assert panel.name == "Analyst"
+        assert panel.model == "claude-sonnet-4-6"
+        assert not panel.done
 
-    def test_scientist_gets_cyan(self):
-        assert _color_for_label("Scientist round 1") == CYAN
+    def test_add_line(self):
+        panel = AgentPanel(name="Analyst", model="claude-sonnet-4-6", style="green")
+        panel.add_line("[15s] Analyzing data")
+        assert len(panel.lines) == 1
+        assert panel.lines[0] == "[15s] Analyzing data"
 
-    def test_coder_gets_magenta(self):
-        assert _color_for_label("Coder") == MAGENTA
+    def test_deque_scrolling(self):
+        panel = AgentPanel(name="Analyst", model="claude-sonnet-4-6", style="green")
+        for i in range(7):
+            panel.add_line(f"line {i}")
+        assert len(panel.lines) == 5
+        assert panel.lines[0] == "line 2"
+        assert panel.lines[-1] == "line 6"
 
-    def test_analyst_gets_green(self):
-        assert _color_for_label("Analyst iteration 1") == GREEN
+    def test_complete(self):
+        panel = AgentPanel(name="Analyst", model="claude-sonnet-4-6", style="green")
+        panel.add_line("[15s] Working...")
+        panel.complete("Analysis complete, found 3 metrics")
+        assert panel.done
+        assert panel.done_summary == "Analysis complete, found 3 metrics"
 
-    def test_ingestor_gets_red(self):
-        assert _color_for_label("Ingestor") == RED
+    def test_error(self):
+        panel = AgentPanel(name="Analyst", model="claude-sonnet-4-6", style="green")
+        panel.error("Connection timeout")
+        assert panel.done
+        assert panel.error_msg == "Connection timeout"
 
-    def test_report_gets_blue(self):
-        assert _color_for_label("Report generation") == BLUE
+    def test_set_tokens(self):
+        panel = AgentPanel(name="Critic", model="gpt-4o", style="yellow")
+        panel.set_tokens(2340, 890)
+        assert panel.input_tokens == 2340
+        assert panel.output_tokens == 890
 
-    def test_debate_gets_yellow(self):
-        assert _color_for_label("Debate") == YELLOW
+    def test_renders_panel_with_title(self):
+        panel = AgentPanel(name="Analyst", model="claude-sonnet-4-6", style="green")
+        panel.add_line("[15s] Analyzing data")
+        buf = StringIO()
+        console = Console(file=buf, width=80, no_color=True)
+        console.print(panel)
+        output = buf.getvalue()
+        assert "Analyst" in output
+        assert "claude-sonnet-4-6" in output
+        assert "Analyzing data" in output
 
-    def test_unknown_falls_back_to_cyan(self):
-        assert _color_for_label("Unknown agent") == CYAN
+    def test_renders_footer_with_tokens(self):
+        panel = AgentPanel(name="Critic", model="gpt-4o", style="yellow")
+        panel.set_tokens(100, 50)
+        panel.complete("Done")
+        buf = StringIO()
+        console = Console(file=buf, width=80, no_color=True)
+        console.print(panel)
+        output = buf.getvalue()
+        assert "100 in" in output
+        assert "50 out" in output
 
+    def test_renders_footer_without_tokens(self):
+        panel = AgentPanel(name="Analyst", model="claude-sonnet-4-6", style="green")
+        panel.complete("Done")
+        buf = StringIO()
+        console = Console(file=buf, width=80, no_color=True)
+        console.print(panel)
+        output = buf.getvalue()
+        # Should not have token counts
+        assert " in /" not in output
 
-class TestMakeStreamPrinter:
-    def test_first_call_prints_label_then_token(self, capsys):
-        printer = make_stream_printer("Critic (openai:gpt-4o)")
-        printer("Hello")
+    def test_collapsed_shows_done_summary(self):
+        panel = AgentPanel(name="Analyst", model="claude-sonnet-4-6", style="green")
+        panel.add_line("[15s] Working...")
+        panel.add_line("[30s] Still working...")
+        panel.complete("Found 3 key metrics with R2=0.85")
+        buf = StringIO()
+        console = Console(file=buf, width=80, no_color=True)
+        console.print(panel)
+        output = buf.getvalue()
+        assert "Found 3 key metrics" in output
+        # Should not show progress lines after collapse
+        assert "Working" not in output
 
-        captured = capsys.readouterr()
-        assert "Critic (openai:gpt-4o)" in captured.out
-        assert "Hello" in captured.out
+    def test_error_panel_shows_error_msg(self):
+        panel = AgentPanel(name="Analyst", model="claude-sonnet-4-6", style="green")
+        panel.error("API rate limit exceeded")
+        buf = StringIO()
+        console = Console(file=buf, width=80, no_color=True)
+        console.print(panel)
+        output = buf.getvalue()
+        assert "API rate limit exceeded" in output
 
-    def test_subsequent_calls_print_only_token(self, capsys):
-        printer = make_stream_printer("Critic")
-        printer("Hello")
-        printer(" world")
-
-        captured = capsys.readouterr()
-        # Label appears exactly once
-        assert captured.out.count("Critic") == 1
-        assert "Hello world" in captured.out
-
-    def test_critic_label_uses_yellow(self, capsys):
-        printer = make_stream_printer("Critic (openai:gpt-4o)")
-        printer("x")
-        captured = capsys.readouterr()
-        assert YELLOW in captured.out
-
-    def test_scientist_label_uses_cyan(self, capsys):
-        printer = make_stream_printer("Scientist round 1")
-        printer("x")
-        captured = capsys.readouterr()
-        assert CYAN in captured.out
-
-    def test_no_color_env_strips_ansi(self, capsys):
-        with patch.dict(os.environ, {"NO_COLOR": "1"}):
-            printer = make_stream_printer("Test")
-            printer("token")
-
-        captured = capsys.readouterr()
-        assert "\033[" not in captured.out
-        assert "Test" in captured.out
-        assert "token" in captured.out
-
-
-class TestPrintSummary:
-    def test_with_label(self, capsys):
-        print_summary("Analyst", "Found key metrics.", label="done")
-        captured = capsys.readouterr()
-        assert "> [done] " in captured.out
-        assert "Found key metrics." in captured.out
-
-    def test_without_label(self, capsys):
-        with patch.dict(os.environ, {"NO_COLOR": "1"}):
-            print_summary("Results", "R2=0.82 on test set.")
-        captured = capsys.readouterr()
-        assert "> R2=0.82" in captured.out
-        # No brackets when label is empty (check without ANSI codes)
-        assert "[" not in captured.out
-
-    def test_truncates_long_progress_text(self, capsys):
-        long_text = "x" * 250
-        print_summary("Analyst", long_text, label="15s")
-        captured = capsys.readouterr()
-        assert "..." in captured.out
-
-    def test_truncates_long_final_text(self, capsys):
-        long_text = "x" * 450
-        print_summary("Analyst", long_text, label="done")
-        captured = capsys.readouterr()
-        assert "..." in captured.out
-
-    def test_uses_agent_color(self, capsys):
-        print_summary("Analyst", "test summary", label="done")
-        captured = capsys.readouterr()
-        assert GREEN in captured.out
-
-    def test_empty_prints_nothing(self, capsys):
-        print_summary("Analyst", "")
-        captured = capsys.readouterr()
-        assert captured.out == ""
-
-    def test_no_color_env(self, capsys):
-        with patch.dict(os.environ, {"NO_COLOR": "1"}):
-            print_summary("Analyst", "test summary", label="done")
-        captured = capsys.readouterr()
-        assert "\033[" not in captured.out
-        assert "[done]" in captured.out
-
-    def test_truncates_long_summary(self, capsys):
-        long_text = "a" * 500
-        print_summary("Analyst", long_text, label="done")
-        captured = capsys.readouterr()
-        # The full 500 chars should not appear
-        assert "a" * 500 not in captured.out
+    def test_empty_panel_shows_spinner_text(self):
+        panel = AgentPanel(name="Analyst", model="claude-sonnet-4-6", style="green")
+        buf = StringIO()
+        console = Console(file=buf, width=80, no_color=True)
+        console.print(panel)
+        output = buf.getvalue()
+        assert "working" in output.lower() or "..." in output
 
 
-class TestStreamSeparator:
-    def test_prints_newlines(self, capsys):
-        stream_separator()
-        captured = capsys.readouterr()
-        assert captured.out == "\n\n"
+class TestStatusBar:
+    def test_construction(self):
+        bar = StatusBar(start_time=time.monotonic())
+        assert bar.iteration == 0
+        assert bar.phase == ""
+
+    def test_update(self):
+        bar = StatusBar(start_time=time.monotonic())
+        bar.update(iteration=3, phase="DEBATE", best_version="v02", best_score=85)
+        assert bar.iteration == 3
+        assert bar.phase == "DEBATE"
+        assert bar.best_version == "v02"
+        assert bar.best_score == 85
+
+    def test_renders_table(self):
+        bar = StatusBar(start_time=time.monotonic())
+        bar.update(iteration=2, phase="ANALYZE", best_version="v01", best_score=72)
+        buf = StringIO()
+        console = Console(file=buf, width=80, no_color=True)
+        console.print(bar)
+        output = buf.getvalue()
+        assert "Iteration 2" in output
+        assert "ANALYZE" in output
+        assert "v01" in output
+        assert "72" in output
+
+    def test_score_color_green(self):
+        bar = StatusBar(start_time=time.monotonic())
+        bar.update(iteration=1, phase="PLAN", best_version="v00", best_score=85)
+        buf = StringIO()
+        console = Console(file=buf, width=80, force_terminal=True)
+        console.print(bar)
+        output = buf.getvalue()
+        # Score 85 should render (green styling applied)
+        assert "85" in output
+
+    def test_no_score_shows_dash(self):
+        bar = StatusBar(start_time=time.monotonic())
+        bar.update(iteration=0, phase="INGESTION")
+        buf = StringIO()
+        console = Console(file=buf, width=80, no_color=True)
+        console.print(bar)
+        output = buf.getvalue()
+        assert "-" in output
+
+
+class TestPipelineLive:
+    def test_lifecycle(self):
+        live = PipelineLive()
+        live.start()
+        live.stop()
+
+    def test_add_and_remove_panel(self):
+        live = PipelineLive()
+        live.start()
+        panel = AgentPanel(name="Analyst", model="claude-sonnet-4-6", style="green")
+        live.add_panel(panel)
+        assert panel in live._panels
+        live.remove_panel(panel)
+        assert panel not in live._panels
+        live.stop()
+
+    def test_collapse_panel(self):
+        live = PipelineLive()
+        live.start()
+        panel = AgentPanel(name="Analyst", model="claude-sonnet-4-6", style="green")
+        live.add_panel(panel)
+        live.collapse_panel(panel, "Analysis done")
+        assert panel.done
+        assert panel.done_summary == "Analysis done"
+        live.stop()
+
+    def test_update_status(self):
+        live = PipelineLive()
+        live.start()
+        live.update_status(iteration=1, phase="PLAN")
+        assert live._status_bar.iteration == 1
+        assert live._status_bar.phase == "PLAN"
+        live.stop()
+
+    def test_file_logging(self, tmp_path):
+        log_path = tmp_path / "console.log"
+        live = PipelineLive()
+        live.start(log_path=log_path)
+        live.log("Test log message")
+        live.stop()
+        content = log_path.read_text()
+        assert "Test log message" in content
+
+    def test_file_logging_no_ansi(self, tmp_path):
+        log_path = tmp_path / "console.log"
+        live = PipelineLive()
+        live.start(log_path=log_path)
+        live.log("[bold red]Styled text[/]")
+        live.stop()
+        content = log_path.read_text()
+        assert "\033[" not in content
+        assert "Styled text" in content
+
+    def test_file_logging_append_mode(self, tmp_path):
+        log_path = tmp_path / "console.log"
+        live = PipelineLive()
+        live.start(log_path=log_path)
+        live.log("first run")
+        live.stop()
+
+        live2 = PipelineLive()
+        live2.start(log_path=log_path)
+        live2.log("second run")
+        live2.stop()
+
+        content = log_path.read_text()
+        assert "first run" in content
+        assert "second run" in content
