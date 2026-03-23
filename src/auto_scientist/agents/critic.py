@@ -14,6 +14,7 @@ additional context but not their own prior critique. This avoids anchoring
 bias and lets the critic form a fresh assessment each round.
 """
 
+import asyncio
 import json
 import logging
 from collections.abc import Callable
@@ -96,6 +97,104 @@ async def _query_with_retry(
     return result  # return whatever we got
 
 
+async def run_single_critic_debate(
+    config: AgentModelConfig,
+    plan: dict[str, Any],
+    notebook_content: str,
+    domain_knowledge: str = "",
+    success_criteria: str = "",
+    max_rounds: int = 2,
+    scientist_config: AgentModelConfig | None = None,
+    on_token_factory: Callable[[str], Callable[[str], None]] | None = None,
+    message_buffer: list[str] | None = None,
+    plot_paths: list[Path] | None = None,
+    images: list[ImageData] | None = None,
+    has_plots: bool = False,
+) -> dict[str, Any]:
+    """Run a multi-round debate between one critic and the scientist.
+
+    Returns a single dict with keys 'model', 'critique', and 'transcript'.
+    """
+    if scientist_config is None:
+        scientist_config = AgentModelConfig(model="claude-sonnet-4-6")
+
+    label = f"{config.provider}:{config.model}"
+    transcript: list[dict[str, str]] = []
+
+    # Round 1: initial critique (no defense context)
+    critic_prompt = _build_critic_prompt(
+        plan, notebook_content, domain_knowledge,
+        success_criteria=success_criteria,
+        has_plots=has_plots,
+    )
+    on_token = on_token_factory(f"Critic ({label}) round 1") if on_token_factory else None
+    critique_text = await _query_with_retry(
+        _query_critic, config, critic_prompt, images=images or [], on_token=on_token,
+        label=f"Critic ({label}) round 1",
+    )
+    if on_token:
+        stream_separator()
+    transcript.append({"role": "critic", "content": critique_text})
+    if message_buffer is not None:
+        message_buffer.append(f"[Critic] {critique_text}")
+
+    # Rounds 2+: scientist responds, then critic critiques again (stateless)
+    for round_num in range(1, max_rounds):
+        scientist_user_prompt = _build_scientist_debate_user_prompt(
+            plan=plan,
+            notebook_content=notebook_content,
+            domain_knowledge=domain_knowledge,
+            success_criteria=success_criteria,
+            critique=critique_text,
+            has_plots=has_plots,
+            plot_paths=plot_paths,
+        )
+        scientist_tools = ["WebSearch"]
+        if has_plots:
+            scientist_tools.append("Read")
+        options = ClaudeCodeOptions(
+            system_prompt=SCIENTIST_DEBATE_SYSTEM,
+            allowed_tools=scientist_tools,
+            max_turns=10,
+            model=scientist_config.model,
+            extra_args={"setting-sources": ""},
+        )
+        scientist_response = await collect_text_from_query(
+            scientist_user_prompt, options, message_buffer,
+            agent_name=f"Scientist debate round {round_num}",
+        )
+        transcript.append({"role": "scientist", "content": scientist_response})
+        if message_buffer is not None:
+            message_buffer.append(f"[Scientist] {scientist_response}")
+
+        # Stateless: critic gets the defense but not their own prior critique
+        critic_prompt = _build_critic_prompt(
+            plan, notebook_content, domain_knowledge,
+            success_criteria=success_criteria,
+            scientist_defense=scientist_response,
+            has_plots=has_plots,
+        )
+        on_token = (
+            on_token_factory(f"Critic ({label}) round {round_num + 1}")
+            if on_token_factory else None
+        )
+        critique_text = await _query_with_retry(
+            _query_critic, config, critic_prompt, images=images or [], on_token=on_token,
+            label=f"Critic ({label}) round {round_num + 1}",
+        )
+        if on_token:
+            stream_separator()
+        transcript.append({"role": "critic", "content": critique_text})
+        if message_buffer is not None:
+            message_buffer.append(f"[Critic] {critique_text}")
+
+    return {
+        "model": label,
+        "critique": critique_text,
+        "transcript": transcript,
+    }
+
+
 async def run_debate(
     critic_configs: list[AgentModelConfig],
     plan: dict[str, Any],
@@ -106,17 +205,13 @@ async def run_debate(
     scientist_config: AgentModelConfig | None = None,
     on_token_factory: Callable[[str], Callable[[str], None]] | None = None,
     message_buffer: list[str] | None = None,
+    message_buffers: dict[str, list[str]] | None = None,
     plot_paths: list[Path] | None = None,
 ) -> list[dict[str, Any]]:
-    """Run a multi-round critic-scientist debate for each critic model.
+    """Run parallel multi-round critic-scientist debates for each critic model.
 
-    Round 1: critic produces initial critique.
-    Rounds 2+: scientist responds, then critic critiques again (stateless,
-    with the scientist's defense as additional context).
-
-    Both Critic and Scientist receive symmetric context: the plan, notebook,
-    domain knowledge, and success criteria. Neither sees the analysis JSON
-    or experiment scripts.
+    Each critic runs its own independent debate with the scientist concurrently
+    via asyncio.gather. Per-critic buffers can be provided via message_buffers.
 
     Args:
         critic_configs: List of AgentModelConfig for each critic.
@@ -126,6 +221,10 @@ async def run_debate(
         success_criteria: Formatted top-level success criteria.
         max_rounds: Number of critique rounds (1 = no debate, 2 = default).
         scientist_config: Config for the Scientist's debate responses.
+        on_token_factory: Factory for token streaming callbacks.
+        message_buffer: Legacy single shared buffer (used if message_buffers not provided).
+        message_buffers: Per-critic buffers keyed by "provider:model" label.
+        plot_paths: Paths to plot images to forward to critics.
 
     Returns:
         List of dicts with keys 'model', 'critique', and 'transcript'.
@@ -134,7 +233,6 @@ async def run_debate(
     if not critic_configs:
         return []
 
-    # Default scientist config if not provided
     if scientist_config is None:
         scientist_config = AgentModelConfig(model="claude-sonnet-4-6")
 
@@ -145,85 +243,34 @@ async def run_debate(
     has_plots = bool(images)
     logger.info(f"Debate: {len(images)} plot image(s) will be forwarded to critics")
 
-    critiques = []
+    tasks = []
     for config in critic_configs:
         label = f"{config.provider}:{config.model}"
-        transcript: list[dict[str, str]] = []
+        # Resolve buffer: per-critic dict > shared legacy buffer > None
+        if message_buffers is not None:
+            buf = message_buffers.setdefault(label, [])
+        else:
+            buf = message_buffer
 
-        # Round 1: initial critique (no defense context)
-        critic_prompt = _build_critic_prompt(
-            plan, notebook_content, domain_knowledge,
-            success_criteria=success_criteria,
-            has_plots=has_plots,
-        )
-        on_token = on_token_factory(f"Critic ({label}) round 1") if on_token_factory else None
-        critique_text = await _query_with_retry(
-            _query_critic, config, critic_prompt, images=images, on_token=on_token,
-            label=f"Critic ({label}) round 1",
-        )
-        if on_token:
-            stream_separator()
-        transcript.append({"role": "critic", "content": critique_text})
-        if message_buffer is not None:
-            message_buffer.append(f"[Critic] {critique_text}")
-
-        # Rounds 2+: scientist responds, then critic critiques again (stateless)
-        for round_num in range(1, max_rounds):
-            scientist_user_prompt = _build_scientist_debate_user_prompt(
+        tasks.append(
+            run_single_critic_debate(
+                config=config,
                 plan=plan,
                 notebook_content=notebook_content,
                 domain_knowledge=domain_knowledge,
                 success_criteria=success_criteria,
-                critique=critique_text,
-                has_plots=has_plots,
+                max_rounds=max_rounds,
+                scientist_config=scientist_config,
+                on_token_factory=on_token_factory,
+                message_buffer=buf,
                 plot_paths=plot_paths,
-            )
-            scientist_tools = ["WebSearch"]
-            if has_plots:
-                scientist_tools.append("Read")
-            options = ClaudeCodeOptions(
-                system_prompt=SCIENTIST_DEBATE_SYSTEM,
-                allowed_tools=scientist_tools,
-                max_turns=10,
-                model=scientist_config.model,
-                extra_args={"setting-sources": ""},
-            )
-            scientist_response = await collect_text_from_query(
-                scientist_user_prompt, options, message_buffer,
-                agent_name=f"Scientist debate round {round_num}",
-            )
-            transcript.append({"role": "scientist", "content": scientist_response})
-            if message_buffer is not None:
-                message_buffer.append(f"[Scientist] {scientist_response}")
-
-            # Stateless: critic gets the defense but not their own prior critique
-            critic_prompt = _build_critic_prompt(
-                plan, notebook_content, domain_knowledge,
-                success_criteria=success_criteria,
-                scientist_defense=scientist_response,
+                images=images,
                 has_plots=has_plots,
             )
-            on_token = (
-                on_token_factory(f"Critic ({label}) round {round_num + 1}")
-                if on_token_factory else None
-            )
-            critique_text = await _query_with_retry(
-                _query_critic, config, critic_prompt, images=images, on_token=on_token,
-                label=f"Critic ({label}) round {round_num + 1}",
-            )
-            if on_token:
-                stream_separator()
-            transcript.append({"role": "critic", "content": critique_text})
-            if message_buffer is not None:
-                message_buffer.append(f"[Critic] {critique_text}")
+        )
 
-        critiques.append({
-            "model": label,
-            "critique": critique_text,
-            "transcript": transcript,
-        })
-
-    return critiques
+    results = await asyncio.gather(*tasks)
+    return list(results)
 
 
 def _build_critic_prompt(

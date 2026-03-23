@@ -108,7 +108,14 @@ async def summarize_agent_output(
 
     try:
         fallback = "Summarize the following agent output in 1-2 sentences."
-        instruction = SUMMARY_PROMPTS.get(agent_name, fallback)
+        instruction = SUMMARY_PROMPTS.get(agent_name)
+        if instruction is None:
+            for key in SUMMARY_PROMPTS:
+                if agent_name.startswith(key):
+                    instruction = SUMMARY_PROMPTS[key]
+                    break
+        if instruction is None:
+            instruction = fallback
         prefix = PROGRESS_PREFIX if progress else FINAL_PREFIX
         instructions = f"{instruction}\n\n{prefix}"
         max_tokens = 60 if progress else 150
@@ -153,6 +160,8 @@ async def run_with_summaries(
     summary_model: str,
     message_buffer: list[str],
     interval: int | float = 15,
+    label_prefix: str = "",
+    summary_collector: list[tuple[str, str, str]] | None = None,
 ) -> T:
     """Run an agent coroutine with periodic live summaries.
 
@@ -169,6 +178,7 @@ async def run_with_summaries(
         summary_model: OpenAI model for summarization.
         message_buffer: Shared list that the agent appends text to.
         interval: Seconds between periodic polls.
+        label_prefix: Prefix for time/done labels (e.g. "Debate: openai:gpt-4o | ").
 
     Returns:
         The result of the agent coroutine.
@@ -199,13 +209,16 @@ async def run_with_summaries(
             current_interval = interval
 
             tail = "\n".join(message_buffer[-10:])
-            label = f"{int(elapsed)}s"
+            label = f"{label_prefix}{int(elapsed)}s"
             try:
                 summary = await summarize_agent_output(
                     agent_name, tail, summary_model, progress=True,
                 )
                 if summary:
-                    print_summary(agent_name, summary, label=label)
+                    if summary_collector is not None:
+                        summary_collector.append((agent_name, summary, label))
+                    else:
+                        print_summary(agent_name, summary, label=label)
             except Exception as e:
                 logger.warning(f"Periodic poll error for {agent_name}: {e}")
 
@@ -225,7 +238,11 @@ async def run_with_summaries(
                     agent_name, full_output, summary_model, progress=False,
                 )
                 if summary:
-                    print_summary(agent_name, summary, label="done")
+                    done_label = f"{label_prefix}done"
+                    if summary_collector is not None:
+                        summary_collector.append((agent_name, summary, done_label))
+                    else:
+                        print_summary(agent_name, summary, label=done_label)
             except Exception as e:
                 logger.warning(f"Final summary error for {agent_name}: {e}")
 

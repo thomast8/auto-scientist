@@ -1568,6 +1568,7 @@ class TestRunDebateOrchestrator:
     async def test_calls_run_debate_with_args(self, orchestrator, tmp_path):
         orchestrator.output_dir.mkdir(parents=True, exist_ok=True)
         orchestrator.model_config.critics = [AgentModelConfig(provider="openai", model="gpt-4o")]
+        orchestrator.model_config.summarizer = None  # disable summarizer to test run_debate path
         orchestrator.state.domain_knowledge = "test knowledge"
         plan = {"hypothesis": "test"}
 
@@ -1586,12 +1587,41 @@ class TestRunDebateOrchestrator:
         assert call_kwargs["critic_configs"][0].model == "gpt-4o"
         assert call_kwargs["domain_knowledge"] == "test knowledge"
         assert call_kwargs["plot_paths"] == []  # no versions => no plots
+        assert isinstance(call_kwargs["message_buffers"], dict)
+
+    @pytest.mark.asyncio
+    async def test_calls_run_single_critic_debate_with_summaries(self, orchestrator, tmp_path):
+        """When summarizer is enabled, each critic gets its own summarizer."""
+        orchestrator.output_dir.mkdir(parents=True, exist_ok=True)
+        orchestrator.model_config.critics = [AgentModelConfig(provider="openai", model="gpt-4o")]
+        plan = {"hypothesis": "test"}
+
+        critique = {"model": "openai:gpt-4o", "critique": "looks good", "transcript": []}
+
+        with (
+            patch(
+                "auto_scientist.agents.critic.run_single_critic_debate",
+                new_callable=AsyncMock,
+                return_value=critique,
+            ) as mock_single,
+            patch(
+                "auto_scientist.summarizer._query_summary",
+                new_callable=AsyncMock,
+                return_value="Summarizing...",
+            ),
+        ):
+            result = await orchestrator._run_debate(plan)
+
+        assert result == [critique]
+        call_kwargs = mock_single.call_args.kwargs
+        assert call_kwargs["config"].model == "gpt-4o"
 
     @pytest.mark.asyncio
     async def test_passes_plot_paths_from_version_dir(self, orchestrator, tmp_path):
         """When versions exist with PNGs, plot_paths are gathered and passed."""
         orchestrator.output_dir.mkdir(parents=True, exist_ok=True)
         orchestrator.model_config.critics = [AgentModelConfig(provider="openai", model="gpt-4o")]
+        orchestrator.model_config.summarizer = None  # disable summarizer to test run_debate path
 
         # Create a version directory with plot PNGs
         version_dir = orchestrator.output_dir / "v01"

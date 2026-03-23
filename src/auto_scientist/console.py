@@ -1,5 +1,7 @@
 """Console output helpers for live token streaming."""
 
+from __future__ import annotations
+
 import os
 import re
 import shutil
@@ -8,7 +10,7 @@ import textwrap
 from collections.abc import Callable
 from datetime import datetime
 from pathlib import Path
-from typing import TextIO
+from typing import Any, TextIO
 
 BOLD = "\033[1m"
 RESET = "\033[0m"
@@ -244,7 +246,7 @@ def print_summary(agent_name: str, summary: str, label: str = "") -> None:
         return
 
     use_color = _use_color()
-    color = AGENT_COLORS.get(agent_name, CYAN)
+    color = _color_for_label(agent_name)
 
     # Clean up: collapse whitespace, strip to one line
     summary = " ".join(summary.split())
@@ -261,3 +263,84 @@ def print_summary(agent_name: str, summary: str, label: str = "") -> None:
     else:
         sys.stdout.write(f"{line}\n")
     sys.stdout.flush()
+
+
+# ---------------------------------------------------------------------------
+# Rich live display for parallel debate output
+# ---------------------------------------------------------------------------
+
+
+class DebateLiveDisplay:
+    """Live-updating terminal display with one section per critic.
+
+    Each critic gets a header (Rule) and accumulated summary lines that
+    update in real-time as debate progresses. Uses ``rich.Live`` when
+    color is enabled; falls back to plain collected output otherwise.
+    """
+
+    def __init__(self, critic_labels: list[str]) -> None:
+        self._labels = critic_labels
+        self._lines: dict[str, list[str]] = {lb: [] for lb in critic_labels}
+        self._live: Any | None = None
+
+    def start(self) -> None:
+        """Start the live display."""
+        if not _use_color():
+            return
+        from rich.live import Live
+
+        self._live = Live(
+            self._render(),
+            refresh_per_second=4,
+            transient=False,
+        )
+        self._live.start()
+
+    def update(
+        self, label: str, summary: str, time_label: str,
+    ) -> None:
+        """Append a summary line for a critic and refresh the display."""
+        # Clean up summary text
+        summary = " ".join(summary.split())
+        is_done = time_label.endswith("done")
+        max_len = 400 if is_done else 200
+        if len(summary) > max_len:
+            summary = summary[:max_len - 3] + "..."
+
+        line = f"  > [{time_label}] {summary}"
+        self._lines[label].append(line)
+        _log_to_file(f"[{label}] {line}")
+
+        if self._live is not None:
+            self._live.update(self._render())
+
+    def stop(self) -> None:
+        """Stop the live display, leaving final state on screen."""
+        if self._live is not None:
+            self._live.update(self._render())
+            self._live.stop()
+            self._live = None
+        elif not _use_color():
+            # NO_COLOR fallback: print everything at the end
+            for label in self._labels:
+                print(f"  --- {label} ---")
+                for line in self._lines[label]:
+                    print(line)
+
+    def _render(self) -> Any:
+        """Build a rich renderable from current state."""
+        from rich.console import Group
+        from rich.rule import Rule
+        from rich.text import Text
+
+        sections: list[Any] = []
+        for label in self._labels:
+            sections.append(Rule(label, style="yellow"))
+            if self._lines[label]:
+                for line in self._lines[label]:
+                    sections.append(Text(line, style="yellow"))
+            else:
+                sections.append(
+                    Text("  waiting...", style="dim yellow"),
+                )
+        return Group(*sections)

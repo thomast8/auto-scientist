@@ -254,7 +254,10 @@ async def run_smoke(output_dir: Path) -> None:
         patch("auto_scientist.agents.ingestor.run_ingestor", side_effect=_make_ingestor_mock()),
         patch("auto_scientist.agents.analyst.run_analyst", side_effect=_make_analyst_mock()),
         patch("auto_scientist.agents.scientist.run_scientist", side_effect=_make_scientist_mock()),
-        patch("auto_scientist.agents.scientist.run_scientist_revision", side_effect=_make_revision_mock()),
+        patch(
+            "auto_scientist.agents.scientist.run_scientist_revision",
+            side_effect=_make_revision_mock(),
+        ),
         patch("auto_scientist.agents.coder.run_coder", side_effect=_make_coder_mock()),
         patch("auto_scientist.agents.report.run_report", side_effect=_make_report_mock()),
 
@@ -264,7 +267,7 @@ async def run_smoke(output_dir: Path) -> None:
             new_callable=AsyncMock,
             side_effect=[
                 _pad("OAI Critique R1: The hypothesis lacks specificity about what linear means."),
-                _pad("OAI Critique R2: Revised, sample size concern addressed. Need cross-validation."),
+                _pad("OAI Critique R2: Revised, sample size concern addressed."),
             ],
         ),
         patch(
@@ -272,7 +275,7 @@ async def run_smoke(output_dir: Path) -> None:
             new_callable=AsyncMock,
             side_effect=[
                 _pad("Google Critique R1: Consider confounding variables in the x-y relationship."),
-                _pad("Google Critique R2: Methodology concerns partially addressed. Proceed with caution."),
+                _pad("Google Critique R2: Methodology concerns partially addressed."),
             ],
         ),
         patch(
@@ -308,7 +311,11 @@ async def run_smoke(output_dir: Path) -> None:
         ("Debate on iter 1", (experiment_dir / "v01" / "debate.json").exists()),
         ("No debate on iter 0", not (experiment_dir / "v00" / "debate.json").exists()),
         ("Report generated", (experiment_dir / "report.md").exists()),
-        ("Criteria defined", final_state.success_criteria is not None and len(final_state.success_criteria) > 0),
+        (
+            "Criteria defined",
+            final_state.success_criteria is not None
+            and len(final_state.success_criteria) > 0,
+        ),
         ("v01 scored", final_state.versions[1].score is not None),
         ("Best version tracked", final_state.best_version == "v01"),
     ]

@@ -870,7 +870,7 @@ class Orchestrator:
             self._persist_buffer("scientist", buffer)
 
     async def _run_debate(self, plan: dict | None) -> list[dict[str, Any]] | None:
-        """Send plan to critic model(s) for debate with the Scientist."""
+        """Send plan to critic model(s) for parallel debate with the Scientist."""
         if not self.model_config.critics or plan is None:
             print_step("  DEBATE: skipped (no critics configured or no plan)")
             return None
@@ -902,26 +902,36 @@ class Orchestrator:
 
         n_critics = len(self.model_config.critics)
         n_plots = len(plot_paths)
-        print_step(f"  DEBATE: {n_critics} critic(s), {self.debate_rounds} round(s), {n_plots} plot(s)")
+        print_step(
+            f"  DEBATE: {n_critics} critic(s), "
+            f"{self.debate_rounds} round(s), {n_plots} plot(s)"
+        )
 
-        buffer: list[str] = []
-
-        async def _debate_coro(buf):
-            return await run_debate(
-                critic_configs=self.model_config.critics,
-                plan=plan,
-                notebook_content=notebook_content,
-                domain_knowledge=domain_knowledge,
-                success_criteria=success_criteria,
-                max_rounds=self.debate_rounds,
-                scientist_config=scientist_cfg,
-                on_token_factory=factory,
-                message_buffer=buf,
-                plot_paths=plot_paths,
-            )
+        # Per-critic buffers
+        buffers: dict[str, list[str]] = {}
+        for config in self.model_config.critics:
+            label = f"{config.provider}:{config.model}"
+            buffers[label] = []
 
         try:
-            critiques = await self._with_summaries(_debate_coro, "Debate", buffer)
+            if self._should_summarize():
+                critiques = await self._run_debate_with_summaries(
+                    buffers, plan, notebook_content, domain_knowledge,
+                    success_criteria, scientist_cfg, plot_paths,
+                )
+            else:
+                critiques = await run_debate(
+                    critic_configs=self.model_config.critics,
+                    plan=plan,
+                    notebook_content=notebook_content,
+                    domain_knowledge=domain_knowledge,
+                    success_criteria=success_criteria,
+                    max_rounds=self.debate_rounds,
+                    scientist_config=scientist_cfg,
+                    on_token_factory=factory,
+                    message_buffers=buffers,
+                    plot_paths=plot_paths,
+                )
             print_step(f"  DEBATE: received {len(critiques)} critique(s)")
             return critiques
         except Exception as e:
@@ -929,7 +939,103 @@ class Orchestrator:
             print_step(f"  DEBATE: error - {e}")
             return None
         finally:
-            self._persist_buffer("debate", buffer)
+            for label, buf in buffers.items():
+                safe_name = f"debate_{label.replace(':', '_').replace('/', '_')}"
+                self._persist_buffer(safe_name, buf)
+
+    async def _run_debate_with_summaries(
+        self,
+        buffers: dict[str, list[str]],
+        plan: dict,
+        notebook_content: str,
+        domain_knowledge: str,
+        success_criteria: str,
+        scientist_cfg: Any,
+        plot_paths: list[Path],
+    ) -> list[dict[str, Any]]:
+        """Run per-critic debates in parallel, each with its own summarizer."""
+        import asyncio
+        import contextlib
+
+        from auto_scientist.agents.critic import run_single_critic_debate
+        from auto_scientist.console import DebateLiveDisplay
+        from auto_scientist.images import ImageData, encode_images_from_paths
+
+        summary_model = self._summary_model
+
+        # Encode plot images once for all critics
+        images: list[ImageData] = []
+        if plot_paths:
+            images = encode_images_from_paths(plot_paths)
+        has_plots = bool(images)
+
+        # Per-critic summary collectors (instead of printing directly)
+        critic_labels = [
+            f"{c.provider}:{c.model}" for c in self.model_config.critics
+        ]
+        collectors: dict[str, list[tuple[str, str, str]]] = {
+            lb: [] for lb in critic_labels
+        }
+
+        display = DebateLiveDisplay(critic_labels)
+        display.start()
+
+        # Track how many entries per critic have been displayed
+        seen: dict[str, int] = {lb: 0 for lb in critic_labels}
+
+        def _flush_collectors():
+            """Push any new collector entries to the live display."""
+            for label in critic_labels:
+                entries = collectors[label]
+                new_entries = entries[seen[label]:]
+                for _agent_name, summary, time_label in new_entries:
+                    display.update(label, summary, time_label)
+                seen[label] = len(entries)
+
+        async def _drain_loop():
+            """Poll collectors and push new entries to the live display."""
+            while True:
+                await asyncio.sleep(0.5)
+                _flush_collectors()
+
+        async def _summarized_debate(config, label):
+            async def coro(buf):
+                return await run_single_critic_debate(
+                    config=config,
+                    plan=plan,
+                    notebook_content=notebook_content,
+                    domain_knowledge=domain_knowledge,
+                    success_criteria=success_criteria,
+                    max_rounds=self.debate_rounds,
+                    scientist_config=scientist_cfg,
+                    message_buffer=buf,
+                    plot_paths=plot_paths,
+                    images=images,
+                    has_plots=has_plots,
+                )
+            return await run_with_summaries(
+                coro, f"Debate: {label}", summary_model, buffers[label],
+                label_prefix=f"{label} | ",
+                summary_collector=collectors[label],
+            )
+
+        drain_task = asyncio.create_task(_drain_loop())
+        try:
+            tasks = [
+                _summarized_debate(config, label)
+                for config, label in zip(
+                    self.model_config.critics, critic_labels, strict=True,
+                )
+            ]
+            results = await asyncio.gather(*tasks)
+        finally:
+            drain_task.cancel()
+            with contextlib.suppress(asyncio.CancelledError):
+                await drain_task
+            _flush_collectors()
+            display.stop()
+
+        return list(results)
 
     async def _run_scientist_revision(
         self,
