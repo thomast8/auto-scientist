@@ -139,8 +139,8 @@ class TestRunScientist:
 
     @pytest.mark.asyncio
     @patch("auto_scientist.sdk_utils.query")
-    async def test_has_file_and_web_tools(self, mock_query, tmp_path):
-        """Scientist should have Read, Glob, and WebSearch tools."""
+    async def test_has_web_search_only(self, mock_query, tmp_path):
+        """Scientist should have WebSearch only (file access is the Analyst's job)."""
         from claude_code_sdk import ResultMessage
         result_msg = MagicMock(spec=ResultMessage)
         result_msg.result = json.dumps(SAMPLE_PLAN)
@@ -156,7 +156,7 @@ class TestRunScientist:
         notebook_path = tmp_path / "notebook.md"
         await run_scientist(analysis={}, notebook_path=notebook_path, version="v01")
 
-        assert captured_options["options"].allowed_tools == ["Read", "Glob", "WebSearch"]
+        assert captured_options["options"].allowed_tools == ["WebSearch"]
 
 
 class TestRunScientistMessageBuffer:

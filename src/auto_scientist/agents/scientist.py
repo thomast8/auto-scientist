@@ -1,7 +1,7 @@
-"""Scientist agent: prompt-in, JSON-out strategic planner with file and web access.
+"""Scientist agent: prompt-in, JSON-out strategic planner with web search.
 
-Does not read Python code. Receives analysis + notebook via prompt.
-Has file read and web search access to ground hypotheses in real-world knowledge.
+Does not read Python code or data files. Receives analysis + notebook via prompt.
+Has web search access to ground hypotheses in real-world knowledge.
 Output: structured JSON plan with hypothesis, strategy, changes, notebook entry.
 """
 
@@ -30,7 +30,7 @@ logger = logging.getLogger(__name__)
 
 MAX_ATTEMPTS = 3
 
-SCIENTIST_TOOLS = ["Read", "Glob", "WebSearch"]
+SCIENTIST_TOOLS = ["WebSearch"]
 
 # JSON schema for structured output (injected into the prompt for LLM guidance)
 SCIENTIST_PLAN_SCHEMA = {
@@ -146,9 +146,9 @@ async def run_scientist(
 ) -> dict[str, Any]:
     """Formulate hypothesis and plan based on analysis.
 
-    The Scientist does not read code. It receives the analysis JSON and
-    notebook content via prompt injection and returns a structured plan.
-    Has file read and web search access.
+    The Scientist does not read code or data files. It receives the analysis
+    JSON and notebook content via prompt injection and returns a structured plan.
+    Has web search access.
 
     Args:
         analysis: Structured analysis JSON from the Analyst.
