@@ -981,7 +981,7 @@ class Orchestrator:
         panels: dict[str, AgentPanel] = {}
         collectors: dict[str, list[tuple[str, str, str]]] = {}
         for config, label in zip(self.model_config.critics, critic_labels, strict=True):
-            panel = AgentPanel(name=f"Critic ({label})", model=config.model, style="yellow")
+            panel = AgentPanel(name="Critic", model=label, style="yellow")
             panels[label] = panel
             collectors[label] = []
             self._live.add_panel(panel)
@@ -1020,7 +1020,7 @@ class Orchestrator:
                 )
             return await run_with_summaries(
                 coro, f"Debate: {label}", summary_model, buffers[label],
-                label_prefix=f"{label} | ",
+                label_prefix="",
                 summary_collector=collectors[label],
             )
 
