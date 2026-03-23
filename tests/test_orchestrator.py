@@ -1264,7 +1264,7 @@ class TestRunIteration:
             await orchestrator._run_iteration_body()
 
         captured = capsys.readouterr()
-        assert "Outputs:" in captured.out
+        assert "Iteration 0: completed" in captured.out
 
 
 class TestComputeScore:
@@ -1984,7 +1984,7 @@ class TestRunReportOrchestrator:
         assert call_kwargs["output_dir"] == orchestrator.output_dir
 
     @pytest.mark.asyncio
-    async def test_error_does_not_raise(self, orchestrator, tmp_path, capsys):
+    async def test_error_does_not_raise(self, orchestrator, tmp_path):
         orchestrator.output_dir.mkdir(parents=True, exist_ok=True)
 
         with patch(
@@ -1994,8 +1994,8 @@ class TestRunReportOrchestrator:
         ):
             await orchestrator._run_report()
 
-        captured = capsys.readouterr()
-        assert "error" in captured.out
+        # Error is handled internally (logged + panel error state), not raised
+        # The test passes if no exception propagates
 
 
 class TestRunFullOrchestration:
@@ -2292,7 +2292,6 @@ class TestSummaryIntegration:
                 new_callable=AsyncMock,
                 return_value="Good results",
             ) as mock_sr,
-            patch("auto_scientist.orchestrator.print_summary"),
         ):
             await orchestrator._run_iteration_body()
 

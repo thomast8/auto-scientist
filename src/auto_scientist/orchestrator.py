@@ -8,25 +8,18 @@ import shutil
 from pathlib import Path
 from typing import Any
 
+from rich.panel import Panel
+from rich.rule import Rule
+from rich.table import Table
+from rich.text import Text
+
 from auto_scientist.config import DomainConfig, SuccessCriterion
 from auto_scientist.console import (
-    AGENT_COLORS,
-    BOLD,
-    DIM,
-    GREEN,
-    RED,
-    RESET,
-    STEP_COLORS,
-    YELLOW,
-    _use_color,
-    close_console_log,
-    colorize,
-    init_console_log,
-    print_header,
-    print_iteration_header,
-    print_step,
-    print_summary,
-    score_color,
+    AGENT_STYLES,
+    AgentPanel,
+    PipelineLive,
+    _score_style,
+    console,
 )
 from auto_scientist.log_setup import setup_file_logging
 from auto_scientist.model_config import AgentModelConfig, ModelConfig
@@ -251,6 +244,7 @@ class Orchestrator:
         self.config: DomainConfig | None = None
         self.stream = stream
         self.verbose = verbose
+        self._live: PipelineLive = PipelineLive()
 
     def _validate_prerequisites(self) -> None:
         """Validate directories, API keys, and config before starting.
@@ -338,7 +332,6 @@ class Orchestrator:
         self._validate_prerequisites()
         self.output_dir.mkdir(parents=True, exist_ok=True)
         setup_file_logging(self.output_dir, verbose=self.verbose)
-        init_console_log(self.output_dir / "console.log")
         logger.info(
             f"Run started: output_dir={self.output_dir}, "
             f"defaults={self.model_config.defaults.model}, "
@@ -352,15 +345,11 @@ class Orchestrator:
         mc_path = self.output_dir / "model_config.json"
         mc_path.write_text(self.model_config.model_dump_json(indent=2))
 
-        goal_preview = self.state.goal[:80] + ("..." if len(self.state.goal) > 80 else "")
-        fields = {
-            "Input": str(self.data_path) if self.data_path else "(none)",
-            "Output": str(self.output_dir),
-            "Goal": goal_preview,
-        }
-        print_header("Auto-Scientist", fields)
-        self._print_model_banner()
-        print_step("Running", color=BOLD)
+        # Startup banner (printed before Live starts)
+        console.print(self._build_startup_banner())
+
+        self._live = PipelineLive()
+        self._live.start(log_path=self.output_dir / "console.log")
 
         try:
             # Phase 0: Ingestion
@@ -387,17 +376,15 @@ class Orchestrator:
             # Phase 1: Unified iteration loop
             while self.state.phase == "iteration":
                 if self.state.iteration >= self.max_iterations:
-                    print_step(
-                        f"Reached max iterations ({self.max_iterations}). Stopping.",
-                        color=YELLOW,
+                    self._live.print_static(
+                        Rule(f"Reached max iterations ({self.max_iterations}). Stopping.", style="yellow")
                     )
                     self.state.phase = "report"
                     break
 
                 if self.state.should_stop_on_failures(self.max_consecutive_failures):
-                    print_step(
-                        f"Hit {self.max_consecutive_failures} consecutive failures. Stopping.",
-                        color=RED,
+                    self._live.print_static(
+                        Rule(f"Hit {self.max_consecutive_failures} consecutive failures. Stopping.", style="red")
                     )
                     self.state.phase = "report"
                     break
@@ -419,11 +406,12 @@ class Orchestrator:
                 self.state.phase = "stopped"
                 self.state.save(state_path)
 
-            status = colorize("completed", GREEN)
-            print_step(f"Experiment {status}. Final state saved to {state_path}")
+            self._live.print_static(
+                Rule("Experiment completed", style="bold green")
+            )
             logger.info("Run finished successfully")
         finally:
-            close_console_log()
+            self._live.stop()
 
     async def _run_ingestion(self) -> Path:
         """Phase 0: Canonicalize raw data into experiments/data/."""
@@ -443,9 +431,10 @@ class Orchestrator:
 
         config_path = self.output_dir / "domain_config.json"
 
-        print_step("INGESTION phase: canonicalizing raw data")
-
         cfg = self.model_config.resolve("ingestor")
+        panel = AgentPanel(name="Ingestor", model=cfg.model, style="red")
+        self._live.add_panel(panel)
+        self._live.update_status(phase="INGESTION")
 
         async def _ingestor_coro(buf):
             return await run_ingestor(
@@ -461,24 +450,21 @@ class Orchestrator:
         buffer: list[str] = []
         try:
             canonical_data_dir = await self._with_summaries(
-                _ingestor_coro, "Ingestor", buffer,
+                _ingestor_coro, "Ingestor", buffer, panel=panel,
             )
+            data_files = sorted(canonical_data_dir.iterdir())
+            file_list = ", ".join(f.name for f in data_files)
+            self._live.collapse_panel(panel, f"Canonicalized {len(data_files)} files: {file_list}")
         finally:
             self._persist_buffer("ingestor", buffer)
-
-        # Summary
-        data_files = sorted(canonical_data_dir.iterdir())
-        print_step("\nINGESTION complete:")
-        for f in data_files:
-            print_step(f"  {f}", color=STEP_COLORS["INGESTION"])
-        print_step("")
 
         return canonical_data_dir
 
     async def _run_iteration_body(self) -> None:
         """Run one iteration of the pipeline (inlined, not _run_iteration)."""
         logger.info(f"=== Iteration {self.state.iteration} start ===")
-        print_iteration_header(self.state.iteration)
+        self._live.print_static(Rule(f"Iteration {self.state.iteration}", style="bold"))
+        self._live.update_status(iteration=self.state.iteration)
 
         version = f"v{self.state.iteration:02d}"
         version_dir = self.output_dir / version
@@ -508,9 +494,8 @@ class Orchestrator:
         # Step 3: Check if Scientist recommends stopping
         if plan and plan.get("should_stop"):
             self._persist_artifact(version_dir, "plan.json", plan)
-            print_step(
-                f"Scientist recommends stopping: {plan.get('stop_reason', 'unknown')}",
-                color=YELLOW,
+            self._live.print_static(
+                Rule(f"Scientist recommends stopping: {plan.get('stop_reason', 'unknown')}", style="yellow")
             )
             logger.info(f"Scientist stop: {plan.get('stop_reason', 'unknown')}")
             self.state.phase = "report"
@@ -548,8 +533,9 @@ class Orchestrator:
             )
             self.state.record_failure()
             self.state.record_version(version_entry)
-            print_step(f"\nITERATION {self.state.iteration} complete:", color=BOLD)
-            print_step(f"  Status:     {colorize(version_entry.status, RED)}")
+            self._live.print_static(
+                Rule(f"Iteration {self.state.iteration}: failed (no script)", style="red")
+            )
             logger.info(
                 f"Iteration {self.state.iteration} complete: "
                 f"status=failed (coder produced no script)"
@@ -560,15 +546,13 @@ class Orchestrator:
         # Step 6: Read run result from Coder's output files
         run_result = self._read_run_result(new_script.parent)
 
+        # Log run result
         if run_result.timed_out:
-            print_step(f"  RUN RESULT: {colorize('timed out', RED)}")
+            self._live.log("RUN RESULT: timed out")
         elif not run_result.success:
-            print_step(f"  RUN RESULT: {colorize(f'failed (rc={run_result.return_code})', RED)}")
+            self._live.log(f"RUN RESULT: failed (rc={run_result.return_code})")
         else:
-            print_step(
-                f"  RUN RESULT: {colorize('success', GREEN)} "
-                f"({len(run_result.output_files)} output files)"
-            )
+            self._live.log(f"RUN RESULT: success ({len(run_result.output_files)} output files)")
 
         # Results summary
         if self._should_summarize() and run_result.success:
@@ -580,7 +564,7 @@ class Orchestrator:
                         results_text, self._summary_model,
                     )
                     if summary:
-                        print_summary("Results", summary)
+                        self._live.log(f"Results: {summary}")
                 except Exception as e:
                     logger.warning(f"SUMMARY: error summarizing results: {e}")
 
@@ -594,31 +578,17 @@ class Orchestrator:
         self._evaluate(run_result, version_entry)
         self.state.record_version(version_entry)
 
-        # Iteration summary
-        version_dir = new_script.parent if new_script else None
-        status_color = GREEN if version_entry.status == "completed" else RED
-        print_step(f"\nITERATION {self.state.iteration} complete:", color=BOLD)
-        if new_script:
-            print_step(f"  Script:     {new_script}", color=DIM)
-        print_step(f"  Status:     {colorize(version_entry.status, status_color)}")
-        if version_entry.score is not None:
-            sc = score_color(version_entry.score)
-            print_step(f"  Score:      {colorize(str(version_entry.score), sc)}")
-        best = self.state.best_score
-        best_colored = colorize(str(best), score_color(best))
-        print_step(f"  Best:       {self.state.best_version} (score {best_colored})")
-        if version_dir and version_dir.exists():
-            suffixes = (".png", ".txt", ".json")
-            artifacts = sorted(
-                f
-                for f in version_dir.iterdir()
-                if f.suffix in suffixes
-                and f.name not in self._INFRA_FILES
-            )
-            if artifacts:
-                print_step("  Outputs:", color=DIM)
-                for f in artifacts:
-                    print_step(f"    {f}", color=DIM)
+        # Iteration summary as a Rule + optional criteria line
+        status_style = "green" if version_entry.status == "completed" else "red"
+        score_str = f" (score {version_entry.score})" if version_entry.score is not None else ""
+        self._live.print_static(
+            Rule(f"Iteration {self.state.iteration}: {version_entry.status}{score_str}", style=status_style)
+        )
+        # Update status bar with best score
+        self._live.update_status(
+            best_version=self.state.best_version,
+            best_score=self.state.best_score,
+        )
 
         # Increment at end of loop body
         logger.info(
@@ -628,65 +598,48 @@ class Orchestrator:
         )
         self.state.iteration += 1
 
-    def _print_model_banner(self) -> None:
-        """Print a color-coded per-agent model configuration banner."""
-        import sys
-
-        use_color = _use_color()
+    def _build_startup_banner(self) -> Panel:
+        """Build the Rich startup banner with run config and model info."""
         mc = self.model_config
+        goal_preview = self.state.goal[:80] + ("..." if len(self.state.goal) > 80 else "")
 
-        # Agents in orchestrator call order
+        table = Table(show_header=False, box=None, padding=(0, 1))
+        table.add_column("key", style="bold", no_wrap=True)
+        table.add_column("value")
+
+        table.add_row("Input", str(self.data_path) if self.data_path else "(none)")
+        table.add_row("Output", str(self.output_dir))
+        table.add_row("Goal", goal_preview)
+        table.add_row("", "")  # spacer
+
+        # Agent models
         agent_map = [
-            ("Ingestor", "Ingestor", "ingestor"),
-            ("Analyst", "Analyst", "analyst"),
-            ("Scientist", "Scientist", "scientist"),
-            ("Coder", "Coder", "coder"),
-            ("Report", "Report", "report"),
+            ("Ingestor", "ingestor"), ("Analyst", "analyst"),
+            ("Scientist", "scientist"), ("Coder", "coder"), ("Report", "report"),
         ]
-
-        heading = "Configured Agents"
-        if use_color:
-            sys.stdout.write(f"{DIM}{heading}{RESET}\n")
-        else:
-            sys.stdout.write(f"{heading}\n")
-
-        lines: list[str] = []
-        for display_name, color_key, field_name in agent_map:
+        for display_name, field_name in agent_map:
             cfg = mc.resolve(field_name)
-            color = AGENT_COLORS.get(color_key, "")
-            reasoning_label = cfg.reasoning.level
-            if cfg.reasoning.budget:
-                reasoning_label += f" ({cfg.reasoning.budget} tokens)"
-            line = f"  {display_name:<12s}{cfg.model}  [{reasoning_label}]"
-            if use_color:
-                lines.append(f"{color}{line}{RESET}")
-            else:
-                lines.append(line)
+            style = AGENT_STYLES.get(display_name, "")
+            table.add_row(
+                Text(display_name, style=style),
+                Text(f"{cfg.model}  [{cfg.reasoning.level}]", style=style),
+            )
 
-        # Critics
-        if mc.critics:
-            for i, critic in enumerate(mc.critics):
-                color = AGENT_COLORS.get("Critic", "")
-                label = f"Critic {i + 1}" if len(mc.critics) > 1 else "Critic"
-                r_label = critic.reasoning.level
-                line = f"  {label:<12s}{critic.provider}:{critic.model}  [{r_label}]"
-                if use_color:
-                    lines.append(f"{color}{line}{RESET}")
-                else:
-                    lines.append(line)
+        for i, critic in enumerate(mc.critics):
+            label = f"Critic {i + 1}" if len(mc.critics) > 1 else "Critic"
+            table.add_row(
+                Text(label, style="yellow"),
+                Text(f"{critic.provider}:{critic.model}  [{critic.reasoning.level}]", style="yellow"),
+            )
 
-        # Summarizer
         if mc.summarizer:
-            r_label = mc.summarizer.reasoning.level
             s = mc.summarizer
-            line = f"  {'Summarizer':<12s}{s.provider}:{s.model}  [{r_label}]"
-            if use_color:
-                lines.append(f"{DIM}{line}{RESET}")
-            else:
-                lines.append(line)
+            table.add_row(
+                Text("Summarizer", style="dim"),
+                Text(f"{s.provider}:{s.model}  [{s.reasoning.level}]", style="dim"),
+            )
 
-        sys.stdout.write("\n".join(lines) + "\n\n")
-        sys.stdout.flush()
+        return Panel(table, title="Auto-Scientist", title_align="left", border_style="bold")
 
     def _should_summarize(self) -> bool:
         """Check if summaries are enabled."""
@@ -699,14 +652,61 @@ class Orchestrator:
             raise RuntimeError("Summarizer not configured")
         return self.model_config.summarizer.model
 
-    async def _with_summaries(self, coro_fn, agent_name: str, message_buffer: list[str]):
+    async def _with_summaries(
+        self, coro_fn, agent_name: str, message_buffer: list[str],
+        panel: AgentPanel | None = None,
+    ):
         """Wrap an agent call in run_with_summaries if enabled.
 
-        Agent errors propagate normally. Only summary infrastructure
-        errors are caught here (auth errors disable future summaries).
+        When a panel is provided, summaries are routed to it via
+        summary_collector callback instead of being printed directly.
         """
+        collector = None
+        if panel is not None:
+            collector_list: list[tuple[str, str, str]] = []
+
+            def _panel_collector(name: str, summary: str, label: str) -> None:
+                panel.add_line(f"[{label}] {summary}")
+                self._live._refresh()
+
+            collector = collector_list  # type: ignore[assignment]
+
         if not self._should_summarize():
             return await coro_fn(message_buffer)
+
+        if panel is not None:
+            # Use summary_collector to route to panel
+            summary_collector: list[tuple[str, str, str]] = []
+
+            async def _poll_collector():
+                """Poll collector and push to panel."""
+                import asyncio
+                seen = 0
+                while True:
+                    await asyncio.sleep(0.5)
+                    new_entries = summary_collector[seen:]
+                    for _name, summary, label in new_entries:
+                        panel.add_line(f"[{label}] {summary}")
+                        self._live._refresh()
+                    seen = len(summary_collector)
+
+            import asyncio
+            import contextlib
+            poll_task = asyncio.create_task(_poll_collector())
+            try:
+                result = await run_with_summaries(
+                    coro_fn, agent_name, self._summary_model, message_buffer,
+                    summary_collector=summary_collector,
+                )
+            finally:
+                poll_task.cancel()
+                with contextlib.suppress(asyncio.CancelledError):
+                    await poll_task
+                # Flush remaining entries
+                for _name, summary, label in summary_collector[len(summary_collector):]:
+                    panel.add_line(f"[{label}] {summary}")
+            return result
+
         return await run_with_summaries(
             coro_fn, agent_name, self._summary_model, message_buffer,
         )
@@ -742,7 +742,10 @@ class Orchestrator:
         domain_knowledge = self.state.domain_knowledge
         cfg = self.model_config.resolve("analyst")
 
-        print_step("  ANALYZE: initial data characterization")
+        panel = AgentPanel(name="Analyst", model=cfg.model, style="green")
+        self._live.add_panel(panel)
+        self._live.update_status(phase="ANALYZE")
+
         buffer: list[str] = []
         try:
             async def _analyst_coro(buf):
@@ -757,13 +760,14 @@ class Orchestrator:
                     message_buffer=buf,
                 )
 
-            analysis = await self._with_summaries(_analyst_coro, "Analyst", buffer)
+            analysis = await self._with_summaries(_analyst_coro, "Analyst", buffer, panel=panel)
             logger.info("Analyst initial: data characterization complete")
-            print_step("  ANALYZE: data characterization complete")
+            self._live.collapse_panel(panel, "Data characterization complete")
             return analysis
         except Exception as e:
             logger.exception(f"Analyst initial error: {e}")
-            print_step(f"  ANALYZE: error - {e}")
+            panel.error(str(e))
+            self._live.collapse_panel(panel)
             return None
         finally:
             self._persist_buffer("analyst", buffer)
@@ -783,7 +787,7 @@ class Orchestrator:
         # Find results file
         results_path = Path(latest.results_path) if latest.results_path else None
         if not results_path or not results_path.exists():
-            print_step("  ANALYZE: skipped (no results file)")
+            self._live.log("ANALYZE: skipped (no results file)")
             return None
 
         # Find plot PNGs in the version directory
@@ -794,7 +798,10 @@ class Orchestrator:
 
         cfg = self.model_config.resolve("analyst")
 
-        print_step(f"  ANALYZE: analyzing {latest.version} ({len(plot_paths)} plots)")
+        panel = AgentPanel(name="Analyst", model=cfg.model, style="green")
+        self._live.add_panel(panel)
+        self._live.update_status(phase="ANALYZE")
+
         buffer: list[str] = []
         try:
             async def _analyst_coro(buf):
@@ -808,17 +815,18 @@ class Orchestrator:
                     message_buffer=buf,
                 )
 
-            analysis = await self._with_summaries(_analyst_coro, "Analyst", buffer)
+            analysis = await self._with_summaries(_analyst_coro, "Analyst", buffer, panel=panel)
             n_criteria = len(analysis.get("criteria_results", []))
             logger.info(
                 f"Analyst complete: {n_criteria} criteria evaluated, "
                 f"data_summary={'yes' if analysis.get('data_summary') else 'no'}"
             )
-            print_step(f"  ANALYZE: complete ({n_criteria} criteria evaluated)")
+            self._live.collapse_panel(panel, f"Complete ({n_criteria} criteria evaluated)")
             return analysis
         except Exception as e:
             logger.exception(f"Analyst error: {e}")
-            print_step(f"  ANALYZE: error - {e}")
+            panel.error(str(e))
+            self._live.collapse_panel(panel)
             return None
         finally:
             self._persist_buffer("analyst", buffer)
@@ -833,7 +841,10 @@ class Orchestrator:
 
         cfg = self.model_config.resolve("scientist")
 
-        print_step(f"  PLAN: scientist planning {version}")
+        panel = AgentPanel(name="Scientist", model=cfg.model, style="cyan")
+        self._live.add_panel(panel)
+        self._live.update_status(phase="PLAN")
+
         buffer: list[str] = []
         try:
             async def _scientist_coro(buf):
@@ -847,7 +858,7 @@ class Orchestrator:
                     message_buffer=buf,
                 )
 
-            plan = await self._with_summaries(_scientist_coro, "Scientist", buffer)
+            plan = await self._with_summaries(_scientist_coro, "Scientist", buffer, panel=panel)
 
             # Write the notebook entry from the plan
             if plan.get("notebook_entry"):
@@ -859,12 +870,14 @@ class Orchestrator:
                 f"hypothesis={plan.get('hypothesis', '?')[:100]}, "
                 f"should_stop={plan.get('should_stop', False)}"
             )
-            print_step(f"  PLAN: strategy={plan.get('strategy', '?')}, "
-                       f"changes={len(plan.get('changes', []))}")
+            self._live.collapse_panel(
+                panel, f"strategy={plan.get('strategy', '?')}, changes={len(plan.get('changes', []))}"
+            )
             return plan
         except Exception as e:
             logger.exception(f"Scientist plan error: {e}")
-            print_step(f"  PLAN: error - {e}")
+            panel.error(str(e))
+            self._live.collapse_panel(panel)
             return None
         finally:
             self._persist_buffer("scientist", buffer)
@@ -872,7 +885,7 @@ class Orchestrator:
     async def _run_debate(self, plan: dict | None) -> list[dict[str, Any]] | None:
         """Send plan to critic model(s) for parallel debate with the Scientist."""
         if not self.model_config.critics or plan is None:
-            print_step("  DEBATE: skipped (no critics configured or no plan)")
+            self._live.log("DEBATE: skipped (no critics configured or no plan)")
             return None
 
         from auto_scientist.agents.critic import run_debate
@@ -890,12 +903,7 @@ class Orchestrator:
             version_dir = Path(latest.script_path).parent
             plot_paths = sorted(version_dir.glob("*.png"))
 
-        n_critics = len(self.model_config.critics)
-        n_plots = len(plot_paths)
-        print_step(
-            f"  DEBATE: {n_critics} critic(s), "
-            f"{self.debate_rounds} round(s), {n_plots} plot(s)"
-        )
+        self._live.update_status(phase="DEBATE")
 
         # Per-critic buffers
         buffers: dict[str, list[str]] = {}
@@ -921,11 +929,11 @@ class Orchestrator:
                     message_buffers=buffers,
                     plot_paths=plot_paths,
                 )
-            print_step(f"  DEBATE: received {len(critiques)} critique(s)")
+            self._live.log(f"DEBATE: received {len(critiques)} critique(s)")
             return critiques
         except Exception as e:
             logger.exception(f"Debate error: {e}")
-            print_step(f"  DEBATE: error - {e}")
+            self._live.log(f"DEBATE: error - {e}")
             return None
         finally:
             for label, buf in buffers.items():
@@ -942,12 +950,11 @@ class Orchestrator:
         scientist_cfg: Any,
         plot_paths: list[Path],
     ) -> list[dict[str, Any]]:
-        """Run per-critic debates in parallel, each with its own summarizer."""
+        """Run per-critic debates in parallel, each with its own summarizer and panel."""
         import asyncio
         import contextlib
 
         from auto_scientist.agents.critic import run_single_critic_debate
-        from auto_scientist.console import DebateLiveDisplay
         from auto_scientist.images import ImageData, encode_images_from_paths
 
         summary_model = self._summary_model
@@ -958,31 +965,31 @@ class Orchestrator:
             images = encode_images_from_paths(plot_paths)
         has_plots = bool(images)
 
-        # Per-critic summary collectors (instead of printing directly)
+        # Create per-critic panels and collectors
         critic_labels = [
             f"{c.provider}:{c.model}" for c in self.model_config.critics
         ]
-        collectors: dict[str, list[tuple[str, str, str]]] = {
-            lb: [] for lb in critic_labels
-        }
+        panels: dict[str, AgentPanel] = {}
+        collectors: dict[str, list[tuple[str, str, str]]] = {}
+        for config, label in zip(self.model_config.critics, critic_labels, strict=True):
+            panel = AgentPanel(name=f"Critic ({label})", model=config.model, style="yellow")
+            panels[label] = panel
+            collectors[label] = []
+            self._live.add_panel(panel)
 
-        display = DebateLiveDisplay(critic_labels)
-        display.start()
-
-        # Track how many entries per critic have been displayed
+        # Track how many entries per critic have been flushed to panels
         seen: dict[str, int] = {lb: 0 for lb in critic_labels}
 
         def _flush_collectors():
-            """Push any new collector entries to the live display."""
             for label in critic_labels:
                 entries = collectors[label]
                 new_entries = entries[seen[label]:]
                 for _agent_name, summary, time_label in new_entries:
-                    display.update(label, summary, time_label)
+                    panels[label].add_line(f"[{time_label}] {summary}")
                 seen[label] = len(entries)
+            self._live._refresh()
 
         async def _drain_loop():
-            """Poll collectors and push new entries to the live display."""
             while True:
                 await asyncio.sleep(0.5)
                 _flush_collectors()
@@ -1022,7 +1029,15 @@ class Orchestrator:
             with contextlib.suppress(asyncio.CancelledError):
                 await drain_task
             _flush_collectors()
-            display.stop()
+            # Collapse all critic panels with token data
+            for label in critic_labels:
+                panel = panels[label]
+                # Find matching result for token data
+                for r in results:
+                    if r["model"] == label:
+                        panel.set_tokens(r.get("input_tokens", 0), r.get("output_tokens", 0))
+                        break
+                self._live.collapse_panel(panel, "Debate complete")
 
         return list(results)
 
@@ -1034,7 +1049,7 @@ class Orchestrator:
     ) -> dict[str, Any] | None:
         """Scientist revises plan based on debate."""
         if plan is None or not debate_result:
-            print_step("  REVISE: skipped (no plan or no debate)")
+            self._live.log("REVISE: skipped (no plan or no debate)")
             return None
 
         from auto_scientist.agents.scientist import run_scientist_revision
@@ -1051,7 +1066,10 @@ class Orchestrator:
 
         cfg = self.model_config.resolve("scientist")
 
-        print_step("  REVISE: scientist revising plan after debate")
+        panel = AgentPanel(name="Revision", model=cfg.model, style="cyan")
+        self._live.add_panel(panel)
+        self._live.update_status(phase="REVISE")
+
         buffer: list[str] = []
         try:
             async def _revision_coro(buf):
@@ -1067,18 +1085,19 @@ class Orchestrator:
                 )
 
             revised = await self._with_summaries(
-                _revision_coro, "Scientist Revision", buffer,
+                _revision_coro, "Scientist Revision", buffer, panel=panel,
             )
 
             # Write revised notebook entry
             if revised.get("notebook_entry"):
                 append_entry(notebook_path, revised["notebook_entry"], version, "revision")
 
-            print_step(f"  REVISE: strategy={revised.get('strategy', '?')}")
+            self._live.collapse_panel(panel, f"strategy={revised.get('strategy', '?')}")
             return revised
         except Exception as e:
             logger.exception(f"Scientist revision error: {e}")
-            print_step(f"  REVISE: error - {e}, using original plan")
+            panel.error(f"{e}, using original plan")
+            self._live.collapse_panel(panel)
             return None
         finally:
             self._persist_buffer("scientist_revision", buffer)
@@ -1088,7 +1107,7 @@ class Orchestrator:
         from auto_scientist.agents.coder import run_coder
 
         if plan is None:
-            print_step("  IMPLEMENT: skipped (no plan)")
+            self._live.log("IMPLEMENT: skipped (no plan)")
             return None
 
         version = f"v{self.state.iteration:02d}"
@@ -1126,7 +1145,10 @@ class Orchestrator:
             c.model_dump() for c in (self.state.success_criteria or [])
         ]
 
-        print_step(f"  IMPLEMENT: coder writing and running {version}")
+        panel = AgentPanel(name="Coder", model=cfg.model, style="magenta")
+        self._live.add_panel(panel)
+        self._live.update_status(phase="IMPLEMENT")
+
         buffer: list[str] = []
         try:
 
@@ -1145,12 +1167,13 @@ class Orchestrator:
                     top_level_criteria=top_criteria or None,
                 )
 
-            new_script = await self._with_summaries(_coder_coro, "Coder", buffer)
-            print_step(f"  IMPLEMENT: created {new_script}")
+            new_script = await self._with_summaries(_coder_coro, "Coder", buffer, panel=panel)
+            self._live.collapse_panel(panel, f"Created {new_script}")
             return new_script
         except Exception as e:
             logger.exception(f"Coder error: {e}")
-            print_step(f"  IMPLEMENT: error - {e}")
+            panel.error(str(e))
+            self._live.collapse_panel(panel)
             self.state.record_failure()
             return None
         finally:
@@ -1235,11 +1258,11 @@ class Orchestrator:
         if score > self.state.best_score:
             self.state.best_score = score
             self.state.best_version = latest.version
-        print_step(f"  SCORE: {colorize(str(score), score_color(score))}")
+        self._live.log(f"SCORE: {score}")
 
     async def _score_final_version(self) -> None:
         """Run the Analyst on the last version so it gets a score before report."""
-        print_step("\nScoring final version before report...", color=BOLD)
+        self._live.print_static(Rule("Scoring final version before report", style="bold"))
         analysis = await self._run_analyst()
         if analysis:
             self._score_latest(analysis)
@@ -1386,10 +1409,12 @@ class Orchestrator:
 
         notebook_path = self.output_dir / NOTEBOOK_FILENAME
 
-        print_step("\nREPORT phase: generating final summary")
-        buffer: list[str] = []
         cfg = self.model_config.resolve("report")
+        panel = AgentPanel(name="Report", model=cfg.model, style="blue")
+        self._live.add_panel(panel)
+        self._live.update_status(phase="REPORT")
 
+        buffer: list[str] = []
         try:
             async def _report_coro(buf):
                 return await run_report(
@@ -1400,12 +1425,13 @@ class Orchestrator:
                     message_buffer=buf,
                 )
 
-            report_content = await self._with_summaries(_report_coro, "Report", buffer)
+            report_content = await self._with_summaries(_report_coro, "Report", buffer, panel=panel)
             report_path = self.output_dir / "report.md"
             report_path.write_text(report_content)
-            print_step(f"REPORT: written to {report_path}")
+            self._live.collapse_panel(panel, f"Written to {report_path}")
         except Exception as e:
             logger.exception(f"Report error: {e}")
-            print_step(f"REPORT: error - {e}")
+            panel.error(str(e))
+            self._live.collapse_panel(panel)
         finally:
             self._persist_buffer("report", buffer)
