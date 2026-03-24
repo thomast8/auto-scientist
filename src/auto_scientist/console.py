@@ -338,8 +338,7 @@ class StatusBarWidget(Widget):
             has_expanded = False
         toggle_action = "compact" if has_expanded else "expand"
         line.append(f"  Ctrl+O: {toggle_action}", style="dim italic")
-        if self.finished:
-            line.append("  q: exit", style="dim italic")
+        line.append("  Ctrl+Q: quit", style="dim italic")
 
         return line
 
@@ -522,7 +521,6 @@ class PipelineApp(App):
 
     BINDINGS = [
         Binding("ctrl+o", "toggle_expand", show=False),
-        Binding("q", "quit_app", show=False),
     ]
 
     DEFAULT_CSS = """
@@ -536,6 +534,7 @@ class PipelineApp(App):
         self._orchestrator = orchestrator
         self._finished: bool = False
         self._live: PipelineLive = PipelineLive()
+        self._worker_loop: asyncio.AbstractEventLoop | None = None
 
     def compose(self) -> ComposeResult:
         yield VerticalScroll(id="main-scroll")
@@ -557,7 +556,14 @@ class PipelineApp(App):
 
     def _run_pipeline(self) -> None:
         """Sync wrapper that runs the async orchestrator in its own event loop."""
-        asyncio.run(self._orchestrator.run())
+        loop = asyncio.new_event_loop()
+        self._worker_loop = loop
+        try:
+            loop.run_until_complete(self._orchestrator.run())
+        except asyncio.CancelledError:
+            pass
+        finally:
+            loop.close()
 
     def on_worker_state_changed(self, event: Worker.StateChanged) -> None:
         if event.state in (WorkerState.SUCCESS, WorkerState.ERROR):
@@ -597,10 +603,16 @@ class PipelineApp(App):
             self.query_one("#main-scroll").scroll_end, animate=False,
         )
 
-    def action_quit_app(self) -> None:
-        """Exit the app, but only after the pipeline finishes."""
-        if self._finished:
-            self.exit()
+    def action_quit(self) -> None:
+        """Gracefully quit: cancel the pipeline if still running, then exit."""
+        if self._worker_loop is not None and self._worker_loop.is_running():
+            self._worker_loop.call_soon_threadsafe(self._cancel_all_tasks)
+        self.exit()
+
+    def _cancel_all_tasks(self) -> None:
+        """Cancel all tasks on the worker event loop."""
+        for task in asyncio.all_tasks(self._worker_loop):
+            task.cancel()
 
     # -- Mount helpers (called via call_from_thread from PipelineLive) --
 
