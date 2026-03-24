@@ -238,7 +238,7 @@ class AgentPanel(Widget):
     def on_click(self) -> None:
         """Toggle expanded state on click."""
         self.expanded = not self.expanded
-        self.refresh()
+        self.refresh(layout=True)
 
 
 # ---------------------------------------------------------------------------
@@ -419,7 +419,7 @@ class PipelineLive:
         if self._status_bar is not None:
             self._status_bar.add_agent_stats(panel)
         if self._app is not None:
-            self._app.call_from_thread(panel.refresh)
+            self._app.call_from_thread(panel.refresh, layout=True)
         if self._file_console is not None:
             self._file_console.print(
                 f"[{panel.panel_name}] {panel.done_summary} ({panel._build_footer()})"
@@ -506,7 +506,7 @@ class PipelineLive:
         if self._app is not None:
             for panel in self._panels:
                 if not panel.done:
-                    self._app.call_from_thread(panel.refresh)
+                    self._app.call_from_thread(panel.refresh, layout=True)
 
 
 # ---------------------------------------------------------------------------
@@ -573,7 +573,7 @@ class PipelineApp(App):
         new_state = not panels[0].expanded
         for panel in panels:
             panel.expanded = new_state
-            panel.refresh()
+            panel.refresh(layout=True)
 
     def action_quit_app(self) -> None:
         """Exit the app, but only after the pipeline finishes."""
