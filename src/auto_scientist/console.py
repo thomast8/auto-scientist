@@ -85,6 +85,7 @@ class AgentPanel(Widget):
     DEFAULT_CSS = """
     AgentPanel {
         height: auto;
+        min-height: 3;
         padding: 0 1;
         margin: 0 0;
     }
@@ -106,6 +107,15 @@ class AgentPanel(Widget):
         self.error_msg = ""
         self._end_time: float | None = None
         self.expanded: bool = False
+
+    def on_mount(self) -> None:
+        self._refresh_timer = self.set_interval(1 / 4, self._tick)
+
+    def _tick(self) -> None:
+        """Periodic refresh for the elapsed timer. Stops after done."""
+        if self.done and hasattr(self, "_refresh_timer"):
+            self._refresh_timer.stop()
+        self.refresh()
 
     @property
     def panel_name(self) -> str:
@@ -525,10 +535,8 @@ class PipelineApp(App):
         # Override the orchestrator's default headless PipelineLive
         self._orchestrator._live = self._live
 
-        # Start log file
-        log_path = getattr(self._orchestrator, "output_dir", None)
-        if log_path is not None:
-            self._live.start(log_path=Path(log_path) / "console.log")
+        # Log file is opened by orchestrator.run() after it creates the
+        # output directory. Don't open it here since the dir may not exist.
 
         # Run orchestrator in a thread worker
         self.run_worker(self._run_pipeline, thread=True, exit_on_error=False)

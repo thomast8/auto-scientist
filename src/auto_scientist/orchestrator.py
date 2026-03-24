@@ -351,6 +351,8 @@ class Orchestrator:
             self._live.start(log_path=self.output_dir / "console.log")
             console.print(self._build_startup_banner())
         else:
+            # Open log file now that the output dir exists
+            self._live.start(log_path=self.output_dir / "console.log")
             self._live.print_static(self._build_startup_banner())
 
         try:
