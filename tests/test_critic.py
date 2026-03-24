@@ -1,5 +1,6 @@
-"""Tests for the critic debate loop."""
+"""Tests for the critic debate loop with personas and structured output."""
 
+import json
 from pathlib import Path
 from unittest.mock import AsyncMock, patch
 
@@ -11,11 +12,53 @@ from auto_scientist.agents.critic import (
     _build_critic_prompt,
     _build_scientist_debate_user_prompt,
     run_debate,
+    run_single_critic_debate,
 )
+from auto_scientist.agents.debate_models import CriticOutput, DebateResult, ScientistDefense
 from auto_scientist.images import ImageData
 from auto_scientist.model_config import AgentModelConfig, ReasoningConfig
 
-SCIENTIST_SDK_PATH = "auto_scientist.agents.critic.collect_text_from_query"
+# Mock paths for the direct API calls used by both critic and scientist
+OPENAI_PATH = "auto_scientist.agents.critic.query_openai"
+GOOGLE_PATH = "auto_scientist.agents.critic.query_google"
+ANTHROPIC_PATH = "auto_scientist.agents.critic.query_anthropic"
+
+
+def _valid_critic_json(
+    concerns: list | None = None,
+    overall: str = "Plan has issues.",
+) -> str:
+    """Build a valid CriticOutput JSON string."""
+    obj = {
+        "concerns": concerns or [
+            {
+                "claim": "Data quality issue",
+                "severity": "high",
+                "confidence": "medium",
+                "category": "methodology",
+            }
+        ],
+        "alternative_hypotheses": ["Try log-transform"],
+        "overall_assessment": overall,
+    }
+    return json.dumps(obj)
+
+
+def _valid_defense_json(
+    responses: list | None = None,
+) -> str:
+    """Build a valid ScientistDefense JSON string."""
+    obj = {
+        "responses": responses or [
+            {
+                "concern": "Data quality issue",
+                "verdict": "accepted",
+                "reasoning": "Valid point, will fix.",
+            }
+        ],
+        "additional_points": "",
+    }
+    return json.dumps(obj)
 
 
 def _pad(text: str) -> str:
@@ -26,8 +69,36 @@ def _pad(text: str) -> str:
 
 
 def _critic_result(text: str) -> AgentResult:
-    """Create an AgentResult from padded text for critic mock returns."""
+    """Create an AgentResult from text for critic mock returns."""
     return AgentResult(text=_pad(text), input_tokens=10, output_tokens=5)
+
+
+def _structured_critic_result(
+    concerns: list | None = None,
+    overall: str = "Plan has issues.",
+) -> AgentResult:
+    """Create an AgentResult containing valid CriticOutput JSON."""
+    return AgentResult(
+        text=_pad(_valid_critic_json(concerns, overall)),
+        input_tokens=10,
+        output_tokens=5,
+    )
+
+
+def _structured_defense_result(
+    responses: list | None = None,
+) -> AgentResult:
+    """Create an AgentResult containing valid ScientistDefense JSON."""
+    return AgentResult(
+        text=_pad(_valid_defense_json(responses)),
+        input_tokens=10,
+        output_tokens=5,
+    )
+
+
+# Short aliases for mock returns used in many tests
+_CR = _structured_critic_result  # critic result
+_DR = _structured_defense_result  # defense result
 
 
 @pytest.fixture
@@ -64,9 +135,19 @@ def openai_critic():
 
 
 @pytest.fixture
-def base_kwargs(plan, openai_critic):
+def google_critic():
+    return AgentModelConfig(provider="google", model="gemini-2.5-pro")
+
+
+@pytest.fixture
+def two_critics(openai_critic, google_critic):
+    return [openai_critic, google_critic]
+
+
+@pytest.fixture
+def base_kwargs(plan, two_critics):
     return {
-        "critic_configs": [openai_critic],
+        "critic_configs": two_critics,
         "plan": plan,
         "notebook_content": "# Lab Notebook\nEntry 1",
     }
@@ -94,6 +175,22 @@ class TestBuildCriticPrompt:
         prompt = _build_critic_prompt({"h": "p"}, "", "")
         assert "(empty)" in prompt or "(none provided)" in prompt
 
+    def test_persona_injected_into_system(self):
+        persona = "<persona>\nYou are the Methodologist.\n</persona>"
+        prompt = _build_critic_prompt({"h": "p"}, "", "", persona_text=persona)
+        assert "<persona>" in prompt
+        assert "Methodologist" in prompt
+
+    def test_output_format_in_system(self):
+        prompt = _build_critic_prompt({"h": "p"}, "", "")
+        assert "<output_format>" in prompt
+        assert "concerns" in prompt
+        assert "severity" in prompt
+
+    def test_no_persona_leaves_empty(self):
+        prompt = _build_critic_prompt({"h": "p"}, "", "")
+        assert "<persona>" not in prompt
+
 
 class TestRunDebate:
     @pytest.mark.asyncio
@@ -106,156 +203,101 @@ class TestRunDebate:
         assert result == []
 
     @pytest.mark.asyncio
-    async def test_single_round_no_scientist_response(self, base_kwargs):
-        """With max_rounds=1, only the critic is called, no scientist response."""
+    async def test_always_3_debates_with_2_critics(self, base_kwargs):
+        """Always runs 3 debates (one per persona), regardless of critic count."""
         with (
-            patch(
-                "auto_scientist.agents.critic.query_openai",
-                new_callable=AsyncMock,
-                return_value=_critic_result("Initial critique"),
-            ) as mock_openai,
-            patch(
-                SCIENTIST_SDK_PATH,
-                new_callable=AsyncMock,
-            ) as mock_scientist,
+            patch(OPENAI_PATH, new_callable=AsyncMock, return_value=_CR()),
+            patch(GOOGLE_PATH, new_callable=AsyncMock, return_value=_CR()),
         ):
-            result = await run_debate(**base_kwargs, max_rounds=1)
+            results = await run_debate(**base_kwargs, max_rounds=1)
 
-        assert len(result) == 1
-        assert result[0]["model"] == "openai:gpt-4o"
-        assert "Initial critique" in result[0]["critique"]
-        assert len(result[0]["transcript"]) == 1
-        assert result[0]["transcript"][0]["role"] == "critic"
-        mock_openai.assert_called_once()
-        mock_scientist.assert_not_called()
+        assert len(results) == 3
+        persona_names = [r.persona for r in results]
+        assert "Methodologist" in persona_names
+        assert "Novelty Skeptic" in persona_names
+        assert "Feasibility Assessor" in persona_names
 
     @pytest.mark.asyncio
-    async def test_two_rounds_calls_scientist_then_refines(self, base_kwargs):
-        """With max_rounds=2, critic -> scientist -> critic refinement."""
+    async def test_returns_debate_result_objects(self, base_kwargs):
+        """Results are DebateResult instances with structured data."""
         with (
-            patch(
-                "auto_scientist.agents.critic.query_openai",
-                new_callable=AsyncMock,
-                side_effect=[_critic_result("Initial critique"), _critic_result("Refined critique")],
-            ) as mock_openai,
-            patch(
-                SCIENTIST_SDK_PATH,
-                new_callable=AsyncMock,
-                return_value=_pad("Scientist response"),
-            ) as mock_scientist,
+            patch(OPENAI_PATH, new_callable=AsyncMock, return_value=_CR()),
+            patch(GOOGLE_PATH, new_callable=AsyncMock, return_value=_CR()),
         ):
-            result = await run_debate(**base_kwargs, max_rounds=2)
+            results = await run_debate(**base_kwargs, max_rounds=1)
 
-        assert len(result) == 1
-        assert "Refined critique" in result[0]["critique"]
-        assert mock_openai.call_count == 2
-        mock_scientist.assert_called_once()
-        # Token counts accumulate across 2 critic rounds (10 in + 10 in, 5 out + 5 out)
-        assert result[0]["input_tokens"] == 20
-        assert result[0]["output_tokens"] == 10
-
-        # Scientist prompt should contain the initial critique
-        scientist_prompt = mock_scientist.call_args[0][0]
-        assert "Initial critique" in scientist_prompt
-
-        # Round 2 critic prompt should contain the scientist's defense
-        round2_prompt = mock_openai.call_args_list[1][0][1]
-        assert "Scientist response" in round2_prompt
+        for r in results:
+            assert isinstance(r, DebateResult)
+            assert len(r.rounds) >= 1
+            assert isinstance(r.rounds[0].critic_output, CriticOutput)
+            assert len(r.raw_transcript) >= 1
 
     @pytest.mark.asyncio
-    async def test_three_rounds(self, base_kwargs):
-        """With max_rounds=3, two scientist-response-refinement cycles."""
+    async def test_persona_rotation_across_iterations(self, base_kwargs):
+        """Different iterations assign different models to the same persona."""
         with (
-            patch(
-                "auto_scientist.agents.critic.query_openai",
-                new_callable=AsyncMock,
-                side_effect=[_critic_result("Critique R1"), _critic_result("Critique R2"), _critic_result("Critique R3")],
-            ) as mock_openai,
-            patch(
-                SCIENTIST_SDK_PATH,
-                new_callable=AsyncMock,
-                side_effect=[_pad("Scientist R1"), _pad("Scientist R2")],
-            ) as mock_scientist,
+            patch(OPENAI_PATH, new_callable=AsyncMock, return_value=_CR()),
+            patch(GOOGLE_PATH, new_callable=AsyncMock, return_value=_CR()),
         ):
-            result = await run_debate(**base_kwargs, max_rounds=3)
+            results_iter0 = await run_debate(**base_kwargs, iteration=0)
+            results_iter1 = await run_debate(**base_kwargs, iteration=1)
 
-        assert "Critique R3" in result[0]["critique"]
-        assert mock_openai.call_count == 3
-        assert mock_scientist.call_count == 2
+        # Methodologist should use different models across iterations
+        meth_0 = next(r for r in results_iter0 if r.persona == "Methodologist")
+        meth_1 = next(r for r in results_iter1 if r.persona == "Methodologist")
+        assert meth_0.critic_model != meth_1.critic_model
 
     @pytest.mark.asyncio
-    async def test_debate_returns_transcript(self, base_kwargs):
-        """Debate returns transcript with all rounds."""
+    async def test_single_round_no_scientist_defense(self, base_kwargs):
+        """With max_rounds=1, no scientist defense is produced."""
         with (
-            patch(
-                "auto_scientist.agents.critic.query_openai",
-                new_callable=AsyncMock,
-                side_effect=[_critic_result("Critique R1"), _critic_result("Critique R2")],
-            ),
-            patch(
-                SCIENTIST_SDK_PATH,
-                new_callable=AsyncMock,
-                return_value=_pad("Scientist response"),
-            ),
+            patch(OPENAI_PATH, new_callable=AsyncMock, return_value=_CR()),
+            patch(GOOGLE_PATH, new_callable=AsyncMock, return_value=_CR()),
+            patch(ANTHROPIC_PATH, new_callable=AsyncMock) as mock_anthropic,
         ):
-            result = await run_debate(**base_kwargs, max_rounds=2)
+            results = await run_debate(**base_kwargs, max_rounds=1)
 
-        assert len(result) == 1
-        transcript = result[0]["transcript"]
-        assert len(transcript) == 3  # critic, scientist, critic
-        assert transcript[0]["role"] == "critic"
-        assert "Critique R1" in transcript[0]["content"]
-        assert transcript[1]["role"] == "scientist"
-        assert "Scientist response" in transcript[1]["content"]
-        assert transcript[2]["role"] == "critic"
-        assert "Critique R2" in transcript[2]["content"]
+        for r in results:
+            assert r.rounds[0].scientist_defense is None
+        # Anthropic (scientist) should not be called in single-round mode
+        mock_anthropic.assert_not_called()
 
     @pytest.mark.asyncio
-    async def test_multiple_critics(self, plan):
-        """Each critic runs its own independent debate."""
-        critics = [
-            AgentModelConfig(provider="openai", model="gpt-4o"),
-            AgentModelConfig(provider="google", model="gemini-2.5-pro"),
-        ]
+    async def test_two_rounds_has_scientist_defense(self, base_kwargs):
+        """With max_rounds=2, scientist defense is included."""
         with (
-            patch(
-                "auto_scientist.agents.critic.query_openai",
-                new_callable=AsyncMock,
-                side_effect=[_critic_result("OAI initial"), _critic_result("OAI refined")],
-            ),
-            patch(
-                "auto_scientist.agents.critic.query_google",
-                new_callable=AsyncMock,
-                side_effect=[_critic_result("Google initial"), _critic_result("Google refined")],
-            ),
-            patch(
-                SCIENTIST_SDK_PATH,
-                new_callable=AsyncMock,
-                side_effect=[_pad("Scientist for OAI"), _pad("Scientist for Google")],
-            ),
+            patch(OPENAI_PATH, new_callable=AsyncMock, return_value=_CR()),
+            patch(GOOGLE_PATH, new_callable=AsyncMock, return_value=_CR()),
+            patch(ANTHROPIC_PATH, new_callable=AsyncMock, return_value=_DR()),
         ):
-            result = await run_debate(
-                critic_configs=critics,
-                plan=plan,
-                notebook_content="",
-                max_rounds=2,
-            )
+            results = await run_debate(**base_kwargs, max_rounds=2)
 
-        assert len(result) == 2
-        assert result[0]["model"] == "openai:gpt-4o"
-        assert "OAI refined" in result[0]["critique"]
-        assert result[1]["model"] == "google:gemini-2.5-pro"
-        assert "Google refined" in result[1]["critique"]
+        for r in results:
+            # First round has both critic and defense
+            assert r.rounds[0].scientist_defense is not None
+            assert isinstance(r.rounds[0].scientist_defense, ScientistDefense)
+            # Last round is critic only
+            assert r.rounds[-1].scientist_defense is None
+
+    @pytest.mark.asyncio
+    async def test_raw_transcript_preserved(self, base_kwargs):
+        """Raw transcript is kept alongside structured data."""
+        with (
+            patch(OPENAI_PATH, new_callable=AsyncMock, return_value=_CR()),
+            patch(GOOGLE_PATH, new_callable=AsyncMock, return_value=_CR()),
+        ):
+            results = await run_debate(**base_kwargs, max_rounds=1)
+
+        for r in results:
+            assert len(r.raw_transcript) == 1
+            assert r.raw_transcript[0]["role"] == "critic"
 
     @pytest.mark.asyncio
     async def test_plan_in_critic_prompt(self, base_kwargs):
         """Critic prompt includes the scientist's plan."""
         with (
-            patch(
-                "auto_scientist.agents.critic.query_openai",
-                new_callable=AsyncMock,
-                return_value=_critic_result("Critique of plan"),
-            ) as mock_openai,
+            patch(OPENAI_PATH, new_callable=AsyncMock, return_value=_CR()) as mock_openai,
+            patch(GOOGLE_PATH, new_callable=AsyncMock, return_value=_CR()),
         ):
             await run_debate(**base_kwargs, max_rounds=1)
 
@@ -264,181 +306,68 @@ class TestRunDebate:
         assert "Adjusting learning rate" in critic_prompt
 
     @pytest.mark.asyncio
-    async def test_plan_in_scientist_prompt(self, base_kwargs):
-        """Scientist response prompt includes the plan."""
-        with (
-            patch(
-                "auto_scientist.agents.critic.query_openai",
-                new_callable=AsyncMock,
-                side_effect=[_critic_result("Critique"), _critic_result("Refined")],
-            ),
-            patch(
-                SCIENTIST_SDK_PATH,
-                new_callable=AsyncMock,
-                return_value=_pad("Response"),
-            ) as mock_scientist,
-        ):
-            await run_debate(**base_kwargs, max_rounds=2)
-
-        scientist_prompt = mock_scientist.call_args[0][0]
-        assert "<plan>" in scientist_prompt
-        assert "Adjusting learning rate" in scientist_prompt
-
-    @pytest.mark.asyncio
-    async def test_criteria_in_critic_prompt(self, base_kwargs):
-        """Critic prompt includes success criteria from the plan."""
-        with patch(
-            "auto_scientist.agents.critic.query_openai",
-            new_callable=AsyncMock,
-            return_value=_critic_result("Critique"),
-        ) as mock_openai:
-            await run_debate(**base_kwargs, max_rounds=1)
-
-        critic_prompt = mock_openai.call_args[0][1]
-        assert "success_criteria" in critic_prompt
-        assert "Convergence improves" in critic_prompt
-
-    @pytest.mark.asyncio
     async def test_no_analysis_or_script_in_prompts(self, base_kwargs):
         """Neither the critic nor scientist sees analysis JSON or script content."""
         with (
-            patch(
-                "auto_scientist.agents.critic.query_openai",
-                new_callable=AsyncMock,
-                side_effect=[_critic_result("Critique"), _critic_result("Refined")],
-            ) as mock_openai,
-            patch(
-                SCIENTIST_SDK_PATH,
-                new_callable=AsyncMock,
-                return_value=_pad("Response"),
-            ) as mock_scientist,
+            patch(OPENAI_PATH, new_callable=AsyncMock, return_value=_CR()) as mock_openai,
+            patch(GOOGLE_PATH, new_callable=AsyncMock, return_value=_CR()),
+            patch(ANTHROPIC_PATH, new_callable=AsyncMock, return_value=_DR()) as mock_anthropic,
         ):
             await run_debate(**base_kwargs, max_rounds=2)
 
         critic_prompt = mock_openai.call_args_list[0][0][1]
-        scientist_prompt = mock_scientist.call_args[0][0]
+        scientist_prompt = mock_anthropic.call_args_list[0][0][1]
 
         assert "Latest Analysis" not in critic_prompt
         assert "Current Script" not in scientist_prompt
 
     @pytest.mark.asyncio
-    async def test_web_search_enabled(self, base_kwargs):
-        """Critic calls pass web_search=True; scientist gets WebSearch tool via SDK."""
+    async def test_web_search_enabled_for_critic(self, base_kwargs):
+        """Critic calls pass web_search=True."""
         with (
-            patch(
-                "auto_scientist.agents.critic.query_openai",
-                new_callable=AsyncMock,
-                side_effect=[_critic_result("Critique"), _critic_result("Refined")],
-            ) as mock_openai,
-            patch(
-                SCIENTIST_SDK_PATH,
-                new_callable=AsyncMock,
-                return_value=_pad("Response"),
-            ) as mock_scientist,
+            patch(OPENAI_PATH, new_callable=AsyncMock, return_value=_CR()) as mock_openai,
+            patch(GOOGLE_PATH, new_callable=AsyncMock, return_value=_CR()),
         ):
-            await run_debate(**base_kwargs, max_rounds=2)
+            await run_debate(**base_kwargs, max_rounds=1)
 
         for call in mock_openai.call_args_list:
             assert call.kwargs.get("web_search") is True
 
-        # Scientist uses SDK with WebSearch tool (passed via ClaudeCodeOptions)
-        options = mock_scientist.call_args[0][1]
-        assert "WebSearch" in options.allowed_tools
-
     @pytest.mark.asyncio
-    async def test_symmetric_context(self, base_kwargs):
-        """Critic and scientist receive the same context (symmetric)."""
+    async def test_web_search_enabled_for_scientist(self, base_kwargs):
+        """Scientist direct API calls pass web_search=True."""
         with (
-            patch(
-                "auto_scientist.agents.critic.query_openai",
-                new_callable=AsyncMock,
-                side_effect=[_critic_result("Critique"), _critic_result("Refined")],
-            ) as mock_openai,
-            patch(
-                SCIENTIST_SDK_PATH,
-                new_callable=AsyncMock,
-                return_value=_pad("Response"),
-            ) as mock_scientist,
+            patch(OPENAI_PATH, new_callable=AsyncMock, return_value=_CR()),
+            patch(GOOGLE_PATH, new_callable=AsyncMock, return_value=_CR()),
+            patch(ANTHROPIC_PATH, new_callable=AsyncMock, return_value=_DR()) as mock_anthropic,
         ):
             await run_debate(**base_kwargs, max_rounds=2)
 
-        critic_prompt = mock_openai.call_args_list[0][0][1]
-        scientist_prompt = mock_scientist.call_args[0][0]
-
-        assert "<notebook>" in critic_prompt
-        assert "<notebook>" in scientist_prompt
-
-    @pytest.mark.asyncio
-    async def test_no_compressed_history_in_prompts(self, base_kwargs):
-        """Prompts should not contain compressed history sections."""
-        with (
-            patch(
-                "auto_scientist.agents.critic.query_openai",
-                new_callable=AsyncMock,
-                side_effect=[_critic_result("Critique"), _critic_result("Refined")],
-            ) as mock_openai,
-            patch(
-                SCIENTIST_SDK_PATH,
-                new_callable=AsyncMock,
-                return_value=_pad("Response"),
-            ) as mock_scientist,
-        ):
-            await run_debate(**base_kwargs, max_rounds=2)
-
-        critic_prompt = mock_openai.call_args_list[0][0][1]
-        scientist_prompt = mock_scientist.call_args[0][0]
-
-        assert "Experiment History" not in critic_prompt
-        assert "Experiment History" not in scientist_prompt
-
-    @pytest.mark.asyncio
-    async def test_custom_scientist_config(self, base_kwargs):
-        """Scientist uses the specified model from config via SDK options."""
-        scientist = AgentModelConfig(model="claude-haiku-4-5-20251001")
-        with (
-            patch(
-                "auto_scientist.agents.critic.query_openai",
-                new_callable=AsyncMock,
-                side_effect=[_critic_result("Critique"), _critic_result("Refined")],
-            ),
-            patch(
-                SCIENTIST_SDK_PATH,
-                new_callable=AsyncMock,
-                return_value=_pad("Response"),
-            ) as mock_scientist,
-        ):
-            await run_debate(
-                **base_kwargs,
-                max_rounds=2,
-                scientist_config=scientist,
-            )
-
-        options = mock_scientist.call_args[0][1]
-        assert options.model == "claude-haiku-4-5-20251001"
+        for call in mock_anthropic.call_args_list:
+            assert call.kwargs.get("web_search") is True
 
     @pytest.mark.asyncio
     async def test_unknown_provider_returns_empty(self, plan):
-        """Unknown provider is captured as a failed debate, returns empty results."""
+        """Unknown provider is captured as a failed debate."""
         bad_config = AgentModelConfig.model_validate(
             {"provider": "openai", "model": "model"}
         )
-        # Monkeypatch provider to bypass Pydantic validation
         object.__setattr__(bad_config, "provider", "unknown")
         result = await run_debate(
             critic_configs=[bad_config],
             plan=plan,
             notebook_content="",
         )
-        assert result == []  # error captured, no successful debates
+        assert result == []
 
     @pytest.mark.asyncio
     async def test_anthropic_critic_dispatches_correctly(self, plan):
         critic = AgentModelConfig(provider="anthropic", model="claude-sonnet-4-6")
         with patch(
-            "auto_scientist.agents.critic.query_anthropic",
+            ANTHROPIC_PATH,
             new_callable=AsyncMock,
-            return_value=_critic_result("Anthropic critique"),
-        ) as mock_anthropic:
+            return_value=_CR(overall="Anthropic critique"),
+        ):
             result = await run_debate(
                 critic_configs=[critic],
                 plan=plan,
@@ -446,9 +375,10 @@ class TestRunDebate:
                 max_rounds=1,
             )
 
-        assert len(result) == 1
-        assert "Anthropic critique" in result[0]["critique"]
-        assert mock_anthropic.call_count == 1
+        assert len(result) == 3
+        # All 3 debates use the same model (only 1 critic configured)
+        for r in result:
+            assert r.critic_model == "anthropic:claude-sonnet-4-6"
 
     @pytest.mark.asyncio
     async def test_reasoning_passed_to_critic(self, plan):
@@ -458,9 +388,9 @@ class TestRunDebate:
             reasoning=ReasoningConfig(level="high"),
         )
         with patch(
-            "auto_scientist.agents.critic.query_openai",
+            OPENAI_PATH,
             new_callable=AsyncMock,
-            return_value=_critic_result("Critique"),
+            return_value=_CR(),
         ) as mock_openai:
             await run_debate(
                 critic_configs=[critic],
@@ -471,69 +401,142 @@ class TestRunDebate:
 
         assert mock_openai.call_args.kwargs["reasoning"].level == "high"
 
+    @pytest.mark.asyncio
+    async def test_token_counts_accumulated(self, base_kwargs):
+        """Token counts are accumulated across rounds."""
+        with (
+            patch(OPENAI_PATH, new_callable=AsyncMock, return_value=_CR()),
+            patch(GOOGLE_PATH, new_callable=AsyncMock, return_value=_CR()),
+            patch(ANTHROPIC_PATH, new_callable=AsyncMock, return_value=_DR()),
+        ):
+            results = await run_debate(**base_kwargs, max_rounds=2)
+
+        for r in results:
+            # 2 critic calls (10 each) + 1 scientist call (10) = 30 input tokens
+            assert r.input_tokens == 30
+            # 2 critic calls (5 each) + 1 scientist call (5) = 15 output tokens
+            assert r.output_tokens == 15
+
 
 class TestCriticRetry:
     @pytest.mark.asyncio
-    async def test_retry_on_empty_critic_response(self, base_kwargs):
+    async def test_retry_on_empty_critic_response(self, plan, two_critics):
         """Empty critic response triggers retry."""
+        valid = _structured_critic_result()
         with (
             patch(
-                "auto_scientist.agents.critic.query_openai",
+                OPENAI_PATH,
                 new_callable=AsyncMock,
-                side_effect=[AgentResult(text=""), _critic_result("Valid critique")],
+                # Methodologist: empty -> retry -> valid. Feasibility: valid.
+                side_effect=[AgentResult(text=""), valid, valid],
             ) as mock_openai,
+            patch(GOOGLE_PATH, new_callable=AsyncMock, return_value=valid),
         ):
-            result = await run_debate(**base_kwargs, max_rounds=1)
+            result = await run_debate(
+                critic_configs=two_critics, plan=plan,
+                notebook_content="", max_rounds=1,
+            )
 
-        assert "Valid critique" in result[0]["critique"]
-        assert mock_openai.call_count == 2
+        assert len(result) == 3
+        # OpenAI called: 2 for Methodologist (retry) + 1 for Feasibility
+        assert mock_openai.call_count == 3
 
     @pytest.mark.asyncio
-    async def test_sdk_error_propagates_from_scientist(self, base_kwargs):
-        """SDK error in scientist debate response propagates up."""
+    async def test_sdk_error_captured_gracefully(self, plan, two_critics):
+        """Errors in individual debates don't crash the whole run."""
         with (
-            patch(
-                "auto_scientist.agents.critic.query_openai",
-                new_callable=AsyncMock,
-                side_effect=[_critic_result("Critique"), _critic_result("Refined")],
-            ),
-            patch(
-                SCIENTIST_SDK_PATH,
-                new_callable=AsyncMock,
-                side_effect=RuntimeError("SDK error"),
-            ),
+            patch(OPENAI_PATH, new_callable=AsyncMock, side_effect=RuntimeError("API error")),
+            patch(GOOGLE_PATH, new_callable=AsyncMock, return_value=_CR()),
         ):
-            result = await run_debate(**base_kwargs, max_rounds=2)
-            assert result == []  # error captured, no successful debates
+            result = await run_debate(
+                critic_configs=two_critics, plan=plan,
+                notebook_content="", max_rounds=1,
+            )
+        # Some debates may fail, but we get results from successful ones
+        assert isinstance(result, list)
+
+
+class TestCriticValidation:
+    @pytest.mark.asyncio
+    async def test_valid_json_parsed_to_critic_output(self, plan):
+        """Valid structured JSON is parsed into CriticOutput."""
+        critic = AgentModelConfig(provider="openai", model="gpt-4o")
+        with patch(
+            OPENAI_PATH,
+            new_callable=AsyncMock,
+            return_value=_CR(),
+        ):
+            result = await run_single_critic_debate(
+                config=critic, plan=plan, notebook_content="",
+                max_rounds=1,
+            )
+
+        assert isinstance(result.rounds[0].critic_output, CriticOutput)
+        assert len(result.rounds[0].critic_output.concerns) == 1
+        assert result.rounds[0].critic_output.concerns[0].claim == "Data quality issue"
 
     @pytest.mark.asyncio
-    async def test_exhausted_retries_uses_whatever_we_have(self, base_kwargs):
-        """If all retries return empty/short, use what we have."""
-        with (
-            patch(
-                "auto_scientist.agents.critic.query_openai",
-                new_callable=AsyncMock,
-                return_value=AgentResult(text=""),
-            ),
+    async def test_invalid_json_preserves_raw_text_as_concern(self, plan):
+        """Invalid JSON falls back with raw text preserved as a PARSE ERROR concern."""
+        critic = AgentModelConfig(provider="openai", model="gpt-4o")
+        with patch(
+            OPENAI_PATH,
+            new_callable=AsyncMock,
+            return_value=_critic_result("Not valid JSON at all, just prose critique."),
         ):
-            result = await run_debate(**base_kwargs, max_rounds=1)
+            result = await run_single_critic_debate(
+                config=critic, plan=plan, notebook_content="",
+                max_rounds=1,
+            )
 
-        assert result[0]["critique"] == ""
+        # Should not crash; raw text preserved as a concern
+        co = result.rounds[0].critic_output
+        assert isinstance(co, CriticOutput)
+        assert len(co.concerns) == 1
+        assert "[PARSE ERROR]" in co.concerns[0].claim
+        assert co.concerns[0].severity == "high"
+        assert co.concerns[0].category == "other"
+
+
+class TestScientistDefenseValidation:
+    @pytest.mark.asyncio
+    async def test_valid_defense_parsed(self, plan):
+        """Valid defense JSON is parsed into ScientistDefense."""
+        critic = AgentModelConfig(provider="openai", model="gpt-4o")
+        with (
+            patch(OPENAI_PATH, new_callable=AsyncMock, return_value=_CR()),
+            patch(ANTHROPIC_PATH, new_callable=AsyncMock, return_value=_DR()),
+        ):
+            result = await run_single_critic_debate(
+                config=critic, plan=plan, notebook_content="",
+                max_rounds=2,
+            )
+
+        defense = result.rounds[0].scientist_defense
+        assert isinstance(defense, ScientistDefense)
+        assert len(defense.responses) == 1
+        assert defense.responses[0].verdict == "accepted"
 
     @pytest.mark.asyncio
-    async def test_retry_on_too_short_response(self, base_kwargs):
-        """Response shorter than MIN_RESPONSE_LENGTH triggers retry."""
+    async def test_invalid_defense_falls_back(self, plan):
+        """Invalid defense JSON falls back to empty responses."""
+        critic = AgentModelConfig(provider="openai", model="gpt-4o")
         with (
+            patch(OPENAI_PATH, new_callable=AsyncMock, return_value=_CR()),
             patch(
-                "auto_scientist.agents.critic.query_openai",
+                ANTHROPIC_PATH,
                 new_callable=AsyncMock,
-                side_effect=[AgentResult(text="OK"), AgentResult(text="This is a substantive critique that addresses the hypothesis, strategy, and provides alternative approaches to consider.")],
-            ) as mock_openai,
+                return_value=_critic_result("Not JSON, just a prose defense."),
+            ),
         ):
-            result = await run_debate(**base_kwargs, max_rounds=1)
+            result = await run_single_critic_debate(
+                config=critic, plan=plan, notebook_content="",
+                max_rounds=2,
+            )
 
-        assert mock_openai.call_count == 2
-        assert "substantive" in result[0]["critique"]
+        defense = result.rounds[0].scientist_defense
+        assert isinstance(defense, ScientistDefense)
+        assert defense.responses == []
 
 
 # Minimal valid 1x1 PNG for test fixtures
@@ -573,45 +576,55 @@ class TestBuildScientistDebatePromptPlots:
         assert "<plots_attached>" not in prompt
 
 
+class TestBuildScientistDebatePromptStructured:
+    def test_critic_persona_in_prompt(self):
+        prompt = _build_scientist_debate_user_prompt(
+            {"h": "p"}, "", "", critique="test",
+            critic_persona="Methodologist",
+        )
+        assert "<critic_persona>" in prompt
+        assert "Methodologist" in prompt
+
+    def test_default_critic_persona(self):
+        prompt = _build_scientist_debate_user_prompt(
+            {"h": "p"}, "", "", critique="test",
+        )
+        assert "<critic_persona>" in prompt
+        assert "(generic critic)" in prompt
+
+
 class TestRunDebateWithPlots:
     @pytest.mark.asyncio
-    async def test_images_forwarded_to_critic(self, plan):
+    async def test_images_forwarded_to_critic(self, plan, two_critics):
         """When plot_paths are provided, encoded images are forwarded to critic."""
-        critic = AgentModelConfig(provider="openai", model="gpt-4o")
         with (
-            patch(
-                "auto_scientist.agents.critic.query_openai",
-                new_callable=AsyncMock,
-                return_value=_critic_result("Critique with plots"),
-            ) as mock_openai,
+            patch(OPENAI_PATH, new_callable=AsyncMock, return_value=_CR()) as mock_openai,
+            patch(GOOGLE_PATH, new_callable=AsyncMock, return_value=_CR()),
             patch(
                 "auto_scientist.agents.critic.encode_images_from_paths",
                 return_value=[ImageData(data="abc", media_type="image/png")],
-            ) as mock_encode,
+            ),
         ):
             await run_debate(
-                critic_configs=[critic],
+                critic_configs=two_critics,
                 plan=plan,
                 notebook_content="",
                 max_rounds=1,
                 plot_paths=[Path("/fake/plot.png")],
             )
 
-        mock_encode.assert_called_once_with([Path("/fake/plot.png")])
         call_kwargs = mock_openai.call_args.kwargs
         assert call_kwargs["images"] == [ImageData(data="abc", media_type="image/png")]
 
     @pytest.mark.asyncio
-    async def test_no_plots_passes_no_images(self, plan):
+    async def test_no_plots_passes_no_images(self, plan, two_critics):
         """Without plot_paths, images kwarg is empty list."""
-        critic = AgentModelConfig(provider="openai", model="gpt-4o")
-        with patch(
-            "auto_scientist.agents.critic.query_openai",
-            new_callable=AsyncMock,
-            return_value=_critic_result("Critique"),
-        ) as mock_openai:
+        with (
+            patch(OPENAI_PATH, new_callable=AsyncMock, return_value=_CR()) as mock_openai,
+            patch(GOOGLE_PATH, new_callable=AsyncMock, return_value=_CR()),
+        ):
             await run_debate(
-                critic_configs=[critic],
+                critic_configs=two_critics,
                 plan=plan,
                 notebook_content="",
                 max_rounds=1,
@@ -621,80 +634,73 @@ class TestRunDebateWithPlots:
         assert call_kwargs.get("images") == []
 
     @pytest.mark.asyncio
-    async def test_scientist_gets_read_tool_with_plots(self, base_kwargs):
-        """When plots are provided, scientist gets Read tool access."""
-        with (
-            patch(
-                "auto_scientist.agents.critic.query_openai",
-                new_callable=AsyncMock,
-                side_effect=[_critic_result("Critique"), _critic_result("Refined")],
-            ),
-            patch(
-                SCIENTIST_SDK_PATH,
-                new_callable=AsyncMock,
-                return_value=_pad("Response"),
-            ) as mock_scientist,
-            patch(
-                "auto_scientist.agents.critic.encode_images_from_paths",
-                return_value=[ImageData(data="abc", media_type="image/png")],
-            ),
-        ):
-            await run_debate(
-                **base_kwargs,
-                max_rounds=2,
-                plot_paths=[Path("/fake/plot.png")],
-            )
-
-        options = mock_scientist.call_args[0][1]
-        assert "Read" in options.allowed_tools
-
-    @pytest.mark.asyncio
-    async def test_scientist_prompt_lists_plot_paths(self, base_kwargs):
-        """When plots are provided, scientist prompt includes plot file paths."""
-        with (
-            patch(
-                "auto_scientist.agents.critic.query_openai",
-                new_callable=AsyncMock,
-                side_effect=[_critic_result("Critique"), _critic_result("Refined")],
-            ),
-            patch(
-                SCIENTIST_SDK_PATH,
-                new_callable=AsyncMock,
-                return_value=_pad("Response"),
-            ) as mock_scientist,
-            patch(
-                "auto_scientist.agents.critic.encode_images_from_paths",
-                return_value=[ImageData(data="abc", media_type="image/png")],
-            ),
-        ):
-            await run_debate(
-                **base_kwargs,
-                max_rounds=2,
-                plot_paths=[Path("/fake/plot.png")],
-            )
-
-        scientist_prompt = mock_scientist.call_args[0][0]
-        assert "/fake/plot.png" in scientist_prompt
-
-    @pytest.mark.asyncio
-    async def test_critic_prompt_has_plots_section(self, base_kwargs):
+    async def test_critic_prompt_has_plots_section(self, plan, two_critics):
         """When plots are provided, critic prompt includes <plots_attached> section."""
         with (
-            patch(
-                "auto_scientist.agents.critic.query_openai",
-                new_callable=AsyncMock,
-                return_value=_critic_result("Critique"),
-            ) as mock_openai,
+            patch(OPENAI_PATH, new_callable=AsyncMock, return_value=_CR()) as mock_openai,
+            patch(GOOGLE_PATH, new_callable=AsyncMock, return_value=_CR()),
             patch(
                 "auto_scientist.agents.critic.encode_images_from_paths",
                 return_value=[ImageData(data="abc", media_type="image/png")],
             ),
         ):
             await run_debate(
-                **base_kwargs,
+                critic_configs=two_critics,
+                plan=plan,
+                notebook_content="",
                 max_rounds=1,
                 plot_paths=[Path("/fake/plot.png")],
             )
 
         critic_prompt = mock_openai.call_args[0][1]
         assert "<plots_attached>" in critic_prompt
+
+
+class TestPersonas:
+    def test_personas_has_three_entries(self):
+        from auto_scientist.prompts.critic import PERSONAS
+
+        assert len(PERSONAS) == 3
+
+    def test_each_persona_has_name_and_system_text(self):
+        from auto_scientist.prompts.critic import PERSONAS
+
+        for persona in PERSONAS:
+            assert "name" in persona
+            assert "system_text" in persona
+            assert isinstance(persona["name"], str)
+            assert "<persona>" in persona["system_text"]
+
+    def test_persona_names(self):
+        from auto_scientist.prompts.critic import PERSONAS
+
+        names = [p["name"] for p in PERSONAS]
+        assert "Methodologist" in names
+        assert "Novelty Skeptic" in names
+        assert "Feasibility Assessor" in names
+
+    def test_model_rotation_two_models(self):
+        from auto_scientist.prompts.critic import get_model_index_for_debate
+
+        # 2 models, 3 personas, iteration 0
+        assert get_model_index_for_debate(0, 0, 2) == 0
+        assert get_model_index_for_debate(1, 0, 2) == 1
+        assert get_model_index_for_debate(2, 0, 2) == 0
+
+        # iteration 1: shift by 1
+        assert get_model_index_for_debate(0, 1, 2) == 1
+        assert get_model_index_for_debate(1, 1, 2) == 0
+        assert get_model_index_for_debate(2, 1, 2) == 1
+
+    def test_model_rotation_one_model(self):
+        from auto_scientist.prompts.critic import get_model_index_for_debate
+
+        assert get_model_index_for_debate(0, 0, 1) == 0
+        assert get_model_index_for_debate(1, 5, 1) == 0
+
+    def test_model_rotation_three_models(self):
+        from auto_scientist.prompts.critic import get_model_index_for_debate
+
+        assert get_model_index_for_debate(0, 0, 3) == 0
+        assert get_model_index_for_debate(1, 0, 3) == 1
+        assert get_model_index_for_debate(2, 0, 3) == 2

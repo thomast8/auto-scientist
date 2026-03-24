@@ -2,45 +2,57 @@
 
 Plain API call (OpenAI/Google/Anthropic SDK), no agent tools needed.
 Input: scientist's plan + lab notebook + domain knowledge.
-Output: critique with challenges, alternative hypotheses, suggestions,
-plus the full debate transcript.
+Output: structured critique with tagged concerns, alternative hypotheses,
+and the scientist's structured defense, plus raw transcript for debugging.
 
 Neither the Critic nor the Scientist (during debate) sees the analysis JSON
 or Python code. The plan already incorporates the analysis; passing both is
 redundant. Both sides get symmetric context (equal footing).
 
-Round 2+ critics are stateless: they receive the scientist's defense as
-additional context but not their own prior critique. This avoids anchoring
-bias and lets the critic form a fresh assessment each round.
+Personas provide diverse critical perspectives. Each debate runs one persona;
+model assignment rotates across iterations so no model is always the same role.
 """
 
 import asyncio
 import json
 import logging
-from collections.abc import Callable
 from pathlib import Path
 from typing import Any
 
-from claude_code_sdk import ClaudeCodeOptions
-
 from auto_scientist.agent_result import AgentResult
+from auto_scientist.agents.debate_models import (
+    CRITIC_OUTPUT_SCHEMA,
+    SCIENTIST_DEFENSE_SCHEMA,
+    Concern,
+    CriticOutput,
+    DebateResult,
+    DebateRound,
+    ScientistDefense,
+)
 from auto_scientist.images import ImageData, encode_images_from_paths
 from auto_scientist.model_config import AgentModelConfig
 from auto_scientist.models.anthropic_client import query_anthropic
 from auto_scientist.models.google_client import query_google
 from auto_scientist.models.openai_client import query_openai
 from auto_scientist.prompts.critic import (
-    CRITIC_SYSTEM,
+    CRITIC_SYSTEM_BASE,
     CRITIC_USER,
+    PERSONAS,
     SCIENTIST_DEBATE_SYSTEM,
     SCIENTIST_DEBATE_USER,
+    get_model_index_for_debate,
 )
-from auto_scientist.sdk_utils import collect_text_from_query
+from auto_scientist.sdk_utils import OutputValidationError, validate_json_output
 
 logger = logging.getLogger(__name__)
 
-MAX_RETRIES = 1  # 1 retry = 2 total attempts for empty responses
+MAX_RETRIES = 1  # 1 retry = 2 total attempts
 MIN_RESPONSE_LENGTH = 50  # minimum chars for a substantive response
+
+
+# ---------------------------------------------------------------------------
+# Low-level query helpers
+# ---------------------------------------------------------------------------
 
 
 async def _query_critic(
@@ -72,33 +84,117 @@ async def _query_critic(
         raise ValueError(f"Unknown critic provider: {config.provider!r}")
 
 
-async def _query_with_retry(
-    query_fn: Callable[..., Any],
-    *args: Any,
+# ---------------------------------------------------------------------------
+# Structured query + validation helpers
+# ---------------------------------------------------------------------------
+
+
+async def _query_critic_structured(
+    config: AgentModelConfig,
+    prompt: str,
+    *,
+    images: list[ImageData] | None = None,
     label: str = "",
-    **kwargs: Any,
-) -> AgentResult:
-    """Call a query function, retrying if the response is empty, too short, or errors."""
+) -> tuple[CriticOutput, AgentResult]:
+    """Query a critic and validate the response as structured CriticOutput.
+
+    Returns (validated CriticOutput, raw AgentResult).
+    Retries once on validation failure with a correction hint.
+    """
     result = AgentResult(text="")
+    correction_hint = ""
+
     for attempt in range(MAX_RETRIES + 1):
+        effective_prompt = prompt + correction_hint
         try:
-            result = await query_fn(*args, **kwargs)
+            result = await _query_critic(config, effective_prompt, images=images)
         except Exception as e:
             if attempt < MAX_RETRIES:
-                logger.warning(f"{label} SDK error ({e}), retrying (attempt {attempt + 1})")
+                logger.warning(f"{label} error ({e}), retrying (attempt {attempt + 1})")
                 continue
             raise
-        if result.text and len(result.text.strip()) >= MIN_RESPONSE_LENGTH:
-            return result
-        if attempt < MAX_RETRIES:
-            reason = "empty" if not result.text or not result.text.strip() else "too short"
-            logger.warning(f"{label} returned {reason} response, retrying (attempt {attempt + 1})")
-        elif result.text and len(result.text.strip()) < MIN_RESPONSE_LENGTH:
-            logger.warning(
-                f"{label} retries exhausted, returning short response "
-                f"({len(result.text.strip())} chars)"
-            )
-    return result  # return whatever we got
+
+        try:
+            validated = validate_json_output(result.text, CriticOutput, "Critic")
+            return CriticOutput(**validated), result
+        except OutputValidationError as e:
+            if attempt < MAX_RETRIES:
+                correction_hint = f"\n\n{e.correction_prompt()}"
+                logger.warning(f"{label} validation failed, retrying: {e}")
+            else:
+                logger.warning(
+                    f"{label} validation failed after retries, preserving raw text as concern"
+                )
+                raw = (result.text or "(empty response)")[:500]
+                fallback = CriticOutput(
+                    concerns=[Concern(
+                        claim=f"[PARSE ERROR] {raw}",
+                        severity="high",
+                        confidence="low",
+                        category="other",
+                    )],
+                    alternative_hypotheses=[],
+                    overall_assessment=result.text or "(empty response)",
+                )
+                return fallback, result
+
+    # Should not reach here, but satisfy type checker
+    return CriticOutput(
+        concerns=[], alternative_hypotheses=[],
+        overall_assessment="(unreachable fallback)",
+    ), result
+
+
+async def _query_scientist_structured(
+    config: AgentModelConfig,
+    prompt: str,
+    system_prompt: str,
+    *,
+    label: str = "",
+) -> tuple[ScientistDefense, AgentResult]:
+    """Query the scientist (direct API) and validate as structured ScientistDefense.
+
+    Returns (validated ScientistDefense, raw AgentResult).
+    Retries once on validation failure with a correction hint.
+    """
+    result = AgentResult(text="")
+    correction_hint = ""
+
+    for attempt in range(MAX_RETRIES + 1):
+        effective_prompt = prompt + correction_hint
+        full_prompt = f"{system_prompt}\n\n{effective_prompt}"
+        try:
+            result = await _query_critic(config, full_prompt)
+        except Exception as e:
+            if attempt < MAX_RETRIES:
+                logger.warning(f"{label} error ({e}), retrying (attempt {attempt + 1})")
+                continue
+            raise
+
+        try:
+            validated = validate_json_output(result.text, ScientistDefense, "Scientist-debate")
+            return ScientistDefense(**validated), result
+        except OutputValidationError as e:
+            if attempt < MAX_RETRIES:
+                correction_hint = f"\n\n{e.correction_prompt()}"
+                logger.warning(f"{label} validation failed, retrying: {e}")
+            else:
+                logger.warning(f"{label} validation failed after retries, using raw text")
+                fallback = ScientistDefense(
+                    responses=[],
+                    additional_points=result.text or "(empty response)",
+                )
+                return fallback, result
+
+    fallback = ScientistDefense(
+        responses=[], additional_points=result.text or "(empty response)",
+    )
+    return fallback, result
+
+
+# ---------------------------------------------------------------------------
+# Single-critic debate
+# ---------------------------------------------------------------------------
 
 
 async def run_single_critic_debate(
@@ -107,23 +203,28 @@ async def run_single_critic_debate(
     notebook_content: str,
     domain_knowledge: str = "",
     success_criteria: str = "",
-    max_rounds: int = 2,
+    max_rounds: int = 1,
     scientist_config: AgentModelConfig | None = None,
     message_buffer: list[str] | None = None,
     plot_paths: list[Path] | None = None,
     images: list[ImageData] | None = None,
     has_plots: bool = False,
-) -> dict[str, Any]:
-    """Run a multi-round debate between one critic and the scientist.
+    persona: dict[str, str] | None = None,
+) -> DebateResult:
+    """Run a multi-round debate between one critic (with persona) and the scientist.
 
-    Returns a dict with keys 'model', 'critique', 'transcript',
-    'input_tokens', and 'output_tokens'.
+    Returns a DebateResult with structured output per round plus raw transcript.
     """
     if scientist_config is None:
         scientist_config = AgentModelConfig(model="claude-sonnet-4-6")
 
+    persona = persona or {"name": "Generic", "system_text": ""}
+    persona_name = persona["name"]
+    persona_text = persona["system_text"]
+
     label = f"{config.provider}:{config.model}"
-    transcript: list[dict[str, str]] = []
+    raw_transcript: list[dict[str, str]] = []
+    rounds: list[DebateRound] = []
     total_in = 0
     total_out = 0
 
@@ -132,72 +233,88 @@ async def run_single_critic_debate(
         plan, notebook_content, domain_knowledge,
         success_criteria=success_criteria,
         has_plots=has_plots,
+        persona_text=persona_text,
     )
-    critique_result = await _query_with_retry(
-        _query_critic, config, critic_prompt, images=images or [],
-        label=f"Critic ({label}) round 1",
+    critic_output, critic_result = await _query_critic_structured(
+        config, critic_prompt, images=images or [],
+        label=f"Critic ({persona_name}, {label}) round 1",
     )
-    total_in += critique_result.input_tokens
-    total_out += critique_result.output_tokens
-    critique_text = critique_result.text
-    transcript.append({"role": "critic", "content": critique_text})
+    total_in += critic_result.input_tokens
+    total_out += critic_result.output_tokens
+    raw_transcript.append({"role": "critic", "content": critic_result.text})
     if message_buffer is not None:
-        message_buffer.append(f"[Critic] {critique_text}")
+        message_buffer.append(f"[Critic/{persona_name}] {critic_result.text}")
 
-    # Rounds 2+: scientist responds, then critic critiques again (stateless)
-    for round_num in range(1, max_rounds):
-        scientist_user_prompt = _build_scientist_debate_user_prompt(
-            plan=plan,
-            notebook_content=notebook_content,
-            domain_knowledge=domain_knowledge,
-            success_criteria=success_criteria,
-            critique=critique_text,
-            has_plots=has_plots,
-            plot_paths=plot_paths,
-        )
-        scientist_tools = ["WebSearch"]
-        if has_plots:
-            scientist_tools.append("Read")
-        options = ClaudeCodeOptions(
-            system_prompt=SCIENTIST_DEBATE_SYSTEM,
-            allowed_tools=scientist_tools,
-            max_turns=10,
-            model=scientist_config.model,
-            extra_args={"setting-sources": ""},
-        )
-        scientist_response = await collect_text_from_query(
-            scientist_user_prompt, options, message_buffer,
-            agent_name=f"Scientist debate round {round_num}",
-        )
-        transcript.append({"role": "scientist", "content": scientist_response})
-        if message_buffer is not None:
-            message_buffer.append(f"[Scientist] {scientist_response}")
+    if max_rounds <= 1:
+        # Single round: no scientist defense
+        rounds.append(DebateRound(critic_output=critic_output))
+    else:
+        # Multi-round: scientist responds, then critic critiques again
+        scientist_defense = None
+        for round_num in range(1, max_rounds):
+            scientist_system = SCIENTIST_DEBATE_SYSTEM.format(
+                scientist_defense_schema=json.dumps(SCIENTIST_DEFENSE_SCHEMA, indent=2),
+            )
+            scientist_user_prompt = _build_scientist_debate_user_prompt(
+                plan=plan,
+                notebook_content=notebook_content,
+                domain_knowledge=domain_knowledge,
+                success_criteria=success_criteria,
+                critique=critic_result.text,
+                has_plots=has_plots,
+                plot_paths=plot_paths,
+                critic_persona=persona_name,
+            )
+            scientist_defense, sci_result = await _query_scientist_structured(
+                scientist_config, scientist_user_prompt, scientist_system,
+                label=f"Scientist ({persona_name}) round {round_num}",
+            )
+            total_in += sci_result.input_tokens
+            total_out += sci_result.output_tokens
+            raw_transcript.append({"role": "scientist", "content": sci_result.text})
+            if message_buffer is not None:
+                message_buffer.append(f"[Scientist] {sci_result.text}")
 
-        # Stateless: critic gets the defense but not their own prior critique
-        critic_prompt = _build_critic_prompt(
-            plan, notebook_content, domain_knowledge,
-            success_criteria=success_criteria,
-            scientist_defense=scientist_response,
-            has_plots=has_plots,
-        )
-        critique_result = await _query_with_retry(
-            _query_critic, config, critic_prompt, images=images or [],
-            label=f"Critic ({label}) round {round_num + 1}",
-        )
-        total_in += critique_result.input_tokens
-        total_out += critique_result.output_tokens
-        critique_text = critique_result.text
-        transcript.append({"role": "critic", "content": critique_text})
-        if message_buffer is not None:
-            message_buffer.append(f"[Critic] {critique_text}")
+            # Record the round with both critic output and scientist defense
+            rounds.append(DebateRound(
+                critic_output=critic_output,
+                scientist_defense=scientist_defense,
+            ))
 
-    return {
-        "model": label,
-        "critique": critique_text,
-        "transcript": transcript,
-        "input_tokens": total_in,
-        "output_tokens": total_out,
-    }
+            # Stateless: critic gets the defense but not their own prior critique
+            critic_prompt = _build_critic_prompt(
+                plan, notebook_content, domain_knowledge,
+                success_criteria=success_criteria,
+                scientist_defense=sci_result.text,
+                has_plots=has_plots,
+                persona_text=persona_text,
+            )
+            critic_output, critic_result = await _query_critic_structured(
+                config, critic_prompt, images=images or [],
+                label=f"Critic ({persona_name}, {label}) round {round_num + 1}",
+            )
+            total_in += critic_result.input_tokens
+            total_out += critic_result.output_tokens
+            raw_transcript.append({"role": "critic", "content": critic_result.text})
+            if message_buffer is not None:
+                message_buffer.append(f"[Critic/{persona_name}] {critic_result.text}")
+
+        # Final round's critic output (no defense after it)
+        rounds.append(DebateRound(critic_output=critic_output))
+
+    return DebateResult(
+        persona=persona_name,
+        critic_model=label,
+        rounds=rounds,
+        raw_transcript=raw_transcript,
+        input_tokens=total_in,
+        output_tokens=total_out,
+    )
+
+
+# ---------------------------------------------------------------------------
+# Top-level debate orchestrator
+# ---------------------------------------------------------------------------
 
 
 async def run_debate(
@@ -206,32 +323,33 @@ async def run_debate(
     notebook_content: str,
     domain_knowledge: str = "",
     success_criteria: str = "",
-    max_rounds: int = 2,
+    max_rounds: int = 1,
     scientist_config: AgentModelConfig | None = None,
     message_buffer: list[str] | None = None,
     message_buffers: dict[str, list[str]] | None = None,
     plot_paths: list[Path] | None = None,
-) -> list[dict[str, Any]]:
-    """Run parallel multi-round critic-scientist debates for each critic model.
+    iteration: int = 0,
+) -> list[DebateResult]:
+    """Run parallel debates, one per persona, with rotating model assignment.
 
-    Each critic runs its own independent debate with the scientist concurrently
-    via asyncio.gather. Per-critic buffers can be provided via message_buffers.
+    Always runs 3 debates (one per persona) regardless of how many critic
+    models are configured. Model assignment rotates across iterations.
 
     Args:
-        critic_configs: List of AgentModelConfig for each critic.
-        plan: Scientist's plan dict (hypothesis, strategy, changes).
+        critic_configs: Pool of critic model configs (round-robin assigned).
+        plan: Scientist's plan dict.
         notebook_content: Current lab notebook content.
         domain_knowledge: Domain-specific context.
         success_criteria: Formatted top-level success criteria.
-        max_rounds: Number of critique rounds (1 = no debate, 2 = default).
+        max_rounds: Number of critique rounds per debate (1 = single-pass).
         scientist_config: Config for the Scientist's debate responses.
-        message_buffer: Legacy single shared buffer (used if message_buffers not provided).
-        message_buffers: Per-critic buffers keyed by "provider:model" label.
+        message_buffer: Legacy single shared buffer.
+        message_buffers: Per-persona buffers keyed by persona name.
         plot_paths: Paths to plot images to forward to critics.
+        iteration: Current iteration number (for model rotation).
 
     Returns:
-        List of dicts with keys 'model', 'critique', 'transcript',
-        'input_tokens', and 'output_tokens'.
+        List of DebateResult, one per persona (always 3 unless no critics).
     """
     if not critic_configs:
         return []
@@ -239,7 +357,7 @@ async def run_debate(
     if scientist_config is None:
         scientist_config = AgentModelConfig(model="claude-sonnet-4-6")
 
-    # Encode plot images once for all critics
+    # Encode plot images once for all debates
     images: list[ImageData] = []
     if plot_paths:
         images = encode_images_from_paths(plot_paths)
@@ -247,11 +365,16 @@ async def run_debate(
     logger.info(f"Debate: {len(images)} plot image(s) will be forwarded to critics")
 
     tasks = []
-    for config in critic_configs:
-        label = f"{config.provider}:{config.model}"
-        # Resolve buffer: per-critic dict > shared legacy buffer > None
+    for persona_index, persona in enumerate(PERSONAS):
+        model_index = get_model_index_for_debate(
+            persona_index, iteration, len(critic_configs),
+        )
+        config = critic_configs[model_index]
+        persona_name = persona["name"]
+
+        # Resolve buffer: per-persona dict > shared legacy buffer > None
         if message_buffers is not None:
-            buf = message_buffers.setdefault(label, [])
+            buf = message_buffers.setdefault(persona_name, [])
         else:
             buf = message_buffer
 
@@ -268,17 +391,28 @@ async def run_debate(
                 plot_paths=plot_paths,
                 images=images,
                 has_plots=has_plots,
+                persona=persona,
             )
         )
 
     raw_results = await asyncio.gather(*tasks, return_exceptions=True)
-    successful = []
-    for r in raw_results:
+    successful: list[DebateResult] = []
+    persona_names = [p["name"] for p in PERSONAS]
+    for persona_name, r in zip(persona_names, raw_results, strict=True):
         if isinstance(r, BaseException):
-            logger.error(f"Critic debate failed: {r}")
+            logger.error(f"Critic debate failed for {persona_name}: {r}", exc_info=r)
         else:
             successful.append(r)
+    if len(successful) < len(raw_results):
+        logger.warning(
+            f"Debate: {len(successful)}/{len(raw_results)} debates succeeded"
+        )
     return successful
+
+
+# ---------------------------------------------------------------------------
+# Prompt builders
+# ---------------------------------------------------------------------------
 
 
 def _build_critic_prompt(
@@ -288,6 +422,7 @@ def _build_critic_prompt(
     success_criteria: str = "",
     scientist_defense: str = "",
     has_plots: bool = False,
+    persona_text: str = "",
 ) -> str:
     """Build the prompt sent to critic models.
 
@@ -303,6 +438,11 @@ def _build_critic_prompt(
 
     plots_section = _plots_section_text() if has_plots else ""
 
+    system = CRITIC_SYSTEM_BASE.format(
+        persona_text=persona_text,
+        critic_output_schema=json.dumps(CRITIC_OUTPUT_SCHEMA, indent=2),
+    )
+
     user = CRITIC_USER.format(
         domain_knowledge=domain_knowledge or "(none provided)",
         success_criteria=success_criteria or "(none defined yet)",
@@ -311,7 +451,7 @@ def _build_critic_prompt(
         scientist_defense=defense_section,
         plots_section=plots_section,
     )
-    return f"{CRITIC_SYSTEM}\n\n{user}"
+    return f"{system}\n\n{user}"
 
 
 def _build_scientist_debate_user_prompt(
@@ -322,11 +462,12 @@ def _build_scientist_debate_user_prompt(
     critique: str = "",
     has_plots: bool = False,
     plot_paths: list[Path] | None = None,
+    critic_persona: str = "",
 ) -> str:
     """Build the user prompt for the Scientist responding to a critique during debate.
 
-    When plots are available, includes file paths so the SDK agent can read them
-    with the Read tool (vision).
+    When plots are available, includes file paths so the scientist can
+    reference them when defending.
     """
     plots_section = ""
     if has_plots:
@@ -335,7 +476,7 @@ def _build_scientist_debate_user_prompt(
             path_list = "\n".join(f"- {p}" for p in plot_paths)
             plots_section += (
                 f"\n<plot_files>\n"
-                f"Use the Read tool to examine each plot file:\n"
+                f"Plot files available for reference:\n"
                 f"{path_list}\n"
                 f"</plot_files>"
             )
@@ -346,6 +487,7 @@ def _build_scientist_debate_user_prompt(
         notebook_content=notebook_content or "(empty)",
         plan_json=json.dumps(plan, indent=2),
         critique=critique,
+        critic_persona=critic_persona or "(generic critic)",
         plots_section=plots_section,
     )
 

@@ -40,7 +40,7 @@ class TestOrchestratorInit:
         o = Orchestrator(state=base_state, data_path=tmp_path, output_dir=tmp_path)
         assert o.max_iterations == 20
         assert len(o.model_config.critics) == 2
-        assert o.debate_rounds == 2
+        assert o.debate_rounds == 1
         assert o.max_consecutive_failures == 5
 
     def test_custom_values(self, base_state, tmp_path):
@@ -1592,18 +1592,34 @@ class TestRunDebateOrchestrator:
 
     @pytest.mark.asyncio
     async def test_calls_run_single_critic_debate_with_summaries(self, orchestrator, tmp_path):
-        """When summarizer is enabled, each critic gets its own summarizer."""
+        """When summarizer is enabled, each persona gets its own summarizer."""
+        from auto_scientist.agents.debate_models import (
+            CriticOutput,
+            DebateResult,
+            DebateRound,
+        )
+
         orchestrator.output_dir.mkdir(parents=True, exist_ok=True)
         orchestrator.model_config.critics = [AgentModelConfig(provider="openai", model="gpt-4o")]
         plan = {"hypothesis": "test"}
 
-        critique = {"model": "openai:gpt-4o", "critique": "looks good", "transcript": []}
+        debate_result = DebateResult(
+            persona="Methodologist",
+            critic_model="openai:gpt-4o",
+            rounds=[DebateRound(
+                critic_output=CriticOutput(
+                    concerns=[], alternative_hypotheses=[],
+                    overall_assessment="looks good",
+                ),
+            )],
+            raw_transcript=[],
+        )
 
         with (
             patch(
                 "auto_scientist.agents.critic.run_single_critic_debate",
                 new_callable=AsyncMock,
-                return_value=critique,
+                return_value=debate_result,
             ) as mock_single,
             patch(
                 "auto_scientist.summarizer._query_summary",
@@ -1613,7 +1629,8 @@ class TestRunDebateOrchestrator:
         ):
             result = await orchestrator._run_debate(plan)
 
-        assert result == [critique]
+        # 3 debates (one per persona), all using the same single critic model
+        assert len(result) == 3
         call_kwargs = mock_single.call_args.kwargs
         assert call_kwargs["config"].model == "gpt-4o"
 
@@ -1670,14 +1687,31 @@ class TestRunScientistRevisionOrchestrator:
 
     @pytest.mark.asyncio
     async def test_returns_revised_plan(self, orchestrator, tmp_path):
+        from auto_scientist.agents.debate_models import (
+            Concern,
+            CriticOutput,
+            DebateResult,
+            DebateRound,
+        )
+
         orchestrator.output_dir.mkdir(parents=True, exist_ok=True)
         plan = {"hypothesis": "original"}
         debate_result = [
-            {
-                "model": "openai:gpt-4o",
-                "critique": "weak",
-                "transcript": [{"role": "critic", "content": "weak"}],
-            },
+            DebateResult(
+                persona="Methodologist",
+                critic_model="openai:gpt-4o",
+                rounds=[DebateRound(
+                    critic_output=CriticOutput(
+                        concerns=[Concern(
+                            claim="weak", severity="medium",
+                            confidence="medium", category="methodology",
+                        )],
+                        alternative_hypotheses=[],
+                        overall_assessment="weak",
+                    ),
+                )],
+                raw_transcript=[{"role": "critic", "content": "weak"}],
+            ),
         ]
         revised = {"hypothesis": "revised", "notebook_entry": "Revised plan\n\nAdjusted approach"}
 
@@ -1696,14 +1730,27 @@ class TestRunScientistRevisionOrchestrator:
 
     @pytest.mark.asyncio
     async def test_error_returns_none(self, orchestrator, tmp_path):
+        from auto_scientist.agents.debate_models import (
+            CriticOutput,
+            DebateResult,
+            DebateRound,
+        )
+
         orchestrator.output_dir.mkdir(parents=True, exist_ok=True)
         plan = {"hypothesis": "original"}
         debate_result = [
-            {
-                "model": "openai:gpt-4o",
-                "critique": "weak",
-                "transcript": [{"role": "critic", "content": "weak"}],
-            },
+            DebateResult(
+                persona="Methodologist",
+                critic_model="openai:gpt-4o",
+                rounds=[DebateRound(
+                    critic_output=CriticOutput(
+                        concerns=[],
+                        alternative_hypotheses=[],
+                        overall_assessment="weak",
+                    ),
+                )],
+                raw_transcript=[],
+            ),
         ]
 
         with patch(
@@ -1714,6 +1761,131 @@ class TestRunScientistRevisionOrchestrator:
             result = await orchestrator._run_scientist_revision(plan, debate_result, {})
 
         assert result is None
+
+
+class TestBuildConcernLedger:
+    def _make_debate_result(
+        self, persona="Methodologist", model="openai:gpt-4o",
+        concerns=None, defense_responses=None,
+    ):
+        from auto_scientist.agents.debate_models import (
+            Concern,
+            CriticOutput,
+            DebateResult,
+            DebateRound,
+            DefenseResponse,
+            ScientistDefense,
+        )
+
+        concerns = concerns or [
+            Concern(
+                claim="Data issue", severity="high",
+                confidence="high", category="methodology",
+            ),
+        ]
+        critic_output = CriticOutput(
+            concerns=concerns,
+            alternative_hypotheses=[],
+            overall_assessment="ok",
+        )
+
+        if defense_responses is not None:
+            defense = ScientistDefense(responses=defense_responses)
+            rounds = [
+                DebateRound(
+                    critic_output=critic_output,
+                    scientist_defense=defense,
+                ),
+                DebateRound(critic_output=critic_output),
+            ]
+        else:
+            rounds = [DebateRound(critic_output=critic_output)]
+
+        return DebateResult(
+            persona=persona, critic_model=model,
+            rounds=rounds, raw_transcript=[],
+        )
+
+    def test_single_round_no_defense(self):
+        result = self._make_debate_result()
+        ledger = Orchestrator._build_concern_ledger([result])
+
+        assert len(ledger) == 1
+        assert ledger[0]["claim"] == "Data issue"
+        assert ledger[0]["persona"] == "Methodologist"
+        assert ledger[0]["scientist_verdict"] is None
+
+    def test_multi_round_with_defense(self):
+        from auto_scientist.agents.debate_models import DefenseResponse
+
+        result = self._make_debate_result(
+            defense_responses=[
+                DefenseResponse(
+                    concern="Data issue",
+                    verdict="accepted",
+                    reasoning="Valid point.",
+                ),
+            ],
+        )
+        ledger = Orchestrator._build_concern_ledger([result])
+
+        assert len(ledger) == 1
+        assert ledger[0]["scientist_verdict"] == "accepted"
+        assert ledger[0]["scientist_reasoning"] == "Valid point."
+
+    def test_multiple_personas(self):
+        r1 = self._make_debate_result(persona="Methodologist")
+        r2 = self._make_debate_result(
+            persona="Novelty Skeptic",
+            model="google:gemini-3.1-pro-preview",
+        )
+        ledger = Orchestrator._build_concern_ledger([r1, r2])
+
+        assert len(ledger) == 2
+        assert ledger[0]["persona"] == "Methodologist"
+        assert ledger[1]["persona"] == "Novelty Skeptic"
+        assert ledger[1]["critic_model"] == "google:gemini-3.1-pro-preview"
+
+    def test_empty_results(self):
+        ledger = Orchestrator._build_concern_ledger([])
+        assert ledger == []
+
+    def test_non_debate_result_skipped(self):
+        ledger = Orchestrator._build_concern_ledger([{"not": "a DebateResult"}])
+        assert ledger == []
+
+    def test_positional_matching_with_multiple_concerns(self):
+        from auto_scientist.agents.debate_models import Concern, DefenseResponse
+
+        concerns = [
+            Concern(
+                claim="Issue A", severity="high",
+                confidence="high", category="methodology",
+            ),
+            Concern(
+                claim="Issue B", severity="medium",
+                confidence="medium", category="feasibility",
+            ),
+        ]
+        defense_responses = [
+            DefenseResponse(
+                concern="Issue A", verdict="accepted",
+                reasoning="Will fix A.",
+            ),
+            DefenseResponse(
+                concern="Issue B", verdict="rejected",
+                reasoning="B is fine.",
+            ),
+        ]
+        result = self._make_debate_result(
+            concerns=concerns,
+            defense_responses=defense_responses,
+        )
+        ledger = Orchestrator._build_concern_ledger([result])
+
+        assert len(ledger) == 2
+        assert ledger[0]["scientist_verdict"] == "accepted"
+        assert ledger[1]["scientist_verdict"] == "rejected"
 
 
 class TestRunCoderOrchestrator:

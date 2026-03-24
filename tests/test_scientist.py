@@ -14,6 +14,22 @@ from auto_scientist.agents.scientist import (
 from auto_scientist.config import SuccessCriterion
 from auto_scientist.sdk_utils import OutputValidationError
 
+SAMPLE_LEDGER = [
+    {
+        "claim": "weak point", "severity": "medium",
+        "confidence": "medium", "category": "methodology",
+        "persona": "Methodologist", "critic_model": "test",
+    },
+]
+
+SAMPLE_LEDGER_SMALL = [
+    {
+        "claim": "test concern", "severity": "low",
+        "confidence": "low", "category": "other",
+        "persona": "Test", "critic_model": "test",
+    },
+]
+
 
 class TestFormatCriteriaForPrompt:
     def test_none_returns_placeholder(self):
@@ -215,7 +231,7 @@ class TestRunScientistMessageBuffer:
         buf: list[str] = []
         await run_scientist_revision(
             original_plan=SAMPLE_PLAN,
-            debate_transcript=[{"role": "critic", "content": "weak"}],
+            concern_ledger=SAMPLE_LEDGER,
             analysis={},
             notebook_path=notebook_path,
             version="v01",
@@ -416,14 +432,16 @@ class TestRunScientistRevision:
         notebook_path = tmp_path / "notebook.md"
         notebook_path.write_text("# Notebook")
 
-        transcript = [
-            {"role": "critic", "content": "This is weak"},
-            {"role": "scientist", "content": "I disagree"},
+        ledger = [
+            {"claim": "This is weak", "severity": "high", "confidence": "high",
+             "category": "methodology", "persona": "Methodologist",
+             "critic_model": "test", "scientist_verdict": "rejected",
+             "scientist_reasoning": "I disagree"},
         ]
 
         result = await run_scientist_revision(
             original_plan=SAMPLE_PLAN,
-            debate_transcript=transcript,
+            concern_ledger=ledger,
             analysis={"observations": []},
             notebook_path=notebook_path,
             version="v01",
@@ -448,7 +466,7 @@ class TestRunScientistRevision:
         with pytest.raises(RuntimeError, match="returned no output"):
             await run_scientist_revision(
                 original_plan=SAMPLE_PLAN,
-                debate_transcript=[],
+                concern_ledger=[],
                 analysis={},
                 notebook_path=notebook_path,
                 version="v01",
@@ -477,7 +495,7 @@ class TestRunScientistRevision:
 
         result = await run_scientist_revision(
             original_plan=SAMPLE_PLAN,
-            debate_transcript=[{"role": "critic", "content": "test"}],
+            concern_ledger=SAMPLE_LEDGER_SMALL,
             analysis={},
             notebook_path=notebook_path,
             version="v01",
@@ -604,7 +622,7 @@ class TestScientistRetry:
 
         result = await run_scientist_revision(
             original_plan=SAMPLE_PLAN,
-            debate_transcript=[{"role": "critic", "content": "weak"}],
+            concern_ledger=SAMPLE_LEDGER,
             analysis={},
             notebook_path=notebook_path,
             version="v01",

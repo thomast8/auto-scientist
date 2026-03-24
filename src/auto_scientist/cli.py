@@ -114,9 +114,9 @@ def cli():
 @click.option("--interactive", is_flag=True, help="Enable interactive mode")
 @click.option(
     "--debate-rounds",
-    default=2,
+    default=1,
     type=int,
-    help="Number of critic-scientist debate rounds (1 = single-pass, default 2)",
+    help="Number of critic-scientist debate rounds per persona (1 = single-pass, default 1)",
 )
 @click.option(
     "--output-dir",

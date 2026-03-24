@@ -228,7 +228,7 @@ class Orchestrator:
         model_config: ModelConfig | None = None,
         interactive: bool = False,
         max_consecutive_failures: int = 5,
-        debate_rounds: int = 2,
+        debate_rounds: int = 1,
         stream: bool = True,
         verbose: bool = False,
     ):
@@ -516,9 +516,16 @@ class Orchestrator:
 
             # Persist debate transcript with original plan for context
             if debate_result:
+                from auto_scientist.agents.debate_models import DebateResult
+                serialized_results = [
+                    r.model_dump() if isinstance(r, DebateResult) else r
+                    for r in debate_result
+                ]
+                concern_ledger = self._build_concern_ledger(debate_result)
                 self._persist_artifact(version_dir, "debate.json", {
                     "original_plan": plan,
-                    "critiques": debate_result,
+                    "debate_results": serialized_results,
+                    "concern_ledger": concern_ledger,
                 })
 
         # Persist the final plan (post-debate revision if applicable)
@@ -944,11 +951,11 @@ class Orchestrator:
 
         self._live.update_status(phase="DEBATE")
 
-        # Per-critic buffers
+        # Per-persona buffers (run_debate keys buffers by persona name)
+        from auto_scientist.prompts.critic import PERSONAS
         buffers: dict[str, list[str]] = {}
-        for config in self.model_config.critics:
-            label = f"{config.provider}:{config.model}"
-            buffers[label] = []
+        for persona in PERSONAS:
+            buffers[persona["name"]] = []
 
         try:
             if self._should_summarize():
@@ -967,6 +974,7 @@ class Orchestrator:
                     scientist_config=scientist_cfg,
                     message_buffers=buffers,
                     plot_paths=plot_paths,
+                    iteration=self.state.iteration,
                 )
             self._live.log(f"DEBATE: received {len(critiques)} critique(s)")
             return critiques
@@ -988,44 +996,51 @@ class Orchestrator:
         success_criteria: str,
         scientist_cfg: Any,
         plot_paths: list[Path],
-    ) -> list[dict[str, Any]]:
-        """Run per-critic debates in parallel, each with its own summarizer and panel."""
+    ) -> list:
+        """Run per-persona debates in parallel, each with its own summarizer and panel."""
         import asyncio
         import contextlib
 
         from auto_scientist.agents.critic import run_single_critic_debate
+        from auto_scientist.agents.debate_models import DebateResult
         from auto_scientist.images import ImageData, encode_images_from_paths
+        from auto_scientist.prompts.critic import PERSONAS, get_model_index_for_debate
 
         summary_model = self._summary_model
 
-        # Encode plot images once for all critics
+        # Encode plot images once for all debates
         images: list[ImageData] = []
         if plot_paths:
             images = encode_images_from_paths(plot_paths)
         has_plots = bool(images)
 
-        # Create per-critic panels and collectors
-        critic_labels = [
-            f"{c.provider}:{c.model}" for c in self.model_config.critics
-        ]
+        # Create per-persona panels and collectors
         panels: dict[str, AgentPanel] = {}
         collectors: dict[str, list[tuple[str, str, str]]] = {}
-        for config, label in zip(self.model_config.critics, critic_labels, strict=True):
-            panel = AgentPanel(name="Critic", model=label, style="yellow")
-            panels[label] = panel
-            collectors[label] = []
+        persona_names = [p["name"] for p in PERSONAS]
+        for persona in PERSONAS:
+            name = persona["name"]
+            model_idx = get_model_index_for_debate(
+                PERSONAS.index(persona), self.state.iteration,
+                len(self.model_config.critics),
+            )
+            config = self.model_config.critics[model_idx]
+            label = f"{config.provider}:{config.model}"
+            panel = AgentPanel(name=f"Critic/{name}", model=label, style="yellow")
+            panels[name] = panel
+            collectors[name] = []
             self._live.add_panel(panel)
 
-        # Track how many entries per critic have been flushed to panels
-        seen: dict[str, int] = {lb: 0 for lb in critic_labels}
+        # Track how many entries per persona have been flushed to panels
+        seen: dict[str, int] = {n: 0 for n in persona_names}
 
         def _flush_collectors():
-            for label in critic_labels:
-                entries = collectors[label]
-                new_entries = entries[seen[label]:]
+            for name in persona_names:
+                entries = collectors[name]
+                new_entries = entries[seen[name]:]
                 for _agent_name, summary, time_label in new_entries:
-                    panels[label].add_line(f"[{time_label}] {summary}")
-                seen[label] = len(entries)
+                    panels[name].add_line(f"[{time_label}] {summary}")
+                seen[name] = len(entries)
             self._live.refresh()
 
         async def _drain_loop():
@@ -1033,32 +1048,43 @@ class Orchestrator:
                 await asyncio.sleep(0.5)
                 _flush_collectors()
 
-        def _collapse_critic(label: str, result: dict[str, Any]) -> None:
-            """Collapse a critic panel with stats from its result."""
-            panel = panels[label]
+        def _collapse_persona(name: str, result: DebateResult) -> None:
+            """Collapse a persona panel with stats from its result."""
+            panel = panels[name]
             panel.set_stats(
-                input_tokens=result.get("input_tokens", 0),
-                output_tokens=result.get("output_tokens", 0),
-                num_turns=len(result.get("transcript", [])),
+                input_tokens=result.input_tokens,
+                output_tokens=result.output_tokens,
+                num_turns=len(result.raw_transcript),
             )
             # Flush collector entries before collapsing
-            entries = collectors[label]
-            new_entries = entries[seen[label]:]
+            entries = collectors[name]
+            new_entries = entries[seen[name]:]
             for _agent_name, summary, time_label in new_entries:
                 panel.add_line(f"[{time_label}] {summary}")
-            seen[label] = len(entries)
+            seen[name] = len(entries)
 
             done_entries = [
-                e for e in collectors[label] if e[2].endswith("done")
+                e for e in collectors[name] if e[2].endswith("done")
             ]
             if done_entries:
                 done_summary = done_entries[-1][1]
             else:
-                critique = result.get("critique", "")
-                done_summary = critique[:200] + "..." if len(critique) > 200 else critique
+                assessment = ""
+                if result.rounds:
+                    assessment = result.rounds[-1].critic_output.overall_assessment
+                done_summary = assessment[:200] + "..." if len(assessment) > 200 else assessment
             self._live.collapse_panel(panel, done_summary or "Debate complete")
 
-        async def _summarized_debate(config, label):
+        async def _summarized_debate(persona_index, persona):
+            name = persona["name"]
+            model_idx = get_model_index_for_debate(
+                persona_index, self.state.iteration,
+                len(self.model_config.critics),
+            )
+            config = self.model_config.critics[model_idx]
+            buf_key = name
+            buffers.setdefault(buf_key, [])
+
             async def coro(buf):
                 return await run_single_critic_debate(
                     config=config,
@@ -1072,28 +1098,27 @@ class Orchestrator:
                     plot_paths=plot_paths,
                     images=images,
                     has_plots=has_plots,
+                    persona=persona,
                 )
             try:
                 result = await run_with_summaries(
-                    coro, f"Debate: {label}", summary_model, buffers[label],
+                    coro, f"Debate: {name}", summary_model, buffers[buf_key],
                     label_prefix="",
-                    summary_collector=collectors[label],
+                    summary_collector=collectors[name],
                 )
-                _collapse_critic(label, result)
+                _collapse_persona(name, result)
                 return result
             except Exception as e:
-                panels[label].error(str(e))
-                self._live.collapse_panel(panels[label])
+                panels[name].error(str(e))
+                self._live.collapse_panel(panels[name])
                 raise
 
         drain_task = asyncio.create_task(_drain_loop())
-        raw_results: list[dict[str, Any] | BaseException] = []
+        raw_results: list[DebateResult | BaseException] = []
         try:
             tasks = [
-                _summarized_debate(config, label)
-                for config, label in zip(
-                    self.model_config.critics, critic_labels, strict=True,
-                )
+                _summarized_debate(i, persona)
+                for i, persona in enumerate(PERSONAS)
             ]
             raw_results = await asyncio.gather(*tasks, return_exceptions=True)
         finally:
@@ -1110,10 +1135,58 @@ class Orchestrator:
                 successful.append(r)
         return successful
 
+    @staticmethod
+    def _build_concern_ledger(debate_results: list) -> list[dict[str, Any]]:
+        """Build a concern ledger from structured debate results.
+
+        For each concern in the final round's CriticOutput, attach the persona,
+        model, and (if available) the scientist's defense verdict.
+        """
+        from auto_scientist.agents.debate_models import ConcernLedgerEntry, DebateResult
+
+        ledger: list[dict[str, Any]] = []
+        for result in debate_results:
+            if not isinstance(result, DebateResult):
+                continue
+            if not result.rounds:
+                continue
+
+            # Use the last round's critic output for concerns
+            last_round = result.rounds[-1]
+            critic_output = last_round.critic_output
+
+            # Gather scientist defense responses (positional matching)
+            # Use the latest defense available from any round
+            defense_responses = []
+            for rnd in result.rounds:
+                if rnd.scientist_defense:
+                    defense_responses = rnd.scientist_defense.responses
+
+            for i, concern in enumerate(critic_output.concerns):
+                verdict = None
+                reasoning = None
+                if i < len(defense_responses):
+                    verdict = defense_responses[i].verdict
+                    reasoning = defense_responses[i].reasoning
+
+                entry = ConcernLedgerEntry(
+                    claim=concern.claim,
+                    severity=concern.severity,
+                    confidence=concern.confidence,
+                    category=concern.category,
+                    persona=result.persona,
+                    critic_model=result.critic_model,
+                    scientist_verdict=verdict,
+                    scientist_reasoning=reasoning,
+                )
+                ledger.append(entry.model_dump())
+
+        return ledger
+
     async def _run_scientist_revision(
         self,
         plan: dict | None,
-        debate_result: list[dict[str, Any]] | None,
+        debate_result: list | None,
         analysis: dict | None,
     ) -> dict[str, Any] | None:
         """Scientist revises plan based on debate."""
@@ -1127,11 +1200,8 @@ class Orchestrator:
         notebook_path = self.output_dir / NOTEBOOK_FILENAME
         domain_knowledge = self.state.domain_knowledge
 
-        # Combine transcripts from all critics
-        all_transcript: list[dict[str, str]] = []
-        for entry in debate_result:
-            all_transcript.append({"role": "critic", "content": f"[{entry['model']}]"})
-            all_transcript.extend(entry.get("transcript", []))
+        # Build structured concern ledger from debate results
+        concern_ledger = self._build_concern_ledger(debate_result)
 
         cfg = self.model_config.resolve("scientist")
 
@@ -1144,7 +1214,7 @@ class Orchestrator:
             async def _revision_coro(buf):
                 return await run_scientist_revision(
                     original_plan=plan,
-                    debate_transcript=all_transcript,
+                    concern_ledger=concern_ledger,
                     analysis=analysis or {},
                     notebook_path=notebook_path,
                     version=version,

@@ -221,7 +221,7 @@ async def run_scientist(
 
 async def run_scientist_revision(
     original_plan: dict[str, Any],
-    debate_transcript: list[dict[str, str]],
+    concern_ledger: list[dict[str, Any]],
     analysis: dict[str, Any],
     notebook_path: Path,
     version: str,
@@ -233,7 +233,7 @@ async def run_scientist_revision(
 
     Args:
         original_plan: The initial plan that was debated.
-        debate_transcript: List of {"role": "critic"|"scientist", "content": str}.
+        concern_ledger: Structured list of ConcernLedgerEntry dicts.
         analysis: Structured analysis JSON from the Analyst.
         notebook_path: Path to the lab notebook.
         version: Version string.
@@ -247,12 +247,7 @@ async def run_scientist_revision(
     notebook_path = Path(notebook_path)
     notebook_content = notebook_path.read_text() if notebook_path.exists() else ""
 
-    # Format debate transcript as XML turns
-    transcript_parts = []
-    for entry in debate_transcript:
-        role = entry["role"]
-        transcript_parts.append(f"<turn role=\"{role}\">\n{entry['content']}\n</turn>")
-    transcript_text = "\n".join(transcript_parts)
+    ledger_text = json.dumps(concern_ledger, indent=2) if concern_ledger else "(no concerns raised)"
 
     user_prompt = SCIENTIST_REVISION_USER.format(
         domain_knowledge=domain_knowledge or "(no domain knowledge provided)",
@@ -261,7 +256,7 @@ async def run_scientist_revision(
         ),
         notebook_content=notebook_content or "(empty notebook)",
         original_plan=json.dumps(original_plan, indent=2),
-        debate_transcript=transcript_text or "(no debate - critique was skipped)",
+        concern_ledger=ledger_text,
         version=version,
     )
 

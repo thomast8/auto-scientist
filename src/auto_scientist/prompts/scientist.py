@@ -630,10 +630,15 @@ by the critic.
 </pipeline_context>
 
 <instructions>
-1. Read the original plan and the full debate transcript.
+1. Read the original plan and the concern ledger. The ledger is a structured
+   JSON list where each entry has: claim, severity, confidence, category,
+   persona (which critic role raised it), critic_model, and optionally
+   scientist_verdict and scientist_reasoning (from a prior defense round).
 
-2. Identify which critique points are valid and which were
-   adequately addressed during the debate.
+2. For each concern in the ledger, decide whether to incorporate it.
+   High-severity concerns that the scientist accepted should be addressed.
+   Rejected concerns with high confidence from the critic deserve a second
+   look. Low-severity, low-confidence concerns can usually be ignored.
 
 3. Apply the parsimony principle: every change must earn its
    complexity. If a critique adds model families, diagnostics, or
@@ -832,8 +837,8 @@ Same JSON schema as the Scientist's initial plan:
 }}
 
 Fallback rules:
-- Empty debate transcript: return original plan unchanged
-- Debate only about criteria: adjust criteria, keep rest intact
+- Empty concern ledger: return original plan unchanged
+- Concerns only about criteria: adjust criteria, keep rest intact
 </output_format>
 
 <recap>
@@ -851,12 +856,12 @@ SCIENTIST_REVISION_USER = """\
 <data>
 <analysis>{analysis_json}</analysis>
 <original_plan>{original_plan}</original_plan>
-<debate_transcript>{debate_transcript}</debate_transcript>
+<concern_ledger>{concern_ledger}</concern_ledger>
 </data>
 
 <task>
-Produce a revised plan incorporating valid critique from the
-debate. Output a complete plan (all fields), not just changes.
+Produce a revised plan incorporating valid concerns from the ledger.
+Output a complete plan (all fields), not just changes.
 
 The new version is: {version}
 </task>
