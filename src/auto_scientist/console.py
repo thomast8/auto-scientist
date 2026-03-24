@@ -297,6 +297,7 @@ class StatusBar:
         self.total_output_tokens = 0
         self.total_turns = 0
         self.finished: bool = False
+        self._end_time: float | None = None
 
     def update(
         self,
@@ -315,6 +316,11 @@ class StatusBar:
         if best_score is not None:
             self.best_score = best_score
 
+    def finish(self) -> None:
+        """Freeze the elapsed timer at the current value."""
+        self.finished = True
+        self._end_time = time.monotonic()
+
     def add_agent_stats(self, panel: "AgentPanel") -> None:
         """Accumulate a completed agent's stats into the running totals."""
         self.total_input_tokens += panel.input_tokens
@@ -323,7 +329,8 @@ class StatusBar:
 
     def __rich_console__(self, console: Console, options):
         """Rich console protocol: render as a compact status line."""
-        elapsed = _format_elapsed(time.monotonic() - self.start_time)
+        end = self._end_time if self._end_time else time.monotonic()
+        elapsed = _format_elapsed(end - self.start_time)
         phase_style = PHASE_STYLES.get(self.phase, "cyan")
 
         line = Text()
@@ -440,7 +447,7 @@ class PipelineLive:
         if self._key_listener is None or self._key_listener._thread is None:
             return
         self._finished = True
-        self._status_bar.finished = True
+        self._status_bar.finish()
         self.refresh()
         self._dismiss_event.wait()
 
