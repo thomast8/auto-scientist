@@ -15,11 +15,10 @@ import json
 import sys
 import tempfile
 from pathlib import Path
-from unittest.mock import AsyncMock, patch
+from unittest.mock import patch
 
 from auto_scientist.agent_result import AgentResult
 from auto_scientist.agents.critic import MIN_RESPONSE_LENGTH
-from auto_scientist.console import AgentPanel
 from auto_scientist.model_config import AgentModelConfig, ModelConfig
 from auto_scientist.orchestrator import Orchestrator
 from auto_scientist.state import ExperimentState
@@ -256,6 +255,46 @@ def _make_report_mock():
 
 
 # ---------------------------------------------------------------------------
+# Canned LLM responses for debate mocks
+# ---------------------------------------------------------------------------
+
+# With 3 personas x 2 critic models x debate_rounds=2, we need enough
+# responses. Each persona debate: 2 critic calls + 1 scientist defense.
+
+
+def _cr(text: str, inp: int = 100, out: int = 50) -> AgentResult:
+    """Build a padded AgentResult for critic/defense mock responses."""
+    return AgentResult(text=_pad(text), input_tokens=inp, output_tokens=out)
+
+
+oai_critic_responses = [
+    _cr("OAI R1: Hypothesis lacks specificity about linearity."),
+    _cr("OAI R2: Revised, sample size concern addressed."),
+    _cr("OAI R3: Skeptical of generalization to larger datasets."),
+    _cr("OAI R4: Optimistic about cross-validation plan."),
+    _cr("OAI R5: Final round critique, methodology sound."),
+    _cr("OAI R6: Remaining concerns addressed satisfactorily."),
+]
+
+google_critic_responses = [
+    _cr("Google R1: Consider confounding variables.", 80, 40),
+    _cr("Google R2: Methodology concerns partially addressed.", 80, 40),
+    _cr("Google R3: Skeptical view on statistical power.", 80, 40),
+    _cr("Google R4: Positive about bootstrap approach.", 80, 40),
+    _cr("Google R5: Final assessment, approach is reasonable.", 80, 40),
+    _cr("Google R6: All major concerns resolved.", 80, 40),
+]
+
+anthropic_defense_responses = [
+    _cr("Scientist: Valid points, will add R2 threshold.", 90, 45),
+    _cr("Scientist: Agreed on confounders, adding residuals.", 90, 45),
+    _cr("Scientist: Adding cross-validation for generalization.", 90, 45),
+    _cr("Scientist: Bootstrap intervals quantify uncertainty.", 90, 45),
+    _cr("Scientist: Statistical power via sample size analysis.", 90, 45),
+    _cr("Scientist: All critiques incorporated into plan.", 90, 45),
+]
+
+# ---------------------------------------------------------------------------
 # Main
 # ---------------------------------------------------------------------------
 
@@ -344,26 +383,20 @@ async def run_smoke(output_dir: Path) -> None:
         patch("auto_scientist.agents.report.run_report", side_effect=_make_report_mock()),
 
         # LLM-level mocks (debate loop runs for real, with delays)
+        #
+        # With 3 personas, 2 critic models (OpenAI, Google), debate_rounds=2:
+        #   Each debate = 2 critic calls + 1 scientist defense (Anthropic) = 3 LLM calls
         patch(
             "auto_scientist.agents.critic.query_openai",
-            side_effect=_make_delayed_side_effect(0.5, [
-                AgentResult(text=_pad("OAI Critique R1: The hypothesis lacks specificity about what linear means."), input_tokens=100, output_tokens=50),
-                AgentResult(text=_pad("OAI Critique R2: Revised, sample size concern addressed."), input_tokens=100, output_tokens=50),
-            ]),
+            side_effect=_make_delayed_side_effect(0.5, oai_critic_responses),
         ),
         patch(
             "auto_scientist.agents.critic.query_google",
-            side_effect=_make_delayed_side_effect(1.5, [
-                AgentResult(text=_pad("Google Critique R1: Consider confounding variables in the x-y relationship."), input_tokens=80, output_tokens=40),
-                AgentResult(text=_pad("Google Critique R2: Methodology concerns partially addressed."), input_tokens=80, output_tokens=40),
-            ]),
+            side_effect=_make_delayed_side_effect(1.5, google_critic_responses),
         ),
         patch(
-            "auto_scientist.agents.critic.collect_text_from_query",
-            side_effect=_make_delayed_side_effect(0.4, [
-                _pad("Scientist to OAI: Valid points about specificity. Will add R2 threshold."),
-                _pad("Scientist to Google: Agreed on confounders. Will add residual analysis."),
-            ]),
+            "auto_scientist.agents.critic.query_anthropic",
+            side_effect=_make_delayed_side_effect(0.4, anthropic_defense_responses),
         ),
 
         # Summarizer LLM mock - varied responses so panels accumulate
@@ -415,50 +448,28 @@ async def run_smoke(output_dir: Path) -> None:
         ("Best score > 0", final_state.best_score > 0),
     ]
 
-    # Validate debate transcript
+    # Validate debate transcript (3 personas, each with rounds)
     debate_ok = False
     debate_path = experiment_dir / "v01" / "debate.json"
     if debate_path.exists():
         debate_data = json.loads(debate_path.read_text())
-        critiques = debate_data.get("critiques", [])
-        if len(critiques) == 2:
-            models = {c["model"] for c in critiques}
-            transcripts_ok = all(
-                len(c["transcript"]) == 3
-                and c["transcript"][0]["role"] == "critic"
-                and c["transcript"][1]["role"] == "scientist"
-                and c["transcript"][2]["role"] == "critic"
-                for c in critiques
-            )
+        debate_results = debate_data.get("debate_results", [])
+        if len(debate_results) == 3:
+            models = {r["critic_model"] for r in debate_results}
+            has_rounds = all(len(r.get("rounds", [])) > 0 for r in debate_results)
             debate_ok = (
                 "openai:gpt-4o" in models
                 and "google:gemini-2.5-pro" in models
-                and transcripts_ok
+                and has_rounds
             )
     checks.append(("Debate transcripts valid", debate_ok))
 
-    # Validate Ctrl+O expand/history mechanism
-    history = orchestrator._live._history
-    checks.append(("History accumulated after flush", len(history) > 0))
-    checks.append(("Expanded flag reset after stop", AgentPanel.expanded is False))
+    # Validate panel tracking via PipelineLive._panels
+    all_panels = orchestrator._live._panels
+    checks.append(("Panels tracked after flush", len(all_panels) > 0))
+    all_collapsed = all(not p.expanded for p in all_panels)
+    checks.append(("All panels collapsed after stop", all_collapsed))
 
-    # Verify all_lines stored on panels in history (panels may be nested
-    # inside iteration Panel(Group(...)) wrappers)
-    from rich.console import Group as RichGroup
-    from rich.panel import Panel as RichPanel
-
-    from auto_scientist.console import AgentPanel as AP
-
-    def _find_agent_panels(items):
-        for item in items:
-            if isinstance(item, AP):
-                yield item
-            elif isinstance(item, RichPanel):
-                renderable = item.renderable
-                if isinstance(renderable, RichGroup):
-                    yield from _find_agent_panels(renderable.renderables)
-
-    all_panels = list(_find_agent_panels(history))
     has_all_lines = any(len(p.all_lines) > 0 for p in all_panels)
     checks.append(("Panels retain all_lines history", has_all_lines))
 

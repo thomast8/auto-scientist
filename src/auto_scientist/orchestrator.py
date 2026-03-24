@@ -344,11 +344,14 @@ class Orchestrator:
         mc_path = self.output_dir / "model_config.json"
         mc_path.write_text(self.model_config.model_dump_json(indent=2))
 
-        # Startup banner (printed before Live starts)
-        console.print(self._build_startup_banner())
-
-        self._live = PipelineLive()
-        self._live.start(log_path=self.output_dir / "console.log")
+        # In app mode, PipelineApp already created and wired _live.
+        # In headless mode (smoke test, direct call), create our own.
+        if self._live._app is None:
+            self._live = PipelineLive()
+            self._live.start(log_path=self.output_dir / "console.log")
+            console.print(self._build_startup_banner())
+        else:
+            self._live.print_static(self._build_startup_banner())
 
         try:
             # Phase 0: Ingestion

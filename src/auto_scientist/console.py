@@ -1,34 +1,28 @@
-"""Rich-based CLI dashboard for the auto-scientist pipeline.
+"""Textual-based CLI dashboard for the auto-scientist pipeline.
 
-Provides three main components:
-- AgentPanel: Fixed-height scrolling panel for each agent phase
-- StatusBar: Persistent status bar showing iteration, phase, elapsed, best score
-- PipelineLive: Wraps Rich.Live to manage panels + status bar as one layout
+Provides:
+- AgentPanel: Auto-sizing widget for each agent phase (scrolling deque / full expand)
+- StatusBarWidget: Persistent status bar docked to bottom
+- IterationContainer: Bordered container grouping panels per iteration
+- PipelineLive: Bridge between orchestrator (worker thread) and Textual app
+- PipelineApp: Textual App that composes the widget tree and runs the orchestrator
 """
 
-import sys
-import threading
+import asyncio
 import time
 from collections import deque
 from pathlib import Path
-from typing import Callable
 
 from rich.console import Console, Group, RenderableType
-from rich.live import Live
-from rich.panel import Panel
-from rich.rule import Rule
-from rich.table import Table
 from rich.text import Text
+from textual.app import App, ComposeResult, RenderResult
+from textual.binding import Binding
+from textual.containers import Vertical, VerticalScroll
+from textual.widget import Widget
+from textual.widgets import Static
+from textual.worker import Worker, WorkerState
 
-try:
-    import select
-    import termios
-
-    _HAS_TERMIOS = True
-except ImportError:
-    _HAS_TERMIOS = False
-
-# Module-level console for one-time prints (startup banner, etc.)
+# Module-level console for one-time prints (startup banner in headless mode, etc.)
 console = Console()
 
 PANEL_MAX_LINES = 5
@@ -74,24 +68,33 @@ def _format_elapsed(seconds: float) -> str:
     return f"{s}s"
 
 
-class AgentPanel:
-    """A fixed-height scrolling panel for a single agent phase.
+# ---------------------------------------------------------------------------
+# AgentPanel widget
+# ---------------------------------------------------------------------------
 
-    Shows the most recent PANEL_MAX_LINES summary lines. On completion,
-    collapses to just the done summary + footer stats. Implements the
-    Rich console protocol for rendering.
 
-    When the class-level ``expanded`` flag is True, all accumulated lines
-    are shown instead of the rolling window, and done panels display their
-    full history.
+class AgentPanel(Widget):
+    """Auto-sizing panel widget for a single agent phase.
+
+    Shows the most recent PANEL_MAX_LINES summary lines by default.
+    When ``expanded`` is True, shows ALL accumulated lines and the widget
+    grows to fit (``height: auto``).  On completion, collapses to just the
+    done summary + footer stats.
     """
 
-    expanded: bool = False
+    DEFAULT_CSS = """
+    AgentPanel {
+        height: auto;
+        padding: 0 1;
+        margin: 0 0;
+    }
+    """
 
     def __init__(self, name: str, model: str, style: str = "cyan") -> None:
-        self.name = name
+        super().__init__()
+        self._panel_name = name
         self.model = model
-        self.style = style
+        self.panel_style = style
         self.lines: deque[str] = deque(maxlen=PANEL_MAX_LINES)
         self.all_lines: list[str] = []
         self.start_time = time.monotonic()
@@ -102,6 +105,11 @@ class AgentPanel:
         self.done_summary = ""
         self.error_msg = ""
         self._end_time: float | None = None
+        self.expanded: bool = False
+
+    @property
+    def panel_name(self) -> str:
+        return self._panel_name
 
     def add_line(self, text: str) -> None:
         """Append a summary line. Older lines scroll off. No-op after done."""
@@ -112,7 +120,7 @@ class AgentPanel:
         self.lines.append(cleaned)
 
     def complete(self, done_summary: str = "") -> None:
-        """Mark this panel as done. Collapses to the summary line.
+        """Mark this panel as done.
 
         If done_summary is empty and the panel has lines, the last line
         is used as the done summary (preserves the summarizer's [done] entry).
@@ -170,19 +178,17 @@ class AgentPanel:
         if self.error_msg:
             return Text(f"[error] {self.error_msg}", style="red")
 
-        done_style = f"bold {self.style}"
+        done_style = f"bold {self.panel_style}"
 
         if self.done and self.done_summary:
             summary = self.done_summary
             if summary.startswith("[done] "):
                 summary = summary[len("[done] "):]
-            if AgentPanel.expanded and self.all_lines:
+            if self.expanded and self.all_lines:
                 body_lines = [
                     Text(line, style=done_style) if line.startswith("[done]") else Text(line)
                     for line in self.all_lines
                 ]
-                # Only append done summary if it's not already the last line
-                # (the summarizer's [done] entry is already in all_lines).
                 done_text = f"[done] {summary}"
                 last = self.all_lines[-1]
                 if last != done_text and last != summary:
@@ -193,102 +199,46 @@ class AgentPanel:
         if not self.lines:
             return Text("  working...", style="dim")
 
-        source = self.all_lines if AgentPanel.expanded else self.lines
+        source = self.all_lines if self.expanded else self.lines
         body_lines = [
             Text(line, style=done_style) if line.startswith("[done]") else Text(line)
             for line in source
         ]
         return Group(*body_lines)
 
-    def __rich_console__(self, console: Console, options):
-        """Rich console protocol: render as a Panel."""
-        border_style = "red" if self.error_msg else self.style
-        subtitle = Text(self._build_footer(), style=border_style)
+    def render(self) -> RenderResult:
+        """Render the panel body. Border title/subtitle set dynamically."""
+        border_color = "red" if self.error_msg else self.panel_style
+        self.border_title = f"{self._panel_name} ({self.model})"
+        self.border_subtitle = self._build_footer()
+        self.styles.border = ("solid", border_color)
+        return self._build_body()
 
-        panel = Panel(
-            self._build_body(),
-            title=f"{self.name} ({self.model})",
-            title_align="left",
-            subtitle=subtitle,
-            subtitle_align="left",
-            border_style=border_style,
-            expand=True,
-        )
-        yield from panel.__rich_console__(console, options)
+    def on_click(self) -> None:
+        """Toggle expanded state on click."""
+        self.expanded = not self.expanded
+        self.refresh()
 
 
-class KeyListener:
-    """Background thread that listens for Ctrl+O to toggle panel expansion.
+# ---------------------------------------------------------------------------
+# StatusBarWidget
+# ---------------------------------------------------------------------------
 
-    Reads raw keypresses in cbreak mode on Unix systems. No-ops gracefully
-    when termios is unavailable (Windows, CI) or stdin is not a TTY.
+
+class StatusBarWidget(Widget):
+    """Persistent status bar docked to the bottom of the screen."""
+
+    DEFAULT_CSS = """
+    StatusBarWidget {
+        dock: bottom;
+        height: 1;
+        background: $surface;
+    }
     """
 
-    def __init__(
-        self,
-        on_toggle: Callable[[], None],
-        on_dismiss: Callable[[], None] | None = None,
-    ) -> None:
-        self._on_toggle = on_toggle
-        self._on_dismiss = on_dismiss
-        self._stop_event = threading.Event()
-        self._thread: threading.Thread | None = None
-        self._old_attrs: list | None = None
-
-    def start(self) -> None:
-        if not _HAS_TERMIOS or not sys.stdin.isatty():
-            return
-        self._thread = threading.Thread(
-            target=self._run, daemon=True, name="key-listener",
-        )
-        self._thread.start()
-
-    def stop(self) -> None:
-        self._stop_event.set()
-        if self._thread is not None:
-            self._thread.join(timeout=1.0)
-            self._thread = None
-
-    def _run(self) -> None:
-        fd = sys.stdin.fileno()
-        try:
-            self._old_attrs = termios.tcgetattr(fd)
-            # Disable ICANON (line buffering), ECHO, and IEXTEN.
-            # IEXTEN must be cleared because on macOS/BSD Ctrl+O is VDISCARD,
-            # which toggles output flushing in the terminal driver, silently
-            # discarding all subsequent output until another Ctrl+O arrives.
-            mode = termios.tcgetattr(fd)
-            mode[3] &= ~(termios.ECHO | termios.ICANON | termios.IEXTEN)
-            mode[6][termios.VMIN] = 1
-            mode[6][termios.VTIME] = 0
-            termios.tcsetattr(fd, termios.TCSAFLUSH, mode)
-            while not self._stop_event.is_set():
-                ready, _, _ = select.select([fd], [], [], 0.2)
-                if ready:
-                    ch = sys.stdin.read(1)
-                    if ch == "\x0f":  # Ctrl+O
-                        self._on_toggle()
-                    elif self._on_dismiss and ch in ("q", "\r", "\n", "\x1b"):
-                        self._on_dismiss()
-        except (OSError, termios.error):
-            pass
-        finally:
-            if self._old_attrs is not None:
-                try:
-                    termios.tcsetattr(fd, termios.TCSADRAIN, self._old_attrs)
-                except (OSError, termios.error):
-                    pass
-
-
-class StatusBar:
-    """Persistent status bar showing iteration, phase, elapsed, best score.
-
-    Elapsed time is computed dynamically at render time so the clock
-    ticks smoothly with Live's refresh_per_second.
-    """
-
-    def __init__(self, start_time: float | None = None) -> None:
-        self.start_time = start_time or time.monotonic()
+    def __init__(self) -> None:
+        super().__init__()
+        self.start_time = time.monotonic()
         self.iteration = 0
         self.phase = ""
         self.best_version = ""
@@ -299,7 +249,10 @@ class StatusBar:
         self.finished: bool = False
         self._end_time: float | None = None
 
-    def update(
+    def on_mount(self) -> None:
+        self.set_interval(1 / 4, self.refresh)
+
+    def set_status(
         self,
         iteration: int | None = None,
         phase: str | None = None,
@@ -321,14 +274,13 @@ class StatusBar:
         self.finished = True
         self._end_time = time.monotonic()
 
-    def add_agent_stats(self, panel: "AgentPanel") -> None:
+    def add_agent_stats(self, panel: AgentPanel) -> None:
         """Accumulate a completed agent's stats into the running totals."""
         self.total_input_tokens += panel.input_tokens
         self.total_output_tokens += panel.output_tokens
         self.total_turns += panel.num_turns
 
-    def __rich_console__(self, console: Console, options):
-        """Rich console protocol: render as a compact status line."""
+    def render(self) -> RenderResult:
         end = self._end_time if self._end_time else time.monotonic()
         elapsed = _format_elapsed(end - self.start_time)
         phase_style = PHASE_STYLES.get(self.phase, "cyan")
@@ -349,7 +301,6 @@ class StatusBar:
             line.append(f" | {self.total_turns} {label}", style="dim")
 
         if self.best_score is not None:
-            # best_version is "vNN" format; v00 = iteration 1, v01 = iteration 2
             try:
                 best_iter = int(self.best_version.lstrip("v")) + 1
             except (ValueError, AttributeError):
@@ -357,255 +308,271 @@ class StatusBar:
             style = _score_style(self.best_score)
             line.append(f"  best: iter {best_iter} ({self.best_score})", style=style)
 
-        toggle_action = "compact" if AgentPanel.expanded else "expand"
+        try:
+            has_expanded = any(p.expanded for p in self.app.query(AgentPanel))
+        except Exception:
+            has_expanded = False
+        toggle_action = "compact" if has_expanded else "expand"
         line.append(f"  Ctrl+O: {toggle_action}", style="dim italic")
         if self.finished:
             line.append("  q: exit", style="dim italic")
 
-        yield from line.__rich_console__(console, options)
+        return line
+
+
+# ---------------------------------------------------------------------------
+# IterationContainer
+# ---------------------------------------------------------------------------
+
+
+class IterationContainer(Vertical):
+    """Bordered container grouping panels for one iteration."""
+
+    DEFAULT_CSS = """
+    IterationContainer {
+        height: auto;
+        border: solid $accent;
+    }
+    """
+
+    def __init__(self, iter_title: str) -> None:
+        super().__init__()
+        self.border_title = iter_title
+
+    def set_result(self, text: str, style: str) -> None:
+        """Set the iteration result as border subtitle."""
+        self.border_subtitle = text
+        # Only set border color for actual color names, not Rich style modifiers
+        valid = {"red", "green", "yellow", "blue", "cyan", "magenta", "white"}
+        if style in valid:
+            self.styles.border = ("solid", style)
+
+
+# ---------------------------------------------------------------------------
+# PipelineLive bridge
+# ---------------------------------------------------------------------------
 
 
 class PipelineLive:
-    """Manages a Rich.Live display with agent panels and a status bar.
+    """Bridge between the orchestrator (worker thread) and the Textual app.
 
-    There is exactly one PipelineLive instance for the entire run.
-    All phases (including debate) render within this single Live context.
+    In app mode (_app is set): delegates widget mounting/refresh to PipelineApp
+    via call_from_thread for thread safety.
+    In headless mode (_app is None): tracks state only, no widget rendering.
     """
 
     def __init__(self) -> None:
-        self._items: list[RenderableType] = []
-        self._history: list[RenderableType] = []
-        self._status_bar = StatusBar()
-        self._live: Live | None = None
+        self._panels: list[AgentPanel] = []
+        self._app: PipelineApp | None = None
+        self._status_bar: StatusBarWidget | None = None
+        self._current_iteration: IterationContainer | None = None
         self._file_console: Console | None = None
         self._file_handle = None
-        self._key_listener: KeyListener | None = None
-        self._dismiss_event: threading.Event = threading.Event()
-        self._finished: bool = False
-        # Iteration border state
-        self._iter_title: str | None = None
-        self._iter_subtitle: str | None = None
-        self._iter_style: str = "bold"
 
     def start(self, log_path: Path | None = None) -> None:
-        """Start the Live display and optionally open a log file."""
-        if self._live is not None:
-            return  # already started
-
+        """Open the optional log file."""
         if log_path:
-            self._file_handle = open(log_path, "a")
+            self._file_handle = open(log_path, "a")  # noqa: SIM115
             self._file_console = Console(
                 file=self._file_handle, no_color=True, width=120,
             )
 
-        try:
-            self._live = Live(
-                self._build_renderable(),
-                refresh_per_second=4,
-                transient=False,
-                console=console,
-            )
-            self._live.start()
-        except Exception:
-            if self._file_handle is not None:
-                self._file_handle.close()
-                self._file_handle = None
-                self._file_console = None
-            raise
-
-        def _toggle_expanded():
-            AgentPanel.expanded = not AgentPanel.expanded
-            self.refresh()
-
-        self._key_listener = KeyListener(
-            on_toggle=_toggle_expanded,
-            on_dismiss=lambda: self._dismiss_event.set(),
-        )
-        self._key_listener.start()
-
     def stop(self) -> None:
-        """Stop the Live display and close the log file."""
-        if self._key_listener is not None:
-            self._key_listener.stop()
-            self._key_listener = None
-        AgentPanel.expanded = False
-        if self._live is not None:
-            self._live.stop()
-            self._live = None
+        """Close the log file and reset panel state."""
+        for panel in self._panels:
+            panel.expanded = False
         if self._file_handle is not None:
             self._file_handle.close()
             self._file_handle = None
             self._file_console = None
 
-    def wait_for_dismiss(self) -> None:
-        """Block until the user presses q/Enter/Escape.
-
-        Called after the pipeline finishes so the user can still toggle
-        Ctrl+O to review output before the display is torn down.
-        No-ops if the key listener is not running (non-TTY, CI).
-        """
-        if self._key_listener is None or self._key_listener._thread is None:
-            return
-        self._finished = True
-        self._status_bar.finish()
-        self.refresh()
-        self._dismiss_event.wait()
-
     def add_panel(self, panel: AgentPanel) -> None:
-        """Add an agent panel to the live display."""
-        self._items.append(panel)
-        self.refresh()
-
-    def add_rule(self, rule: Rule) -> None:
-        """Add a Rule inline with panels (renders in chronological order)."""
-        self._items.append(rule)
-        self.refresh()
-        if self._file_console is not None:
-            self._file_console.print(rule)
-
-    def start_iteration(self, title: int | str) -> None:
-        """Begin an iteration Panel. All subsequent items render inside it."""
-        if isinstance(title, int):
-            self._iter_title = f"Iteration {title}"
-        else:
-            self._iter_title = title
-        self._iter_subtitle = None
-        self._iter_style = "bold"
-        self.refresh()
-        if self._file_console is not None:
-            self._file_console.print(Rule(self._iter_title, style="bold"))
-
-    def end_iteration(self, subtitle: str, style: str) -> None:
-        """Finalize the iteration Panel with a subtitle and border color."""
-        self._iter_subtitle = subtitle
-        self._iter_style = style
-        self.refresh()
-        if self._file_console is not None:
-            if self._iter_title is not None:
-                label = f"{self._iter_title}: {subtitle}"
-            else:
-                label = subtitle
-            self._file_console.print(Rule(label, style=style))
-
-    def remove_panel(self, panel: AgentPanel) -> None:
-        """Remove an agent panel from the live display."""
-        if panel in self._items:
-            self._items.remove(panel)
-            self.refresh()
+        """Track a panel and mount it in the app if running."""
+        self._panels.append(panel)
+        if self._app is not None:
+            self._app.call_from_thread(self._app._mount_panel, panel)
 
     def collapse_panel(self, panel: AgentPanel, done_summary: str = "") -> None:
-        """Mark a panel as complete and accumulate stats.
-
-        Outside an iteration: moves everything up to and including this
-        panel from ``_items`` to ``_history`` so it doesn't get wrapped
-        inside the next iteration's border panel.
-        Inside an iteration: keeps items in _items until flush_completed().
-        """
+        """Mark a panel as complete and accumulate stats."""
         panel.complete(done_summary)
-        self._status_bar.add_agent_stats(panel)
+        if self._status_bar is not None:
+            self._status_bar.add_agent_stats(panel)
+        if self._app is not None:
+            self._app.call_from_thread(panel.refresh)
+        if self._file_console is not None:
+            self._file_console.print(
+                f"[{panel.panel_name}] {panel.done_summary} ({panel._build_footer()})"
+            )
 
-        if self._iter_title is None and panel in self._items:
-            idx = self._items.index(panel)
-            to_flush = self._items[:idx + 1]
-            self._history.extend(to_flush)
-            if self._file_console is not None:
-                for item in to_flush:
-                    self._file_console.print(item)
-            del self._items[:idx + 1]
+    def start_iteration(self, title: int | str) -> None:
+        """Begin an iteration container."""
+        iter_title = f"Iteration {title}" if isinstance(title, int) else title
+        container = IterationContainer(iter_title=iter_title)
+        self._current_iteration = container
+        if self._app is not None:
+            self._app.call_from_thread(self._app._mount_iteration, container)
+        if self._file_console is not None:
+            self._file_console.print(f"\n{'=' * 60}")
+            self._file_console.print(iter_title)
+            self._file_console.print(f"{'=' * 60}")
 
-        self.refresh()
+    def end_iteration(self, subtitle: str, style: str) -> None:
+        """Finalize the iteration container with a result."""
+        if self._current_iteration is not None:
+            if self._app is not None:
+                self._app.call_from_thread(
+                    self._current_iteration.set_result, subtitle, style,
+                )
+            else:
+                self._current_iteration.set_result(subtitle, style)
+        if self._file_console is not None:
+            label = subtitle
+            if self._current_iteration is not None:
+                label = f"{self._current_iteration.border_title}: {subtitle}"
+            self._file_console.print(f"--- {label} ---")
 
     def flush_completed(self) -> None:
-        """Move current items into history and clear the live area.
+        """Clear iteration state. Panels stay mounted in the DOM."""
+        self._current_iteration = None
 
-        Inside an iteration: wraps items in a Panel with the iteration
-        title/subtitle/border and stores that as one history entry.
-        Outside: moves items individually into history.
-
-        Nothing is printed statically; all rendering happens through the
-        live area so that Ctrl+O expand/collapse works without duplication.
-        File logging still happens so console.log captures everything.
-        """
-        if self._iter_title is not None:
-            body = Group(*self._items) if self._items else Text("")
-            iter_panel = Panel(
-                body,
-                title=self._iter_title,
-                title_align="left",
-                subtitle=self._iter_subtitle,
-                subtitle_align="left",
-                border_style=self._iter_style,
-                expand=True,
-            )
-            self._history.append(iter_panel)
-            if self._file_console is not None:
-                self._file_console.print(iter_panel)
-            self._iter_title = None
-            self._iter_subtitle = None
-            self._iter_style = "bold"
-        else:
-            self._history.extend(self._items)
-            if self._file_console is not None:
-                for item in self._items:
-                    self._file_console.print(item)
-        self._items.clear()
-        self.refresh()
+    def remove_panel(self, panel: AgentPanel) -> None:
+        """Remove a panel from tracking."""
+        if panel in self._panels:
+            self._panels.remove(panel)
+        if self._app is not None:
+            self._app.call_from_thread(panel.remove)
 
     def update_status(self, **kwargs) -> None:
-        """Update the status bar fields and refresh."""
-        self._status_bar.update(**kwargs)
-        self.refresh()
+        """Update the status bar fields."""
+        if self._status_bar is not None:
+            self._status_bar.set_status(**kwargs)
 
     def log(self, message: str) -> None:
-        """Write a message to the log file (no terminal output)."""
+        """Write a message to the log file only (no terminal output)."""
         if self._file_console is not None:
             self._file_console.print(message)
 
     def print_static(self, renderable: RenderableType) -> None:
-        """Print a renderable above the live display (e.g., Rules, banners).
-
-        Uses live.console.print() which Rich handles correctly within
-        a Live context.
-        """
-        if self._live is not None:
-            self._live.console.print(renderable)
+        """Print a renderable. In app mode, mount as Static widget."""
+        if self._app is not None:
+            self._app.call_from_thread(self._app._mount_static, renderable)
         else:
             console.print(renderable)
-        # Also log to file
         if self._file_console is not None:
             self._file_console.print(renderable)
 
+    def add_rule(self, rule: RenderableType) -> None:
+        """Add a rule/separator. In app mode, mount as Static widget."""
+        if self._app is not None:
+            self._app.call_from_thread(self._app._mount_static, rule)
+        if self._file_console is not None:
+            self._file_console.print(rule)
+
     def has_panel(self, panel: AgentPanel) -> bool:
-        """Check if a panel is in the live display."""
-        return panel in self._items
+        """Check if a panel is tracked."""
+        return panel in self._panels
 
     @property
     def panel_count(self) -> int:
-        """Number of active panels (excludes rules)."""
-        return sum(1 for item in self._items if isinstance(item, AgentPanel))
+        """Number of tracked panels that are not yet done."""
+        return sum(1 for p in self._panels if not p.done)
+
+    def wait_for_dismiss(self) -> None:
+        """No-op. PipelineApp handles dismiss via q key binding."""
 
     def refresh(self) -> None:
-        """Rebuild and push the renderable to Live."""
-        if self._live is not None:
-            self._live.update(self._build_renderable())
+        """Refresh all active panels in the app."""
+        if self._app is not None:
+            for panel in self._panels:
+                if not panel.done:
+                    self._app.call_from_thread(panel.refresh)
 
-    def _build_renderable(self) -> RenderableType:
-        """Build the full Live renderable: history + current items + status bar."""
-        parts: list[RenderableType] = list(self._history)
-        if self._iter_title is not None:
-            body = Group(*self._items) if self._items else Text("")
-            iter_panel = Panel(
-                body,
-                title=self._iter_title,
-                title_align="left",
-                subtitle=self._iter_subtitle,
-                subtitle_align="left",
-                border_style=self._iter_style,
-                expand=True,
-            )
-            parts.append(iter_panel)
-        else:
-            parts.extend(self._items)
-        parts.append(Rule(style="dim"))
-        parts.append(self._status_bar)
-        return Group(*parts)
+
+# ---------------------------------------------------------------------------
+# PipelineApp
+# ---------------------------------------------------------------------------
+
+
+class PipelineApp(App):
+    """Textual application that runs the orchestrator and displays the dashboard."""
+
+    BINDINGS = [
+        Binding("ctrl+o", "toggle_expand", show=False),
+        Binding("q", "quit_app", show=False),
+    ]
+
+    DEFAULT_CSS = """
+    #main-scroll {
+        height: 1fr;
+    }
+    """
+
+    def __init__(self, orchestrator) -> None:
+        super().__init__()
+        self._orchestrator = orchestrator
+        self._finished: bool = False
+        self._live: PipelineLive = PipelineLive()
+
+    def compose(self) -> ComposeResult:
+        yield VerticalScroll(id="main-scroll")
+        yield StatusBarWidget()
+
+    def on_mount(self) -> None:
+        # Wire the bridge to this app
+        self._live._app = self
+        self._live._status_bar = self.query_one(StatusBarWidget)
+
+        # Override the orchestrator's default headless PipelineLive
+        self._orchestrator._live = self._live
+
+        # Start log file
+        log_path = getattr(self._orchestrator, "output_dir", None)
+        if log_path is not None:
+            self._live.start(log_path=Path(log_path) / "console.log")
+
+        # Run orchestrator in a thread worker
+        self.run_worker(self._run_pipeline, thread=True, exit_on_error=False)
+
+    def _run_pipeline(self) -> None:
+        """Sync wrapper that runs the async orchestrator in its own event loop."""
+        asyncio.run(self._orchestrator.run())
+
+    def on_worker_state_changed(self, event: Worker.StateChanged) -> None:
+        if event.state in (WorkerState.SUCCESS, WorkerState.ERROR):
+            self._finished = True
+            bar = self.query_one(StatusBarWidget)
+            bar.finish()
+
+    # -- Key binding actions --
+
+    def action_toggle_expand(self) -> None:
+        """Toggle expanded state on all AgentPanels."""
+        panels = list(self.query(AgentPanel))
+        if not panels:
+            return
+        # Toggle to the opposite of the first panel's state
+        new_state = not panels[0].expanded
+        for panel in panels:
+            panel.expanded = new_state
+            panel.refresh()
+
+    def action_quit_app(self) -> None:
+        """Exit the app, but only after the pipeline finishes."""
+        if self._finished:
+            self.exit()
+
+    # -- Mount helpers (called via call_from_thread from PipelineLive) --
+
+    def _mount_panel(self, panel: AgentPanel) -> None:
+        """Mount a panel into the current iteration container or main scroll."""
+        target = self._live._current_iteration or self.query_one("#main-scroll")
+        target.mount(panel)
+        panel.scroll_visible()
+
+    def _mount_iteration(self, container: IterationContainer) -> None:
+        """Mount an iteration container into the main scroll."""
+        self.query_one("#main-scroll").mount(container)
+
+    def _mount_static(self, renderable: RenderableType) -> None:
+        """Mount a Rich renderable as a Static widget."""
+        self.query_one("#main-scroll").mount(Static(renderable))

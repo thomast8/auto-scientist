@@ -1,9 +1,7 @@
 """Tests for the CLI entry point."""
 
-from pathlib import Path
 from unittest.mock import patch
 
-import pytest
 from click.testing import CliRunner
 
 from auto_scientist.cli import _next_output_dir, cli
@@ -32,9 +30,9 @@ class TestStatusCommand:
 
 
 class TestRunCommand:
-    @patch("auto_scientist.cli.asyncio.run")
+    @patch("auto_scientist.cli.PipelineApp")
     @patch("auto_scientist.cli.Orchestrator")
-    def test_required_options(self, mock_orch, mock_async_run, tmp_path):
+    def test_required_options(self, mock_orch, mock_app_cls, tmp_path):
         data_file = tmp_path / "data.csv"
         data_file.write_text("a,b\n1,2\n")
 
@@ -50,7 +48,8 @@ class TestRunCommand:
         # Default preset should be used
         mc = call_kwargs["model_config"]
         assert mc.defaults.model == "claude-sonnet-4-6"
-        mock_async_run.assert_called_once()
+        mock_app_cls.assert_called_once()
+        mock_app_cls.return_value.run.assert_called_once()
 
     def test_missing_data_fails(self):
         runner = CliRunner()
@@ -67,9 +66,9 @@ class TestRunCommand:
 
 
 class TestRunCommandPresets:
-    @patch("auto_scientist.cli.asyncio.run")
+    @patch("auto_scientist.cli.PipelineApp")
     @patch("auto_scientist.cli.Orchestrator")
-    def test_fast_preset(self, mock_orch, mock_async_run, tmp_path):
+    def test_fast_preset(self, mock_orch, mock_app_cls, tmp_path):
         data_file = tmp_path / "data.csv"
         data_file.write_text("a,b\n1,2\n")
 
@@ -83,9 +82,9 @@ class TestRunCommandPresets:
         mc = mock_orch.call_args.kwargs["model_config"]
         assert mc.defaults.model == "claude-haiku-4-5-20251001"
 
-    @patch("auto_scientist.cli.asyncio.run")
+    @patch("auto_scientist.cli.PipelineApp")
     @patch("auto_scientist.cli.Orchestrator")
-    def test_config_file(self, mock_orch, mock_async_run, tmp_path):
+    def test_config_file(self, mock_orch, mock_app_cls, tmp_path):
         data_file = tmp_path / "data.csv"
         data_file.write_text("a,b\n1,2\n")
         config_file = tmp_path / "models.toml"
@@ -101,9 +100,9 @@ class TestRunCommandPresets:
         mc = mock_orch.call_args.kwargs["model_config"]
         assert mc.defaults.model == "claude-opus-4-6"
 
-    @patch("auto_scientist.cli.asyncio.run")
+    @patch("auto_scientist.cli.PipelineApp")
     @patch("auto_scientist.cli.Orchestrator")
-    def test_config_and_preset_mutually_exclusive(self, mock_orch, mock_async_run, tmp_path):
+    def test_config_and_preset_mutually_exclusive(self, mock_orch, mock_app_cls, tmp_path):
         data_file = tmp_path / "data.csv"
         data_file.write_text("a,b\n1,2\n")
         config_file = tmp_path / "models.toml"
@@ -117,9 +116,9 @@ class TestRunCommandPresets:
 
         assert result.exit_code != 0
 
-    @patch("auto_scientist.cli.asyncio.run")
+    @patch("auto_scientist.cli.PipelineApp")
     @patch("auto_scientist.cli.Orchestrator")
-    def test_no_summaries_disables_summarizer(self, mock_orch, mock_async_run, tmp_path):
+    def test_no_summaries_disables_summarizer(self, mock_orch, mock_app_cls, tmp_path):
         data_file = tmp_path / "data.csv"
         data_file.write_text("a,b\n1,2\n")
 
@@ -133,9 +132,9 @@ class TestRunCommandPresets:
         mc = mock_orch.call_args.kwargs["model_config"]
         assert mc.summarizer is None
 
-    @patch("auto_scientist.cli.asyncio.run")
+    @patch("auto_scientist.cli.PipelineApp")
     @patch("auto_scientist.cli.Orchestrator")
-    def test_default_has_summarizer(self, mock_orch, mock_async_run, tmp_path):
+    def test_default_has_summarizer(self, mock_orch, mock_app_cls, tmp_path):
         data_file = tmp_path / "data.csv"
         data_file.write_text("a,b\n1,2\n")
 
@@ -194,9 +193,9 @@ class TestNextOutputDir:
 
 
 class TestRunCommandOptions:
-    @patch("auto_scientist.cli.asyncio.run")
+    @patch("auto_scientist.cli.PipelineApp")
     @patch("auto_scientist.cli.Orchestrator")
-    def test_passes_max_iterations(self, mock_orch, mock_async_run, tmp_path):
+    def test_passes_max_iterations(self, mock_orch, mock_app_cls, tmp_path):
         data_file = tmp_path / "data.csv"
         data_file.write_text("a,b\n1,2\n")
 
@@ -208,9 +207,9 @@ class TestRunCommandOptions:
         call_kwargs = mock_orch.call_args.kwargs
         assert call_kwargs["max_iterations"] == 10
 
-    @patch("auto_scientist.cli.asyncio.run")
+    @patch("auto_scientist.cli.PipelineApp")
     @patch("auto_scientist.cli.Orchestrator")
-    def test_passes_schedule(self, mock_orch, mock_async_run, tmp_path):
+    def test_passes_schedule(self, mock_orch, mock_app_cls, tmp_path):
         data_file = tmp_path / "data.csv"
         data_file.write_text("a,b\n1,2\n")
 
@@ -222,9 +221,9 @@ class TestRunCommandOptions:
         call_kwargs = mock_orch.call_args.kwargs
         assert call_kwargs["state"].schedule == "22:00-06:00"
 
-    @patch("auto_scientist.cli.asyncio.run")
+    @patch("auto_scientist.cli.PipelineApp")
     @patch("auto_scientist.cli.Orchestrator")
-    def test_passes_debate_rounds(self, mock_orch, mock_async_run, tmp_path):
+    def test_passes_debate_rounds(self, mock_orch, mock_app_cls, tmp_path):
         data_file = tmp_path / "data.csv"
         data_file.write_text("a,b\n1,2\n")
 
@@ -236,9 +235,9 @@ class TestRunCommandOptions:
         call_kwargs = mock_orch.call_args.kwargs
         assert call_kwargs["debate_rounds"] == 3
 
-    @patch("auto_scientist.cli.asyncio.run")
+    @patch("auto_scientist.cli.PipelineApp")
     @patch("auto_scientist.cli.Orchestrator")
-    def test_no_stream_flag(self, mock_orch, mock_async_run, tmp_path):
+    def test_no_stream_flag(self, mock_orch, mock_app_cls, tmp_path):
         data_file = tmp_path / "data.csv"
         data_file.write_text("a,b\n1,2\n")
 
@@ -252,9 +251,9 @@ class TestRunCommandOptions:
 
 
 class TestResumeCommand:
-    @patch("auto_scientist.cli.asyncio.run")
+    @patch("auto_scientist.cli.PipelineApp")
     @patch("auto_scientist.cli.Orchestrator")
-    def test_loads_state_and_creates_orchestrator(self, mock_orch, mock_async_run, tmp_path):
+    def test_loads_state_and_creates_orchestrator(self, mock_orch, mock_app_cls, tmp_path):
         state = ExperimentState(domain="auto", goal="g", phase="iteration")
         state_path = tmp_path / "state.json"
         state.save(state_path)
@@ -270,9 +269,9 @@ class TestResumeCommand:
         mc = call_kwargs["model_config"]
         assert mc.defaults.model == "claude-sonnet-4-6"
 
-    @patch("auto_scientist.cli.asyncio.run")
+    @patch("auto_scientist.cli.PipelineApp")
     @patch("auto_scientist.cli.Orchestrator")
-    def test_resume_loads_saved_config(self, mock_orch, mock_async_run, tmp_path):
+    def test_resume_loads_saved_config(self, mock_orch, mock_app_cls, tmp_path):
         state = ExperimentState(domain="auto", goal="g", phase="iteration")
         state_path = tmp_path / "state.json"
         state.save(state_path)

@@ -1263,9 +1263,9 @@ class TestRunIteration:
         ):
             await orchestrator._run_iteration_body()
 
-        # Iteration summary is now in _history (no static prints)
-        history = orchestrator._live._history
-        assert len(history) > 0
+        # Iteration completed and state advanced
+        assert orchestrator.state.iteration == 1
+        assert len(orchestrator.state.versions) == 1
 
 
 class TestComputeScore:
@@ -2311,8 +2311,7 @@ class TestRunIngestionFull:
         # Ingestor panel is in history with data file info in done_summary
         from auto_scientist.console import AgentPanel
 
-        history_panels = [p for p in o._live._history if isinstance(p, AgentPanel)]
-        assert any("data.csv" in p.done_summary for p in history_panels)
+        assert any("data.csv" in p.done_summary for p in o._live._panels)
 
 
 class TestSummaryIntegration:

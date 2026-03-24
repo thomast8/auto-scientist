@@ -1,6 +1,5 @@
 """CLI entry point: run, resume, status commands."""
 
-import asyncio
 from pathlib import Path
 
 import click
@@ -8,7 +7,7 @@ from dotenv import load_dotenv
 
 load_dotenv()
 
-from auto_scientist.console import console
+from auto_scientist.console import PipelineApp, console
 from auto_scientist.model_config import ModelConfig
 from auto_scientist.orchestrator import Orchestrator
 from auto_scientist.state import ExperimentState
@@ -17,7 +16,8 @@ from auto_scientist.state import ExperimentState
 def _run_orchestrator(orchestrator: Orchestrator) -> None:
     """Run the orchestrator with user-friendly error handling."""
     try:
-        asyncio.run(orchestrator.run())
+        app = PipelineApp(orchestrator)
+        app.run()
     except RuntimeError as e:
         msg = str(e)
         if "Pre-flight check failed" not in msg:

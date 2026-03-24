@@ -1,177 +1,248 @@
-"""Tests for Rich console components: AgentPanel, StatusBar, PipelineLive."""
+"""Tests for Textual console components: AgentPanel, StatusBarWidget, PipelineLive, PipelineApp."""
 
-import time
-from io import StringIO
-from unittest.mock import MagicMock, patch
+import threading
 
-from rich.console import Console
+import pytest
+from textual.app import App, ComposeResult
 
-from auto_scientist.console import AgentPanel, KeyListener, PipelineLive, StatusBar
+from auto_scientist.console import (
+    PANEL_MAX_LINES,
+    AgentPanel,
+    IterationContainer,
+    PipelineApp,
+    PipelineLive,
+    StatusBarWidget,
+    _format_elapsed,
+    _score_style,
+)
+
+# ---------------------------------------------------------------------------
+# Minimal test apps for widget-level testing
+# ---------------------------------------------------------------------------
+
+
+class PanelTestApp(App):
+    """Minimal app that mounts a single AgentPanel for testing."""
+
+    def __init__(self, panel: AgentPanel) -> None:
+        super().__init__()
+        self._panel = panel
+
+    def compose(self) -> ComposeResult:
+        yield self._panel
+
+
+class StatusBarTestApp(App):
+    """Minimal app that mounts a StatusBarWidget for testing."""
+
+    def __init__(self, bar: StatusBarWidget) -> None:
+        super().__init__()
+        self._bar = bar
+
+    def compose(self) -> ComposeResult:
+        yield self._bar
+
+
+class IterationTestApp(App):
+    """Minimal app that mounts an IterationContainer for testing."""
+
+    def __init__(self, container: IterationContainer) -> None:
+        super().__init__()
+        self._container = container
+
+    def compose(self) -> ComposeResult:
+        yield self._container
+
+
+# ---------------------------------------------------------------------------
+# AgentPanel tests
+# ---------------------------------------------------------------------------
 
 
 class TestAgentPanel:
-    def test_construction(self):
+    @pytest.mark.asyncio
+    async def test_construction(self):
         panel = AgentPanel(name="Analyst", model="claude-sonnet-4-6", style="green")
-        assert panel.name == "Analyst"
-        assert panel.model == "claude-sonnet-4-6"
-        assert not panel.done
+        async with PanelTestApp(panel).run_test():
+            assert panel.panel_name == "Analyst"
+            assert panel.model == "claude-sonnet-4-6"
+            assert not panel.done
 
-    def test_add_line(self):
+    @pytest.mark.asyncio
+    async def test_add_line(self):
         panel = AgentPanel(name="Analyst", model="claude-sonnet-4-6", style="green")
-        panel.add_line("[15s] Analyzing data")
-        assert len(panel.lines) == 1
-        assert panel.lines[0] == "[15s] Analyzing data"
+        async with PanelTestApp(panel).run_test():
+            panel.add_line("[15s] Analyzing data")
+            assert len(panel.lines) == 1
+            assert panel.all_lines[0] == "[15s] Analyzing data"
 
-    def test_deque_scrolling(self):
+    @pytest.mark.asyncio
+    async def test_deque_scrolling(self):
         panel = AgentPanel(name="Analyst", model="claude-sonnet-4-6", style="green")
-        for i in range(7):
-            panel.add_line(f"line {i}")
-        assert len(panel.lines) == 5
-        assert panel.lines[0] == "line 2"
-        assert panel.lines[-1] == "line 6"
+        async with PanelTestApp(panel).run_test():
+            for i in range(7):
+                panel.add_line(f"line {i}")
+            assert len(panel.lines) == PANEL_MAX_LINES
+            assert len(panel.all_lines) == 7
+            assert panel.lines[0] == "line 2"
+            assert panel.lines[-1] == "line 6"
 
-    def test_complete(self):
+    @pytest.mark.asyncio
+    async def test_complete(self):
         panel = AgentPanel(name="Analyst", model="claude-sonnet-4-6", style="green")
-        panel.add_line("[15s] Working...")
-        panel.complete("Analysis complete, found 3 metrics")
-        assert panel.done
-        assert panel.done_summary == "Analysis complete, found 3 metrics"
+        async with PanelTestApp(panel).run_test():
+            panel.add_line("[15s] Working...")
+            panel.complete("Analysis complete, found 3 metrics")
+            assert panel.done
+            assert panel.done_summary == "Analysis complete, found 3 metrics"
 
-    def test_error(self):
+    @pytest.mark.asyncio
+    async def test_complete_uses_last_line_as_fallback(self):
         panel = AgentPanel(name="Analyst", model="claude-sonnet-4-6", style="green")
-        panel.error("Connection timeout")
-        assert panel.done
-        assert panel.error_msg == "Connection timeout"
+        async with PanelTestApp(panel).run_test():
+            panel.add_line("[done] strategy=incremental")
+            panel.complete()
+            assert panel.done_summary == "[done] strategy=incremental"
 
-    def test_set_tokens(self):
+    @pytest.mark.asyncio
+    async def test_error(self):
+        panel = AgentPanel(name="Analyst", model="claude-sonnet-4-6", style="green")
+        async with PanelTestApp(panel).run_test():
+            panel.error("Connection timeout")
+            assert panel.done
+            assert panel.error_msg == "Connection timeout"
+
+    @pytest.mark.asyncio
+    async def test_set_tokens(self):
         panel = AgentPanel(name="Critic", model="gpt-4o", style="yellow")
-        panel.set_tokens(2340, 890)
-        assert panel.input_tokens == 2340
-        assert panel.output_tokens == 890
+        async with PanelTestApp(panel).run_test():
+            panel.set_tokens(2340, 890)
+            assert panel.input_tokens == 2340
+            assert panel.output_tokens == 890
 
-    def test_renders_panel_with_title(self):
-        panel = AgentPanel(name="Analyst", model="claude-sonnet-4-6", style="green")
-        panel.add_line("[15s] Analyzing data")
-        buf = StringIO()
-        console = Console(file=buf, width=80, no_color=True)
-        console.print(panel)
-        output = buf.getvalue()
-        assert "Analyst" in output
-        assert "claude-sonnet-4-6" in output
-        assert "Analyzing data" in output
-
-    def test_renders_footer_with_tokens(self):
+    @pytest.mark.asyncio
+    async def test_set_stats(self):
         panel = AgentPanel(name="Critic", model="gpt-4o", style="yellow")
-        panel.set_tokens(100, 50)
-        panel.complete("Done")
-        buf = StringIO()
-        console = Console(file=buf, width=80, no_color=True)
-        console.print(panel)
-        output = buf.getvalue()
-        assert "100 in" in output
-        assert "50 out" in output
+        async with PanelTestApp(panel).run_test():
+            panel.set_stats(input_tokens=100, output_tokens=50, num_turns=3)
+            assert panel.input_tokens == 100
+            assert panel.output_tokens == 50
+            assert panel.num_turns == 3
 
-    def test_renders_footer_without_tokens(self):
+    @pytest.mark.asyncio
+    async def test_add_line_noop_after_done(self):
         panel = AgentPanel(name="Analyst", model="claude-sonnet-4-6", style="green")
-        panel.complete("Done")
-        buf = StringIO()
-        console = Console(file=buf, width=80, no_color=True)
-        console.print(panel)
-        output = buf.getvalue()
-        # Should not have token counts
-        assert " in /" not in output
+        async with PanelTestApp(panel).run_test():
+            panel.add_line("working")
+            panel.complete("done")
+            panel.add_line("this should be ignored")
+            assert len(panel.all_lines) == 1
 
-    def test_collapsed_shows_done_summary(self):
+    @pytest.mark.asyncio
+    async def test_elapsed_freezes_on_complete(self):
         panel = AgentPanel(name="Analyst", model="claude-sonnet-4-6", style="green")
-        panel.add_line("[15s] Working...")
-        panel.add_line("[30s] Still working...")
-        panel.complete("Found 3 key metrics with R2=0.85")
-        buf = StringIO()
-        console = Console(file=buf, width=80, no_color=True)
-        console.print(panel)
-        output = buf.getvalue()
-        assert "Found 3 key metrics" in output
-        # Should not show progress lines after collapse
-        assert "Working" not in output
+        async with PanelTestApp(panel).run_test():
+            panel.complete("done")
+            assert panel._end_time is not None
 
-    def test_error_panel_shows_error_msg(self):
+    @pytest.mark.asyncio
+    async def test_expanded_default_false(self):
         panel = AgentPanel(name="Analyst", model="claude-sonnet-4-6", style="green")
-        panel.error("API rate limit exceeded")
-        buf = StringIO()
-        console = Console(file=buf, width=80, no_color=True)
-        console.print(panel)
-        output = buf.getvalue()
-        assert "API rate limit exceeded" in output
+        async with PanelTestApp(panel).run_test():
+            assert panel.expanded is False
 
-    def test_empty_panel_shows_spinner_text(self):
+    @pytest.mark.asyncio
+    async def test_expanded_toggle(self):
         panel = AgentPanel(name="Analyst", model="claude-sonnet-4-6", style="green")
-        buf = StringIO()
-        console = Console(file=buf, width=80, no_color=True)
-        console.print(panel)
-        output = buf.getvalue()
-        assert "working" in output.lower() or "..." in output
+        async with PanelTestApp(panel).run_test():
+            panel.expanded = True
+            assert panel.expanded is True
+            panel.expanded = False
+            assert panel.expanded is False
 
 
-class TestStatusBar:
-    def test_construction(self):
-        bar = StatusBar(start_time=time.monotonic())
-        assert bar.iteration == 0
-        assert bar.phase == ""
-
-    def test_update(self):
-        bar = StatusBar(start_time=time.monotonic())
-        bar.update(iteration=3, phase="DEBATE", best_version="v02", best_score=85)
-        assert bar.iteration == 3
-        assert bar.phase == "DEBATE"
-        assert bar.best_version == "v02"
-        assert bar.best_score == 85
-
-    def test_renders_table(self):
-        bar = StatusBar(start_time=time.monotonic())
-        bar.update(iteration=2, phase="ANALYZE", best_version="v01", best_score=72)
-        buf = StringIO()
-        console = Console(file=buf, width=80, no_color=True)
-        console.print(bar)
-        output = buf.getvalue()
-        assert "Iteration 2" in output
-        assert "ANALYZE" in output
-        assert "best: iter 2 (72)" in output
-
-    def test_score_color_green(self):
-        bar = StatusBar(start_time=time.monotonic())
-        bar.update(iteration=1, phase="PLAN", best_version="v00", best_score=85)
-        buf = StringIO()
-        console = Console(file=buf, width=80, force_terminal=True)
-        console.print(bar)
-        output = buf.getvalue()
-        # Score 85 should render (green styling applied)
-        assert "85" in output
-
-    def test_no_score_omits_score(self):
-        bar = StatusBar(start_time=time.monotonic())
-        bar.update(iteration=0, phase="INGESTION")
-        buf = StringIO()
-        console = Console(file=buf, width=80, no_color=True)
-        console.print(bar)
-        output = buf.getvalue()
-        assert "score" not in output
-        assert "INGESTION" in output
+# ---------------------------------------------------------------------------
+# StatusBarWidget tests
+# ---------------------------------------------------------------------------
 
 
-class TestPipelineLive:
+class TestStatusBarWidget:
+    @pytest.mark.asyncio
+    async def test_construction(self):
+        bar = StatusBarWidget()
+        async with StatusBarTestApp(bar).run_test():
+            assert bar.iteration == 0
+            assert bar.phase == ""
+            assert bar.finished is False
+
+    @pytest.mark.asyncio
+    async def test_update(self):
+        bar = StatusBarWidget()
+        async with StatusBarTestApp(bar).run_test():
+            bar.set_status(iteration=3, phase="DEBATE", best_version="v02", best_score=85)
+            assert bar.iteration == 3
+            assert bar.phase == "DEBATE"
+            assert bar.best_version == "v02"
+            assert bar.best_score == 85
+
+    @pytest.mark.asyncio
+    async def test_add_agent_stats(self):
+        bar = StatusBarWidget()
+        panel = AgentPanel(name="Analyst", model="claude-sonnet-4-6", style="green")
+        async with StatusBarTestApp(bar).run_test():
+            panel.set_stats(input_tokens=100, output_tokens=50, num_turns=3)
+            bar.add_agent_stats(panel)
+            assert bar.total_input_tokens == 100
+            assert bar.total_output_tokens == 50
+            assert bar.total_turns == 3
+
+    @pytest.mark.asyncio
+    async def test_finish_freezes_timer(self):
+        bar = StatusBarWidget()
+        async with StatusBarTestApp(bar).run_test():
+            bar.finish()
+            assert bar.finished is True
+            assert bar._end_time is not None
+
+
+# ---------------------------------------------------------------------------
+# IterationContainer tests
+# ---------------------------------------------------------------------------
+
+
+class TestIterationContainer:
+    @pytest.mark.asyncio
+    async def test_construction(self):
+        container = IterationContainer(iter_title="Iteration 0")
+        async with IterationTestApp(container).run_test():
+            assert container.border_title == "Iteration 0"
+
+    @pytest.mark.asyncio
+    async def test_set_result(self):
+        container = IterationContainer(iter_title="Iteration 1")
+        async with IterationTestApp(container).run_test():
+            container.set_result("completed (85)", "green")
+            assert container.border_subtitle == "completed (85)"
+
+
+# ---------------------------------------------------------------------------
+# PipelineLive headless tests
+# ---------------------------------------------------------------------------
+
+
+class TestPipelineLiveHeadless:
     def test_lifecycle(self):
         live = PipelineLive()
         live.start()
         live.stop()
 
-    def test_add_and_remove_panel(self):
+    def test_add_panel_tracks_internally(self):
         live = PipelineLive()
         live.start()
         panel = AgentPanel(name="Analyst", model="claude-sonnet-4-6", style="green")
         live.add_panel(panel)
         assert live.has_panel(panel)
-        live.remove_panel(panel)
-        assert not live.has_panel(panel)
+        assert live.panel_count == 1
         live.stop()
 
     def test_collapse_panel(self):
@@ -179,17 +250,9 @@ class TestPipelineLive:
         live.start()
         panel = AgentPanel(name="Analyst", model="claude-sonnet-4-6", style="green")
         live.add_panel(panel)
-        live.collapse_panel(panel, "Analysis done")
+        live.collapse_panel(panel, "done")
         assert panel.done
-        assert panel.done_summary == "Analysis done"
-        live.stop()
-
-    def test_update_status(self):
-        live = PipelineLive()
-        live.start()
-        live.update_status(iteration=1, phase="PLAN")
-        assert live._status_bar.iteration == 1
-        assert live._status_bar.phase == "PLAN"
+        assert panel.done_summary == "done"
         live.stop()
 
     def test_file_logging(self, tmp_path):
@@ -201,220 +264,357 @@ class TestPipelineLive:
         content = log_path.read_text()
         assert "Test log message" in content
 
-    def test_file_logging_no_ansi(self, tmp_path):
-        log_path = tmp_path / "console.log"
+    def test_panel_count(self):
         live = PipelineLive()
-        live.start(log_path=log_path)
-        live.log("[bold red]Styled text[/]")
-        live.stop()
-        content = log_path.read_text()
-        assert "\033[" not in content
-        assert "Styled text" in content
-
-    def test_file_logging_append_mode(self, tmp_path):
-        log_path = tmp_path / "console.log"
-        live = PipelineLive()
-        live.start(log_path=log_path)
-        live.log("first run")
+        live.start()
+        p1 = AgentPanel(name="Analyst", model="claude-sonnet-4-6", style="green")
+        p2 = AgentPanel(name="Scientist", model="claude-sonnet-4-6", style="cyan")
+        live.add_panel(p1)
+        live.add_panel(p2)
+        assert live.panel_count == 2
         live.stop()
 
-        live2 = PipelineLive()
-        live2.start(log_path=log_path)
-        live2.log("second run")
-        live2.stop()
-
-        content = log_path.read_text()
-        assert "first run" in content
-        assert "second run" in content
-
-    def test_flush_preserves_history(self):
+    def test_remove_panel(self):
         live = PipelineLive()
         live.start()
         panel = AgentPanel(name="Analyst", model="claude-sonnet-4-6", style="green")
-        panel.add_line("working")
-        panel.complete("done")
         live.add_panel(panel)
-        live.flush_completed()
-        assert len(live._history) > 0
-        assert live._items == []
+        live.remove_panel(panel)
+        assert not live.has_panel(panel)
+        assert live.panel_count == 0
         live.stop()
 
-    def test_collapse_outside_iteration_moves_to_history(self):
-        """Collapse outside iteration moves panel to history (not items)."""
+    def test_update_status(self):
         live = PipelineLive()
         live.start()
-        panel = AgentPanel(name="Ingestor", model="claude-sonnet-4-6", style="red")
-        live.add_panel(panel)
-        live.collapse_panel(panel, "done")
-        assert panel.done
-        assert panel in live._history
-        assert panel not in live._items
+        live.update_status(iteration=1, phase="PLAN")
+        # In headless mode, status updates are tracked internally
         live.stop()
 
-    def test_collapse_inside_iteration_keeps_in_items(self):
-        """Collapse inside iteration keeps panel in _items for flush."""
-        live = PipelineLive()
-        live.start()
-        live.start_iteration(0)
-        panel = AgentPanel(name="Analyst", model="claude-sonnet-4-6", style="green")
-        live.add_panel(panel)
-        live.collapse_panel(panel, "done")
-        assert panel.done
-        assert panel in live._items
-        assert panel not in live._history
-        live.stop()
-
-    def test_renderable_includes_history(self):
-        """History panels appear in the live renderable."""
-        live = PipelineLive()
-        live.start()
-        panel = AgentPanel(name="Analyst", model="claude-sonnet-4-6", style="green")
-        panel.add_line("working")
-        panel.complete("done")
-        live.add_panel(panel)
-        live.flush_completed()
-
-        buf = StringIO()
-        c = Console(file=buf, width=80, no_color=True)
-        c.print(live._build_renderable())
-        output = buf.getvalue()
-        assert "Analyst" in output
-        live.stop()
-
-    def test_stop_resets_expanded_flag(self):
-        live = PipelineLive()
-        live.start()
-        AgentPanel.expanded = True
-        live.stop()
-        assert AgentPanel.expanded is False
-
-    def test_wait_for_dismiss_noop_without_tty(self):
-        """wait_for_dismiss should return immediately when no TTY (CI, tests)."""
+    def test_wait_for_dismiss_noop(self):
         live = PipelineLive()
         live.start()
         live.wait_for_dismiss()  # should not block
         live.stop()
 
-    def test_finished_shows_exit_hint(self):
-        bar = StatusBar(start_time=time.monotonic())
-        bar.update(iteration=0, phase="REPORT")
-        bar.finished = True
-        buf = StringIO()
-        c = Console(file=buf, width=120, no_color=True)
-        c.print(bar)
-        output = buf.getvalue()
-        assert "q: exit" in output
-
-
-class TestAgentPanelExpanded:
-    def setup_method(self):
-        AgentPanel.expanded = False
-
-    def teardown_method(self):
-        AgentPanel.expanded = False
-
-    def test_all_lines_stored(self):
+    def test_flush_completed(self):
+        live = PipelineLive()
+        live.start()
         panel = AgentPanel(name="Analyst", model="claude-sonnet-4-6", style="green")
-        for i in range(7):
-            panel.add_line(f"line {i}")
-        assert len(panel.all_lines) == 7
-        assert len(panel.lines) == 5
+        live.add_panel(panel)
+        live.collapse_panel(panel, "done")
+        live.flush_completed()
+        # Should not raise
+        live.stop()
 
-    def test_compact_hides_scrolled_off_lines(self):
+    def test_start_end_iteration(self):
+        live = PipelineLive()
+        live.start()
+        live.start_iteration(0)
+        live.end_iteration("completed (85)", "green")
+        live.flush_completed()
+        live.stop()
+
+    def test_panels_list_tracks_all(self):
+        """The _panels list preserves all panels ever added for validation."""
+        live = PipelineLive()
+        live.start()
+        p1 = AgentPanel(name="Analyst", model="claude-sonnet-4-6", style="green")
+        p2 = AgentPanel(name="Scientist", model="claude-sonnet-4-6", style="cyan")
+        live.add_panel(p1)
+        live.add_panel(p2)
+        assert p1 in live._panels
+        assert p2 in live._panels
+        live.stop()
+
+
+# ---------------------------------------------------------------------------
+# PipelineApp tests
+# ---------------------------------------------------------------------------
+
+
+class TestPipelineApp:
+    @pytest.mark.asyncio
+    async def test_lifecycle_with_mock_orchestrator(self):
+        """App starts, runs mock orchestrator, and can be dismissed."""
+
+        class FakeOrch:
+            _live: PipelineLive | None = None
+
+            async def run(self):
+                pass
+
+        orch = FakeOrch()
+        app = PipelineApp(orch)
+        async with app.run_test():
+            # App should have composed the widget tree
+            assert app.query_one("#main-scroll") is not None
+            assert app.query_one(StatusBarWidget) is not None
+
+    @pytest.mark.asyncio
+    async def test_add_panel_mounts_widget(self):
+        class FakeOrch:
+            _live: PipelineLive | None = None
+
+            async def run(self):
+                self._live.add_panel(
+                    AgentPanel(name="Analyst", model="claude-sonnet-4-6", style="green")
+                )
+
+        orch = FakeOrch()
+        app = PipelineApp(orch)
+        async with app.run_test() as pilot:
+            await pilot.pause()
+            panels = app.query(AgentPanel)
+            assert len(panels) >= 1
+
+    @pytest.mark.asyncio
+    async def test_ctrl_o_toggles_all_panels(self):
+        class FakeOrch:
+            _live: PipelineLive | None = None
+
+            async def run(self):
+                self._live.add_panel(
+                    AgentPanel(name="Analyst", model="claude-sonnet-4-6", style="green")
+                )
+                self._live.add_panel(
+                    AgentPanel(name="Scientist", model="claude-sonnet-4-6", style="cyan")
+                )
+
+        orch = FakeOrch()
+        app = PipelineApp(orch)
+        async with app.run_test() as pilot:
+            await pilot.pause()
+            await pilot.press("ctrl+o")
+            await pilot.pause()
+            panels = list(app.query(AgentPanel))
+            assert all(p.expanded for p in panels)
+            await pilot.press("ctrl+o")
+            await pilot.pause()
+            assert all(not p.expanded for p in panels)
+
+    @pytest.mark.asyncio
+    async def test_per_panel_click_toggles_one(self):
+        class FakeOrch:
+            _live: PipelineLive | None = None
+
+            async def run(self):
+                self._live.add_panel(
+                    AgentPanel(name="Analyst", model="claude-sonnet-4-6", style="green")
+                )
+                self._live.add_panel(
+                    AgentPanel(name="Scientist", model="claude-sonnet-4-6", style="cyan")
+                )
+
+        orch = FakeOrch()
+        app = PipelineApp(orch)
+        async with app.run_test() as pilot:
+            await pilot.pause()
+            panels = list(app.query(AgentPanel))
+            assert len(panels) == 2
+            await pilot.click(AgentPanel, offset=(5, 0))
+            await pilot.pause()
+            # At least one should be expanded
+            expanded_count = sum(1 for p in panels if p.expanded)
+            assert expanded_count >= 1
+
+    @pytest.mark.asyncio
+    async def test_start_iteration_creates_container(self):
+        class FakeOrch:
+            _live: PipelineLive | None = None
+
+            async def run(self):
+                self._live.start_iteration(0)
+
+        orch = FakeOrch()
+        app = PipelineApp(orch)
+        async with app.run_test() as pilot:
+            await pilot.pause()
+            containers = app.query(IterationContainer)
+            assert len(containers) >= 1
+
+    @pytest.mark.asyncio
+    async def test_update_status(self):
+        class FakeOrch:
+            _live: PipelineLive | None = None
+
+            async def run(self):
+                self._live.update_status(iteration=1, phase="PLAN")
+
+        orch = FakeOrch()
+        app = PipelineApp(orch)
+        async with app.run_test() as pilot:
+            await pilot.pause()
+            bar = app.query_one(StatusBarWidget)
+            assert bar.iteration == 1
+            assert bar.phase == "PLAN"
+
+    @pytest.mark.asyncio
+    async def test_q_noop_when_not_finished(self):
+        """Pressing q before pipeline finishes should not exit the app."""
+        gate = threading.Event()
+
+        class FakeOrch:
+            _live: PipelineLive | None = None
+
+            async def run(self):
+                # Worker runs in a thread, so use threading.Event
+                gate.wait()
+
+        orch = FakeOrch()
+        app = PipelineApp(orch)
+        async with app.run_test() as pilot:
+            await pilot.press("q")
+            await pilot.pause()
+            # App should still be running (not exited)
+            assert app.query_one(StatusBarWidget) is not None
+            gate.set()
+
+    @pytest.mark.asyncio
+    async def test_q_exits_when_finished(self):
+        """Pressing q after pipeline finishes should exit the app."""
+
+        class FakeOrch:
+            _live: PipelineLive | None = None
+
+            async def run(self):
+                pass
+
+        orch = FakeOrch()
+        app = PipelineApp(orch)
+        async with app.run_test() as pilot:
+            await pilot.pause()
+            # Worker should have completed, setting _finished
+            assert app._finished is True
+            await pilot.press("q")
+            await pilot.pause()
+
+    @pytest.mark.asyncio
+    async def test_worker_completion_sets_finished(self):
+        """Worker completing sets _finished and freezes status bar."""
+
+        class FakeOrch:
+            _live: PipelineLive | None = None
+
+            async def run(self):
+                pass
+
+        orch = FakeOrch()
+        app = PipelineApp(orch)
+        async with app.run_test() as pilot:
+            await pilot.pause()
+            assert app._finished is True
+            bar = app.query_one(StatusBarWidget)
+            assert bar.finished is True
+            assert bar._end_time is not None
+
+    @pytest.mark.asyncio
+    async def test_collapse_panel_accumulates_stats_in_app(self):
+        """In app mode, collapse_panel accumulates stats on the status bar."""
+
+        class FakeOrch:
+            _live: PipelineLive | None = None
+
+            async def run(self):
+                panel = AgentPanel(name="Analyst", model="claude-sonnet-4-6", style="green")
+                panel.set_stats(input_tokens=500, output_tokens=200, num_turns=3)
+                self._live.add_panel(panel)
+                self._live.collapse_panel(panel, "done")
+
+        orch = FakeOrch()
+        app = PipelineApp(orch)
+        async with app.run_test() as pilot:
+            await pilot.pause()
+            bar = app.query_one(StatusBarWidget)
+            assert bar.total_input_tokens == 500
+            assert bar.total_output_tokens == 200
+            assert bar.total_turns == 3
+
+    @pytest.mark.asyncio
+    async def test_end_iteration_and_flush_separates_containers(self):
+        """After flush, a new iteration gets its own container."""
+
+        class FakeOrch:
+            _live: PipelineLive | None = None
+
+            async def run(self):
+                self._live.start_iteration(0)
+                self._live.add_panel(
+                    AgentPanel(name="Analyst", model="claude-sonnet-4-6", style="green")
+                )
+                self._live.end_iteration("done", "green")
+                self._live.flush_completed()
+                self._live.start_iteration(1)
+                self._live.add_panel(
+                    AgentPanel(name="Scientist", model="claude-sonnet-4-6", style="cyan")
+                )
+
+        orch = FakeOrch()
+        app = PipelineApp(orch)
+        async with app.run_test() as pilot:
+            await pilot.pause()
+            containers = list(app.query(IterationContainer))
+            assert len(containers) == 2
+
+
+# ---------------------------------------------------------------------------
+# Helper function tests
+# ---------------------------------------------------------------------------
+
+
+class TestHelperFunctions:
+    def test_format_elapsed_zero(self):
+        assert _format_elapsed(0) == "0s"
+
+    def test_format_elapsed_seconds(self):
+        assert _format_elapsed(45) == "45s"
+
+    def test_format_elapsed_one_minute(self):
+        assert _format_elapsed(60) == "1m 0s"
+
+    def test_format_elapsed_minutes_and_seconds(self):
+        assert _format_elapsed(125) == "2m 5s"
+
+    def test_score_style_green(self):
+        assert _score_style(70) == "green"
+        assert _score_style(100) == "green"
+
+    def test_score_style_yellow(self):
+        assert _score_style(40) == "yellow"
+        assert _score_style(69) == "yellow"
+
+    def test_score_style_red(self):
+        assert _score_style(0) == "red"
+        assert _score_style(39) == "red"
+
+
+# ---------------------------------------------------------------------------
+# AgentPanel idempotency tests
+# ---------------------------------------------------------------------------
+
+
+class TestAgentPanelIdempotency:
+    @pytest.mark.asyncio
+    async def test_double_complete(self):
         panel = AgentPanel(name="Analyst", model="claude-sonnet-4-6", style="green")
-        for i in range(7):
-            panel.add_line(f"line {i}")
-        buf = StringIO()
-        c = Console(file=buf, width=80, no_color=True)
-        c.print(panel)
-        output = buf.getvalue()
-        assert "line 0" not in output
-        assert "line 6" in output
+        async with PanelTestApp(panel).run_test():
+            panel.complete("first")
+            panel.complete("second")
+            assert panel.done_summary == "first"
 
-    def test_expanded_shows_all_lines(self):
-        AgentPanel.expanded = True
+    @pytest.mark.asyncio
+    async def test_double_error(self):
         panel = AgentPanel(name="Analyst", model="claude-sonnet-4-6", style="green")
-        for i in range(7):
-            panel.add_line(f"line {i}")
-        buf = StringIO()
-        c = Console(file=buf, width=80, no_color=True)
-        c.print(panel)
-        output = buf.getvalue()
-        assert "line 0" in output
-        assert "line 6" in output
+        async with PanelTestApp(panel).run_test():
+            panel.error("err1")
+            panel.error("err2")
+            assert panel.error_msg == "err1"
 
-    def test_done_compact_shows_summary_only(self):
+    @pytest.mark.asyncio
+    async def test_error_after_complete_is_noop(self):
         panel = AgentPanel(name="Analyst", model="claude-sonnet-4-6", style="green")
-        panel.add_line("working on it")
-        panel.add_line("still going")
-        panel.complete("All done")
-        buf = StringIO()
-        c = Console(file=buf, width=80, no_color=True)
-        c.print(panel)
-        output = buf.getvalue()
-        assert "All done" in output
-        assert "working on it" not in output
-
-    def test_done_expanded_shows_history_and_summary(self):
-        AgentPanel.expanded = True
-        panel = AgentPanel(name="Analyst", model="claude-sonnet-4-6", style="green")
-        panel.add_line("working on it")
-        panel.add_line("still going")
-        panel.complete("All done")
-        buf = StringIO()
-        c = Console(file=buf, width=80, no_color=True)
-        c.print(panel)
-        output = buf.getvalue()
-        assert "working on it" in output
-        assert "still going" in output
-        assert "All done" in output
-
-    def test_done_expanded_no_duplicate_when_summary_matches_last_line(self):
-        """When done_summary comes from the last line, don't show it twice."""
-        AgentPanel.expanded = True
-        panel = AgentPanel(name="Scientist", model="claude-sonnet-4-6", style="cyan")
-        panel.add_line("planning")
-        panel.add_line("[done] strategy=incremental")
-        panel.complete()  # done_summary = last line
-        buf = StringIO()
-        c = Console(file=buf, width=80, no_color=True)
-        c.print(panel)
-        output = buf.getvalue()
-        assert "planning" in output
-        assert output.count("strategy=incremental") == 1
-
-
-class TestKeyListener:
-    def test_noop_without_tty(self):
-        listener = KeyListener(on_toggle=lambda: None)
-        listener.start()
-        listener.stop()
-
-    def test_stop_without_start(self):
-        listener = KeyListener(on_toggle=lambda: None)
-        listener.stop()
-
-
-class TestStatusBarExpandHint:
-    def test_compact_shows_expand_action(self):
-        AgentPanel.expanded = False
-        bar = StatusBar(start_time=time.monotonic())
-        bar.update(iteration=0, phase="PLAN")
-        buf = StringIO()
-        c = Console(file=buf, width=120, no_color=True)
-        c.print(bar)
-        output = buf.getvalue()
-        assert "Ctrl+O: expand" in output
-
-    def test_expanded_shows_compact_action(self):
-        AgentPanel.expanded = True
-        try:
-            bar = StatusBar(start_time=time.monotonic())
-            bar.update(iteration=0, phase="PLAN")
-            buf = StringIO()
-            c = Console(file=buf, width=120, no_color=True)
-            c.print(bar)
-            output = buf.getvalue()
-            assert "Ctrl+O: compact" in output
-        finally:
-            AgentPanel.expanded = False
+        async with PanelTestApp(panel).run_test():
+            panel.complete("done")
+            panel.error("err")
+            assert panel.error_msg == ""
+            assert panel.done_summary == "done"
