@@ -118,6 +118,9 @@ class AgentPanel(Widget):
         # layout=True forces Textual to recalculate dimensions when
         # content changes (new lines added, text wraps differently).
         self.refresh(layout=True)
+        # Auto-scroll to bottom if user hasn't scrolled up
+        if isinstance(self.app, PipelineApp):
+            self.app._scroll_to_bottom_if_anchored()
 
     @property
     def panel_name(self) -> str:
@@ -562,6 +565,21 @@ class PipelineApp(App):
             bar = self.query_one(StatusBarWidget)
             bar.finish()
 
+    # -- Scroll helpers --
+
+    def _is_near_bottom(self) -> bool:
+        """Check if the scroll view is at or near the bottom."""
+        scroll = self.query_one("#main-scroll", VerticalScroll)
+        # Allow a small margin (2 lines) so rounding doesn't break it
+        return scroll.scroll_offset.y >= scroll.max_scroll_y - 2
+
+    def _scroll_to_bottom_if_anchored(self) -> None:
+        """Scroll to bottom only if the user hasn't scrolled up."""
+        if self._is_near_bottom():
+            self.call_after_refresh(
+                self.query_one("#main-scroll").scroll_end, animate=False,
+            )
+
     # -- Key binding actions --
 
     def action_toggle_expand(self) -> None:
@@ -574,6 +592,10 @@ class PipelineApp(App):
         for panel in panels:
             panel.expanded = new_state
             panel.refresh(layout=True)
+        # Ctrl+O always scrolls to bottom (intentional user action)
+        self.call_after_refresh(
+            self.query_one("#main-scroll").scroll_end, animate=False,
+        )
 
     def action_quit_app(self) -> None:
         """Exit the app, but only after the pipeline finishes."""
@@ -584,14 +606,28 @@ class PipelineApp(App):
 
     def _mount_panel(self, panel: AgentPanel) -> None:
         """Mount a panel into the current iteration container or main scroll."""
+        near_bottom = self._is_near_bottom()
         target = self._live._current_iteration or self.query_one("#main-scroll")
         target.mount(panel)
-        panel.scroll_visible()
+        if near_bottom:
+            self.call_after_refresh(
+                self.query_one("#main-scroll").scroll_end, animate=False,
+            )
 
     def _mount_iteration(self, container: IterationContainer) -> None:
         """Mount an iteration container into the main scroll."""
+        near_bottom = self._is_near_bottom()
         self.query_one("#main-scroll").mount(container)
+        if near_bottom:
+            self.call_after_refresh(
+                self.query_one("#main-scroll").scroll_end, animate=False,
+            )
 
     def _mount_static(self, renderable: RenderableType) -> None:
         """Mount a Rich renderable as a Static widget."""
+        near_bottom = self._is_near_bottom()
         self.query_one("#main-scroll").mount(Static(renderable))
+        if near_bottom:
+            self.call_after_refresh(
+                self.query_one("#main-scroll").scroll_end, animate=False,
+            )
