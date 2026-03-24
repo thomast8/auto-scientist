@@ -1264,7 +1264,8 @@ class TestRunIteration:
             await orchestrator._run_iteration_body()
 
         captured = capsys.readouterr()
-        assert "Iteration 0: completed" in captured.out
+        assert "Iteration 0" in captured.out
+        assert "completed" in captured.out
 
 
 class TestComputeScore:

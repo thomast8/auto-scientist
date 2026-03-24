@@ -154,7 +154,10 @@ class AgentPanel:
         done_style = f"bold {self.style}"
 
         if self.done and self.done_summary:
-            return Text(f"[done] {self.done_summary}", style=done_style)
+            summary = self.done_summary
+            if summary.startswith("[done] "):
+                summary = summary[len("[done] "):]
+            return Text(f"[done] {summary}", style=done_style)
 
         if not self.lines:
             return Text("  working...", style="dim")
@@ -223,47 +226,35 @@ class StatusBar:
         self.total_turns += panel.num_turns
 
     def __rich_console__(self, console: Console, options):
-        """Rich console protocol: render as a single-row Table."""
+        """Rich console protocol: render as a compact status line."""
         elapsed = _format_elapsed(time.monotonic() - self.start_time)
         phase_style = PHASE_STYLES.get(self.phase, "cyan")
 
-        table = Table(show_header=False, expand=True, box=None, padding=(0, 1))
-        table.add_column("iter", style="bold", no_wrap=True)
-        table.add_column("phase", style=phase_style, no_wrap=True)
-        table.add_column("elapsed", style="dim", no_wrap=True)
-        table.add_column("best", no_wrap=True, justify="right")
+        line = Text()
+        line.append(f" Iteration {self.iteration}", style="bold")
+        line.append("  ")
+        line.append(self.phase, style=phase_style)
+        line.append("  ", style="dim")
+        line.append(elapsed, style="dim")
 
-        # Format best score with color
-        if self.best_score is not None:
-            score_text = Text(
-                f"{self.best_version} (score {self.best_score})",
-                style=_score_style(self.best_score),
-            )
-        else:
-            score_text = Text("-", style="dim")
-
-        # Row 1: iteration, phase, elapsed, best score
-        table.add_row(
-            f"Iteration {self.iteration}",
-            self.phase,
-            elapsed,
-            score_text,
-        )
-
-        # Row 2: running totals (tokens, turns, cost)
         total_tokens = self.total_input_tokens + self.total_output_tokens
         if total_tokens > 0:
-            stats_parts = [f"{self.total_input_tokens:,} in / {self.total_output_tokens:,} out"]
-            if self.total_turns:
-                stats_parts.append(f"{self.total_turns} {'turn' if self.total_turns == 1 else 'turns'}")
-            table.add_row(
-                "",
-                "",
-                Text(" | ".join(stats_parts), style="dim"),
-                "",
-            )
+            tokens = f"{self.total_input_tokens:,} in / {self.total_output_tokens:,} out"
+            line.append(f" | {tokens}", style="dim")
+        if self.total_turns:
+            label = "turn" if self.total_turns == 1 else "turns"
+            line.append(f" | {self.total_turns} {label}", style="dim")
 
-        yield from table.__rich_console__(console, options)
+        if self.best_score is not None:
+            # best_version is "vNN" format; v00 = iteration 1, v01 = iteration 2
+            try:
+                best_iter = int(self.best_version.lstrip("v")) + 1
+            except (ValueError, AttributeError):
+                best_iter = "?"
+            style = _score_style(self.best_score)
+            line.append(f"  best: iter {best_iter} ({self.best_score})", style=style)
+
+        yield from line.__rich_console__(console, options)
 
 
 class PipelineLive:
@@ -279,6 +270,10 @@ class PipelineLive:
         self._live: Live | None = None
         self._file_console: Console | None = None
         self._file_handle = None
+        # Iteration border state
+        self._iter_title: str | None = None
+        self._iter_subtitle: str | None = None
+        self._iter_style: str = "bold"
 
     def start(self, log_path: Path | None = None) -> None:
         """Start the Live display and optionally open a log file."""
@@ -328,6 +323,30 @@ class PipelineLive:
         if self._file_console is not None:
             self._file_console.print(rule)
 
+    def start_iteration(self, title: int | str) -> None:
+        """Begin an iteration Panel. All subsequent items render inside it."""
+        if isinstance(title, int):
+            self._iter_title = f"Iteration {title}"
+        else:
+            self._iter_title = title
+        self._iter_subtitle = None
+        self._iter_style = "bold"
+        self.refresh()
+        if self._file_console is not None:
+            self._file_console.print(Rule(self._iter_title, style="bold"))
+
+    def end_iteration(self, subtitle: str, style: str) -> None:
+        """Finalize the iteration Panel with a subtitle and border color."""
+        self._iter_subtitle = subtitle
+        self._iter_style = style
+        self.refresh()
+        if self._file_console is not None:
+            if self._iter_title is not None:
+                label = f"{self._iter_title}: {subtitle}"
+            else:
+                label = subtitle
+            self._file_console.print(Rule(label, style=style))
+
     def remove_panel(self, panel: AgentPanel) -> None:
         """Remove an agent panel from the live display."""
         if panel in self._items:
@@ -335,17 +354,17 @@ class PipelineLive:
             self.refresh()
 
     def collapse_panel(self, panel: AgentPanel, done_summary: str = "") -> None:
-        """Mark a panel as complete, accumulate stats, flush it out of live.
+        """Mark a panel as complete and accumulate stats.
 
-        Prints everything up to and including this panel statically (rules
-        that precede it + the panel itself), then removes them from the
-        live display so only active panels remain.
+        Outside an iteration: flushes everything up to and including this
+        panel statically (rules that precede it + the panel itself).
+        Inside an iteration: keeps items in _items so they render inside
+        the iteration Panel border until flush_completed() is called.
         """
         panel.complete(done_summary)
         self._status_bar.add_agent_stats(panel)
 
-        # Flush everything up to and including this panel
-        if panel in self._items:
+        if self._iter_title is None and panel in self._items:
             idx = self._items.index(panel)
             to_flush = self._items[:idx + 1]
             target = self._live.console if self._live is not None else console
@@ -358,12 +377,29 @@ class PipelineLive:
     def flush_completed(self) -> None:
         """Print all remaining items statically and clear the live area.
 
-        Used for iteration-end rules and other items that don't have a
-        panel collapse event.
+        Inside an iteration: wraps all items in a Panel with the iteration
+        title/subtitle/border, prints as one unit, and resets iteration state.
+        Outside: prints items individually.
         """
         target = self._live.console if self._live is not None else console
-        for item in self._items:
-            target.print(item)
+        if self._iter_title is not None:
+            body = Group(*self._items) if self._items else Text("")
+            iter_panel = Panel(
+                body,
+                title=self._iter_title,
+                title_align="left",
+                subtitle=self._iter_subtitle,
+                subtitle_align="left",
+                border_style=self._iter_style,
+                expand=True,
+            )
+            target.print(iter_panel)
+            self._iter_title = None
+            self._iter_subtitle = None
+            self._iter_style = "bold"
+        else:
+            for item in self._items:
+                target.print(item)
         self._items.clear()
         self.refresh()
 
@@ -407,7 +443,21 @@ class PipelineLive:
 
     def _build_renderable(self) -> RenderableType:
         """Build the full Live renderable: items + status bar."""
-        parts: list[RenderableType] = list(self._items)
+        parts: list[RenderableType] = []
+        if self._iter_title is not None:
+            body = Group(*self._items) if self._items else Text("")
+            iter_panel = Panel(
+                body,
+                title=self._iter_title,
+                title_align="left",
+                subtitle=self._iter_subtitle,
+                subtitle_align="left",
+                border_style=self._iter_style,
+                expand=True,
+            )
+            parts.append(iter_panel)
+        else:
+            parts.extend(self._items)
         parts.append(Rule(style="dim"))
         parts.append(self._status_bar)
         return Group(*parts)

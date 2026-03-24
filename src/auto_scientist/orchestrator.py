@@ -396,21 +396,22 @@ class Orchestrator:
                 await self._run_iteration_body()
                 self.state.save(state_path)
 
-            # Score the final version if it was never evaluated
-            if self.state.versions and self.state.versions[-1].score is None:
-                await self._score_final_version()
-                self.state.save(state_path)
-
-            # Phase 2: Report
+            # Phase 2: Report (with its own border)
             if self.state.phase == "report":
+                self._live.start_iteration("Report")
+
+                # Score the final version if it was never evaluated
+                if self.state.versions and self.state.versions[-1].score is None:
+                    await self._score_final_version()
+                    self.state.save(state_path)
+
                 await self._run_report()
                 self.state.phase = "stopped"
                 self.state.save(state_path)
 
-            self._live.add_rule(
-                Rule("Experiment completed", style="bold green")
-            )
-            self._live.flush_completed()
+                self._live.end_iteration("done", "blue")
+                self._live.flush_completed()
+
             logger.info("Run finished successfully")
         finally:
             self._live.stop()
@@ -465,8 +466,9 @@ class Orchestrator:
     async def _run_iteration_body(self) -> None:
         """Run one iteration of the pipeline (inlined, not _run_iteration)."""
         logger.info(f"=== Iteration {self.state.iteration} start ===")
-        self._live.add_rule(Rule(f"Iteration {self.state.iteration}", style="bold"))
+        self._live.start_iteration(self.state.iteration)
         self._live.update_status(iteration=self.state.iteration)
+        prev_best = self.state.best_score
 
         version = f"v{self.state.iteration:02d}"
         version_dir = self.output_dir / version
@@ -496,11 +498,11 @@ class Orchestrator:
         # Step 3: Check if Scientist recommends stopping
         if plan and plan.get("should_stop"):
             self._persist_artifact(version_dir, "plan.json", plan)
-            self._live.add_rule(
-                Rule(f"Scientist recommends stopping: {plan.get('stop_reason', 'unknown')}", style="yellow")
-            )
             logger.info(f"Scientist stop: {plan.get('stop_reason', 'unknown')}")
             self.state.phase = "report"
+            self._live.end_iteration(
+                f"stopped: {plan.get('stop_reason', 'unknown')}", "yellow",
+            )
             self._live.flush_completed()
             return
 
@@ -536,13 +538,11 @@ class Orchestrator:
             )
             self.state.record_failure()
             self.state.record_version(version_entry)
-            self._live.add_rule(
-                Rule(f"Iteration {self.state.iteration}: failed (no script)", style="red")
-            )
             logger.info(
                 f"Iteration {self.state.iteration} complete: "
                 f"status=failed (coder produced no script)"
             )
+            self._live.end_iteration("failed (no script)", "red")
             self._live.flush_completed()
             self.state.iteration += 1
             return
@@ -582,17 +582,23 @@ class Orchestrator:
         self._evaluate(run_result, version_entry)
         self.state.record_version(version_entry)
 
-        # Iteration summary as a Rule + optional criteria line
-        status_style = "green" if version_entry.status == "completed" else "red"
-        score_str = f" (score {version_entry.score})" if version_entry.score is not None else ""
-        self._live.add_rule(
-            Rule(f"Iteration {self.state.iteration}: {version_entry.status}{score_str}", style=status_style)
-        )
+        # Iteration border color: green=improved, yellow=no gain, red=failed
+        best_now = self.state.best_score
+        if version_entry.status != "completed":
+            status_style = "red"
+        elif best_now > prev_best:
+            status_style = "green"
+        elif best_now > 0:
+            status_style = "yellow"
+        else:
+            status_style = "bold"
+        score_str = f" (best: {best_now})" if best_now > 0 else ""
         # Update status bar with best score
         self._live.update_status(
             best_version=self.state.best_version,
             best_score=self.state.best_score,
         )
+        self._live.end_iteration(f"{version_entry.status}{score_str}", status_style)
         self._live.flush_completed()
 
         # Increment at end of loop body
@@ -1324,7 +1330,6 @@ class Orchestrator:
 
     async def _score_final_version(self) -> None:
         """Run the Analyst on the last version so it gets a score before report."""
-        self._live.add_rule(Rule("Scoring final version before report", style="bold"))
         analysis = await self._run_analyst()
         if analysis:
             self._score_latest(analysis)

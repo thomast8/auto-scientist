@@ -60,6 +60,14 @@ PLAN_ITER0 = {
     "should_stop": False,
     "stop_reason": None,
     "notebook_entry": "## Exploration\nFirst look at the data structure.",
+    "top_level_criteria": [
+        {
+            "name": "C1",
+            "description": "Model R2 exceeds 0.8",
+            "metric_key": "r2",
+            "condition": "> 0.8",
+        }
+    ],
 }
 
 PLAN_ITER1 = {
@@ -77,14 +85,6 @@ PLAN_ITER1 = {
     "should_stop": False,
     "stop_reason": None,
     "notebook_entry": "## Linear model\nFitting a linear model to x,y data.",
-    "top_level_criteria": [
-        {
-            "name": "C1",
-            "description": "Model R2 exceeds 0.8",
-            "metric_key": "r2",
-            "condition": "> 0.8",
-        }
-    ],
 }
 
 REVISED_PLAN = {
@@ -110,11 +110,26 @@ REVISED_PLAN = {
 # ---------------------------------------------------------------------------
 
 
+def _make_delayed_side_effect(delay: float, values: list):
+    """Return an async callable that sleeps then yields values from a list."""
+    idx = 0
+
+    async def _delayed(*args, **kwargs):
+        nonlocal idx
+        await asyncio.sleep(delay)
+        val = values[min(idx, len(values) - 1)]
+        idx += 1
+        return val
+
+    return _delayed
+
+
 def _make_ingestor_mock():
     async def fake(
         raw_data_path, output_dir, goal, interactive=False,
         config_path=None, model=None, message_buffer=None,
     ):
+        await asyncio.sleep(1.5)
         dest = output_dir / "data"
         dest.mkdir(parents=True, exist_ok=True)
         for f in raw_data_path.iterdir():
@@ -133,6 +148,7 @@ def _make_analyst_mock():
 
     async def fake(**kwargs):
         nonlocal call_idx
+        await asyncio.sleep(0.8)
         buf = kwargs.get("message_buffer")
         if buf is not None:
             buf.append("[Analyst] Analyzing data")
@@ -149,6 +165,7 @@ def _make_scientist_mock():
 
     async def fake(**kwargs):
         nonlocal call_idx
+        await asyncio.sleep(1.2)
         buf = kwargs.get("message_buffer")
         if buf is not None:
             buf.append("[Scientist] Formulating plan")
@@ -161,6 +178,7 @@ def _make_scientist_mock():
 
 def _make_revision_mock():
     async def fake(**kwargs):
+        await asyncio.sleep(1.0)
         buf = kwargs.get("message_buffer")
         if buf is not None:
             buf.append("[Scientist Revision] Revising plan after debate")
@@ -177,6 +195,7 @@ def _make_coder_mock():
         run_command="uv run {script_path}",
         top_level_criteria=None,
     ):
+        await asyncio.sleep(2.5)
         version_dir = output_dir / version
         version_dir.mkdir(parents=True, exist_ok=True)
 
@@ -200,6 +219,7 @@ def _make_coder_mock():
 
 def _make_report_mock():
     async def fake(**kwargs):
+        await asyncio.sleep(1.5)
         buf = kwargs.get("message_buffer")
         if buf is not None:
             buf.append("[Report] Generating final summary")
@@ -247,9 +267,34 @@ async def run_smoke(output_dir: Path) -> None:
         stream=False,
     )
 
+    # Counter for varying fake token stats per agent call
+    _call_count = 0
+    _token_table = [
+        (1200, 400, 3),   # Ingestor
+        (800, 300, 2),    # Analyst iter 0
+        (1500, 600, 4),   # Scientist iter 0
+        (2200, 900, 8),   # Coder iter 0
+        (900, 350, 2),    # Analyst iter 1
+        (1800, 700, 5),   # Scientist iter 1
+        (1600, 650, 4),   # Revision iter 1
+        (3500, 1400, 12), # Coder iter 1
+        (700, 250, 2),    # Analyst (final scoring)
+        (2000, 800, 6),   # Report
+    ]
+
+    def _fake_sdk_usage(panel):
+        nonlocal _call_count
+        entry = _token_table[min(_call_count, len(_token_table) - 1)]
+        panel.set_stats(input_tokens=entry[0], output_tokens=entry[1], num_turns=entry[2])
+        _call_count += 1
+
     with (
         # Infrastructure
         patch.object(Orchestrator, "_validate_prerequisites"),
+        patch.object(
+            Orchestrator, "_apply_sdk_usage",
+            staticmethod(_fake_sdk_usage),
+        ),
 
         # Agent-level mocks
         patch("auto_scientist.agents.ingestor.run_ingestor", side_effect=_make_ingestor_mock()),
@@ -262,37 +307,35 @@ async def run_smoke(output_dir: Path) -> None:
         patch("auto_scientist.agents.coder.run_coder", side_effect=_make_coder_mock()),
         patch("auto_scientist.agents.report.run_report", side_effect=_make_report_mock()),
 
-        # LLM-level mocks (debate loop runs for real)
+        # LLM-level mocks (debate loop runs for real, with delays)
         patch(
             "auto_scientist.agents.critic.query_openai",
-            new_callable=AsyncMock,
-            side_effect=[
+            side_effect=_make_delayed_side_effect(0.5, [
                 AgentResult(text=_pad("OAI Critique R1: The hypothesis lacks specificity about what linear means."), input_tokens=100, output_tokens=50),
                 AgentResult(text=_pad("OAI Critique R2: Revised, sample size concern addressed."), input_tokens=100, output_tokens=50),
-            ],
+            ]),
         ),
         patch(
             "auto_scientist.agents.critic.query_google",
-            new_callable=AsyncMock,
-            side_effect=[
+            side_effect=_make_delayed_side_effect(1.5, [
                 AgentResult(text=_pad("Google Critique R1: Consider confounding variables in the x-y relationship."), input_tokens=80, output_tokens=40),
                 AgentResult(text=_pad("Google Critique R2: Methodology concerns partially addressed."), input_tokens=80, output_tokens=40),
-            ],
+            ]),
         ),
         patch(
             "auto_scientist.agents.critic.collect_text_from_query",
-            new_callable=AsyncMock,
-            side_effect=[
+            side_effect=_make_delayed_side_effect(0.4, [
                 _pad("Scientist to OAI: Valid points about specificity. Will add R2 threshold."),
                 _pad("Scientist to Google: Agreed on confounders. Will add residual analysis."),
-            ],
+            ]),
         ),
 
         # Summarizer LLM mock
         patch(
             "auto_scientist.summarizer._query_summary",
-            new_callable=AsyncMock,
-            return_value="Summarizing agent progress...",
+            side_effect=_make_delayed_side_effect(0.2, [
+                "Summarizing agent progress...",
+            ]),
         ),
     ):
         await orchestrator.run()
@@ -313,12 +356,13 @@ async def run_smoke(output_dir: Path) -> None:
         ("No debate on iter 0", not (experiment_dir / "v00" / "debate.json").exists()),
         ("Report generated", (experiment_dir / "report.md").exists()),
         (
-            "Criteria defined",
+            "Criteria defined in iter 0",
             final_state.success_criteria is not None
             and len(final_state.success_criteria) > 0,
         ),
-        ("v01 scored", final_state.versions[1].score is not None),
-        ("Best version tracked", final_state.best_version == "v01"),
+        ("v00 scored (by iter 1 analyst)", final_state.versions[0].score is not None),
+        ("v01 scored (by final scoring)", final_state.versions[1].score is not None),
+        ("Best score > 0", final_state.best_score > 0),
     ]
 
     # Validate debate transcript

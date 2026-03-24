@@ -135,8 +135,7 @@ class TestStatusBar:
         output = buf.getvalue()
         assert "Iteration 2" in output
         assert "ANALYZE" in output
-        assert "v01" in output
-        assert "72" in output
+        assert "best: iter 2 (72)" in output
 
     def test_score_color_green(self):
         bar = StatusBar(start_time=time.monotonic())
@@ -148,14 +147,15 @@ class TestStatusBar:
         # Score 85 should render (green styling applied)
         assert "85" in output
 
-    def test_no_score_shows_dash(self):
+    def test_no_score_omits_score(self):
         bar = StatusBar(start_time=time.monotonic())
         bar.update(iteration=0, phase="INGESTION")
         buf = StringIO()
         console = Console(file=buf, width=80, no_color=True)
         console.print(bar)
         output = buf.getvalue()
-        assert "-" in output
+        assert "score" not in output
+        assert "INGESTION" in output
 
 
 class TestPipelineLive:

@@ -231,15 +231,13 @@ async def run_with_summaries(
         with contextlib.suppress(asyncio.CancelledError):
             await poll_task
 
-        # Final summary: summarize the progress summaries (not the raw buffer)
-        # to keep cost low and provide a coherent recap
-        if progress_summaries:
+        # Final summary: use the agent's actual output trace (tail) so the
+        # recap reflects real results, not a lossy summary-of-summaries.
+        if message_buffer:
             try:
-                recap_input = "\n".join(
-                    f"- {s}" for s in progress_summaries
-                )
+                tail = "\n".join(message_buffer[-20:])
                 summary = await summarize_agent_output(
-                    agent_name, recap_input, summary_model, progress=False,
+                    agent_name, tail, summary_model, progress=False,
                 )
                 if summary:
                     done_label = f"{label_prefix}done"
