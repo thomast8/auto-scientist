@@ -115,7 +115,9 @@ class AgentPanel(Widget):
         """Periodic refresh for the elapsed timer. Stops after done."""
         if self.done and hasattr(self, "_refresh_timer"):
             self._refresh_timer.stop()
-        self.refresh()
+        # layout=True forces Textual to recalculate dimensions when
+        # content changes (new lines added, text wraps differently).
+        self.refresh(layout=True)
 
     @property
     def panel_name(self) -> str:
