@@ -19,53 +19,56 @@ logger = logging.getLogger(__name__)
 
 PROGRESS_PREFIX = (
     "Reply with ONE sentence, max 15 words. "
-    "Use present participle (-ing) voice: 'Inspecting...', 'Writing...', 'Computing...'."
+    "Use present participle (-ing) voice: 'Inspecting...', 'Writing...', 'Computing...'. "
+    "Never refer to the agent in third person. Write as if you are the agent."
 )
 FINAL_PREFIX = (
     "Reply with 2-3 sentences, max 40 words total. "
     "Use past tense. First sentence: the main outcome. "
-    "Remaining sentences: key metrics, notable findings, or comparisons to prior iterations."
+    "Remaining sentences: key metrics, notable findings, or comparisons to prior iterations. "
+    "Never refer to the agent in third person (no 'they', 'the agent', 'it'). "
+    "Write as if you are the agent: 'Loaded 200 rows...', 'Found high variance in y...'."
 )
 
 SUMMARY_PROMPTS: dict[str, str] = {
     "Ingestor": (
-        "You are summarizing an Ingestor agent's output. "
-        "Focus on: what files are being processed and what transformations are being applied?"
+        "Summarize this data ingestion output in first person. "
+        "Focus on: what files were processed and what transformations were applied."
     ),
     "Analyst": (
-        "You are summarizing an Analyst agent's output. "
-        "Focus on: what findings have been observed? What metrics stand out? "
-        "Any improvements or regressions?"
+        "Summarize this analysis output in first person. "
+        "Focus on: what findings were observed, what metrics stand out, "
+        "any improvements or regressions."
     ),
     "Scientist": (
-        "You are summarizing a Scientist agent's output. "
-        "Focus on: what hypothesis and strategy are being formulated? "
-        "What is the expected impact?"
+        "Summarize this planning output in first person. "
+        "Focus on: what hypothesis and strategy are being formulated, "
+        "what is the expected impact."
     ),
     "Scientist Revision": (
-        "You are summarizing a Scientist Revision agent's output. "
-        "Focus on: what is changing from the original plan? "
-        "What revisions were adopted from the debate?"
+        "Summarize this plan revision output in first person. "
+        "Focus on: what changed from the original plan, "
+        "what revisions were adopted from the debate."
     ),
     "Debate": (
-        "You are summarizing a single critic's debate output. "
+        "Summarize this debate output in first person. "
         "Messages are prefixed [Critic] or [Scientist]. "
         "Do not prefix with 'Critic:' since the panel already identifies who this is. "
-        "Focus on: what is being challenged and what positions are forming?"
+        "Focus on: what is being challenged and what positions are forming."
     ),
     "Coder": (
-        "You are summarizing a Coder agent's output. "
-        "Focus on: what code is being written and what approach is being taken? "
+        "Summarize this coding output in first person. "
+        "Focus on: what code was written and what approach was taken. "
         "Describe the script structure, not line-by-line details."
     ),
     "Results": (
-        "You are summarizing experiment results. "
-        "Focus on: what did the experiment produce? Key numeric outcomes, "
+        "Summarize these experiment results in first person. "
+        "Focus on: what the experiment produced, key numeric outcomes, "
         "whether the hypothesis was supported, comparison to previous iteration."
     ),
     "Report": (
-        "You are summarizing a Report agent's output. "
-        "Focus on: what key findings and results are being documented?"
+        "Summarize this report output in first person. "
+        "Focus on: what key findings and results are being documented."
     ),
 }
 
