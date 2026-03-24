@@ -19,6 +19,7 @@ from unittest.mock import AsyncMock, patch
 
 from auto_scientist.agent_result import AgentResult
 from auto_scientist.agents.critic import MIN_RESPONSE_LENGTH
+from auto_scientist.console import AgentPanel
 from auto_scientist.model_config import AgentModelConfig, ModelConfig
 from auto_scientist.orchestrator import Orchestrator
 from auto_scientist.state import ExperimentState
@@ -124,19 +125,32 @@ def _make_delayed_side_effect(delay: float, values: list):
     return _delayed
 
 
+async def _drip_buffer(buf: list[str] | None, entries: list[str], delay: float = 0.3):
+    """Feed buffer entries one at a time with delays between them."""
+    if buf is None:
+        await asyncio.sleep(delay * len(entries))
+        return
+    for entry in entries:
+        buf.append(entry)
+        await asyncio.sleep(delay)
+
+
 def _make_ingestor_mock():
     async def fake(
         raw_data_path, output_dir, goal, interactive=False,
         config_path=None, model=None, message_buffer=None,
     ):
-        await asyncio.sleep(1.5)
         dest = output_dir / "data"
         dest.mkdir(parents=True, exist_ok=True)
         for f in raw_data_path.iterdir():
             if f.is_file():
                 (dest / f.name).write_text(f.read_text())
-        if message_buffer is not None:
-            message_buffer.append("[Ingestor] Canonicalized 1 file")
+        await _drip_buffer(message_buffer, [
+            "[Ingestor] Reading raw data files",
+            "[Ingestor] Validating CSV schema and column types",
+            "[Ingestor] Copying canonical data to output directory",
+            "[Ingestor] Canonicalized 1 file",
+        ])
         return dest
 
     return fake
@@ -148,10 +162,13 @@ def _make_analyst_mock():
 
     async def fake(**kwargs):
         nonlocal call_idx
-        await asyncio.sleep(0.8)
         buf = kwargs.get("message_buffer")
-        if buf is not None:
-            buf.append("[Analyst] Analyzing data")
+        await _drip_buffer(buf, [
+            "[Analyst] Loading data and checking structure",
+            "[Analyst] Computing summary statistics",
+            "[Analyst] Evaluating success criteria",
+            "[Analyst] Analysis complete",
+        ])
         result = results[min(call_idx, len(results) - 1)]
         call_idx += 1
         return result
@@ -165,10 +182,13 @@ def _make_scientist_mock():
 
     async def fake(**kwargs):
         nonlocal call_idx
-        await asyncio.sleep(1.2)
         buf = kwargs.get("message_buffer")
-        if buf is not None:
-            buf.append("[Scientist] Formulating plan")
+        await _drip_buffer(buf, [
+            "[Scientist] Reviewing analysis results",
+            "[Scientist] Formulating hypothesis",
+            "[Scientist] Designing experimental strategy",
+            "[Scientist] Plan complete",
+        ])
         result = results[min(call_idx, len(results) - 1)]
         call_idx += 1
         return result
@@ -178,10 +198,12 @@ def _make_scientist_mock():
 
 def _make_revision_mock():
     async def fake(**kwargs):
-        await asyncio.sleep(1.0)
         buf = kwargs.get("message_buffer")
-        if buf is not None:
-            buf.append("[Scientist Revision] Revising plan after debate")
+        await _drip_buffer(buf, [
+            "[Revision] Reading critic feedback",
+            "[Revision] Incorporating suggestions into plan",
+            "[Revision] Revised plan ready",
+        ])
         return REVISED_PLAN
 
     return fake
@@ -195,7 +217,6 @@ def _make_coder_mock():
         run_command="uv run {script_path}",
         top_level_criteria=None,
     ):
-        await asyncio.sleep(2.5)
         version_dir = output_dir / version
         version_dir.mkdir(parents=True, exist_ok=True)
 
@@ -208,10 +229,14 @@ def _make_coder_mock():
             json.dumps({"success": True, "return_code": 0, "timed_out": False})
         )
 
-        if message_buffer is not None:
-            message_buffer.append(f"[Coder] Writing {version} experiment script")
-            message_buffer.append("[Coder] Running experiment... success")
-
+        await _drip_buffer(message_buffer, [
+            f"[Coder] Reading plan for {version}",
+            f"[Coder] Writing {version} experiment script",
+            "[Coder] Verifying script syntax",
+            "[Coder] Running experiment...",
+            "[Coder] Collecting results and generating plots",
+            "[Coder] Experiment completed successfully",
+        ])
         return script
 
     return fake
@@ -219,10 +244,12 @@ def _make_coder_mock():
 
 def _make_report_mock():
     async def fake(**kwargs):
-        await asyncio.sleep(1.5)
         buf = kwargs.get("message_buffer")
-        if buf is not None:
-            buf.append("[Report] Generating final summary")
+        await _drip_buffer(buf, [
+            "[Report] Gathering results from all iterations",
+            "[Report] Compiling findings and recommendations",
+            "[Report] Writing final summary",
+        ])
         return "# Smoke Test Report\n\nAll experiments completed successfully."
 
     return fake
@@ -288,9 +315,18 @@ async def run_smoke(output_dir: Path) -> None:
         panel.set_stats(input_tokens=entry[0], output_tokens=entry[1], num_turns=entry[2])
         _call_count += 1
 
+    # Reduce summarizer poll interval so it fires during short agent runs
+    import auto_scientist.summarizer as _summarizer_mod
+    _orig_rws = _summarizer_mod.run_with_summaries
+    async def _fast_rws(*args, interval=0.5, **kwargs):
+        return await _orig_rws(*args, interval=interval, **kwargs)
+
     with (
         # Infrastructure
         patch.object(Orchestrator, "_validate_prerequisites"),
+        # Patch at both locations: module def and orchestrator import
+        patch("auto_scientist.summarizer.run_with_summaries", side_effect=_fast_rws),
+        patch("auto_scientist.orchestrator.run_with_summaries", side_effect=_fast_rws),
         patch.object(
             Orchestrator, "_apply_sdk_usage",
             staticmethod(_fake_sdk_usage),
@@ -330,11 +366,25 @@ async def run_smoke(output_dir: Path) -> None:
             ]),
         ),
 
-        # Summarizer LLM mock
+        # Summarizer LLM mock - varied responses so panels accumulate
+        # multiple lines (tests expand/compact toggle)
         patch(
             "auto_scientist.summarizer._query_summary",
-            side_effect=_make_delayed_side_effect(0.2, [
-                "Summarizing agent progress...",
+            side_effect=_make_delayed_side_effect(0.1, [
+                "Inspecting raw data files and checking column types.",
+                "Reading CSV headers and validating schema consistency.",
+                "Computing summary statistics for all numeric columns.",
+                "Evaluating data quality: missing values, outliers, distributions.",
+                "Formulating hypothesis based on observed data patterns.",
+                "Planning experimental strategy with cross-validation approach.",
+                "Writing experiment script with polynomial regression pipeline.",
+                "Running experiment, collecting metrics and generating plots.",
+                "Comparing results against baseline and previous iterations.",
+                "Reviewing methodology and suggesting alternative approaches.",
+                "Analyzing critic feedback and identifying valid concerns.",
+                "Revising plan to incorporate cross-validation per critic feedback.",
+                "Generating final report with all findings and recommendations.",
+                "[done] Pipeline step completed successfully.",
             ]),
         ),
     ):
@@ -386,6 +436,38 @@ async def run_smoke(output_dir: Path) -> None:
                 and transcripts_ok
             )
     checks.append(("Debate transcripts valid", debate_ok))
+
+    # Validate Ctrl+O expand/history mechanism
+    history = orchestrator._live._history
+    checks.append(("History accumulated after flush", len(history) > 0))
+    checks.append(("Expanded flag reset after stop", AgentPanel.expanded is False))
+
+    # Verify all_lines stored on panels in history (panels may be nested
+    # inside iteration Panel(Group(...)) wrappers)
+    from rich.console import Group as RichGroup
+    from rich.panel import Panel as RichPanel
+
+    from auto_scientist.console import AgentPanel as AP
+
+    def _find_agent_panels(items):
+        for item in items:
+            if isinstance(item, AP):
+                yield item
+            elif isinstance(item, RichPanel):
+                renderable = item.renderable
+                if isinstance(renderable, RichGroup):
+                    yield from _find_agent_panels(renderable.renderables)
+
+    all_panels = list(_find_agent_panels(history))
+    has_all_lines = any(len(p.all_lines) > 0 for p in all_panels)
+    checks.append(("Panels retain all_lines history", has_all_lines))
+
+    # Check that panels have multiple lines (for expand/compact testing)
+    multi_line_panels = [p for p in all_panels if len(p.all_lines) > 1]
+    checks.append((
+        f"Panels have multi-line history ({len(multi_line_panels)}/{len(all_panels)})",
+        len(multi_line_panels) > 0,
+    ))
 
     print("\n" + "=" * 50)
     print("SMOKE TEST VALIDATION")

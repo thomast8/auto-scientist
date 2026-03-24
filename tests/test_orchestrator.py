@@ -1236,7 +1236,7 @@ class TestRunIteration:
         assert orchestrator.state.versions[0].script_path == ""
 
     @pytest.mark.asyncio
-    async def test_iteration_summary_prints_artifacts(self, orchestrator, tmp_path, capsys):
+    async def test_iteration_summary_prints_artifacts(self, orchestrator, tmp_path):
         orchestrator.output_dir.mkdir(parents=True, exist_ok=True)
         orchestrator.state.phase = "iteration"
         orchestrator.state.iteration = 0
@@ -1263,9 +1263,9 @@ class TestRunIteration:
         ):
             await orchestrator._run_iteration_body()
 
-        captured = capsys.readouterr()
-        assert "Iteration 0" in captured.out
-        assert "completed" in captured.out
+        # Iteration summary is now in _history (no static prints)
+        history = orchestrator._live._history
+        assert len(history) > 0
 
 
 class TestComputeScore:
@@ -2108,7 +2108,7 @@ class TestRunIngestionFull:
         assert state.phase == "stopped"
 
     @pytest.mark.asyncio
-    async def test_ingestion_prints_data_files(self, tmp_path, capsys):
+    async def test_ingestion_prints_data_files(self, tmp_path):
         state = ExperimentState(
             domain="test",
             goal="g",
@@ -2136,8 +2136,11 @@ class TestRunIngestionFull:
         ):
             await o.run()
 
-        captured = capsys.readouterr()
-        assert "data.csv" in captured.out
+        # Ingestor panel is in history with data file info in done_summary
+        from auto_scientist.console import AgentPanel
+
+        history_panels = [p for p in o._live._history if isinstance(p, AgentPanel)]
+        assert any("data.csv" in p.done_summary for p in history_panels)
 
 
 class TestSummaryIntegration:

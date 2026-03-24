@@ -414,6 +414,7 @@ class Orchestrator:
 
             logger.info("Run finished successfully")
         finally:
+            self._live.wait_for_dismiss()
             self._live.stop()
 
     async def _run_ingestion(self) -> Path:

@@ -6,9 +6,12 @@ Provides three main components:
 - PipelineLive: Wraps Rich.Live to manage panels + status bar as one layout
 """
 
+import sys
+import threading
 import time
 from collections import deque
 from pathlib import Path
+from typing import Callable
 
 from rich.console import Console, Group, RenderableType
 from rich.live import Live
@@ -16,6 +19,14 @@ from rich.panel import Panel
 from rich.rule import Rule
 from rich.table import Table
 from rich.text import Text
+
+try:
+    import select
+    import termios
+
+    _HAS_TERMIOS = True
+except ImportError:
+    _HAS_TERMIOS = False
 
 # Module-level console for one-time prints (startup banner, etc.)
 console = Console()
@@ -69,13 +80,20 @@ class AgentPanel:
     Shows the most recent PANEL_MAX_LINES summary lines. On completion,
     collapses to just the done summary + footer stats. Implements the
     Rich console protocol for rendering.
+
+    When the class-level ``expanded`` flag is True, all accumulated lines
+    are shown instead of the rolling window, and done panels display their
+    full history.
     """
+
+    expanded: bool = False
 
     def __init__(self, name: str, model: str, style: str = "cyan") -> None:
         self.name = name
         self.model = model
         self.style = style
         self.lines: deque[str] = deque(maxlen=PANEL_MAX_LINES)
+        self.all_lines: list[str] = []
         self.start_time = time.monotonic()
         self.input_tokens = 0
         self.output_tokens = 0
@@ -90,6 +108,7 @@ class AgentPanel:
         if self.done:
             return
         cleaned = " ".join(text.split())
+        self.all_lines.append(cleaned)
         self.lines.append(cleaned)
 
     def complete(self, done_summary: str = "") -> None:
@@ -157,14 +176,27 @@ class AgentPanel:
             summary = self.done_summary
             if summary.startswith("[done] "):
                 summary = summary[len("[done] "):]
+            if AgentPanel.expanded and self.all_lines:
+                body_lines = [
+                    Text(line, style=done_style) if line.startswith("[done]") else Text(line)
+                    for line in self.all_lines
+                ]
+                # Only append done summary if it's not already the last line
+                # (the summarizer's [done] entry is already in all_lines).
+                done_text = f"[done] {summary}"
+                last = self.all_lines[-1]
+                if last != done_text and last != summary:
+                    body_lines.append(Text(done_text, style=done_style))
+                return Group(*body_lines)
             return Text(f"[done] {summary}", style=done_style)
 
         if not self.lines:
             return Text("  working...", style="dim")
 
+        source = self.all_lines if AgentPanel.expanded else self.lines
         body_lines = [
             Text(line, style=done_style) if line.startswith("[done]") else Text(line)
-            for line in self.lines
+            for line in source
         ]
         return Group(*body_lines)
 
@@ -185,6 +217,69 @@ class AgentPanel:
         yield from panel.__rich_console__(console, options)
 
 
+class KeyListener:
+    """Background thread that listens for Ctrl+O to toggle panel expansion.
+
+    Reads raw keypresses in cbreak mode on Unix systems. No-ops gracefully
+    when termios is unavailable (Windows, CI) or stdin is not a TTY.
+    """
+
+    def __init__(
+        self,
+        on_toggle: Callable[[], None],
+        on_dismiss: Callable[[], None] | None = None,
+    ) -> None:
+        self._on_toggle = on_toggle
+        self._on_dismiss = on_dismiss
+        self._stop_event = threading.Event()
+        self._thread: threading.Thread | None = None
+        self._old_attrs: list | None = None
+
+    def start(self) -> None:
+        if not _HAS_TERMIOS or not sys.stdin.isatty():
+            return
+        self._thread = threading.Thread(
+            target=self._run, daemon=True, name="key-listener",
+        )
+        self._thread.start()
+
+    def stop(self) -> None:
+        self._stop_event.set()
+        if self._thread is not None:
+            self._thread.join(timeout=1.0)
+            self._thread = None
+
+    def _run(self) -> None:
+        fd = sys.stdin.fileno()
+        try:
+            self._old_attrs = termios.tcgetattr(fd)
+            # Disable ICANON (line buffering), ECHO, and IEXTEN.
+            # IEXTEN must be cleared because on macOS/BSD Ctrl+O is VDISCARD,
+            # which toggles output flushing in the terminal driver, silently
+            # discarding all subsequent output until another Ctrl+O arrives.
+            mode = termios.tcgetattr(fd)
+            mode[3] &= ~(termios.ECHO | termios.ICANON | termios.IEXTEN)
+            mode[6][termios.VMIN] = 1
+            mode[6][termios.VTIME] = 0
+            termios.tcsetattr(fd, termios.TCSAFLUSH, mode)
+            while not self._stop_event.is_set():
+                ready, _, _ = select.select([fd], [], [], 0.2)
+                if ready:
+                    ch = sys.stdin.read(1)
+                    if ch == "\x0f":  # Ctrl+O
+                        self._on_toggle()
+                    elif self._on_dismiss and ch in ("q", "\r", "\n", "\x1b"):
+                        self._on_dismiss()
+        except (OSError, termios.error):
+            pass
+        finally:
+            if self._old_attrs is not None:
+                try:
+                    termios.tcsetattr(fd, termios.TCSADRAIN, self._old_attrs)
+                except (OSError, termios.error):
+                    pass
+
+
 class StatusBar:
     """Persistent status bar showing iteration, phase, elapsed, best score.
 
@@ -201,6 +296,7 @@ class StatusBar:
         self.total_input_tokens = 0
         self.total_output_tokens = 0
         self.total_turns = 0
+        self.finished: bool = False
 
     def update(
         self,
@@ -254,6 +350,11 @@ class StatusBar:
             style = _score_style(self.best_score)
             line.append(f"  best: iter {best_iter} ({self.best_score})", style=style)
 
+        toggle_action = "compact" if AgentPanel.expanded else "expand"
+        line.append(f"  Ctrl+O: {toggle_action}", style="dim italic")
+        if self.finished:
+            line.append("  q: exit", style="dim italic")
+
         yield from line.__rich_console__(console, options)
 
 
@@ -266,10 +367,14 @@ class PipelineLive:
 
     def __init__(self) -> None:
         self._items: list[RenderableType] = []
+        self._history: list[RenderableType] = []
         self._status_bar = StatusBar()
         self._live: Live | None = None
         self._file_console: Console | None = None
         self._file_handle = None
+        self._key_listener: KeyListener | None = None
+        self._dismiss_event: threading.Event = threading.Event()
+        self._finished: bool = False
         # Iteration border state
         self._iter_title: str | None = None
         self._iter_subtitle: str | None = None
@@ -301,8 +406,22 @@ class PipelineLive:
                 self._file_console = None
             raise
 
+        def _toggle_expanded():
+            AgentPanel.expanded = not AgentPanel.expanded
+            self.refresh()
+
+        self._key_listener = KeyListener(
+            on_toggle=_toggle_expanded,
+            on_dismiss=lambda: self._dismiss_event.set(),
+        )
+        self._key_listener.start()
+
     def stop(self) -> None:
         """Stop the Live display and close the log file."""
+        if self._key_listener is not None:
+            self._key_listener.stop()
+            self._key_listener = None
+        AgentPanel.expanded = False
         if self._live is not None:
             self._live.stop()
             self._live = None
@@ -310,6 +429,20 @@ class PipelineLive:
             self._file_handle.close()
             self._file_handle = None
             self._file_console = None
+
+    def wait_for_dismiss(self) -> None:
+        """Block until the user presses q/Enter/Escape.
+
+        Called after the pipeline finishes so the user can still toggle
+        Ctrl+O to review output before the display is torn down.
+        No-ops if the key listener is not running (non-TTY, CI).
+        """
+        if self._key_listener is None or self._key_listener._thread is None:
+            return
+        self._finished = True
+        self._status_bar.finished = True
+        self.refresh()
+        self._dismiss_event.wait()
 
     def add_panel(self, panel: AgentPanel) -> None:
         """Add an agent panel to the live display."""
@@ -356,10 +489,10 @@ class PipelineLive:
     def collapse_panel(self, panel: AgentPanel, done_summary: str = "") -> None:
         """Mark a panel as complete and accumulate stats.
 
-        Outside an iteration: flushes everything up to and including this
-        panel statically (rules that precede it + the panel itself).
-        Inside an iteration: keeps items in _items so they render inside
-        the iteration Panel border until flush_completed() is called.
+        Outside an iteration: moves everything up to and including this
+        panel from ``_items`` to ``_history`` so it doesn't get wrapped
+        inside the next iteration's border panel.
+        Inside an iteration: keeps items in _items until flush_completed().
         """
         panel.complete(done_summary)
         self._status_bar.add_agent_stats(panel)
@@ -367,21 +500,25 @@ class PipelineLive:
         if self._iter_title is None and panel in self._items:
             idx = self._items.index(panel)
             to_flush = self._items[:idx + 1]
-            target = self._live.console if self._live is not None else console
-            for item in to_flush:
-                target.print(item)
+            self._history.extend(to_flush)
+            if self._file_console is not None:
+                for item in to_flush:
+                    self._file_console.print(item)
             del self._items[:idx + 1]
 
         self.refresh()
 
     def flush_completed(self) -> None:
-        """Print all remaining items statically and clear the live area.
+        """Move current items into history and clear the live area.
 
-        Inside an iteration: wraps all items in a Panel with the iteration
-        title/subtitle/border, prints as one unit, and resets iteration state.
-        Outside: prints items individually.
+        Inside an iteration: wraps items in a Panel with the iteration
+        title/subtitle/border and stores that as one history entry.
+        Outside: moves items individually into history.
+
+        Nothing is printed statically; all rendering happens through the
+        live area so that Ctrl+O expand/collapse works without duplication.
+        File logging still happens so console.log captures everything.
         """
-        target = self._live.console if self._live is not None else console
         if self._iter_title is not None:
             body = Group(*self._items) if self._items else Text("")
             iter_panel = Panel(
@@ -393,13 +530,17 @@ class PipelineLive:
                 border_style=self._iter_style,
                 expand=True,
             )
-            target.print(iter_panel)
+            self._history.append(iter_panel)
+            if self._file_console is not None:
+                self._file_console.print(iter_panel)
             self._iter_title = None
             self._iter_subtitle = None
             self._iter_style = "bold"
         else:
-            for item in self._items:
-                target.print(item)
+            self._history.extend(self._items)
+            if self._file_console is not None:
+                for item in self._items:
+                    self._file_console.print(item)
         self._items.clear()
         self.refresh()
 
@@ -442,8 +583,8 @@ class PipelineLive:
             self._live.update(self._build_renderable())
 
     def _build_renderable(self) -> RenderableType:
-        """Build the full Live renderable: items + status bar."""
-        parts: list[RenderableType] = []
+        """Build the full Live renderable: history + current items + status bar."""
+        parts: list[RenderableType] = list(self._history)
         if self._iter_title is not None:
             body = Group(*self._items) if self._items else Text("")
             iter_panel = Panel(

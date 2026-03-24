@@ -6,7 +6,7 @@ from unittest.mock import MagicMock, patch
 
 from rich.console import Console
 
-from auto_scientist.console import AgentPanel, PipelineLive, StatusBar
+from auto_scientist.console import AgentPanel, KeyListener, PipelineLive, StatusBar
 
 
 class TestAgentPanel:
@@ -226,3 +226,195 @@ class TestPipelineLive:
         content = log_path.read_text()
         assert "first run" in content
         assert "second run" in content
+
+    def test_flush_preserves_history(self):
+        live = PipelineLive()
+        live.start()
+        panel = AgentPanel(name="Analyst", model="claude-sonnet-4-6", style="green")
+        panel.add_line("working")
+        panel.complete("done")
+        live.add_panel(panel)
+        live.flush_completed()
+        assert len(live._history) > 0
+        assert live._items == []
+        live.stop()
+
+    def test_collapse_outside_iteration_moves_to_history(self):
+        """Collapse outside iteration moves panel to history (not items)."""
+        live = PipelineLive()
+        live.start()
+        panel = AgentPanel(name="Ingestor", model="claude-sonnet-4-6", style="red")
+        live.add_panel(panel)
+        live.collapse_panel(panel, "done")
+        assert panel.done
+        assert panel in live._history
+        assert panel not in live._items
+        live.stop()
+
+    def test_collapse_inside_iteration_keeps_in_items(self):
+        """Collapse inside iteration keeps panel in _items for flush."""
+        live = PipelineLive()
+        live.start()
+        live.start_iteration(0)
+        panel = AgentPanel(name="Analyst", model="claude-sonnet-4-6", style="green")
+        live.add_panel(panel)
+        live.collapse_panel(panel, "done")
+        assert panel.done
+        assert panel in live._items
+        assert panel not in live._history
+        live.stop()
+
+    def test_renderable_includes_history(self):
+        """History panels appear in the live renderable."""
+        live = PipelineLive()
+        live.start()
+        panel = AgentPanel(name="Analyst", model="claude-sonnet-4-6", style="green")
+        panel.add_line("working")
+        panel.complete("done")
+        live.add_panel(panel)
+        live.flush_completed()
+
+        buf = StringIO()
+        c = Console(file=buf, width=80, no_color=True)
+        c.print(live._build_renderable())
+        output = buf.getvalue()
+        assert "Analyst" in output
+        live.stop()
+
+    def test_stop_resets_expanded_flag(self):
+        live = PipelineLive()
+        live.start()
+        AgentPanel.expanded = True
+        live.stop()
+        assert AgentPanel.expanded is False
+
+    def test_wait_for_dismiss_noop_without_tty(self):
+        """wait_for_dismiss should return immediately when no TTY (CI, tests)."""
+        live = PipelineLive()
+        live.start()
+        live.wait_for_dismiss()  # should not block
+        live.stop()
+
+    def test_finished_shows_exit_hint(self):
+        bar = StatusBar(start_time=time.monotonic())
+        bar.update(iteration=0, phase="REPORT")
+        bar.finished = True
+        buf = StringIO()
+        c = Console(file=buf, width=120, no_color=True)
+        c.print(bar)
+        output = buf.getvalue()
+        assert "q: exit" in output
+
+
+class TestAgentPanelExpanded:
+    def setup_method(self):
+        AgentPanel.expanded = False
+
+    def teardown_method(self):
+        AgentPanel.expanded = False
+
+    def test_all_lines_stored(self):
+        panel = AgentPanel(name="Analyst", model="claude-sonnet-4-6", style="green")
+        for i in range(7):
+            panel.add_line(f"line {i}")
+        assert len(panel.all_lines) == 7
+        assert len(panel.lines) == 5
+
+    def test_compact_hides_scrolled_off_lines(self):
+        panel = AgentPanel(name="Analyst", model="claude-sonnet-4-6", style="green")
+        for i in range(7):
+            panel.add_line(f"line {i}")
+        buf = StringIO()
+        c = Console(file=buf, width=80, no_color=True)
+        c.print(panel)
+        output = buf.getvalue()
+        assert "line 0" not in output
+        assert "line 6" in output
+
+    def test_expanded_shows_all_lines(self):
+        AgentPanel.expanded = True
+        panel = AgentPanel(name="Analyst", model="claude-sonnet-4-6", style="green")
+        for i in range(7):
+            panel.add_line(f"line {i}")
+        buf = StringIO()
+        c = Console(file=buf, width=80, no_color=True)
+        c.print(panel)
+        output = buf.getvalue()
+        assert "line 0" in output
+        assert "line 6" in output
+
+    def test_done_compact_shows_summary_only(self):
+        panel = AgentPanel(name="Analyst", model="claude-sonnet-4-6", style="green")
+        panel.add_line("working on it")
+        panel.add_line("still going")
+        panel.complete("All done")
+        buf = StringIO()
+        c = Console(file=buf, width=80, no_color=True)
+        c.print(panel)
+        output = buf.getvalue()
+        assert "All done" in output
+        assert "working on it" not in output
+
+    def test_done_expanded_shows_history_and_summary(self):
+        AgentPanel.expanded = True
+        panel = AgentPanel(name="Analyst", model="claude-sonnet-4-6", style="green")
+        panel.add_line("working on it")
+        panel.add_line("still going")
+        panel.complete("All done")
+        buf = StringIO()
+        c = Console(file=buf, width=80, no_color=True)
+        c.print(panel)
+        output = buf.getvalue()
+        assert "working on it" in output
+        assert "still going" in output
+        assert "All done" in output
+
+    def test_done_expanded_no_duplicate_when_summary_matches_last_line(self):
+        """When done_summary comes from the last line, don't show it twice."""
+        AgentPanel.expanded = True
+        panel = AgentPanel(name="Scientist", model="claude-sonnet-4-6", style="cyan")
+        panel.add_line("planning")
+        panel.add_line("[done] strategy=incremental")
+        panel.complete()  # done_summary = last line
+        buf = StringIO()
+        c = Console(file=buf, width=80, no_color=True)
+        c.print(panel)
+        output = buf.getvalue()
+        assert "planning" in output
+        assert output.count("strategy=incremental") == 1
+
+
+class TestKeyListener:
+    def test_noop_without_tty(self):
+        listener = KeyListener(on_toggle=lambda: None)
+        listener.start()
+        listener.stop()
+
+    def test_stop_without_start(self):
+        listener = KeyListener(on_toggle=lambda: None)
+        listener.stop()
+
+
+class TestStatusBarExpandHint:
+    def test_compact_shows_expand_action(self):
+        AgentPanel.expanded = False
+        bar = StatusBar(start_time=time.monotonic())
+        bar.update(iteration=0, phase="PLAN")
+        buf = StringIO()
+        c = Console(file=buf, width=120, no_color=True)
+        c.print(bar)
+        output = buf.getvalue()
+        assert "Ctrl+O: expand" in output
+
+    def test_expanded_shows_compact_action(self):
+        AgentPanel.expanded = True
+        try:
+            bar = StatusBar(start_time=time.monotonic())
+            bar.update(iteration=0, phase="PLAN")
+            buf = StringIO()
+            c = Console(file=buf, width=120, no_color=True)
+            c.print(bar)
+            output = buf.getvalue()
+            assert "Ctrl+O: compact" in output
+        finally:
+            AgentPanel.expanded = False
