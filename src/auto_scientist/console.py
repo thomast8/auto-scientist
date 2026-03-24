@@ -184,9 +184,13 @@ class AgentPanel(Widget):
         return " | ".join(parts)
 
     def _build_body(self) -> RenderableType:
-        """Build the panel body content."""
+        """Build the panel body content.
+
+        Returns Rich Text with explicit wrapping so Textual can measure
+        the height correctly for ``height: auto``.
+        """
         if self.error_msg:
-            return Text(f"[error] {self.error_msg}", style="red")
+            return Text(f"[error] {self.error_msg}", style="red", overflow="fold")
 
         done_style = f"bold {self.panel_style}"
 
@@ -195,26 +199,31 @@ class AgentPanel(Widget):
             if summary.startswith("[done] "):
                 summary = summary[len("[done] "):]
             if self.expanded and self.all_lines:
-                body_lines = [
-                    Text(line, style=done_style) if line.startswith("[done]") else Text(line)
-                    for line in self.all_lines
-                ]
+                result = Text(overflow="fold")
+                for i, line in enumerate(self.all_lines):
+                    if i > 0:
+                        result.append("\n")
+                    s = done_style if line.startswith("[done]") else ""
+                    result.append(line, style=s)
                 done_text = f"[done] {summary}"
                 last = self.all_lines[-1]
                 if last != done_text and last != summary:
-                    body_lines.append(Text(done_text, style=done_style))
-                return Group(*body_lines)
-            return Text(f"[done] {summary}", style=done_style)
+                    result.append("\n")
+                    result.append(done_text, style=done_style)
+                return result
+            return Text(f"[done] {summary}", style=done_style, overflow="fold")
 
         if not self.lines:
             return Text("  working...", style="dim")
 
         source = self.all_lines if self.expanded else self.lines
-        body_lines = [
-            Text(line, style=done_style) if line.startswith("[done]") else Text(line)
-            for line in source
-        ]
-        return Group(*body_lines)
+        result = Text(overflow="fold")
+        for i, line in enumerate(source):
+            if i > 0:
+                result.append("\n")
+            s = done_style if line.startswith("[done]") else ""
+            result.append(line, style=s)
+        return result
 
     def render(self) -> RenderResult:
         """Render the panel body. Border title/subtitle set dynamically."""
