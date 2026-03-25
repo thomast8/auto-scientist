@@ -31,9 +31,11 @@ def _load_prefs() -> dict:
 
 
 def _save_prefs(prefs: dict) -> None:
-    """Save user preferences to disk."""
+    """Save user preferences to disk (atomic write)."""
     _PREFS_PATH.parent.mkdir(parents=True, exist_ok=True)
-    _PREFS_PATH.write_text(json.dumps(prefs, indent=2))
+    tmp = _PREFS_PATH.with_suffix(".tmp")
+    tmp.write_text(json.dumps(prefs, indent=2))
+    tmp.replace(_PREFS_PATH)
 
 from rich.console import Console, RenderableType
 from rich.text import Text
@@ -65,7 +67,7 @@ AGENT_STYLES = {
     "Analyst": "green",
     "Scientist": "cyan",
     "Coder": "magenta1",
-    "Ingestor": "red",
+    "Ingestor": "bright_red",
     "Report": "blue",
     "Critic": "yellow",
     "Debate": "yellow",
@@ -85,7 +87,7 @@ AGENT_DESCRIPTIONS: dict[str, str] = {
 
 # Maps orchestrator phase names to colors (matches the active agent)
 PHASE_STYLES = {
-    "INGESTION": "red",
+    "INGESTION": "bright_red",
     "ANALYZE": "green",
     "PLAN": "cyan",
     "DEBATE": "yellow",
@@ -258,7 +260,15 @@ class AgentPanel(Widget):
             rich_log = self.query_one(RichLog)
         except NoMatches:
             return
+        # Auto-scroll main container if user is near the bottom
+        try:
+            app = self.app
+            near_bottom = app._is_near_bottom()
+        except Exception:
+            near_bottom = False
         rich_log.write(Text(text), expand=True)
+        if near_bottom:
+            app._scroll_to_end()
 
     def complete(self, done_summary: str = "") -> None:
         """Mark this panel as done.
@@ -290,7 +300,11 @@ class AgentPanel(Widget):
         collapsible.title = (
             f"[{self.panel_style}]{self._panel_name}: {summary} | {self._build_footer()}[/]"
         )
+        # Suppress Textual's built-in scroll-on-collapse (Collapsible._watch_collapsed
+        # calls self.call_after_refresh(self.scroll_visible) unconditionally)
+        collapsible.scroll_visible = lambda *a, **kw: None
         collapsible.collapsed = True
+        del collapsible.scroll_visible  # Restore inherited method for user-initiated toggles
         if len(self.all_lines) <= 1:
             collapsible.disabled = True
             try:
@@ -871,6 +885,9 @@ class PipelineApp(App):
 
     def __init__(self, orchestrator) -> None:
         super().__init__()
+        saved_theme = _load_prefs().get("theme")
+        if saved_theme and saved_theme in self.available_themes:
+            self.theme = saved_theme
         self._orchestrator = orchestrator
         self._finished: bool = False
         self._live: PipelineLive = PipelineLive()
@@ -883,12 +900,6 @@ class PipelineApp(App):
         yield Footer()
 
     def on_mount(self) -> None:
-        saved_theme = _load_prefs().get("theme")
-        if saved_theme:
-            try:
-                self.theme = saved_theme
-            except Exception:
-                pass
         self.title = "Auto-Scientist"
         self._live._app = self
         self._orchestrator._live = self._live
@@ -934,8 +945,11 @@ class PipelineApp(App):
 
     def _do_panel_collapse(self, panel: AgentPanel) -> None:
         """Apply panel DOM collapse and handle post-collapse UI (runs on UI thread)."""
+        near_bottom = self._is_near_bottom()
         panel._apply_complete_dom()
         self._on_panel_collapsed(panel)
+        if near_bottom:
+            self._scroll_to_end()
 
     def _on_panel_collapsed(self, panel: AgentPanel) -> None:
         """Handle panel completion: accumulate stats, fire toast."""
