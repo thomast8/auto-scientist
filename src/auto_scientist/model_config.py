@@ -45,8 +45,18 @@ BUILTIN_PRESETS: dict[str, dict] = {
             {"provider": "openai", "model": "gpt-5.4"},
         ],
     },
+    "medium": {
+        "defaults": {"model": "claude-sonnet-4-6", "reasoning": "medium"},
+        "analyst": {"model": "claude-opus-4-6", "reasoning": "medium"},
+        "scientist": {"model": "claude-opus-4-6", "reasoning": "medium"},
+        "summarizer": {"provider": "openai", "model": "gpt-5.4-nano"},
+        "critics": [
+            {"provider": "google", "model": "gemini-3.1-pro-preview", "reasoning": "medium"},
+            {"provider": "openai", "model": "gpt-5.4", "reasoning": "medium"},
+        ],
+    },
     "high": {
-        "defaults": {"model": "claude-sonnet-4-6"},
+        "defaults": {"model": "claude-sonnet-4-6", "reasoning": "high"},
         "analyst": {"model": "claude-opus-4-6", "reasoning": "high"},
         "scientist": {"model": "claude-opus-4-6", "reasoning": "high"},
         "summarizer": {"provider": "openai", "model": "gpt-5.4-nano"},
@@ -56,7 +66,7 @@ BUILTIN_PRESETS: dict[str, dict] = {
         ],
     },
     "max": {
-        "defaults": {"model": "claude-opus-4-6", "reasoning": "high"},
+        "defaults": {"model": "claude-opus-4-6", "reasoning": "max"},
         "analyst": {"model": "claude-opus-4-6", "reasoning": "max"},
         "scientist": {"model": "claude-opus-4-6", "reasoning": "max"},
         "summarizer": {"provider": "openai", "model": "gpt-5.4-mini"},
