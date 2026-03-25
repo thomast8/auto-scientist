@@ -4,25 +4,34 @@ Provides:
 - AgentPanel: Collapsible + RichLog widget for each agent phase
 - MetricsBar: Persistent metrics display (sparkline, tokens, phase)
 - IterationContainer: Bordered container grouping panels per iteration
+- AgentDetailScreen: Full-screen view of one agent's output
+- QuitConfirmScreen: Modal confirmation dialog for quit
+- PipelineCommandProvider: Command palette with navigation and control
 - PipelineLive: Bridge between orchestrator (worker thread) and Textual app
-- PipelineApp: Textual App with Header, Footer, and message handlers
+- PipelineApp: Textual App with screens, command palette, and message handlers
 """
 
 import asyncio
+import subprocess
 import time
+from functools import partial
 from pathlib import Path
 
 from rich.console import Console, RenderableType
 from rich.text import Text
 from textual.app import App, ComposeResult
 from textual.binding import Binding
-from textual.containers import Vertical, VerticalScroll
+from textual.command import Hit, Hits, Provider
+from textual.containers import Center, Vertical, VerticalScroll
 from textual.css.query import NoMatches
+from textual.screen import ModalScreen
 from textual.widget import Widget
 from textual.widgets import (
+    Button,
     Collapsible,
     Footer,
     Header,
+    Label,
     RichLog,
     Static,
 )
@@ -384,6 +393,195 @@ class IterationContainer(Vertical):
 
 
 # ---------------------------------------------------------------------------
+# AgentDetailScreen
+# ---------------------------------------------------------------------------
+
+
+class AgentDetailScreen(ModalScreen):
+    """Full-screen view of one agent's complete output."""
+
+    DEFAULT_CSS = """
+    AgentDetailScreen {
+        align: center middle;
+    }
+    AgentDetailScreen > Vertical {
+        width: 90%;
+        height: 90%;
+        border: solid $accent;
+        background: $surface;
+    }
+    AgentDetailScreen > Vertical > RichLog {
+        height: 1fr;
+    }
+    AgentDetailScreen > Vertical > Static {
+        height: auto;
+        padding: 0 1;
+        background: $primary-background;
+    }
+    """
+
+    BINDINGS = [
+        Binding("escape", "dismiss", "Back", show=True),
+    ]
+
+    def __init__(
+        self,
+        panel_name: str,
+        model: str,
+        stats: str,
+        lines: list[str],
+    ) -> None:
+        super().__init__()
+        self._panel_name = panel_name
+        self._model = model
+        self._stats = stats
+        self._lines = lines
+
+    def compose(self) -> ComposeResult:
+        with Vertical():
+            yield Static(
+                f"[bold]{self._panel_name}[/bold] ({self._model})"
+                f" | {self._stats}"
+            )
+            yield RichLog(auto_scroll=False, markup=True, wrap=True)
+
+    def on_mount(self) -> None:
+        rich_log = self.query_one(RichLog)
+        for line in self._lines:
+            rich_log.write(Text(line))
+
+    def action_dismiss(self) -> None:
+        self.app.pop_screen()
+
+
+# ---------------------------------------------------------------------------
+# QuitConfirmScreen
+# ---------------------------------------------------------------------------
+
+
+class QuitConfirmScreen(ModalScreen[bool]):
+    """Modal confirmation dialog for quitting while pipeline runs."""
+
+    DEFAULT_CSS = """
+    QuitConfirmScreen {
+        align: center middle;
+    }
+    QuitConfirmScreen > Vertical {
+        width: 50;
+        height: auto;
+        border: solid $error;
+        background: $surface;
+        padding: 1 2;
+    }
+    QuitConfirmScreen > Vertical > Label {
+        width: 100%;
+        text-align: center;
+        margin-bottom: 1;
+    }
+    QuitConfirmScreen > Vertical > Center {
+        height: auto;
+    }
+    """
+
+    BINDINGS = [
+        Binding("y", "yes", "Yes", show=True),
+        Binding("n", "no", "No", show=True),
+        Binding("escape", "no", show=False),
+    ]
+
+    def compose(self) -> ComposeResult:
+        with Vertical():
+            yield Label("Pipeline is still running. Quit anyway?")
+            with Center():
+                yield Button("Yes", variant="error", id="yes-btn")
+                yield Button("No", variant="primary", id="no-btn")
+
+    def on_button_pressed(self, event: Button.Pressed) -> None:
+        self.dismiss(event.button.id == "yes-btn")
+
+    def action_yes(self) -> None:
+        self.dismiss(True)
+
+    def action_no(self) -> None:
+        self.dismiss(False)
+
+
+# ---------------------------------------------------------------------------
+# PipelineCommandProvider
+# ---------------------------------------------------------------------------
+
+
+class PipelineCommandProvider(Provider):
+    """Command palette provider for pipeline navigation and control."""
+
+    async def search(self, query: str) -> Hits:
+        matcher = self.matcher(query)
+        app = self.app
+        if not isinstance(app, PipelineApp):
+            return
+
+        # Static commands
+        commands = [
+            ("Expand all panels", app.action_toggle_expand),
+            ("Collapse all panels", app.action_toggle_expand),
+            ("Go to top", partial(app._scroll_to, "top")),
+            ("Go to bottom", partial(app._scroll_to, "bottom")),
+            ("Quit", app.action_quit),
+        ]
+
+        # Theme switching
+        for theme_name in sorted(app.available_themes):
+            commands.append((
+                f"Switch theme: {theme_name}",
+                partial(app._set_theme, theme_name),
+            ))
+
+        # Pipeline control
+        if hasattr(app._orchestrator, "pause_requested"):
+            commands.append((
+                "Pause after current iteration",
+                partial(app._set_orchestrator_flag, "pause_requested"),
+            ))
+        if hasattr(app._orchestrator, "skip_to_report"):
+            commands.append((
+                "Skip to report",
+                partial(app._set_orchestrator_flag, "skip_to_report"),
+            ))
+
+        # Dynamic: go to iteration N
+        for container in app.query(IterationContainer):
+            title = container.border_title or "?"
+            commands.append((
+                f"Go to {title}",
+                partial(app._scroll_to_widget, container),
+            ))
+
+        # Dynamic: view agent details
+        for panel in app.query(AgentPanel):
+            commands.append((
+                f"View {panel.panel_name} details",
+                partial(app._open_agent_detail, panel),
+            ))
+
+        # Open experiment directory (macOS)
+        if app._orchestrator and hasattr(app._orchestrator, "output_dir"):
+            commands.append((
+                "Open experiment directory",
+                partial(
+                    app._open_directory,
+                    app._orchestrator.output_dir,
+                ),
+            ))
+
+        for label, callback in commands:
+            score = matcher.match(label)
+            if score > 0:
+                yield Hit(
+                    score, matcher.highlight(label), callback,
+                )
+
+
+# ---------------------------------------------------------------------------
 # PipelineLive bridge
 # ---------------------------------------------------------------------------
 
@@ -536,9 +734,15 @@ class PipelineLive:
 class PipelineApp(App):
     """Textual app that runs the orchestrator and displays the dashboard."""
 
+    COMMANDS = App.COMMANDS | {PipelineCommandProvider}
+
     BINDINGS = [
         Binding("ctrl+o", "toggle_expand", "Expand/Collapse", show=True),
         Binding("ctrl+q", "quit", "Quit", show=True),
+        Binding("ctrl+t", "cycle_theme", "Theme", show=True),
+        Binding(
+            "enter", "open_focused_detail", "Detail", show=False,
+        ),
     ]
 
     DEFAULT_CSS = """
@@ -649,7 +853,21 @@ class PipelineApp(App):
         self._scroll_to_end()
 
     def action_quit(self) -> None:
-        """Gracefully quit: cancel the pipeline if running, then exit."""
+        """Quit with confirmation if pipeline is still running."""
+        if not self._finished:
+            self.push_screen(
+                QuitConfirmScreen(), callback=self._handle_quit_confirm,
+            )
+        else:
+            self.exit()
+
+    def _handle_quit_confirm(self, confirmed: bool | None) -> None:
+        """Handle quit confirmation result."""
+        if confirmed:
+            self._force_quit()
+
+    def _force_quit(self) -> None:
+        """Cancel the pipeline and exit."""
         if self._worker_loop is not None and self._worker_loop.is_running():
             self._worker_loop.call_soon_threadsafe(self._cancel_all_tasks)
         self.exit()
@@ -659,6 +877,74 @@ class PipelineApp(App):
         if self._worker_loop:
             for task in asyncio.all_tasks(self._worker_loop):
                 task.cancel()
+
+    def action_cycle_theme(self) -> None:
+        """Cycle through available themes."""
+        themes = sorted(self.available_themes)
+        if not themes:
+            return
+        current = self.theme or themes[0]
+        try:
+            idx = themes.index(current)
+            self.theme = themes[(idx + 1) % len(themes)]
+        except ValueError:
+            self.theme = themes[0]
+        self.notify(f"Theme: {self.theme}")
+
+    def action_open_focused_detail(self) -> None:
+        """Open detail view for the currently focused AgentPanel."""
+        focused = self.focused
+        if focused is None:
+            return
+        panel = None
+        widget = focused
+        while widget is not None:
+            if isinstance(widget, AgentPanel):
+                panel = widget
+                break
+            widget = widget.parent
+        if panel is not None:
+            self._open_agent_detail(panel)
+
+    # -- Command palette helpers --
+
+    def _open_agent_detail(self, panel: AgentPanel) -> None:
+        """Push the AgentDetailScreen for a panel."""
+        self.push_screen(AgentDetailScreen(
+            panel_name=panel.panel_name,
+            model=panel.model,
+            stats=panel._build_footer(),
+            lines=list(panel.all_lines),
+        ))
+
+    def _scroll_to(self, direction: str) -> None:
+        """Scroll the main area to top or bottom."""
+        scroll = self.query_one("#main-scroll", VerticalScroll)
+        if direction == "top":
+            scroll.scroll_home(animate=False)
+        else:
+            scroll.scroll_end(animate=False)
+
+    def _scroll_to_widget(self, widget: Widget) -> None:
+        """Scroll to make a widget visible."""
+        widget.scroll_visible(animate=False)
+
+    def _set_theme(self, theme_name: str) -> None:
+        """Switch to a named theme."""
+        self.theme = theme_name
+        self.notify(f"Theme: {theme_name}")
+
+    def _set_orchestrator_flag(self, flag_name: str) -> None:
+        """Set a boolean flag on the orchestrator."""
+        setattr(self._orchestrator, flag_name, True)
+        self.notify(f"{flag_name.replace('_', ' ').title()} requested")
+
+    def _open_directory(self, path: Path) -> None:
+        """Open a directory in the system file manager."""
+        try:
+            subprocess.Popen(["open", str(path)])
+        except FileNotFoundError:
+            self.notify(f"Directory: {path}", timeout=10)
 
     # -- Mount helpers (called via call_from_thread from PipelineLive) --
 

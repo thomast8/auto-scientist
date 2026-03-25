@@ -7,11 +7,13 @@ from textual.widgets import Collapsible, RichLog
 from auto_scientist.console import (
     AGENT_STYLES,
     PHASE_STYLES,
+    AgentDetailScreen,
     AgentPanel,
     IterationContainer,
     MetricsBar,
     PipelineApp,
     PipelineLive,
+    QuitConfirmScreen,
     _format_elapsed,
     _score_style,
 )
@@ -659,3 +661,166 @@ class TestOrchestratorFlags:
         )
         assert orch.pause_requested is False
         assert orch.skip_to_report is False
+
+
+# ---------------------------------------------------------------------------
+# Screen tests
+# ---------------------------------------------------------------------------
+
+
+class TestAgentDetailScreen:
+    @pytest.mark.asyncio
+    async def test_detail_screen_shows_lines(self):
+        class FakeOrch:
+            _live: PipelineLive | None = None
+
+            async def run(self):
+                pass
+
+        orch = FakeOrch()
+        app = PipelineApp(orch)
+        async with app.run_test() as pilot:
+            await pilot.pause()
+            app.push_screen(AgentDetailScreen(
+                panel_name="Analyst",
+                model="claude-sonnet-4-6",
+                stats="5s | 100 in / 50 out",
+                lines=["line 1", "line 2", "line 3"],
+            ))
+            await pilot.pause()
+            rich_log = app.screen.query_one(RichLog)
+            assert rich_log is not None
+
+    @pytest.mark.asyncio
+    async def test_detail_screen_escape_dismisses(self):
+        class FakeOrch:
+            _live: PipelineLive | None = None
+
+            async def run(self):
+                pass
+
+        orch = FakeOrch()
+        app = PipelineApp(orch)
+        async with app.run_test() as pilot:
+            await pilot.pause()
+            app.push_screen(AgentDetailScreen(
+                panel_name="Analyst",
+                model="claude-sonnet-4-6",
+                stats="5s",
+                lines=["line 1"],
+            ))
+            await pilot.pause()
+            assert isinstance(app.screen, AgentDetailScreen)
+            await pilot.press("escape")
+            await pilot.pause()
+            assert not isinstance(app.screen, AgentDetailScreen)
+
+
+class TestQuitConfirmScreen:
+    @pytest.mark.asyncio
+    async def test_quit_confirm_y_dismisses_with_true(self):
+        class FakeOrch:
+            _live: PipelineLive | None = None
+
+            async def run(self):
+                pass
+
+        results = []
+        orch = FakeOrch()
+        app = PipelineApp(orch)
+        async with app.run_test() as pilot:
+            await pilot.pause()
+            app._finished = False  # Pretend still running
+            app.push_screen(
+                QuitConfirmScreen(), callback=results.append,
+            )
+            await pilot.pause()
+            await pilot.press("y")
+            await pilot.pause()
+            assert results == [True]
+
+    @pytest.mark.asyncio
+    async def test_quit_confirm_n_dismisses_with_false(self):
+        class FakeOrch:
+            _live: PipelineLive | None = None
+
+            async def run(self):
+                pass
+
+        results = []
+        orch = FakeOrch()
+        app = PipelineApp(orch)
+        async with app.run_test() as pilot:
+            await pilot.pause()
+            app.push_screen(
+                QuitConfirmScreen(), callback=results.append,
+            )
+            await pilot.pause()
+            await pilot.press("n")
+            await pilot.pause()
+            assert results == [False]
+
+    @pytest.mark.asyncio
+    async def test_quit_when_finished_exits_immediately(self):
+        class FakeOrch:
+            _live: PipelineLive | None = None
+
+            async def run(self):
+                pass
+
+        orch = FakeOrch()
+        app = PipelineApp(orch)
+        async with app.run_test() as pilot:
+            await pilot.pause()
+            assert app._finished is True
+            # Should exit without showing modal
+            await pilot.press("ctrl+q")
+            await pilot.pause()
+
+    @pytest.mark.asyncio
+    async def test_quit_when_running_shows_modal(self):
+        import threading
+
+        gate = threading.Event()
+
+        class FakeOrch:
+            _live: PipelineLive | None = None
+
+            async def run(self):
+                gate.wait()
+
+        orch = FakeOrch()
+        app = PipelineApp(orch)
+        async with app.run_test() as pilot:
+            await pilot.pause()
+            assert app._finished is False
+            await pilot.press("ctrl+q")
+            await pilot.pause()
+            assert isinstance(app.screen, QuitConfirmScreen)
+            await pilot.press("n")
+            await pilot.pause()
+            gate.set()
+
+
+# ---------------------------------------------------------------------------
+# Theme cycling test
+# ---------------------------------------------------------------------------
+
+
+class TestThemeCycling:
+    @pytest.mark.asyncio
+    async def test_ctrl_t_changes_theme(self):
+        class FakeOrch:
+            _live: PipelineLive | None = None
+
+            async def run(self):
+                pass
+
+        orch = FakeOrch()
+        app = PipelineApp(orch)
+        async with app.run_test() as pilot:
+            await pilot.pause()
+            initial_theme = app.theme
+            await pilot.press("ctrl+t")
+            await pilot.pause()
+            assert app.theme != initial_theme
