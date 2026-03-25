@@ -150,6 +150,9 @@ class AgentPanel(Widget):
     AgentPanel CollapsibleTitle {
         width: 100%;
     }
+    AgentPanel Collapsible:disabled CollapsibleTitle {
+        opacity: 1;
+    }
     """
 
     def __init__(self, name: str, model: str, style: str = "cyan", description: str = "") -> None:
@@ -871,8 +874,11 @@ class PipelineApp(App):
 
     def on_mount(self) -> None:
         saved_theme = _load_prefs().get("theme")
-        if saved_theme and saved_theme in self.available_themes:
-            self.theme = saved_theme
+        if saved_theme:
+            try:
+                self.theme = saved_theme
+            except Exception:
+                pass
         self.title = "Auto-Scientist"
         self._live._app = self
         self._orchestrator._live = self._live
