@@ -185,6 +185,19 @@ class AgentPanel(Widget):
     def on_mount(self) -> None:
         self._refresh_timer = self.set_interval(1, self._tick)
         self._dot_count = 0
+        self._apply_title_color()
+
+    def _apply_title_color(self) -> None:
+        """Force the CollapsibleTitle foreground color to match the agent style.
+
+        Without this, some Textual themes override Rich markup colors on the
+        CollapsibleTitle widget, making completed panels appear grey.
+        """
+        try:
+            title_widget = self.query_one(CollapsibleTitle)
+        except NoMatches:
+            return
+        title_widget.styles.color = self.panel_style
 
     def _tick(self) -> None:
         """Update the Collapsible title with elapsed time and animate description dots."""
@@ -305,6 +318,7 @@ class AgentPanel(Widget):
         collapsible.scroll_visible = lambda *a, **kw: None
         collapsible.collapsed = True
         del collapsible.scroll_visible  # Restore inherited method for user-initiated toggles
+        self._apply_title_color()
         if len(self.all_lines) <= 1:
             collapsible.disabled = True
             try:
@@ -344,6 +358,7 @@ class AgentPanel(Widget):
             f"[{self.panel_style}]{self._panel_name}:[/] [red][error] {msg}[/red] | {self._build_footer()}"
         )
         rich_log.write(Text(f"[error] {msg}", style="red"))
+        self._apply_title_color()
 
     def set_tokens(self, input_tokens: int, output_tokens: int) -> None:
         """Set token usage metadata."""
