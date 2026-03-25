@@ -569,20 +569,13 @@ class TestPipelineApp:
             panels = app.query(AgentPanel)
             assert len(panels) >= 1
 
-    @pytest.mark.asyncio
-    async def test_start_iteration_creates_container(self):
-        class FakeOrch:
-            _live: PipelineLive | None = None
-
-            async def run(self):
-                self._live.start_iteration(0)
-
-        orch = FakeOrch()
-        app = PipelineApp(orch)
-        async with app.run_test() as pilot:
-            await pilot.pause()
-            containers = app.query(IterationContainer)
-            assert len(containers) >= 1
+    def test_start_iteration_creates_container_headless(self):
+        live = PipelineLive()
+        live.start()
+        live.start_iteration(0)
+        assert live._current_iteration is not None
+        assert live._current_iteration.border_title == "Iteration 0"
+        live.stop()
 
     @pytest.mark.asyncio
     async def test_update_status(self):

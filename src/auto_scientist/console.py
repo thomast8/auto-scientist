@@ -32,6 +32,7 @@ from textual.widgets import (
     Footer,
     Header,
     Label,
+    LoadingIndicator,
     RichLog,
     Static,
 )
@@ -108,6 +109,9 @@ class AgentPanel(Widget):
         height: auto;
         max-height: 20;
     }
+    AgentPanel LoadingIndicator {
+        height: 1;
+    }
     """
 
     def __init__(self, name: str, model: str, style: str = "cyan") -> None:
@@ -127,6 +131,7 @@ class AgentPanel(Widget):
 
     def compose(self) -> ComposeResult:
         with Collapsible(title=self._make_title(), collapsed=False):
+            yield LoadingIndicator()
             yield RichLog(auto_scroll=True, markup=True, wrap=True)
 
     def on_mount(self) -> None:
@@ -171,6 +176,10 @@ class AgentPanel(Widget):
             rich_log = self.query_one(RichLog)
         except NoMatches:
             return
+        # Remove loading indicator on first output
+        if len(self.all_lines) == 1:
+            for indicator in self.query(LoadingIndicator):
+                indicator.remove()
         rich_log.write(Text(cleaned))
 
     def complete(self, done_summary: str = "") -> None:
@@ -187,6 +196,8 @@ class AgentPanel(Widget):
         elif self.all_lines:
             self.done_summary = self.all_lines[-1]
         self._end_time = time.monotonic()
+        for indicator in self.query(LoadingIndicator):
+            indicator.remove()
         try:
             collapsible = self.query_one(Collapsible)
         except NoMatches:
@@ -206,6 +217,8 @@ class AgentPanel(Widget):
         self.done = True
         self.error_msg = msg
         self._end_time = time.monotonic()
+        for indicator in self.query(LoadingIndicator):
+            indicator.remove()
         try:
             collapsible = self.query_one(Collapsible)
             rich_log = self.query_one(RichLog)
