@@ -175,7 +175,8 @@ class TestAgentPanel:
             collapsible = panel.query_one(Collapsible)
             assert collapsible.collapsed is True
             assert collapsible.disabled is True
-            assert collapsible.collapsed_symbol == ""
+            title_widget = collapsible.query_one("CollapsibleTitle")
+            assert title_widget.collapsed_symbol == "●"
 
     @pytest.mark.asyncio
     async def test_complete_multi_entry_stays_expandable(self):

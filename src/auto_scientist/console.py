@@ -54,6 +54,7 @@ from textual.widgets import (
     RichLog,
     Static,
 )
+from textual.widgets._collapsible import CollapsibleTitle
 from textual.worker import Worker, WorkerState
 
 # Module-level console for one-time prints (startup banner in headless mode, etc.)
@@ -139,9 +140,6 @@ class AgentPanel(Widget):
         height: auto;
         max-height: 20;
     }
-    AgentPanel LoadingIndicator {
-        height: 1;
-    }
     AgentPanel .agent-description {
         color: $text-muted;
         text-style: italic;
@@ -178,20 +176,29 @@ class AgentPanel(Widget):
 
     def compose(self) -> ComposeResult:
         with Collapsible(title=self._make_title(), collapsed=False):
-            yield LoadingIndicator()
             if self._description:
                 yield Static(self._description, classes="agent-description")
             yield RichLog(auto_scroll=True, markup=True, wrap=True)
 
     def on_mount(self) -> None:
         self._refresh_timer = self.set_interval(1, self._tick)
+        self._dot_count = 0
 
     def _tick(self) -> None:
-        """Update the Collapsible title with elapsed time. Stops after done."""
+        """Update the Collapsible title with elapsed time and animate description dots."""
         if self.done and hasattr(self, "_refresh_timer"):
             self._refresh_timer.stop()
             return
         self._update_title()
+        if self._description and not self.all_lines:
+            self._dot_count = (self._dot_count + 1) % 4
+            dots = "." * self._dot_count if self._dot_count else ""
+            base = self._description.rstrip(".")
+            try:
+                desc_widget = self.query_one(".agent-description", Static)
+                desc_widget.update(f"{base}{dots}")
+            except NoMatches:
+                pass
 
     def on_resize(self, event) -> None:
         """Re-render RichLog content at new width."""
@@ -245,8 +252,6 @@ class AgentPanel(Widget):
     def _write_to_richlog(self, text: str) -> None:
         """Write a line to the RichLog widget (must be called from UI thread)."""
         if len(self.all_lines) == 1:
-            for indicator in self.query(LoadingIndicator):
-                indicator.remove()
             for desc in self.query(".agent-description"):
                 desc.remove()
         try:
@@ -273,8 +278,6 @@ class AgentPanel(Widget):
 
     def _apply_complete_dom(self) -> None:
         """Apply completion state to DOM (must be called from UI thread)."""
-        for indicator in self.query(LoadingIndicator):
-            indicator.remove()
         for desc in self.query(".agent-description"):
             desc.remove()
         try:
@@ -289,8 +292,14 @@ class AgentPanel(Widget):
         )
         collapsible.collapsed = True
         if len(self.all_lines) <= 1:
-            collapsible.collapsed_symbol = ""
             collapsible.disabled = True
+            try:
+                title_widget = collapsible.query_one(CollapsibleTitle)
+                title_widget.collapsed_symbol = "●"
+                title_widget.expanded_symbol = "●"
+                title_widget._update_label()
+            except NoMatches:
+                pass
 
     def error(self, msg: str) -> None:
         """Mark this panel as errored. Thread-safe: routes DOM update to UI thread."""
@@ -310,8 +319,6 @@ class AgentPanel(Widget):
 
     def _apply_error_dom(self, msg: str) -> None:
         """Apply error state to DOM (must be called from UI thread)."""
-        for indicator in self.query(LoadingIndicator):
-            indicator.remove()
         for desc in self.query(".agent-description"):
             desc.remove()
         try:
@@ -965,13 +972,24 @@ class PipelineApp(App):
     # -- Key binding actions --
 
     def action_toggle_expand(self) -> None:
-        """Toggle expanded state on all AgentPanel Collapsibles."""
-        collapsibles = list(self.query("AgentPanel Collapsible"))
-        if not collapsibles:
+        """Toggle expanded state on all AgentPanel Collapsibles.
+
+        When collapsing, skip panels that are still running so their
+        live output remains visible.
+        """
+        panels = list(self.query(AgentPanel))
+        if not panels:
             return
-        new_state = not collapsibles[0].collapsed
-        for c in collapsibles:
-            c.collapsed = new_state
+        first_collapsible = panels[0].query_one(Collapsible)
+        collapsing = not first_collapsible.collapsed
+        for panel in panels:
+            if collapsing and not panel.done:
+                continue
+            try:
+                c = panel.query_one(Collapsible)
+            except NoMatches:
+                continue
+            c.collapsed = collapsing
         self._scroll_to_end()
 
     def action_quit(self) -> None:
