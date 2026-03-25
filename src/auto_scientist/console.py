@@ -45,8 +45,8 @@ console = Console()
 AGENT_STYLES = {
     "Analyst": "green",
     "Scientist": "cyan",
-    "Coder": "magenta",
-    "Ingestor": "red",
+    "Coder": "magenta1",
+    "Ingestor": "dark_orange",
     "Report": "blue",
     "Critic": "yellow",
     "Debate": "yellow",
@@ -55,12 +55,12 @@ AGENT_STYLES = {
 
 # Maps orchestrator phase names to colors (matches the active agent)
 PHASE_STYLES = {
-    "INGESTION": "red",
+    "INGESTION": "dark_orange",
     "ANALYZE": "green",
     "PLAN": "cyan",
     "DEBATE": "yellow",
     "REVISE": "cyan",
-    "IMPLEMENT": "magenta",
+    "IMPLEMENT": "magenta1",
     "REPORT": "blue",
 }
 
@@ -97,6 +97,7 @@ class AgentPanel(Widget):
 
     DEFAULT_CSS = """
     AgentPanel {
+        width: 100%;
         height: auto;
         min-height: 3;
         padding: 0 0;
@@ -111,6 +112,9 @@ class AgentPanel(Widget):
     }
     AgentPanel LoadingIndicator {
         height: 1;
+    }
+    AgentPanel CollapsibleTitle {
+        width: 100%;
     }
     """
 
@@ -144,10 +148,22 @@ class AgentPanel(Widget):
             return
         self._update_title()
 
+    def on_resize(self, event) -> None:
+        """Re-render RichLog content at new width."""
+        if not self.all_lines:
+            return
+        try:
+            rich_log = self.query_one(RichLog)
+        except NoMatches:
+            return
+        rich_log.clear()
+        for line in self.all_lines:
+            rich_log.write(Text(line), expand=True)
+
     def _make_title(self) -> str:
         """Build the Collapsible title string."""
         footer = self._build_footer()
-        return f"{self._panel_name} ({self.model}) | {footer}"
+        return f"[{self.panel_style}]{self._panel_name} ({self.model}) | {footer}[/]"
 
     def _update_title(self) -> None:
         """Update the Collapsible title in the DOM."""
@@ -180,7 +196,7 @@ class AgentPanel(Widget):
         if len(self.all_lines) == 1:
             for indicator in self.query(LoadingIndicator):
                 indicator.remove()
-        rich_log.write(Text(cleaned))
+        rich_log.write(Text(cleaned), expand=True)
 
     def complete(self, done_summary: str = "") -> None:
         """Mark this panel as done.
@@ -206,7 +222,7 @@ class AgentPanel(Widget):
         if summary.startswith("[done] "):
             summary = summary[len("[done] "):]
         collapsible.title = (
-            f"{self._panel_name}: {summary} | {self._build_footer()}"
+            f"[{self.panel_style}]{self._panel_name}: {summary} | {self._build_footer()}[/]"
         )
         collapsible.collapsed = True
 
@@ -225,7 +241,7 @@ class AgentPanel(Widget):
         except NoMatches:
             return
         collapsible.title = (
-            f"{self._panel_name}: [error] {msg} | {self._build_footer()}"
+            f"[{self.panel_style}]{self._panel_name}:[/] [red][error] {msg}[/red] | {self._build_footer()}"
         )
         rich_log.write(Text(f"[error] {msg}", style="red"))
 
@@ -761,6 +777,9 @@ class PipelineApp(App):
     DEFAULT_CSS = """
     #main-scroll {
         height: 1fr;
+    }
+    #main-scroll > Static {
+        width: 100%;
     }
     """
 
