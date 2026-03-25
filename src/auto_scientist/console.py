@@ -187,6 +187,12 @@ class AgentPanel(Widget):
         self._dot_count = 0
         self._apply_title_color()
 
+    # Rich markup color names that need translation for Textual CSS styles.color
+    _RICH_TO_TEXTUAL_COLOR: dict[str, str] = {
+        "bright_red": "ansi_bright_red",
+        "magenta1": "ansi_bright_magenta",
+    }
+
     def _apply_title_color(self) -> None:
         """Force the CollapsibleTitle foreground color to match the agent style.
 
@@ -197,7 +203,8 @@ class AgentPanel(Widget):
             title_widget = self.query_one(CollapsibleTitle)
         except NoMatches:
             return
-        title_widget.styles.color = self.panel_style
+        css_color = self._RICH_TO_TEXTUAL_COLOR.get(self.panel_style, self.panel_style)
+        title_widget.styles.color = css_color
 
     def _tick(self) -> None:
         """Update the Collapsible title with elapsed time and animate description dots."""
