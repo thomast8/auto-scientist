@@ -288,6 +288,9 @@ class AgentPanel(Widget):
             f"[{self.panel_style}]{self._panel_name}: {summary} | {self._build_footer()}[/]"
         )
         collapsible.collapsed = True
+        if len(self.all_lines) <= 1:
+            collapsible.collapsed_symbol = ""
+            collapsible.disabled = True
 
     def error(self, msg: str) -> None:
         """Mark this panel as errored. Thread-safe: routes DOM update to UI thread."""

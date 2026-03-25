@@ -161,8 +161,34 @@ class TestAgentPanel:
         panel = AgentPanel(name="Analyst", model="claude-sonnet-4-6", style="green")
         async with PanelTestApp(panel).run_test():
             panel.complete("done")
+            panel._apply_complete_dom()
             collapsible = panel.query_one(Collapsible)
             assert collapsible.collapsed is True
+
+    @pytest.mark.asyncio
+    async def test_complete_single_entry_not_expandable(self):
+        panel = AgentPanel(name="Scientist", model="claude-sonnet-4-6", style="cyan")
+        async with PanelTestApp(panel).run_test():
+            panel.add_line("Planned experiment A")
+            panel.complete("Planned experiment A")
+            panel._apply_complete_dom()
+            collapsible = panel.query_one(Collapsible)
+            assert collapsible.collapsed is True
+            assert collapsible.disabled is True
+            assert collapsible.collapsed_symbol == ""
+
+    @pytest.mark.asyncio
+    async def test_complete_multi_entry_stays_expandable(self):
+        panel = AgentPanel(name="Analyst", model="claude-sonnet-4-6", style="green")
+        async with PanelTestApp(panel).run_test():
+            panel.add_line("Step 1")
+            panel.add_line("Step 2")
+            panel.add_line("Step 3")
+            panel.complete("Analysis complete")
+            panel._apply_complete_dom()
+            collapsible = panel.query_one(Collapsible)
+            assert collapsible.collapsed is True
+            assert collapsible.disabled is False
 
     @pytest.mark.asyncio
     async def test_error(self):
