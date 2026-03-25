@@ -12,10 +12,28 @@ Provides:
 """
 
 import asyncio
+import json
 import subprocess
+import threading
 import time
 from functools import partial
 from pathlib import Path
+
+_PREFS_PATH = Path.home() / ".config" / "auto-scientist" / "preferences.json"
+
+
+def _load_prefs() -> dict:
+    """Load user preferences from disk."""
+    try:
+        return json.loads(_PREFS_PATH.read_text())
+    except (FileNotFoundError, json.JSONDecodeError, OSError):
+        return {}
+
+
+def _save_prefs(prefs: dict) -> None:
+    """Save user preferences to disk."""
+    _PREFS_PATH.parent.mkdir(parents=True, exist_ok=True)
+    _PREFS_PATH.write_text(json.dumps(prefs, indent=2))
 
 from rich.console import Console, RenderableType
 from rich.text import Text
@@ -46,16 +64,27 @@ AGENT_STYLES = {
     "Analyst": "green",
     "Scientist": "cyan",
     "Coder": "magenta1",
-    "Ingestor": "dark_orange",
+    "Ingestor": "red",
     "Report": "blue",
     "Critic": "yellow",
     "Debate": "yellow",
     "Results": "dim",
 }
 
+# Short descriptions shown immediately when an agent panel opens (before first summary)
+AGENT_DESCRIPTIONS: dict[str, str] = {
+    "Ingestor": "Preparing and canonicalizing raw data for experiment scripts...",
+    "Analyst": "Analyzing experiment results and producing quantitative assessments...",
+    "Scientist": "Formulating hypotheses and planning the next experiment...",
+    "Critic": "Challenging the plan through critical debate...",
+    "Revision": "Revising the experiment plan based on critique feedback...",
+    "Coder": "Implementing the experiment plan as a Python script and running it...",
+    "Report": "Generating a comprehensive summary report of all findings...",
+}
+
 # Maps orchestrator phase names to colors (matches the active agent)
 PHASE_STYLES = {
-    "INGESTION": "dark_orange",
+    "INGESTION": "red",
     "ANALYZE": "green",
     "PLAN": "cyan",
     "DEBATE": "yellow",
@@ -113,12 +142,17 @@ class AgentPanel(Widget):
     AgentPanel LoadingIndicator {
         height: 1;
     }
+    AgentPanel .agent-description {
+        color: $text-muted;
+        text-style: italic;
+        padding: 0 1;
+    }
     AgentPanel CollapsibleTitle {
         width: 100%;
     }
     """
 
-    def __init__(self, name: str, model: str, style: str = "cyan") -> None:
+    def __init__(self, name: str, model: str, style: str = "cyan", description: str = "") -> None:
         super().__init__()
         self._panel_name = name
         self.model = model
@@ -132,10 +166,18 @@ class AgentPanel(Widget):
         self.done_summary = ""
         self.error_msg = ""
         self._end_time: float | None = None
+        # Resolve description: explicit > exact lookup > prefix lookup (e.g. "Critic/X" -> "Critic")
+        if not description:
+            description = AGENT_DESCRIPTIONS.get(
+                name, AGENT_DESCRIPTIONS.get(name.split("/")[0], "")
+            )
+        self._description = description
 
     def compose(self) -> ComposeResult:
         with Collapsible(title=self._make_title(), collapsed=False):
             yield LoadingIndicator()
+            if self._description:
+                yield Static(self._description, classes="agent-description")
             yield RichLog(auto_scroll=True, markup=True, wrap=True)
 
     def on_mount(self) -> None:
@@ -183,26 +225,39 @@ class AgentPanel(Widget):
         return self.all_lines
 
     def add_line(self, text: str) -> None:
-        """Append a summary line to the RichLog. No-op after done."""
+        """Append a summary line. Thread-safe: routes DOM update to UI thread."""
         if self.done:
             return
         cleaned = " ".join(text.split())
         self.all_lines.append(cleaned)
         try:
-            rich_log = self.query_one(RichLog)
-        except NoMatches:
+            app = self.app
+        except Exception:
             return
-        # Remove loading indicator on first output
+        if app._thread_id == threading.get_ident():
+            self._write_to_richlog(cleaned)
+        else:
+            app.call_from_thread(self._write_to_richlog, cleaned)
+
+    def _write_to_richlog(self, text: str) -> None:
+        """Write a line to the RichLog widget (must be called from UI thread)."""
         if len(self.all_lines) == 1:
             for indicator in self.query(LoadingIndicator):
                 indicator.remove()
-        rich_log.write(Text(cleaned), expand=True)
+            for desc in self.query(".agent-description"):
+                desc.remove()
+        try:
+            rich_log = self.query_one(RichLog)
+        except NoMatches:
+            return
+        rich_log.write(Text(text), expand=True)
 
     def complete(self, done_summary: str = "") -> None:
         """Mark this panel as done.
 
         If done_summary is empty and the panel has lines, the last line
-        is used as the done summary.
+        is used as the done summary. Sets metadata immediately (thread-safe),
+        defers DOM updates to the UI thread.
         """
         if self.done:
             return
@@ -212,8 +267,13 @@ class AgentPanel(Widget):
         elif self.all_lines:
             self.done_summary = self.all_lines[-1]
         self._end_time = time.monotonic()
+
+    def _apply_complete_dom(self) -> None:
+        """Apply completion state to DOM (must be called from UI thread)."""
         for indicator in self.query(LoadingIndicator):
             indicator.remove()
+        for desc in self.query(".agent-description"):
+            desc.remove()
         try:
             collapsible = self.query_one(Collapsible)
         except NoMatches:
@@ -227,14 +287,27 @@ class AgentPanel(Widget):
         collapsible.collapsed = True
 
     def error(self, msg: str) -> None:
-        """Mark this panel as errored."""
+        """Mark this panel as errored. Thread-safe: routes DOM update to UI thread."""
         if self.done:
             return
         self.done = True
         self.error_msg = msg
         self._end_time = time.monotonic()
+        try:
+            app = self.app
+        except Exception:
+            return
+        if app._thread_id == threading.get_ident():
+            self._apply_error_dom(msg)
+        else:
+            app.call_from_thread(self._apply_error_dom, msg)
+
+    def _apply_error_dom(self, msg: str) -> None:
+        """Apply error state to DOM (must be called from UI thread)."""
         for indicator in self.query(LoadingIndicator):
             indicator.remove()
+        for desc in self.query(".agent-description"):
+            desc.remove()
         try:
             collapsible = self.query_one(Collapsible)
             rich_log = self.query_one(RichLog)
@@ -403,7 +476,7 @@ class IterationContainer(Vertical):
     IterationContainer {
         height: auto;
         border: solid $accent;
-        transition: border 300ms ease;
+        transition: border 300ms in_out_cubic;
     }
     """
 
@@ -657,7 +730,7 @@ class PipelineLive:
         panel.complete(done_summary)
         if self._app is not None:
             self._app.call_from_thread(
-                self._app._on_panel_collapsed, panel,
+                self._app._do_panel_collapse, panel,
             )
         if self._file_console is not None:
             self._file_console.print(
@@ -797,6 +870,9 @@ class PipelineApp(App):
         yield Footer()
 
     def on_mount(self) -> None:
+        saved_theme = _load_prefs().get("theme")
+        if saved_theme and saved_theme in self.available_themes:
+            self.theme = saved_theme
         self.title = "Auto-Scientist"
         self._live._app = self
         self._orchestrator._live = self._live
@@ -839,6 +915,11 @@ class PipelineApp(App):
                 )
 
     # -- Callbacks from PipelineLive (called via call_from_thread) --
+
+    def _do_panel_collapse(self, panel: AgentPanel) -> None:
+        """Apply panel DOM collapse and handle post-collapse UI (runs on UI thread)."""
+        panel._apply_complete_dom()
+        self._on_panel_collapsed(panel)
 
     def _on_panel_collapsed(self, panel: AgentPanel) -> None:
         """Handle panel completion: accumulate stats, fire toast."""
@@ -910,6 +991,12 @@ class PipelineApp(App):
             for task in asyncio.all_tasks(self._worker_loop):
                 task.cancel()
 
+    def _persist_theme(self, theme_name: str) -> None:
+        """Save the selected theme to user preferences."""
+        prefs = _load_prefs()
+        prefs["theme"] = theme_name
+        _save_prefs(prefs)
+
     def action_cycle_theme(self) -> None:
         """Cycle through available themes."""
         themes = sorted(self.available_themes)
@@ -921,6 +1008,7 @@ class PipelineApp(App):
             self.theme = themes[(idx + 1) % len(themes)]
         except ValueError:
             self.theme = themes[0]
+        self._persist_theme(self.theme)
         self.notify(f"Theme: {self.theme}")
 
     def action_open_focused_detail(self) -> None:
@@ -964,6 +1052,7 @@ class PipelineApp(App):
     def _set_theme(self, theme_name: str) -> None:
         """Switch to a named theme."""
         self.theme = theme_name
+        self._persist_theme(theme_name)
         self.notify(f"Theme: {theme_name}")
 
     def _set_orchestrator_flag(self, flag_name: str) -> None:
