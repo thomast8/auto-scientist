@@ -244,6 +244,8 @@ class Orchestrator:
         self.stream = stream
         self.verbose = verbose
         self._live: PipelineLive = PipelineLive()
+        self.pause_requested: bool = False
+        self.skip_to_report: bool = False
 
     def _validate_prerequisites(self) -> None:
         """Validate directories, API keys, and config before starting.
@@ -391,6 +393,18 @@ class Orchestrator:
                     self._live.add_rule(
                         Rule(f"Hit {self.max_consecutive_failures} consecutive failures. Stopping.", style="red")
                     )
+                    self._live.flush_completed()
+                    self.state.phase = "report"
+                    break
+
+                if self.pause_requested:
+                    self._live.add_rule(Rule("Paused by user.", style="yellow"))
+                    self._live.flush_completed()
+                    self.state.phase = "report"
+                    break
+
+                if self.skip_to_report:
+                    self._live.add_rule(Rule("Skipping to report.", style="yellow"))
                     self._live.flush_completed()
                     self.state.phase = "report"
                     break

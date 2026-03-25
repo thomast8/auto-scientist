@@ -1,31 +1,35 @@
 """Textual-based CLI dashboard for the auto-scientist pipeline.
 
 Provides:
-- AgentPanel: Auto-sizing widget for each agent phase (scrolling deque / full expand)
-- StatusBarWidget: Persistent status bar docked to bottom
+- AgentPanel: Collapsible + RichLog widget for each agent phase
+- MetricsBar: Persistent metrics display (sparkline, tokens, phase)
 - IterationContainer: Bordered container grouping panels per iteration
 - PipelineLive: Bridge between orchestrator (worker thread) and Textual app
-- PipelineApp: Textual App that composes the widget tree and runs the orchestrator
+- PipelineApp: Textual App with Header, Footer, and message handlers
 """
 
 import asyncio
 import time
-from collections import deque
 from pathlib import Path
 
-from rich.console import Console, Group, RenderableType
+from rich.console import Console, RenderableType
 from rich.text import Text
-from textual.app import App, ComposeResult, RenderResult
+from textual.app import App, ComposeResult
 from textual.binding import Binding
 from textual.containers import Vertical, VerticalScroll
+from textual.css.query import NoMatches
 from textual.widget import Widget
-from textual.widgets import Static
+from textual.widgets import (
+    Collapsible,
+    Footer,
+    Header,
+    RichLog,
+    Static,
+)
 from textual.worker import Worker, WorkerState
 
 # Module-level console for one-time prints (startup banner in headless mode, etc.)
 console = Console()
-
-PANEL_MAX_LINES = 5
 
 # Agent style palette
 AGENT_STYLES = {
@@ -74,20 +78,26 @@ def _format_elapsed(seconds: float) -> str:
 
 
 class AgentPanel(Widget):
-    """Auto-sizing panel widget for a single agent phase.
+    """Collapsible panel widget for a single agent phase.
 
-    Shows the most recent PANEL_MAX_LINES summary lines by default.
-    When ``expanded`` is True, shows ALL accumulated lines and the widget
-    grows to fit (``height: auto``).  On completion, collapses to just the
-    done summary + footer stats.
+    Contains a Collapsible wrapping a RichLog. The Collapsible title shows
+    agent name, model, and stats. On completion, collapses to show just
+    the done summary.
     """
 
     DEFAULT_CSS = """
     AgentPanel {
         height: auto;
         min-height: 3;
-        padding: 0 1;
+        padding: 0 0;
         margin: 0 0;
+    }
+    AgentPanel:hover {
+        background: $surface;
+    }
+    AgentPanel RichLog {
+        height: auto;
+        max-height: 20;
     }
     """
 
@@ -96,7 +106,6 @@ class AgentPanel(Widget):
         self._panel_name = name
         self.model = model
         self.panel_style = style
-        self.lines: deque[str] = deque(maxlen=PANEL_MAX_LINES)
         self.all_lines: list[str] = []
         self.start_time = time.monotonic()
         self.input_tokens = 0
@@ -106,51 +115,80 @@ class AgentPanel(Widget):
         self.done_summary = ""
         self.error_msg = ""
         self._end_time: float | None = None
-        self.expanded: bool = False
+
+    def compose(self) -> ComposeResult:
+        with Collapsible(title=self._make_title(), collapsed=False):
+            yield RichLog(auto_scroll=True, markup=True, wrap=True)
 
     def on_mount(self) -> None:
-        self._refresh_timer = self.set_interval(1 / 4, self._tick)
+        self._refresh_timer = self.set_interval(1, self._tick)
 
     def _tick(self) -> None:
-        """Periodic refresh for the elapsed timer. Stops after done."""
+        """Update the Collapsible title with elapsed time. Stops after done."""
         if self.done and hasattr(self, "_refresh_timer"):
             self._refresh_timer.stop()
-        # Capture scroll position BEFORE layout changes content height
-        should_scroll = (
-            isinstance(self.app, PipelineApp) and self.app._is_near_bottom()
-        )
-        # layout=True forces Textual to recalculate dimensions when
-        # content changes (new lines added, text wraps differently).
-        self.refresh(layout=True)
-        if should_scroll:
-            self.app._scroll_to_end()
+            return
+        self._update_title()
+
+    def _make_title(self) -> str:
+        """Build the Collapsible title string."""
+        footer = self._build_footer()
+        return f"{self._panel_name} ({self.model}) | {footer}"
+
+    def _update_title(self) -> None:
+        """Update the Collapsible title in the DOM."""
+        try:
+            collapsible = self.query_one(Collapsible)
+        except NoMatches:
+            return
+        collapsible.title = self._make_title()
 
     @property
     def panel_name(self) -> str:
         return self._panel_name
 
+    @property
+    def lines(self) -> list[str]:
+        """Backward-compatible property. Returns all_lines."""
+        return self.all_lines
+
     def add_line(self, text: str) -> None:
-        """Append a summary line. Older lines scroll off. No-op after done."""
+        """Append a summary line to the RichLog. No-op after done."""
         if self.done:
             return
         cleaned = " ".join(text.split())
         self.all_lines.append(cleaned)
-        self.lines.append(cleaned)
+        try:
+            rich_log = self.query_one(RichLog)
+        except NoMatches:
+            return
+        rich_log.write(Text(cleaned))
 
     def complete(self, done_summary: str = "") -> None:
         """Mark this panel as done.
 
         If done_summary is empty and the panel has lines, the last line
-        is used as the done summary (preserves the summarizer's [done] entry).
+        is used as the done summary.
         """
         if self.done:
             return
         self.done = True
         if done_summary:
             self.done_summary = done_summary
-        elif self.lines:
-            self.done_summary = self.lines[-1]
+        elif self.all_lines:
+            self.done_summary = self.all_lines[-1]
         self._end_time = time.monotonic()
+        try:
+            collapsible = self.query_one(Collapsible)
+        except NoMatches:
+            return
+        summary = self.done_summary
+        if summary.startswith("[done] "):
+            summary = summary[len("[done] "):]
+        collapsible.title = (
+            f"{self._panel_name}: {summary} | {self._build_footer()}"
+        )
+        collapsible.collapsed = True
 
     def error(self, msg: str) -> None:
         """Mark this panel as errored."""
@@ -159,6 +197,15 @@ class AgentPanel(Widget):
         self.done = True
         self.error_msg = msg
         self._end_time = time.monotonic()
+        try:
+            collapsible = self.query_one(Collapsible)
+            rich_log = self.query_one(RichLog)
+        except NoMatches:
+            return
+        collapsible.title = (
+            f"{self._panel_name}: [error] {msg} | {self._build_footer()}"
+        )
+        rich_log.write(Text(f"[error] {msg}", style="red"))
 
     def set_tokens(self, input_tokens: int, output_tokens: int) -> None:
         """Set token usage metadata."""
@@ -186,80 +233,31 @@ class AgentPanel(Widget):
         """Build the footer subtitle string."""
         parts = [_format_elapsed(self.elapsed)]
         if self.input_tokens or self.output_tokens:
-            parts.append(f"{self.input_tokens:,} in / {self.output_tokens:,} out")
+            parts.append(
+                f"{self.input_tokens:,} in / {self.output_tokens:,} out"
+            )
         if self.num_turns:
-            parts.append(f"{self.num_turns} {'turn' if self.num_turns == 1 else 'turns'}")
+            parts.append(
+                f"{self.num_turns} "
+                f"{'turn' if self.num_turns == 1 else 'turns'}"
+            )
         return " | ".join(parts)
 
-    def _build_body(self) -> RenderableType:
-        """Build the panel body content.
-
-        Returns Rich Text with explicit wrapping so Textual can measure
-        the height correctly for ``height: auto``.
-        """
-        if self.error_msg:
-            return Text(f"[error] {self.error_msg}", style="red", overflow="fold")
-
-        done_style = f"bold {self.panel_style}"
-
-        if self.done and self.done_summary:
-            summary = self.done_summary
-            if summary.startswith("[done] "):
-                summary = summary[len("[done] "):]
-            if self.expanded and self.all_lines:
-                result = Text(overflow="fold")
-                for i, line in enumerate(self.all_lines):
-                    if i > 0:
-                        result.append("\n")
-                    s = done_style if line.startswith("[done]") else ""
-                    result.append(line, style=s)
-                done_text = f"[done] {summary}"
-                last = self.all_lines[-1]
-                if last != done_text and last != summary:
-                    result.append("\n")
-                    result.append(done_text, style=done_style)
-                return result
-            return Text(f"[done] {summary}", style=done_style, overflow="fold")
-
-        if not self.lines:
-            return Text("  working...", style="dim")
-
-        source = self.all_lines if self.expanded else self.lines
-        result = Text(overflow="fold")
-        for i, line in enumerate(source):
-            if i > 0:
-                result.append("\n")
-            s = done_style if line.startswith("[done]") else ""
-            result.append(line, style=s)
-        return result
-
-    def render(self) -> RenderResult:
-        """Render the panel body. Border title/subtitle set dynamically."""
-        border_color = "red" if self.error_msg else self.panel_style
-        self.border_title = f"{self._panel_name} ({self.model})"
-        self.border_subtitle = self._build_footer()
-        self.styles.border = ("solid", border_color)
-        return self._build_body()
-
-    def on_click(self) -> None:
-        """Toggle expanded state on click."""
-        self.expanded = not self.expanded
-        self.refresh(layout=True)
-
 
 # ---------------------------------------------------------------------------
-# StatusBarWidget
+# MetricsBar widget
 # ---------------------------------------------------------------------------
 
 
-class StatusBarWidget(Widget):
-    """Persistent status bar docked to the bottom of the screen."""
+class MetricsBar(Widget):
+    """Persistent metrics bar showing iteration, phase, scores, tokens."""
 
     DEFAULT_CSS = """
-    StatusBarWidget {
-        dock: bottom;
+    MetricsBar {
+        dock: top;
         height: 1;
         background: $surface;
+        padding: 0 1;
     }
     """
 
@@ -273,11 +271,12 @@ class StatusBarWidget(Widget):
         self.total_input_tokens = 0
         self.total_output_tokens = 0
         self.total_turns = 0
+        self.scores: list[float] = []
         self.finished: bool = False
         self._end_time: float | None = None
 
     def on_mount(self) -> None:
-        self.set_interval(1 / 4, self.refresh)
+        self.set_interval(1, self.refresh)
 
     def set_status(
         self,
@@ -286,7 +285,7 @@ class StatusBarWidget(Widget):
         best_version: str | None = None,
         best_score: int | None = None,
     ) -> None:
-        """Update status bar fields. Only non-None values are changed."""
+        """Update metrics bar fields. Only non-None values are changed."""
         if iteration is not None:
             self.iteration = iteration
         if phase is not None:
@@ -295,19 +294,20 @@ class StatusBarWidget(Widget):
             self.best_version = best_version
         if best_score is not None:
             self.best_score = best_score
+        self.refresh()
 
     def finish(self) -> None:
         """Freeze the elapsed timer at the current value."""
         self.finished = True
         self._end_time = time.monotonic()
 
-    def add_agent_stats(self, panel: AgentPanel) -> None:
+    def add_agent_stats(self, panel: "AgentPanel") -> None:
         """Accumulate a completed agent's stats into the running totals."""
         self.total_input_tokens += panel.input_tokens
         self.total_output_tokens += panel.output_tokens
         self.total_turns += panel.num_turns
 
-    def render(self) -> RenderResult:
+    def render(self) -> Text:
         end = self._end_time if self._end_time else time.monotonic()
         elapsed = _format_elapsed(end - self.start_time)
         phase_style = PHASE_STYLES.get(self.phase, "cyan")
@@ -321,7 +321,10 @@ class StatusBarWidget(Widget):
 
         total_tokens = self.total_input_tokens + self.total_output_tokens
         if total_tokens > 0:
-            tokens = f"{self.total_input_tokens:,} in / {self.total_output_tokens:,} out"
+            tokens = (
+                f"{self.total_input_tokens:,} in"
+                f" / {self.total_output_tokens:,} out"
+            )
             line.append(f" | {tokens}", style="dim")
         if self.total_turns:
             label = "turn" if self.total_turns == 1 else "turns"
@@ -333,15 +336,19 @@ class StatusBarWidget(Widget):
             except (ValueError, AttributeError):
                 best_iter = "?"
             style = _score_style(self.best_score)
-            line.append(f"  best: iter {best_iter} ({self.best_score})", style=style)
+            line.append(
+                f"  best: iter {best_iter} ({self.best_score})",
+                style=style,
+            )
 
-        try:
-            has_expanded = any(p.expanded for p in self.app.query(AgentPanel))
-        except Exception:
-            has_expanded = False
-        toggle_action = "compact" if has_expanded else "expand"
-        line.append(f"  Ctrl+O: {toggle_action}", style="dim italic")
-        line.append("  Ctrl+Q: quit", style="dim italic")
+        if self.scores:
+            blocks = " \u2581\u2582\u2583\u2584\u2585\u2586\u2587\u2588"
+            max_s = max(self.scores) or 1
+            spark = ""
+            for s in self.scores[-20:]:
+                idx = min(int(s / max_s * 8), 8)
+                spark += blocks[idx]
+            line.append(f"  [{spark}]", style="dim")
 
         return line
 
@@ -358,6 +365,7 @@ class IterationContainer(Vertical):
     IterationContainer {
         height: auto;
         border: solid $accent;
+        transition: border 300ms ease;
     }
     """
 
@@ -368,8 +376,9 @@ class IterationContainer(Vertical):
     def set_result(self, text: str, style: str) -> None:
         """Set the iteration result as border subtitle."""
         self.border_subtitle = text
-        # Only set border color for actual color names, not Rich style modifiers
-        valid = {"red", "green", "yellow", "blue", "cyan", "magenta", "white"}
+        valid = {
+            "red", "green", "yellow", "blue", "cyan", "magenta", "white",
+        }
         if style in valid:
             self.styles.border = ("solid", style)
 
@@ -382,15 +391,13 @@ class IterationContainer(Vertical):
 class PipelineLive:
     """Bridge between the orchestrator (worker thread) and the Textual app.
 
-    In app mode (_app is set): delegates widget mounting/refresh to PipelineApp
-    via call_from_thread for thread safety.
-    In headless mode (_app is None): tracks state only, no widget rendering.
+    In app mode (_app is set): mounts widgets via call_from_thread.
+    In headless mode (_app is None): tracks state only, no rendering.
     """
 
     def __init__(self) -> None:
         self._panels: list[AgentPanel] = []
         self._app: PipelineApp | None = None
-        self._status_bar: StatusBarWidget | None = None
         self._current_iteration: IterationContainer | None = None
         self._file_console: Console | None = None
         self._file_handle = None
@@ -398,15 +405,13 @@ class PipelineLive:
     def start(self, log_path: Path | None = None) -> None:
         """Open the optional log file."""
         if log_path:
-            self._file_handle = open(log_path, "a")  # noqa: SIM115
+            self._file_handle = log_path.open("a")
             self._file_console = Console(
                 file=self._file_handle, no_color=True, width=120,
             )
 
     def stop(self) -> None:
-        """Close the log file and reset panel state."""
-        for panel in self._panels:
-            panel.expanded = False
+        """Close the log file."""
         if self._file_handle is not None:
             self._file_handle.close()
             self._file_handle = None
@@ -418,25 +423,32 @@ class PipelineLive:
         if self._app is not None:
             self._app.call_from_thread(self._app._mount_panel, panel)
 
-    def collapse_panel(self, panel: AgentPanel, done_summary: str = "") -> None:
+    def collapse_panel(
+        self, panel: AgentPanel, done_summary: str = "",
+    ) -> None:
         """Mark a panel as complete and accumulate stats."""
         panel.complete(done_summary)
-        if self._status_bar is not None:
-            self._status_bar.add_agent_stats(panel)
         if self._app is not None:
-            self._app.call_from_thread(panel.refresh, layout=True)
+            self._app.call_from_thread(
+                self._app._on_panel_collapsed, panel,
+            )
         if self._file_console is not None:
             self._file_console.print(
-                f"[{panel.panel_name}] {panel.done_summary} ({panel._build_footer()})"
+                f"[{panel.panel_name}] "
+                f"{panel.done_summary} ({panel._build_footer()})"
             )
 
     def start_iteration(self, title: int | str) -> None:
         """Begin an iteration container."""
-        iter_title = f"Iteration {title}" if isinstance(title, int) else title
+        iter_title = (
+            f"Iteration {title}" if isinstance(title, int) else title
+        )
         container = IterationContainer(iter_title=iter_title)
         self._current_iteration = container
         if self._app is not None:
-            self._app.call_from_thread(self._app._mount_iteration, container)
+            self._app.call_from_thread(
+                self._app._mount_iteration, container,
+            )
         if self._file_console is not None:
             self._file_console.print(f"\n{'=' * 60}")
             self._file_console.print(iter_title)
@@ -454,7 +466,9 @@ class PipelineLive:
         if self._file_console is not None:
             label = subtitle
             if self._current_iteration is not None:
-                label = f"{self._current_iteration.border_title}: {subtitle}"
+                label = (
+                    f"{self._current_iteration.border_title}: {subtitle}"
+                )
             self._file_console.print(f"--- {label} ---")
 
     def flush_completed(self) -> None:
@@ -469,9 +483,11 @@ class PipelineLive:
             self._app.call_from_thread(panel.remove)
 
     def update_status(self, **kwargs) -> None:
-        """Update the status bar fields."""
-        if self._status_bar is not None:
-            self._status_bar.set_status(**kwargs)
+        """Update the metrics bar fields."""
+        if self._app is not None:
+            self._app.call_from_thread(
+                self._app._on_status_update, **kwargs,
+            )
 
     def log(self, message: str) -> None:
         """Write a message to the log file only (no terminal output)."""
@@ -481,7 +497,9 @@ class PipelineLive:
     def print_static(self, renderable: RenderableType) -> None:
         """Print a renderable. In app mode, mount as Static widget."""
         if self._app is not None:
-            self._app.call_from_thread(self._app._mount_static, renderable)
+            self._app.call_from_thread(
+                self._app._mount_static, renderable,
+            )
         else:
             console.print(renderable)
         if self._file_console is not None:
@@ -504,14 +522,10 @@ class PipelineLive:
         return sum(1 for p in self._panels if not p.done)
 
     def wait_for_dismiss(self) -> None:
-        """No-op. PipelineApp handles dismiss via q key binding."""
+        """No-op. PipelineApp handles dismiss via key binding."""
 
     def refresh(self) -> None:
-        """Refresh all active panels in the app."""
-        if self._app is not None:
-            for panel in self._panels:
-                if not panel.done:
-                    self._app.call_from_thread(panel.refresh, layout=True)
+        """No-op. Widget refresh is handled automatically."""
 
 
 # ---------------------------------------------------------------------------
@@ -520,10 +534,11 @@ class PipelineLive:
 
 
 class PipelineApp(App):
-    """Textual application that runs the orchestrator and displays the dashboard."""
+    """Textual app that runs the orchestrator and displays the dashboard."""
 
     BINDINGS = [
-        Binding("ctrl+o", "toggle_expand", show=False),
+        Binding("ctrl+o", "toggle_expand", "Expand/Collapse", show=True),
+        Binding("ctrl+q", "quit", "Quit", show=True),
     ]
 
     DEFAULT_CSS = """
@@ -540,25 +555,21 @@ class PipelineApp(App):
         self._worker_loop: asyncio.AbstractEventLoop | None = None
 
     def compose(self) -> ComposeResult:
+        yield Header()
+        yield MetricsBar()
         yield VerticalScroll(id="main-scroll")
-        yield StatusBarWidget()
+        yield Footer()
 
     def on_mount(self) -> None:
-        # Wire the bridge to this app
+        self.title = "Auto-Scientist"
         self._live._app = self
-        self._live._status_bar = self.query_one(StatusBarWidget)
-
-        # Override the orchestrator's default headless PipelineLive
         self._orchestrator._live = self._live
-
-        # Log file is opened by orchestrator.run() after it creates the
-        # output directory. Don't open it here since the dir may not exist.
-
-        # Run orchestrator in a thread worker
-        self.run_worker(self._run_pipeline, thread=True, exit_on_error=False)
+        self.run_worker(
+            self._run_pipeline, thread=True, exit_on_error=False,
+        )
 
     def _run_pipeline(self) -> None:
-        """Sync wrapper that runs the async orchestrator in its own event loop."""
+        """Run the async orchestrator in its own event loop (worker thread)."""
         loop = asyncio.new_event_loop()
         self._worker_loop = loop
         try:
@@ -571,15 +582,52 @@ class PipelineApp(App):
     def on_worker_state_changed(self, event: Worker.StateChanged) -> None:
         if event.state in (WorkerState.SUCCESS, WorkerState.ERROR):
             self._finished = True
-            bar = self.query_one(StatusBarWidget)
-            bar.finish()
+            try:
+                bar = self.query_one(MetricsBar)
+            except NoMatches:
+                bar = None
+            if bar is not None:
+                bar.finish()
+
+            if event.state == WorkerState.ERROR:
+                self.notify(
+                    "Pipeline failed! Check logs.",
+                    severity="error",
+                    timeout=0,
+                )
+            else:
+                self.notify(
+                    "Pipeline complete!",
+                    severity="information",
+                    timeout=0,
+                )
+
+    # -- Callbacks from PipelineLive (called via call_from_thread) --
+
+    def _on_panel_collapsed(self, panel: AgentPanel) -> None:
+        """Handle panel completion: accumulate stats, fire toast."""
+        try:
+            bar = self.query_one(MetricsBar)
+        except NoMatches:
+            bar = None
+        if bar is not None:
+            bar.add_agent_stats(panel)
+        elapsed = _format_elapsed(panel.elapsed)
+        self.notify(f"{panel.panel_name} complete ({elapsed})")
+
+    def _on_status_update(self, **kwargs) -> None:
+        """Handle status update: update MetricsBar."""
+        try:
+            bar = self.query_one(MetricsBar)
+        except NoMatches:
+            return
+        bar.set_status(**kwargs)
 
     # -- Scroll helpers --
 
     def _is_near_bottom(self) -> bool:
         """Check if the scroll view is at or near the bottom."""
         scroll = self.query_one("#main-scroll", VerticalScroll)
-        # Allow a small margin (2 lines) so rounding doesn't break it
         return scroll.scroll_offset.y >= scroll.max_scroll_y - 2
 
     def _scroll_to_end(self) -> None:
@@ -591,35 +639,36 @@ class PipelineApp(App):
     # -- Key binding actions --
 
     def action_toggle_expand(self) -> None:
-        """Toggle expanded state on all AgentPanels."""
-        panels = list(self.query(AgentPanel))
-        if not panels:
+        """Toggle expanded state on all AgentPanel Collapsibles."""
+        collapsibles = list(self.query("AgentPanel Collapsible"))
+        if not collapsibles:
             return
-        # Toggle to the opposite of the first panel's state
-        new_state = not panels[0].expanded
-        for panel in panels:
-            panel.expanded = new_state
-            panel.refresh(layout=True)
-        # Ctrl+O always scrolls to bottom (intentional user action)
+        new_state = not collapsibles[0].collapsed
+        for c in collapsibles:
+            c.collapsed = new_state
         self._scroll_to_end()
 
     def action_quit(self) -> None:
-        """Gracefully quit: cancel the pipeline if still running, then exit."""
+        """Gracefully quit: cancel the pipeline if running, then exit."""
         if self._worker_loop is not None and self._worker_loop.is_running():
             self._worker_loop.call_soon_threadsafe(self._cancel_all_tasks)
         self.exit()
 
     def _cancel_all_tasks(self) -> None:
         """Cancel all tasks on the worker event loop."""
-        for task in asyncio.all_tasks(self._worker_loop):
-            task.cancel()
+        if self._worker_loop:
+            for task in asyncio.all_tasks(self._worker_loop):
+                task.cancel()
 
     # -- Mount helpers (called via call_from_thread from PipelineLive) --
 
     def _mount_panel(self, panel: AgentPanel) -> None:
-        """Mount a panel into the current iteration container or main scroll."""
+        """Mount a panel into the current iteration container or scroll."""
         near_bottom = self._is_near_bottom()
-        target = self._live._current_iteration or self.query_one("#main-scroll")
+        target = (
+            self._live._current_iteration
+            or self.query_one("#main-scroll")
+        )
         target.mount(panel)
         if near_bottom:
             self._scroll_to_end()
