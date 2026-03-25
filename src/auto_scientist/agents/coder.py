@@ -58,6 +58,7 @@ async def run_coder(
     run_timeout_minutes: int = 120,
     run_command: str = "uv run {script_path}",
     top_level_criteria: list[dict[str, Any]] | None = None,
+    data_files_listing: str = "",
 ) -> Path:
     """Implement the scientist's plan as a runnable experiment script.
 
@@ -69,6 +70,7 @@ async def run_coder(
         domain_knowledge: Domain-specific context.
         data_path: Absolute path to the dataset.
         top_level_criteria: Investigation-wide success criteria from orchestrator.
+        data_files_listing: Pre-computed listing of files in data_path directory.
 
     Returns:
         Path to the newly created experiment script.
@@ -106,15 +108,28 @@ async def run_coder(
     else:
         top_level_section = ""
 
+    # Build data files section so coder doesn't need to discover files
+    if data_files_listing:
+        data_files_section = (
+            f"\n<data_files>\n"
+            f"Files in the data directory ({data_path}):\n"
+            f"{data_files_listing}\n"
+            f"</data_files>"
+        )
+    else:
+        data_files_section = ""
+
     user_prompt = CODER_USER.format(
         domain_knowledge=domain_knowledge or "(no domain knowledge provided)",
         plan_json=json.dumps(plan, indent=2),
         previous_script_section=previous_script_section,
         new_script_path=str(new_script_path),
+        version_dir=str(version_dir),
         version=version,
         run_timeout_minutes=run_timeout_minutes,
         run_command=run_command,
         top_level_section=top_level_section,
+        data_files_section=data_files_section,
     )
 
     options = ClaudeCodeOptions(

@@ -17,9 +17,11 @@ What you receive:
   changes, and success criteria
 - The previous iteration's script (if any) to build on
 - A data path: an absolute path to a directory containing canonical data
-  files prepared by the Ingestor. The previous script (if any) already
-  loads the data correctly; reuse its loading code. For the first
-  iteration, list the data directory once to see what files are available.
+  files prepared by the Ingestor, along with a listing of files in that
+  directory. The previous script (if any) already loads the data
+  correctly; reuse its loading code.
+- The version directory (already created) where you write the script,
+  run_result.json, and output plots.
 
 What you produce:
 - A self-contained Python script run via `uv run script.py`. The script
@@ -159,9 +161,12 @@ CODER_USER = """\
 <previous_script>{previous_script_section}</previous_script>
 </data>
 {top_level_section}
+{data_files_section}
 
 <task>
 Implement the scientist's plan as a new complete experiment script.
+
+Version directory (already exists): {version_dir}
 
 1. Read the previous script (if any) to understand the current implementation
 2. Write the new script to: {new_script_path}
@@ -171,7 +176,7 @@ Implement the scientist's plan as a new complete experiment script.
    `timeout {run_timeout_minutes}m {run_command} \
     > results.txt 2>stderr.txt; echo $? > exitcode.txt`
 5. If it fails (non-zero exit, not timeout), read stderr.txt, fix, and re-run
-6. Write run_result.json in the version directory
+6. Write run_result.json to: {version_dir}/run_result.json
 
 The new version is: {version}
 </task>

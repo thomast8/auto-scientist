@@ -130,12 +130,18 @@ async def run_analyst(
 
     # Build the data section depending on iteration 0 vs normal
     if data_dir is not None and (results_path is None or not results_path.exists()):
-        data_section = (
-            f"<data_directory>{data_dir}</data_directory>\n"
-            "Use the Glob tool to list files in this directory, then use the Read tool\n"
-            "to examine each data file. Describe the structure of each file factually."
+        abs_data_dir = Path(data_dir).resolve()
+        # Pre-compute file listing so the analyst doesn't need to Glob
+        file_listing = "\n".join(
+            f"- {f.name}" for f in sorted(abs_data_dir.iterdir()) if f.is_file()
         )
-        cwd = data_dir
+        data_section = (
+            f"<data_directory>{abs_data_dir}</data_directory>\n"
+            f"<data_files>\n{file_listing}\n</data_files>\n"
+            "Use the Read tool to examine each data file listed above. "
+            "Describe the structure of each file factually."
+        )
+        cwd = abs_data_dir
     else:
         results_content = (
             results_path.read_text()

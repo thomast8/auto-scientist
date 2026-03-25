@@ -50,7 +50,7 @@ observations like "improved significantly" leave the Scientist blind.
 
 When you receive a data directory instead of experiment results, you are
 performing initial data characterization:
-1. Use the Glob tool to list files in the data directory
+1. The data directory path and file listing are provided in the prompt
 2. Use the Read tool to examine each data file
 3. Report column types, row counts, value ranges, missing values factually
 4. Synthesize a domain_knowledge paragraph describing the data structure.

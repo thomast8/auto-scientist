@@ -233,8 +233,8 @@ class Orchestrator:
         verbose: bool = False,
     ):
         self.state = state
-        self.data_path = data_path
-        self.output_dir = output_dir
+        self.data_path = data_path.resolve() if data_path else data_path
+        self.output_dir = output_dir.resolve()
         self.max_iterations = max_iterations
         self.model_config = model_config or ModelConfig.builtin_preset("default")
         self.interactive = interactive
@@ -834,8 +834,8 @@ class Orchestrator:
         notebook_path = self.output_dir / NOTEBOOK_FILENAME
         domain_knowledge = self.state.domain_knowledge
 
-        # Find results file
-        results_path = Path(latest.results_path) if latest.results_path else None
+        # Find results file (resolve to absolute for agent cwd consistency)
+        results_path = Path(latest.results_path).resolve() if latest.results_path else None
         if not results_path or not results_path.exists():
             self._live.log("ANALYZE: skipped (no results file)")
             return None
@@ -1256,7 +1256,7 @@ class Orchestrator:
 
         version = f"v{self.state.iteration:02d}"
         domain_knowledge = self.state.domain_knowledge
-        data_path = self.state.data_path or ""
+        data_path = str(Path(self.state.data_path).resolve()) if self.state.data_path else ""
 
         # On iteration 0 (no previous versions), use a nonexistent path
         if self.state.versions:
@@ -1289,6 +1289,17 @@ class Orchestrator:
             c.model_dump() for c in (self.state.success_criteria or [])
         ]
 
+        # Pre-compute data directory listing so coder doesn't waste turns
+        data_dir = Path(data_path) if data_path else None
+        if data_dir and data_dir.is_dir():
+            data_files_listing = "\n".join(
+                f"- {f.name} ({f.stat().st_size} bytes)"
+                for f in sorted(data_dir.iterdir())
+                if f.is_file() and not f.name.startswith(".")
+            )
+        else:
+            data_files_listing = ""
+
         panel = AgentPanel(name="Coder", model=cfg.model, style="magenta")
         self._live.add_panel(panel)
         self._live.update_status(phase="IMPLEMENT")
@@ -1309,6 +1320,7 @@ class Orchestrator:
                     run_timeout_minutes=run_timeout,
                     run_command=run_cmd,
                     top_level_criteria=top_criteria or None,
+                    data_files_listing=data_files_listing,
                 )
 
             new_script = await self._with_summaries(_coder_coro, "Coder", buffer, panel=panel)
