@@ -10,6 +10,24 @@ from auto_scientist.model_config import ModelConfig
 from auto_scientist.state import ExperimentState
 
 
+class TestBareInvocation:
+    @patch("auto_scientist.cli.PipelineApp")
+    def test_no_subcommand_launches_ui(self, mock_app_cls):
+        runner = CliRunner()
+        result = runner.invoke(cli, [])
+        assert result.exit_code == 0
+        mock_app_cls.assert_called_once_with()
+        mock_app_cls.return_value.run.assert_called_once()
+
+    @patch("auto_scientist.cli.PipelineApp")
+    def test_ui_subcommand_launches_ui(self, mock_app_cls):
+        runner = CliRunner()
+        result = runner.invoke(cli, ["ui"])
+        assert result.exit_code == 0
+        mock_app_cls.assert_called_once_with()
+        mock_app_cls.return_value.run.assert_called_once()
+
+
 class TestStatusCommand:
     def test_displays_state_info(self, tmp_path):
         state = ExperimentState(

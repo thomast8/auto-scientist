@@ -81,9 +81,24 @@ def _resolve_model_config(
     return model_config
 
 
-@click.group()
-def cli():
+@click.group(invoke_without_command=True)
+@click.pass_context
+def cli(ctx):
     """Auto-Scientist: Autonomous scientific investigation framework."""
+    if ctx.invoked_subcommand is None:
+        _launch_ui()
+
+
+def _launch_ui():
+    """Launch the interactive UI with HomeScreen."""
+    app = PipelineApp()
+    app.run()
+
+
+@cli.command()
+def ui():
+    """Launch the interactive home screen UI."""
+    _launch_ui()
 
 
 @cli.command()

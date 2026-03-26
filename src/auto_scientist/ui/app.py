@@ -1,4 +1,4 @@
-"""PipelineApp: Textual App with dashboard, command palette, and message handlers."""
+"""PipelineApp: Textual App with multi-screen support, command palette, and tab management."""
 
 import asyncio
 import subprocess
@@ -18,15 +18,25 @@ from textual.widgets import (
 )
 from textual.worker import Worker, WorkerState
 
+from auto_scientist.experiment_store import (
+    ExperimentStore,
+    FilesystemStore,
+    next_output_dir,
+)
 from auto_scientist.ui.bridge import PipelineLive
 from auto_scientist.ui.commands import PipelineCommandProvider
+from auto_scientist.ui.config_form import ConfigForm
 from auto_scientist.ui.detail_screen import AgentDetailScreen, QuitConfirmScreen
 from auto_scientist.ui.styles import _format_elapsed, _load_prefs, _save_prefs
 from auto_scientist.ui.widgets import AgentPanel, IterationContainer, MetricsBar
 
 
 class PipelineApp(App):
-    """Textual app that runs the orchestrator and displays the dashboard."""
+    """Textual app with HomeScreen or direct ExperimentScreen mode.
+
+    When orchestrator is None: shows HomeScreen with presets, config form, past runs.
+    When orchestrator is provided: shows single ExperimentScreen (backward compatible).
+    """
 
     COMMANDS = App.COMMANDS | {PipelineCommandProvider}
 
@@ -48,7 +58,11 @@ class PipelineApp(App):
     }
     """
 
-    def __init__(self, orchestrator) -> None:
+    def __init__(
+        self,
+        orchestrator=None,
+        store: ExperimentStore | None = None,
+    ) -> None:
         super().__init__()
         saved_theme = _load_prefs().get("theme")
         if saved_theme and saved_theme in self.available_themes:
@@ -57,20 +71,67 @@ class PipelineApp(App):
         self._finished: bool = False
         self._live: PipelineLive = PipelineLive()
         self._worker_loop: asyncio.AbstractEventLoop | None = None
+        self._store = store or FilesystemStore(Path("experiments"))
+        self._experiment_screens: dict[str, object] = {}
 
     def compose(self) -> ComposeResult:
         yield Header()
-        yield MetricsBar()
-        yield VerticalScroll(id="main-scroll")
+        if self._orchestrator is not None:
+            # Legacy single-experiment mode
+            yield MetricsBar()
+            yield VerticalScroll(id="main-scroll")
         yield Footer()
 
     def on_mount(self) -> None:
         self.title = "Auto-Scientist"
-        self._live._app = self
-        self._orchestrator._live = self._live
-        self.run_worker(
-            self._run_pipeline, thread=True, exit_on_error=False,
+        if self._orchestrator is not None:
+            # Legacy mode: run single experiment directly
+            self._live._app = self
+            self._orchestrator._live = self._live
+            self.run_worker(
+                self._run_pipeline, thread=True, exit_on_error=False,
+            )
+        else:
+            # Multi-experiment mode: show HomeScreen
+            from auto_scientist.ui.home_screen import HomeScreen
+
+            self.push_screen(HomeScreen(store=self._store))
+
+    def on_config_form_launch_requested(self, event: ConfigForm.LaunchRequested) -> None:
+        """Handle launch from HomeScreen config form."""
+        # Create orchestrator with the config from the form
+        # The actual Orchestrator creation needs state + output_dir
+        from auto_scientist.orchestrator import Orchestrator
+        from auto_scientist.state import ExperimentState
+        from auto_scientist.ui.experiment_screen import ExperimentScreen
+
+        output_dir = next_output_dir(Path("experiments"))
+        output_dir.mkdir(parents=True, exist_ok=True)
+
+        state = ExperimentState(
+            domain="auto",
+            goal=event.goal,
+            data_path=event.data_path or None,
+            ingestion_source=event.ingestion_source,
         )
+
+        orchestrator = Orchestrator(
+            state=state,
+            data_path=event.data_path,
+            output_dir=output_dir,
+            model_config=event.model_config,
+            max_iterations=event.max_iterations,
+            debate_rounds=event.debate_rounds,
+        )
+
+        label = f"{event.goal[:20]}"
+        screen = ExperimentScreen(
+            orchestrator=orchestrator,
+            experiment_label=label,
+        )
+        self.push_screen(screen)
+
+    # -- Legacy single-experiment mode methods --
 
     def _run_pipeline(self) -> None:
         """Run the async orchestrator in its own event loop (worker thread)."""
@@ -109,7 +170,6 @@ class PipelineApp(App):
     # -- Callbacks from PipelineLive (called via call_from_thread) --
 
     def _do_panel_collapse(self, panel: AgentPanel) -> None:
-        """Apply panel DOM collapse and handle post-collapse UI (runs on UI thread)."""
         near_bottom = self._is_near_bottom()
         panel._apply_complete_dom()
         self._on_panel_collapsed(panel)
@@ -117,7 +177,6 @@ class PipelineApp(App):
             self._scroll_to_end()
 
     def _on_panel_collapsed(self, panel: AgentPanel) -> None:
-        """Handle panel completion: accumulate stats, fire toast."""
         try:
             bar = self.query_one(MetricsBar)
         except NoMatches:
@@ -128,7 +187,6 @@ class PipelineApp(App):
         self.notify(f"{panel.panel_name} complete ({elapsed})")
 
     def _on_status_update(self, **kwargs) -> None:
-        """Handle status update: update MetricsBar."""
         try:
             bar = self.query_one(MetricsBar)
         except NoMatches:
@@ -138,24 +196,22 @@ class PipelineApp(App):
     # -- Scroll helpers --
 
     def _is_near_bottom(self) -> bool:
-        """Check if the scroll view is at or near the bottom."""
-        scroll = self.query_one("#main-scroll", VerticalScroll)
-        return scroll.scroll_offset.y >= scroll.max_scroll_y - 2
+        try:
+            scroll = self.query_one("#main-scroll", VerticalScroll)
+            return scroll.scroll_offset.y >= scroll.max_scroll_y - 2
+        except NoMatches:
+            return False
 
     def _scroll_to_end(self) -> None:
-        """Scroll to the bottom of the main scroll area."""
-        self.call_after_refresh(
-            self.query_one("#main-scroll").scroll_end, animate=False,
-        )
+        try:
+            scroll = self.query_one("#main-scroll")
+            self.call_after_refresh(scroll.scroll_end, animate=False)
+        except NoMatches:
+            pass
 
     # -- Key binding actions --
 
     def action_toggle_expand(self) -> None:
-        """Toggle expanded state on all AgentPanel Collapsibles.
-
-        When collapsing, skip panels that are still running so their
-        live output remains visible.
-        """
         panels = list(self.query(AgentPanel))
         if not panels:
             return
@@ -172,8 +228,7 @@ class PipelineApp(App):
         self._scroll_to_end()
 
     def action_quit(self) -> None:
-        """Quit with confirmation if pipeline is still running."""
-        if not self._finished:
+        if self._orchestrator is not None and not self._finished:
             self.push_screen(
                 QuitConfirmScreen(), callback=self._handle_quit_confirm,
             )
@@ -181,30 +236,25 @@ class PipelineApp(App):
             self.exit()
 
     def _handle_quit_confirm(self, confirmed: bool | None) -> None:
-        """Handle quit confirmation result."""
         if confirmed:
             self._force_quit()
 
     def _force_quit(self) -> None:
-        """Cancel the pipeline and exit."""
         if self._worker_loop is not None and self._worker_loop.is_running():
             self._worker_loop.call_soon_threadsafe(self._cancel_all_tasks)
         self.exit()
 
     def _cancel_all_tasks(self) -> None:
-        """Cancel all tasks on the worker event loop."""
         if self._worker_loop:
             for task in asyncio.all_tasks(self._worker_loop):
                 task.cancel()
 
     def _persist_theme(self, theme_name: str) -> None:
-        """Save the selected theme to user preferences."""
         prefs = _load_prefs()
         prefs["theme"] = theme_name
         _save_prefs(prefs)
 
     def action_cycle_theme(self) -> None:
-        """Cycle through available themes."""
         themes = sorted(self.available_themes)
         if not themes:
             return
@@ -218,7 +268,6 @@ class PipelineApp(App):
         self.notify(f"Theme: {self.theme}")
 
     def action_open_focused_detail(self) -> None:
-        """Open detail view for the currently focused AgentPanel."""
         focused = self.focused
         if focused is None:
             return
@@ -235,7 +284,6 @@ class PipelineApp(App):
     # -- Command palette helpers --
 
     def _open_agent_detail(self, panel: AgentPanel) -> None:
-        """Push the AgentDetailScreen for a panel."""
         self.push_screen(AgentDetailScreen(
             panel_name=panel.panel_name,
             model=panel.model,
@@ -244,30 +292,29 @@ class PipelineApp(App):
         ))
 
     def _scroll_to(self, direction: str) -> None:
-        """Scroll the main area to top or bottom."""
-        scroll = self.query_one("#main-scroll", VerticalScroll)
+        try:
+            scroll = self.query_one("#main-scroll", VerticalScroll)
+        except NoMatches:
+            return
         if direction == "top":
             scroll.scroll_home(animate=False)
         else:
             scroll.scroll_end(animate=False)
 
     def _scroll_to_widget(self, widget: Widget) -> None:
-        """Scroll to make a widget visible."""
         widget.scroll_visible(animate=False)
 
     def _set_theme(self, theme_name: str) -> None:
-        """Switch to a named theme."""
         self.theme = theme_name
         self._persist_theme(theme_name)
         self.notify(f"Theme: {theme_name}")
 
     def _set_orchestrator_flag(self, flag_name: str) -> None:
-        """Set a boolean flag on the orchestrator."""
-        setattr(self._orchestrator, flag_name, True)
-        self.notify(f"{flag_name.replace('_', ' ').title()} requested")
+        if self._orchestrator:
+            setattr(self._orchestrator, flag_name, True)
+            self.notify(f"{flag_name.replace('_', ' ').title()} requested")
 
     def _open_directory(self, path: Path) -> None:
-        """Open a directory in the system file manager."""
         try:
             subprocess.Popen(["open", str(path)])
         except FileNotFoundError:
@@ -276,7 +323,6 @@ class PipelineApp(App):
     # -- Mount helpers (called via call_from_thread from PipelineLive) --
 
     def _mount_panel(self, panel: AgentPanel) -> None:
-        """Mount a panel into the current iteration container or scroll."""
         near_bottom = self._is_near_bottom()
         target = (
             self._live._current_iteration
@@ -287,14 +333,12 @@ class PipelineApp(App):
             self._scroll_to_end()
 
     def _mount_iteration(self, container: IterationContainer) -> None:
-        """Mount an iteration container into the main scroll."""
         near_bottom = self._is_near_bottom()
         self.query_one("#main-scroll").mount(container)
         if near_bottom:
             self._scroll_to_end()
 
     def _mount_static(self, renderable: RenderableType) -> None:
-        """Mount a Rich renderable as a Static widget."""
         near_bottom = self._is_near_bottom()
         self.query_one("#main-scroll").mount(Static(renderable))
         if near_bottom:
