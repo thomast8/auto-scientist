@@ -959,10 +959,15 @@ class PipelineApp(App):
                 bar.finish()
 
             if event.state == WorkerState.ERROR:
+                error = event.worker.error
+                error_msg = str(error) if error else "Unknown error"
                 self.notify(
-                    "Pipeline failed! Check logs.",
+                    "Pipeline failed! See error below.",
                     severity="error",
                     timeout=0,
+                )
+                self._mount_static(
+                    Text(f"\n{error_msg}", style="red"),
                 )
             else:
                 self.notify(
