@@ -1,13 +1,13 @@
 """Critic: multi-model critique dispatcher with Scientist debate loop.
 
 Plain API call (OpenAI/Google/Anthropic SDK), no agent tools needed.
-Input: scientist's plan + lab notebook + domain knowledge.
+Input: scientist's plan + analysis JSON + prediction history + lab notebook
++ domain knowledge.
 Output: structured critique with tagged concerns, alternative hypotheses,
 and the scientist's structured defense, plus raw transcript for debugging.
 
-Neither the Critic nor the Scientist (during debate) sees the analysis JSON
-or Python code. The plan already incorporates the analysis; passing both is
-redundant. Both sides get symmetric context (equal footing).
+Both the Critic and Scientist (during debate) share the full evidence base.
+Neither sees Python code (implementation is the Coder's domain).
 
 Personas provide diverse critical perspectives. Each debate runs one persona;
 model assignment rotates across iterations so no model is always the same role.
@@ -16,7 +16,6 @@ model assignment rotates across iterations so no model is always the same role.
 import asyncio
 import json
 import logging
-from pathlib import Path
 from typing import Any
 
 from auto_scientist.agent_result import AgentResult
@@ -29,7 +28,6 @@ from auto_scientist.agents.debate_models import (
     DebateRound,
     ScientistDefense,
 )
-from auto_scientist.images import ImageData, encode_images_from_paths
 from auto_scientist.model_config import AgentModelConfig
 from auto_scientist.models.anthropic_client import query_anthropic
 from auto_scientist.models.google_client import query_google
@@ -58,27 +56,22 @@ MIN_RESPONSE_LENGTH = 50  # minimum chars for a substantive response
 async def _query_critic(
     config: AgentModelConfig,
     prompt: str,
-    *,
-    images: list[ImageData] | None = None,
 ) -> AgentResult:
     """Dispatch a prompt to the appropriate provider with web search enabled."""
     if config.provider == "openai":
         return await query_openai(
             config.model, prompt,
             web_search=True, reasoning=config.reasoning,
-            images=images or [],
         )
     elif config.provider == "google":
         return await query_google(
             config.model, prompt,
             web_search=True, reasoning=config.reasoning,
-            images=images or [],
         )
     elif config.provider == "anthropic":
         return await query_anthropic(
             config.model, prompt,
             web_search=True, reasoning=config.reasoning,
-            images=images or [],
         )
     else:
         raise ValueError(f"Unknown critic provider: {config.provider!r}")
@@ -93,7 +86,6 @@ async def _query_critic_structured(
     config: AgentModelConfig,
     prompt: str,
     *,
-    images: list[ImageData] | None = None,
     label: str = "",
 ) -> tuple[CriticOutput, AgentResult]:
     """Query a critic and validate the response as structured CriticOutput.
@@ -107,7 +99,7 @@ async def _query_critic_structured(
     for attempt in range(MAX_RETRIES + 1):
         effective_prompt = prompt + correction_hint
         try:
-            result = await _query_critic(config, effective_prompt, images=images)
+            result = await _query_critic(config, effective_prompt)
         except Exception as e:
             if attempt < MAX_RETRIES:
                 logger.warning(f"{label} error ({e}), retrying (attempt {attempt + 1})")
@@ -202,14 +194,12 @@ async def run_single_critic_debate(
     plan: dict[str, Any],
     notebook_content: str,
     domain_knowledge: str = "",
-    success_criteria: str = "",
     max_rounds: int = 1,
     scientist_config: AgentModelConfig | None = None,
     message_buffer: list[str] | None = None,
-    plot_paths: list[Path] | None = None,
-    images: list[ImageData] | None = None,
-    has_plots: bool = False,
     persona: dict[str, str] | None = None,
+    analysis_json: str = "",
+    prediction_history: str = "",
 ) -> DebateResult:
     """Run a multi-round debate between one critic (with persona) and the scientist.
 
@@ -231,12 +221,12 @@ async def run_single_critic_debate(
     # Round 1: initial critique (no defense context)
     critic_prompt = _build_critic_prompt(
         plan, notebook_content, domain_knowledge,
-        success_criteria=success_criteria,
-        has_plots=has_plots,
         persona_text=persona_text,
+        analysis_json=analysis_json,
+        prediction_history=prediction_history,
     )
     critic_output, critic_result = await _query_critic_structured(
-        config, critic_prompt, images=images or [],
+        config, critic_prompt,
         label=f"Critic ({persona_name}, {label}) round 1",
     )
     total_in += critic_result.input_tokens
@@ -259,11 +249,10 @@ async def run_single_critic_debate(
                 plan=plan,
                 notebook_content=notebook_content,
                 domain_knowledge=domain_knowledge,
-                success_criteria=success_criteria,
                 critique=critic_result.text,
-                has_plots=has_plots,
-                plot_paths=plot_paths,
                 critic_persona=persona_name,
+                analysis_json=analysis_json,
+                prediction_history=prediction_history,
             )
             scientist_defense, sci_result = await _query_scientist_structured(
                 scientist_config, scientist_user_prompt, scientist_system,
@@ -284,13 +273,13 @@ async def run_single_critic_debate(
             # Stateless: critic gets the defense but not their own prior critique
             critic_prompt = _build_critic_prompt(
                 plan, notebook_content, domain_knowledge,
-                success_criteria=success_criteria,
                 scientist_defense=sci_result.text,
-                has_plots=has_plots,
                 persona_text=persona_text,
+                analysis_json=analysis_json,
+                prediction_history=prediction_history,
             )
             critic_output, critic_result = await _query_critic_structured(
-                config, critic_prompt, images=images or [],
+                config, critic_prompt,
                 label=f"Critic ({persona_name}, {label}) round {round_num + 1}",
             )
             total_in += critic_result.input_tokens
@@ -322,13 +311,13 @@ async def run_debate(
     plan: dict[str, Any],
     notebook_content: str,
     domain_knowledge: str = "",
-    success_criteria: str = "",
     max_rounds: int = 1,
     scientist_config: AgentModelConfig | None = None,
     message_buffer: list[str] | None = None,
     message_buffers: dict[str, list[str]] | None = None,
-    plot_paths: list[Path] | None = None,
     iteration: int = 0,
+    analysis_json: str = "",
+    prediction_history: str = "",
 ) -> list[DebateResult]:
     """Run parallel debates, one per persona, with rotating model assignment.
 
@@ -340,13 +329,13 @@ async def run_debate(
         plan: Scientist's plan dict.
         notebook_content: Current lab notebook content.
         domain_knowledge: Domain-specific context.
-        success_criteria: Formatted top-level success criteria.
         max_rounds: Number of critique rounds per debate (1 = single-pass).
         scientist_config: Config for the Scientist's debate responses.
         message_buffer: Legacy single shared buffer.
         message_buffers: Per-persona buffers keyed by persona name.
-        plot_paths: Paths to plot images to forward to critics.
         iteration: Current iteration number (for model rotation).
+        analysis_json: Serialized analysis JSON from the Analyst.
+        prediction_history: Formatted prediction history string.
 
     Returns:
         List of DebateResult, one per persona (always 3 unless no critics).
@@ -356,13 +345,6 @@ async def run_debate(
 
     if scientist_config is None:
         scientist_config = AgentModelConfig(model="claude-sonnet-4-6")
-
-    # Encode plot images once for all debates
-    images: list[ImageData] = []
-    if plot_paths:
-        images = encode_images_from_paths(plot_paths)
-    has_plots = bool(images)
-    logger.info(f"Debate: {len(images)} plot image(s) will be forwarded to critics")
 
     tasks = []
     for persona_index, persona in enumerate(PERSONAS):
@@ -384,14 +366,12 @@ async def run_debate(
                 plan=plan,
                 notebook_content=notebook_content,
                 domain_knowledge=domain_knowledge,
-                success_criteria=success_criteria,
                 max_rounds=max_rounds,
                 scientist_config=scientist_config,
                 message_buffer=buf,
-                plot_paths=plot_paths,
-                images=images,
-                has_plots=has_plots,
                 persona=persona,
+                analysis_json=analysis_json,
+                prediction_history=prediction_history,
             )
         )
 
@@ -419,10 +399,10 @@ def _build_critic_prompt(
     plan: dict[str, Any],
     notebook_content: str,
     domain_knowledge: str,
-    success_criteria: str = "",
     scientist_defense: str = "",
-    has_plots: bool = False,
     persona_text: str = "",
+    analysis_json: str = "",
+    prediction_history: str = "",
 ) -> str:
     """Build the prompt sent to critic models.
 
@@ -436,8 +416,6 @@ def _build_critic_prompt(
             f"<scientist_defense>{scientist_defense}</scientist_defense>"
         )
 
-    plots_section = _plots_section_text() if has_plots else ""
-
     system = CRITIC_SYSTEM_BASE.format(
         persona_text=persona_text,
         critic_output_schema=json.dumps(CRITIC_OUTPUT_SCHEMA, indent=2),
@@ -445,11 +423,11 @@ def _build_critic_prompt(
 
     user = CRITIC_USER.format(
         domain_knowledge=domain_knowledge or "(none provided)",
-        success_criteria=success_criteria or "(none defined yet)",
         notebook_content=notebook_content or "(empty)",
+        analysis_json=analysis_json or "(no analysis yet)",
+        prediction_history=prediction_history or "(no prediction history yet)",
         plan_json=json.dumps(plan, indent=2),
         scientist_defense=defense_section,
-        plots_section=plots_section,
     )
     return f"{system}\n\n{user}"
 
@@ -458,46 +436,20 @@ def _build_scientist_debate_user_prompt(
     plan: dict[str, Any],
     notebook_content: str,
     domain_knowledge: str,
-    success_criteria: str = "",
     critique: str = "",
-    has_plots: bool = False,
-    plot_paths: list[Path] | None = None,
     critic_persona: str = "",
+    analysis_json: str = "",
+    prediction_history: str = "",
 ) -> str:
-    """Build the user prompt for the Scientist responding to a critique during debate.
-
-    When plots are available, includes file paths so the scientist can
-    reference them when defending.
-    """
-    plots_section = ""
-    if has_plots:
-        plots_section = _plots_section_text()
-        if plot_paths:
-            path_list = "\n".join(f"- {p}" for p in plot_paths)
-            plots_section += (
-                f"\n<plot_files>\n"
-                f"Plot files available for reference:\n"
-                f"{path_list}\n"
-                f"</plot_files>"
-            )
-
+    """Build the user prompt for the Scientist responding to a critique during debate."""
     return SCIENTIST_DEBATE_USER.format(
         domain_knowledge=domain_knowledge or "(none provided)",
-        success_criteria=success_criteria or "(none defined yet)",
         notebook_content=notebook_content or "(empty)",
+        analysis_json=analysis_json or "(no analysis yet)",
+        prediction_history=prediction_history or "(no prediction history yet)",
         plan_json=json.dumps(plan, indent=2),
         critique=critique,
         critic_persona=critic_persona or "(generic critic)",
-        plots_section=plots_section,
     )
 
 
-def _plots_section_text() -> str:
-    """Return the standard plots-attached section for debate prompts."""
-    return (
-        "<plots_attached>\n"
-        "Experimental plots from the latest iteration are attached as images.\n"
-        "Examine them for trends, patterns, anomalies, and numeric values.\n"
-        "Reference specific plots when they support or contradict the plan.\n"
-        "</plots_attached>"
-    )

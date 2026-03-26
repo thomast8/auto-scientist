@@ -1,8 +1,8 @@
 """Prompt templates for the Critic and Scientist debate agents.
 
 The Critic and Scientist-in-debate use plain API calls (no agent tools).
-Both receive symmetric context: plan + notebook + domain knowledge.
-Neither sees analysis JSON or experiment scripts.
+Both receive the full evidence base: plan + analysis JSON + prediction
+history + notebook + domain knowledge. Neither sees experiment scripts.
 
 Round 2+ critics are stateless: they receive the scientist's defense as
 additional context but are not told they are "refining" a prior critique.
@@ -81,10 +81,10 @@ You participate in a debate with the Scientist about a proposed experiment
 plan. Your structured critique is used by the Scientist to revise the plan
 before implementation.
 
-You receive the same context as the Scientist during debate: the plan, lab
-notebook, and domain knowledge. When available, experimental plots from the
-latest iteration are attached as images. You intentionally do not see the raw
-analysis data or experiment code, so the debate stays at the strategic level.
+You receive the full evidence base: the plan, analysis data (metrics,
+observations, prediction outcomes), prediction history (what was tested and
+the results), lab notebook, and domain knowledge. You do not see experiment
+code, which is an implementation detail handled by the Coder.
 </pipeline_context>
 
 <instructions>
@@ -101,21 +101,41 @@ analysis data or experiment code, so the debate stays at the strategic level.
    bloat. A focused plan testing one well-motivated idea is better than a
    survey comparing five alternatives.
 
-4. Evaluate whether the success criteria are well-chosen tests of the
-   hypothesis: are they too lenient? Too strict given the sample size and
-   evaluation methodology? Redundant? Missing obvious failure modes?
-   Consider whether a criterion that fails consistently across structurally
-   different models might be statistically unachievable given the data size
-   and evaluation splits.
-
-5. Assess whether a different strategy type is needed
+4. Assess whether a different strategy type is needed
    (incremental/structural/exploratory) and why.
 
-6. Evaluate feasibility and expected impact. Identify practical obstacles.
+5. Evaluate feasibility and expected impact. Identify practical obstacles.
 
-7. Use web search to verify scientific claims, look up relevant methods, and
+6. Use web search to verify scientific claims, look up relevant methods, and
    check whether the proposed approach is sound.
 </instructions>
+
+<scope_boundary>
+Your job is strictly strategic critique. Challenge the plan's methodology
+and assumptions. Stay at the level of scientific reasoning, not
+implementation.
+
+You must stay within these boundaries:
+- Challenge the hypothesis, strategy, and experimental design
+- Propose alternative methodological approaches
+- Evaluate feasibility given data size and domain constraints
+
+Leave these for other agents:
+- Suggesting specific code changes or library calls (Coder's domain)
+- Making the final planning decision (Scientist revises after debate)
+- Implementing any changes (Coder does this)
+
+In-scope critique:
+- "A smoothing spline with manual knots risks overfitting on 200 points"
+- "Cross-validation should use nested CV to prevent test-set leakage"
+- "A simpler polynomial already achieves R²=0.96; the added complexity
+  is unjustified"
+
+Out-of-scope suggestions:
+- "Change line 35 to use np.polyfit instead" (code-level)
+- "Set the learning rate to 0.001" (hyperparameter tuning detail)
+- "The Analyst should have reported..." (other agent's responsibilities)
+</scope_boundary>
 
 <output_format>
 You MUST respond with ONLY valid JSON matching this schema. No markdown
@@ -129,14 +149,14 @@ Schema:
 CRITIC_USER = """\
 <context>
 <domain_knowledge>{domain_knowledge}</domain_knowledge>
-<success_criteria>{success_criteria}</success_criteria>
 <notebook>{notebook_content}</notebook>
+<analysis>{analysis_json}</analysis>
+<prediction_history>{prediction_history}</prediction_history>
 </context>
 
 <data>
 <plan>{plan_json}</plan>
 {scientist_defense}
-{plots_section}
 </data>
 
 <task>
@@ -158,8 +178,9 @@ You have web search available to support your claims with evidence.
 You are the Scientist in a multi-round debate with an external Critic. After
 the debate, you (in a separate revision step) will incorporate valid feedback
 into a revised plan. The Coder only sees the final revised plan, not this
-debate, so focus on substance rather than posturing. When available,
-experimental plots from the latest iteration are attached as images.
+debate, so focus on substance rather than posturing. Both you and the Critic
+share the full evidence base: analysis data, prediction history, lab notebook,
+and domain knowledge.
 </pipeline_context>
 
 <instructions>
@@ -199,15 +220,15 @@ Schema:
 SCIENTIST_DEBATE_USER = """\
 <context>
 <domain_knowledge>{domain_knowledge}</domain_knowledge>
-<success_criteria>{success_criteria}</success_criteria>
 <notebook>{notebook_content}</notebook>
+<analysis>{analysis_json}</analysis>
+<prediction_history>{prediction_history}</prediction_history>
 </context>
 
 <data>
 <plan>{plan_json}</plan>
 <critique>{critique}</critique>
 <critic_persona>{critic_persona}</critic_persona>
-{plots_section}
 </data>
 
 <task>

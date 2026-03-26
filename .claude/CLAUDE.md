@@ -11,7 +11,7 @@ Two-phase pipeline: Ingestion -> Iteration (unified loop) -> Report.
 Iteration loop (four agents, adaptive behavior):
 1. **Analyst** (observer): reads results + plots (or raw data on iteration 0), outputs structured JSON. No recommendations. On iteration 0, produces domain_knowledge + data_summary.
 2. **Scientist** (planner): pure prompt-in/JSON-out, no tools, no code access. Outputs plan + per-iteration success criteria. On iteration 1, defines top-level criteria. On iteration 2+, may revise criteria.
-3. **Critic** (challenger): multi-round debate with the Scientist. Both have web search. Symmetric context (plan + notebook + domain knowledge). Skipped on iteration 0.
+3. **Critic** (challenger): multi-round debate with the Scientist. Both have web search. Full evidence base (plan + analysis JSON + prediction history + notebook + domain knowledge). Skipped on iteration 0.
 4. **Coder** (implementer): only agent that reads/writes and runs Python code. Writes the experiment script, runs it with error correction, and reports results via run_result.json.
 
 Orchestrator flow: Ingest -> Analyst -> Scientist (plan) -> criteria update -> stop check -> (Debate, iter 1+) -> Scientist (revise) -> Coder (implement + run) -> Evaluate -> increment iteration
@@ -28,7 +28,7 @@ Orchestrator flow: Ingest -> Analyst -> Scientist (plan) -> criteria update -> s
 ### Information Boundaries
 - Only the Coder sees Python code
 - The Scientist plans from analysis JSON + notebook (no code)
-- Critic and Scientist (during debate) get symmetric context (no analysis, no script); they challenge the plan's criteria too
+- Critic and Scientist (during debate) share the full evidence base (analysis JSON, prediction history, notebook, domain knowledge); neither sees experiment scripts
 - After debate, the Scientist revises the plan; Coder gets only the revised plan (no critique)
 - results.txt is compiled by the script itself (print statements), no LLM post-processing
 

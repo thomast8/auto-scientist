@@ -70,8 +70,8 @@ Phase 1: ITERATION (unified loop)
   [4] Critic-Scientist Debate (skipped on iteration 0)
       Round 1: Critic (GPT/Gemini/other) critiques the Scientist's plan
       Round 2+: Scientist (Claude API) responds, Critic refines
-      Input: plan JSON + lab notebook + domain knowledge
-      Both sides get symmetric context (no analysis, no script)
+      Input: plan JSON + analysis JSON + prediction history + lab notebook + domain knowledge
+      Both sides share the full evidence base; neither sees experiment scripts
       Both sides have web search for claim verification and literature lookup
       Output: debate transcript (all rounds)
 
@@ -98,17 +98,18 @@ Phase 2: REPORT (one-time)
 
 A core design principle: each agent sees only the information relevant to its role.
 
-| Agent | Sees code? | Sees analysis JSON? | Sees notebook? | Has tools? |
-|-------|-----------|-------------------|---------------|------------|
-| Ingestor | No | No | Writes structure summary | Bash, Read, Write, Glob, Grep |
-| Analyst | No | Produces it | Yes | Read, Glob |
-| Scientist | No | Yes (input) | Yes | None |
-| Critic (debate) | No | No | Yes | Web search |
-| Coder | Yes (only agent) | No | No | Bash, Read, Write, Glob |
+| Agent | Sees code? | Sees analysis JSON? | Sees prediction history? | Sees notebook? | Has tools? |
+|-------|-----------|-------------------|------------------------|---------------|------------|
+| Ingestor | No | No | No | Writes structure summary | Bash, Read, Write, Glob, Grep |
+| Analyst | No | Produces it | No | Yes | Read, Glob |
+| Scientist | No | Yes (input) | Yes | Yes | None |
+| Critic (debate) | No | Yes | Yes | Yes | Web search |
+| Coder | Yes (only agent) | No | No | No | Bash, Read, Write, Glob |
 
-Why: The plan already incorporates the analysis, so passing both to the Critic
-is redundant. Code is an implementation detail that only the implementer needs.
-The Critic and Scientist debate strategy on equal footing with symmetric context.
+Why: Debate participants share the full evidence base (analysis, prediction
+history, notebook, domain knowledge) so critics can make grounded arguments
+based on actual metrics and what has already been tested. Code is an
+implementation detail that only the Coder needs.
 
 ### Agent Details
 
@@ -142,8 +143,8 @@ The Critic and Scientist debate strategy on equal footing with symmetric context
 - Multi-round debate between external critic models and the Scientist (Claude via API)
 - Round 1: plain API call to critic model (OpenAI/Google/Anthropic SDK)
 - Round 2+: Scientist responds to critique, then critic refines
-- Input: plan JSON + lab notebook + domain knowledge
-- Neither side sees analysis JSON or experiment scripts (symmetric context)
+- Input: plan JSON + analysis JSON + prediction history + lab notebook + domain knowledge
+- Both sides share the full evidence base; neither sees experiment scripts
 - Both Critic and Scientist have web search (verify claims, look up papers, check methods)
 - Returns full debate transcript for the Scientist revision step
 - Configurable: `--debate-rounds N` (default 2; 1 = single-pass, no debate)

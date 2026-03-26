@@ -5,7 +5,7 @@ from unittest.mock import AsyncMock, patch
 
 import pytest
 
-from auto_scientist.config import DomainConfig, SuccessCriterion
+from auto_scientist.config import DomainConfig
 from auto_scientist.model_config import AgentModelConfig, ModelConfig, ReasoningConfig
 from auto_scientist.orchestrator import Orchestrator
 from auto_scientist.runner import RunResult
@@ -627,7 +627,7 @@ class TestIteration0:
                 orchestrator,
                 "_run_analyst",
                 new_callable=AsyncMock,
-                return_value={"success_score": None},
+                return_value={},
             ),
             patch.object(
                 orchestrator, "_run_scientist_plan", new_callable=AsyncMock, return_value=plan
@@ -646,7 +646,7 @@ class TestIteration0:
                 orchestrator, "_run_coder", new_callable=AsyncMock, return_value=script_path
             ),
             patch.object(orchestrator, "_read_run_result", return_value=run_result),
-            patch.object(orchestrator, "_apply_criteria_updates"),
+
         ):
             await orchestrator._run_iteration_body()
 
@@ -701,254 +701,11 @@ class TestIteration0:
                 "_read_run_result",
                 return_value=run_result,
             ),
-            patch.object(orchestrator, "_apply_criteria_updates"),
+
         ):
             await orchestrator._run_iteration_body()
 
         assert orchestrator.state.iteration == 1
-
-
-class TestParseCriterion:
-    def test_greater_than(self, orchestrator):
-        raw = {"name": "acc", "description": "d", "metric_key": "acc", "condition": "> 0.95"}
-        sc = Orchestrator._parse_criterion(raw)
-        assert sc.target_min == 0.95
-        assert sc.target_max is None
-
-    def test_less_than(self, orchestrator):
-        raw = {"name": "err", "description": "d", "metric_key": "err", "condition": "< 500"}
-        sc = Orchestrator._parse_criterion(raw)
-        assert sc.target_max == 500.0
-        assert sc.target_min is None
-
-    def test_greater_equal(self, orchestrator):
-        raw = {"name": "r2", "description": "d", "metric_key": "r2", "condition": ">= 0.9"}
-        sc = Orchestrator._parse_criterion(raw)
-        assert sc.target_min == 0.9
-
-    def test_less_equal(self, orchestrator):
-        raw = {"name": "err", "description": "d", "metric_key": "err", "condition": "<= 10"}
-        sc = Orchestrator._parse_criterion(raw)
-        assert sc.target_max == 10.0
-
-    def test_invalid_condition_returns_none(self, orchestrator):
-        raw = {"name": "x", "description": "d", "metric_key": "x", "condition": "between 0 and 1"}
-        assert Orchestrator._parse_criterion(raw) is None
-
-    def test_empty_condition_returns_none(self, orchestrator):
-        raw = {"name": "x", "description": "d", "metric_key": "x", "condition": ""}
-        assert Orchestrator._parse_criterion(raw) is None
-
-    def test_missing_condition_key_returns_none(self, orchestrator):
-        raw = {"name": "x", "description": "d", "metric_key": "x"}
-        assert Orchestrator._parse_criterion(raw) is None
-
-    def test_non_numeric_condition_returns_none(self, orchestrator):
-        raw = {
-            "name": "Normal residuals",
-            "description": "d",
-            "metric_key": "x",
-            "condition": "approximately normal",
-        }
-        assert Orchestrator._parse_criterion(raw) is None
-
-    def test_preserves_name_description(self, orchestrator):
-        raw = {
-            "name": "Accuracy",
-            "description": "Model accuracy",
-            "metric_key": "acc",
-            "condition": "> 0.9",
-        }
-        sc = Orchestrator._parse_criterion(raw)
-        assert sc.name == "Accuracy"
-        assert sc.description == "Model accuracy"
-        assert sc.metric_key == "acc"
-
-
-class TestApplyCriteriaUpdates:
-    """Test _apply_criteria_updates with various plan shapes."""
-
-    def test_top_level_criteria_populates_state(self, orchestrator):
-        plan = {
-            "top_level_criteria": [
-                {
-                    "name": "RMSE",
-                    "description": "low error",
-                    "metric_key": "rmse",
-                    "condition": "< 0.5",
-                },
-                {
-                    "name": "R-squared",
-                    "description": "high fit",
-                    "metric_key": "r2",
-                    "condition": "> 0.95",
-                },
-            ],
-        }
-        orchestrator.state.iteration = 1
-        orchestrator._apply_criteria_updates(plan)
-
-        assert orchestrator.state.success_criteria is not None
-        assert len(orchestrator.state.success_criteria) == 2
-        assert orchestrator.state.success_criteria[0].name == "RMSE"
-        assert orchestrator.state.success_criteria[0].target_max == 0.5
-        assert orchestrator.state.success_criteria[1].target_min == 0.95
-        assert len(orchestrator.state.criteria_history) == 1
-        assert orchestrator.state.criteria_history[0].action == "defined"
-
-    def test_criteria_revision_updates_state(self, orchestrator):
-        # Pre-populate with existing criteria
-        orchestrator.state.success_criteria = [
-            SuccessCriterion(name="R2", description="fit", metric_key="r2", target_min=0.95),
-        ]
-        plan = {
-            "criteria_revision": {
-                "changes": "Lowered target from 0.95 to 0.90",
-                "revised_criteria": [
-                    {"name": "R2", "description": "fit", "metric_key": "r2", "condition": "> 0.90"},
-                ],
-            },
-        }
-        orchestrator.state.iteration = 3
-        orchestrator._apply_criteria_updates(plan)
-
-        assert orchestrator.state.success_criteria[0].target_min == 0.90
-        assert len(orchestrator.state.criteria_history) == 1
-        assert orchestrator.state.criteria_history[0].action == "revised"
-
-    def test_no_criteria_fields_no_change(self, orchestrator):
-        orchestrator.state.success_criteria = None
-        plan = {"hypothesis": "test", "changes": []}
-        orchestrator._apply_criteria_updates(plan)
-        assert orchestrator.state.success_criteria is None
-        assert len(orchestrator.state.criteria_history) == 0
-
-    def test_top_level_takes_priority_over_revision(self, orchestrator):
-        orchestrator.state.iteration = 1
-        plan = {
-            "top_level_criteria": [
-                {"name": "A", "description": "d", "metric_key": "a", "condition": "> 0.9"},
-            ],
-            "criteria_revision": {
-                "changes": "ignored",
-                "revised_criteria": [
-                    {"name": "B", "description": "d", "metric_key": "b", "condition": "< 1"},
-                ],
-            },
-        }
-        orchestrator._apply_criteria_updates(plan)
-        assert len(orchestrator.state.success_criteria) == 1
-        assert orchestrator.state.success_criteria[0].name == "A"
-        assert orchestrator.state.criteria_history[0].action == "defined"
-
-    def test_filters_out_unmeasurable_criteria(self, orchestrator):
-        """Criteria without numeric targets should be filtered out."""
-        plan = {
-            "top_level_criteria": [
-                {
-                    "name": "RMSE",
-                    "description": "low error",
-                    "metric_key": "rmse",
-                    "condition": "< 0.5",
-                },
-                {
-                    "name": "Normal residuals",
-                    "description": "bad",
-                    "metric_key": "x",
-                    "condition": "approximately normal",
-                },
-                {
-                    "name": "R2",
-                    "description": "high fit",
-                    "metric_key": "r2",
-                    "condition": "> 0.95",
-                },
-            ],
-        }
-        orchestrator.state.iteration = 1
-        orchestrator._apply_criteria_updates(plan)
-
-        assert len(orchestrator.state.success_criteria) == 2
-        names = [c.name for c in orchestrator.state.success_criteria]
-        assert "RMSE" in names
-        assert "R2" in names
-        assert "Normal residuals" not in names
-
-    def test_empty_top_level_list_no_update(self, orchestrator):
-        orchestrator.state.success_criteria = None
-        plan = {"top_level_criteria": []}
-        orchestrator._apply_criteria_updates(plan)
-        assert orchestrator.state.success_criteria is None
-
-    def test_revision_with_empty_revised_list(self, orchestrator):
-        orchestrator.state.success_criteria = [
-            SuccessCriterion(name="X", description="d", metric_key="x", target_min=0.5),
-        ]
-        plan = {
-            "criteria_revision": {
-                "changes": "Cleared all criteria",
-                "revised_criteria": [],
-            },
-        }
-        orchestrator.state.iteration = 2
-        orchestrator._apply_criteria_updates(plan)
-        assert orchestrator.state.success_criteria == []
-
-    def test_criteria_history_records_defined_action(self, orchestrator):
-        orchestrator.state.iteration = 1
-        plan = {
-            "top_level_criteria": [
-                {"name": "A", "description": "d", "metric_key": "a", "condition": "> 0.9"},
-            ],
-        }
-        orchestrator._apply_criteria_updates(plan)
-        assert len(orchestrator.state.criteria_history) == 1
-        assert orchestrator.state.criteria_history[0].action == "defined"
-        assert orchestrator.state.criteria_history[0].iteration == 1
-
-    def test_criteria_history_records_revised_action(self, orchestrator):
-        orchestrator.state.success_criteria = [
-            SuccessCriterion(name="A", description="d", metric_key="a", target_min=0.9),
-        ]
-        orchestrator.state.iteration = 3
-        plan = {
-            "criteria_revision": {
-                "changes": "Lowered target",
-                "revised_criteria": [
-                    {"name": "A", "description": "d", "metric_key": "a", "condition": "> 0.8"},
-                ],
-            },
-        }
-        orchestrator._apply_criteria_updates(plan)
-        assert orchestrator.state.criteria_history[0].action == "revised"
-        assert orchestrator.state.criteria_history[0].iteration == 3
-
-    def test_condition_parsing_less_than(self, orchestrator):
-        plan = {
-            "top_level_criteria": [
-                {"name": "Error", "description": "low", "metric_key": "err", "condition": "< 500"},
-            ],
-        }
-        orchestrator.state.iteration = 1
-        orchestrator._apply_criteria_updates(plan)
-        assert orchestrator.state.success_criteria[0].target_max == 500.0
-        assert orchestrator.state.success_criteria[0].target_min is None
-
-    def test_condition_parsing_greater_than(self, orchestrator):
-        plan = {
-            "top_level_criteria": [
-                {
-                    "name": "Accuracy",
-                    "description": "high",
-                    "metric_key": "acc",
-                    "condition": "> 0.95",
-                },
-            ],
-        }
-        orchestrator.state.iteration = 1
-        orchestrator._apply_criteria_updates(plan)
-        assert orchestrator.state.success_criteria[0].target_min == 0.95
-        assert orchestrator.state.success_criteria[0].target_max is None
 
 
 class TestDomainKnowledgeSourcing:
@@ -988,7 +745,6 @@ class TestDomainKnowledgeSourcing:
         orchestrator.state.domain_knowledge = ""
 
         analysis = {
-            "success_score": None,
             "domain_knowledge": "Environmental sensor data with temperature readings",
         }
 
@@ -1036,7 +792,7 @@ class TestRunIteration:
                 new_callable=AsyncMock,
                 return_value=plan,
             ),
-            patch.object(orchestrator, "_apply_criteria_updates"),
+
         ):
             await orchestrator._run_iteration_body()
 
@@ -1101,11 +857,11 @@ class TestRunIteration:
                 "_read_run_result",
                 return_value=run_result,
             ),
-            patch.object(orchestrator, "_apply_criteria_updates"),
+
         ):
             await orchestrator._run_iteration_body()
 
-        mock_debate.assert_called_once_with(plan)
+        mock_debate.assert_called_once_with(plan, {})
 
     @pytest.mark.asyncio
     async def test_domain_knowledge_updated_from_analysis(self, orchestrator, tmp_path):
@@ -1115,7 +871,6 @@ class TestRunIteration:
         orchestrator.state.domain_knowledge = ""
 
         analysis = {
-            "success_score": None,
             "domain_knowledge": "Sensor data with temperature readings",
         }
         plan = {"should_stop": False, "hypothesis": "explore"}
@@ -1135,7 +890,7 @@ class TestRunIteration:
                 orchestrator, "_run_coder", new_callable=AsyncMock, return_value=script_path
             ),
             patch.object(orchestrator, "_read_run_result", return_value=run_result),
-            patch.object(orchestrator, "_apply_criteria_updates"),
+
         ):
             await orchestrator._run_iteration_body()
 
@@ -1163,7 +918,7 @@ class TestRunIteration:
             patch.object(
                 orchestrator, "_run_scientist_plan", new_callable=AsyncMock, return_value=plan
             ),
-            patch.object(orchestrator, "_apply_criteria_updates"),
+
         ):
             await orchestrator._run_iteration_body()
 
@@ -1190,7 +945,7 @@ class TestRunIteration:
             patch.object(
                 orchestrator, "_run_coder", new_callable=AsyncMock, return_value=script_path
             ),
-            patch.object(orchestrator, "_apply_criteria_updates"),
+
         ):
             await orchestrator._run_iteration_body()
 
@@ -1225,7 +980,7 @@ class TestRunIteration:
                 new_callable=AsyncMock,
                 return_value=None,
             ),
-            patch.object(orchestrator, "_apply_criteria_updates"),
+
         ):
             await orchestrator._run_iteration_body()
 
@@ -1259,164 +1014,13 @@ class TestRunIteration:
                 orchestrator, "_run_coder", new_callable=AsyncMock, return_value=script_path
             ),
             patch.object(orchestrator, "_read_run_result", return_value=run_result),
-            patch.object(orchestrator, "_apply_criteria_updates"),
+
         ):
             await orchestrator._run_iteration_body()
 
         # Iteration completed and state advanced
         assert orchestrator.state.iteration == 1
         assert len(orchestrator.state.versions) == 1
-
-
-class TestComputeScore:
-    """Test _compute_score deterministic scoring from criteria_results."""
-
-    def test_all_required_pass_returns_100(self):
-        criteria = [
-            SuccessCriterion(
-                name="RMSE", description="d", metric_key="rmse", target_max=0.5, required=True
-            ),
-            SuccessCriterion(
-                name="R2", description="d", metric_key="r2", target_min=0.9, required=True
-            ),
-        ]
-        results = [
-            {"name": "RMSE", "status": "pass"},
-            {"name": "R2", "status": "pass"},
-        ]
-        assert Orchestrator._compute_score(results, criteria) == 100
-
-    def test_no_required_pass_returns_0(self):
-        criteria = [
-            SuccessCriterion(
-                name="RMSE", description="d", metric_key="rmse", target_max=0.5, required=True
-            ),
-            SuccessCriterion(
-                name="R2", description="d", metric_key="r2", target_min=0.9, required=True
-            ),
-        ]
-        results = [
-            {"name": "RMSE", "status": "fail"},
-            {"name": "R2", "status": "fail"},
-        ]
-        assert Orchestrator._compute_score(results, criteria) == 0
-
-    def test_mixed_returns_proportional(self):
-        criteria = [
-            SuccessCriterion(
-                name="A", description="d", metric_key="a", target_min=0.5, required=True
-            ),
-            SuccessCriterion(
-                name="B", description="d", metric_key="b", target_max=10, required=True
-            ),
-            SuccessCriterion(
-                name="C", description="d", metric_key="c", target_min=0.1, required=True
-            ),
-        ]
-        results = [
-            {"name": "A", "status": "pass"},
-            {"name": "B", "status": "fail"},
-            {"name": "C", "status": "pass"},
-        ]
-        assert Orchestrator._compute_score(results, criteria) == 67  # round(2/3 * 100)
-
-    def test_optional_criteria_ignored(self):
-        criteria = [
-            SuccessCriterion(
-                name="A", description="d", metric_key="a", target_min=0.5, required=True
-            ),
-            SuccessCriterion(
-                name="B", description="d", metric_key="b", target_max=10, required=False
-            ),
-        ]
-        results = [
-            {"name": "A", "status": "pass"},
-            {"name": "B", "status": "fail"},
-        ]
-        # Only 1 required, it passes -> 100
-        assert Orchestrator._compute_score(results, criteria) == 100
-
-    def test_no_criteria_returns_0(self):
-        assert Orchestrator._compute_score([], []) == 0
-
-    def test_no_results_returns_0(self):
-        criteria = [
-            SuccessCriterion(
-                name="A", description="d", metric_key="a", target_min=0.5, required=True
-            ),
-        ]
-        assert Orchestrator._compute_score([], criteria) == 0
-
-    def test_unable_to_measure_counts_as_fail(self):
-        criteria = [
-            SuccessCriterion(
-                name="A", description="d", metric_key="a", target_min=0.5, required=True
-            ),
-        ]
-        results = [
-            {"name": "A", "status": "unable_to_measure"},
-        ]
-        assert Orchestrator._compute_score(results, criteria) == 0
-
-
-class TestScoreLatest:
-    """Test _score_latest updates version score and best tracking."""
-
-    def test_scores_latest_version(self, orchestrator):
-        orchestrator.state.success_criteria = [
-            SuccessCriterion(
-                name="RMSE", description="d", metric_key="rmse", target_max=0.5, required=True
-            ),
-        ]
-        latest = VersionEntry(version="v01", iteration=1, script_path="/tmp/s.py")
-        orchestrator.state.versions = [latest]
-
-        analysis = {"criteria_results": [{"name": "RMSE", "status": "pass"}]}
-        orchestrator._score_latest(analysis)
-
-        assert latest.score == 100
-        assert orchestrator.state.best_score == 100
-        assert orchestrator.state.best_version == "v01"
-
-    def test_no_versions_is_noop(self, orchestrator):
-        orchestrator._score_latest({"criteria_results": []})
-        assert orchestrator.state.best_score == 0
-
-    def test_none_analysis_scores_zero(self, orchestrator):
-        orchestrator.state.success_criteria = [
-            SuccessCriterion(
-                name="A", description="d", metric_key="a", target_min=0.5, required=True
-            ),
-        ]
-        latest = VersionEntry(version="v01", iteration=1, script_path="/tmp/s.py")
-        orchestrator.state.versions = [latest]
-
-        orchestrator._score_latest(None)
-        assert latest.score == 0
-
-    def test_scores_after_criteria_defined(self, orchestrator):
-        """Score should work even when criteria are defined in the same iteration."""
-        latest = VersionEntry(version="v01", iteration=1, script_path="/tmp/s.py")
-        orchestrator.state.versions = [latest]
-
-        # Criteria defined by Scientist in same iteration
-        orchestrator.state.success_criteria = [
-            SuccessCriterion(
-                name="R2", description="d", metric_key="r2", target_min=0.9, required=True
-            ),
-            SuccessCriterion(
-                name="RMSE", description="d", metric_key="rmse", target_max=0.5, required=True
-            ),
-        ]
-
-        analysis = {
-            "criteria_results": [
-                {"name": "R2", "status": "pass"},
-                {"name": "RMSE", "status": "fail"},
-            ],
-        }
-        orchestrator._score_latest(analysis)
-        assert latest.score == 50
 
 
 class TestRunAnalystInitial:
@@ -1465,8 +1069,8 @@ class TestRunAnalystNormal:
         assert result is None
 
     @pytest.mark.asyncio
-    async def test_analyst_returns_criteria_results(self, orchestrator, tmp_path):
-        """_run_analyst returns analysis with criteria_results for later scoring."""
+    async def test_analyst_returns_observations(self, orchestrator, tmp_path):
+        """_run_analyst returns analysis dict from agent."""
         orchestrator.output_dir.mkdir(parents=True, exist_ok=True)
 
         results_path = tmp_path / "results.txt"
@@ -1481,13 +1085,14 @@ class TestRunAnalystNormal:
 
         async def fake_analyst(**kwargs):
             return {
-                "criteria_results": [{"name": "RMSE", "status": "pass"}],
+                "observations": ["RMSE improved"],
+                "key_metrics": {"rmse": 0.3},
             }
 
         with patch("auto_scientist.agents.analyst.run_analyst", side_effect=fake_analyst):
             result = await orchestrator._run_analyst()
 
-        assert result["criteria_results"] == [{"name": "RMSE", "status": "pass"}]
+        assert result["observations"] == ["RMSE improved"]
 
     @pytest.mark.asyncio
     async def test_error_returns_none(self, orchestrator, tmp_path):
@@ -1556,13 +1161,13 @@ class TestRunDebateOrchestrator:
     @pytest.mark.asyncio
     async def test_no_critics_returns_none(self, orchestrator):
         orchestrator.model_config.critics = []
-        result = await orchestrator._run_debate({"hypothesis": "test"})
+        result = await orchestrator._run_debate({"hypothesis": "test"}, None)
         assert result is None
 
     @pytest.mark.asyncio
     async def test_no_plan_returns_none(self, orchestrator):
         orchestrator.model_config.critics = [AgentModelConfig(provider="openai", model="gpt-4o")]
-        result = await orchestrator._run_debate(None)
+        result = await orchestrator._run_debate(None, None)
         assert result is None
 
     @pytest.mark.asyncio
@@ -1572,6 +1177,7 @@ class TestRunDebateOrchestrator:
         orchestrator.model_config.summarizer = None  # disable summarizer to test run_debate path
         orchestrator.state.domain_knowledge = "test knowledge"
         plan = {"hypothesis": "test"}
+        analysis = {"key_metrics": {"rmse": 0.52}}
 
         critique = [{"model": "openai:gpt-4o", "critique": "looks good", "transcript": []}]
 
@@ -1580,14 +1186,15 @@ class TestRunDebateOrchestrator:
             new_callable=AsyncMock,
             return_value=critique,
         ) as mock_debate:
-            result = await orchestrator._run_debate(plan)
+            result = await orchestrator._run_debate(plan, analysis)
 
         assert result == critique
         call_kwargs = mock_debate.call_args.kwargs
         assert len(call_kwargs["critic_configs"]) == 1
         assert call_kwargs["critic_configs"][0].model == "gpt-4o"
         assert call_kwargs["domain_knowledge"] == "test knowledge"
-        assert call_kwargs["plot_paths"] == []  # no versions => no plots
+        assert '"rmse"' in call_kwargs["analysis_json"]
+        assert isinstance(call_kwargs["prediction_history"], str)
         assert isinstance(call_kwargs["message_buffers"], dict)
 
     @pytest.mark.asyncio
@@ -1627,51 +1234,12 @@ class TestRunDebateOrchestrator:
                 return_value="Summarizing...",
             ),
         ):
-            result = await orchestrator._run_debate(plan)
+            result = await orchestrator._run_debate(plan, None)
 
         # 3 debates (one per persona), all using the same single critic model
         assert len(result) == 3
         call_kwargs = mock_single.call_args.kwargs
         assert call_kwargs["config"].model == "gpt-4o"
-
-    @pytest.mark.asyncio
-    async def test_passes_plot_paths_from_version_dir(self, orchestrator, tmp_path):
-        """When versions exist with PNGs, plot_paths are gathered and passed."""
-        orchestrator.output_dir.mkdir(parents=True, exist_ok=True)
-        orchestrator.model_config.critics = [AgentModelConfig(provider="openai", model="gpt-4o")]
-        orchestrator.model_config.summarizer = None  # disable summarizer to test run_debate path
-
-        # Create a version directory with plot PNGs
-        version_dir = orchestrator.output_dir / "v01"
-        version_dir.mkdir()
-        script_path = version_dir / "experiment.py"
-        script_path.write_text("pass")
-        (version_dir / "loss_curve.png").write_bytes(b"\x89PNG")
-        (version_dir / "scatter.png").write_bytes(b"\x89PNG")
-
-        orchestrator.state.versions = [
-            VersionEntry(
-                version="v01",
-                iteration=1,
-                script_path=str(script_path),
-                results_path=str(version_dir / "results.txt"),
-            )
-        ]
-
-        critique = [{"model": "openai:gpt-4o", "critique": "ok", "transcript": []}]
-
-        with patch(
-            "auto_scientist.agents.critic.run_debate",
-            new_callable=AsyncMock,
-            return_value=critique,
-        ) as mock_debate:
-            await orchestrator._run_debate({"hypothesis": "test"})
-
-        call_kwargs = mock_debate.call_args.kwargs
-        plot_paths = call_kwargs["plot_paths"]
-        assert len(plot_paths) == 2
-        plot_names = sorted(p.name for p in plot_paths)
-        assert plot_names == ["loss_curve.png", "scatter.png"]
 
 
 class TestRunScientistRevisionOrchestrator:
@@ -2232,7 +1800,6 @@ class TestRunFullOrchestration:
             patch.object(o, "_run_scientist_plan", new_callable=AsyncMock, return_value=plan),
             patch.object(o, "_run_coder", new_callable=AsyncMock, return_value=script_path),
             patch.object(o, "_read_run_result", return_value=run_result),
-            patch.object(o, "_apply_criteria_updates"),
             patch.object(o, "_run_report", new_callable=AsyncMock),
         ):
             await o.run()
@@ -2362,7 +1929,6 @@ class TestSummaryIntegration:
             patch.object(o, "_run_scientist_plan", new_callable=AsyncMock, return_value=plan),
             patch.object(o, "_run_coder", new_callable=AsyncMock, return_value=script_path),
             patch.object(o, "_read_run_result", return_value=run_result),
-            patch.object(o, "_apply_criteria_updates"),
             patch.object(o, "_run_report", new_callable=AsyncMock),
             patch(
                 "auto_scientist.orchestrator.run_with_summaries", new_callable=AsyncMock
@@ -2419,7 +1985,6 @@ class TestSummaryIntegration:
                 return_value=script_path,
             ),
             patch.object(o, "_read_run_result", return_value=run_result),
-            patch.object(o, "_apply_criteria_updates"),
             patch.object(o, "_run_report", new_callable=AsyncMock),
             patch(
                 "auto_scientist.orchestrator.run_with_summaries", new_callable=AsyncMock
@@ -2461,7 +2026,7 @@ class TestSummaryIntegration:
                 orchestrator, "_run_coder", new_callable=AsyncMock, return_value=script_path
             ),
             patch.object(orchestrator, "_read_run_result", return_value=run_result),
-            patch.object(orchestrator, "_apply_criteria_updates"),
+
             patch(
                 "auto_scientist.orchestrator.summarize_results",
                 new_callable=AsyncMock,
@@ -2504,7 +2069,7 @@ class TestSummaryIntegration:
                 return_value=script_path,
             ),
             patch.object(orchestrator, "_read_run_result", return_value=run_result),
-            patch.object(orchestrator, "_apply_criteria_updates"),
+
             patch(
                 "auto_scientist.orchestrator.run_with_summaries",
                 new_callable=AsyncMock,
@@ -2514,3 +2079,133 @@ class TestSummaryIntegration:
             await orchestrator._run_iteration_body()
 
         assert orchestrator.state.iteration == 1
+
+
+# ---------------------------------------------------------------------------
+# Prediction updates
+# ---------------------------------------------------------------------------
+
+class TestApplyPredictionUpdates:
+    def test_stores_records_with_pred_ids(self, orchestrator):
+        orchestrator.state.iteration = 1
+        plan = {
+            "testable_predictions": [
+                {
+                    "prediction": "spline fits better locally",
+                    "diagnostic": "compare regional RMSE",
+                    "if_confirmed": "focus on local fit",
+                    "if_refuted": "problem is elsewhere",
+                },
+                {
+                    "prediction": "smoothing parameter identifiable",
+                    "diagnostic": "profile s on grid",
+                    "if_confirmed": "fine-tune s",
+                    "if_refuted": "fix s",
+                    "follows_from": "spline fits better locally",
+                },
+            ],
+        }
+        orchestrator._apply_prediction_updates(plan)
+        assert len(orchestrator.state.prediction_history) == 2
+        assert orchestrator.state.prediction_history[0].pred_id == "1.1"
+        assert orchestrator.state.prediction_history[1].pred_id == "1.2"
+        assert orchestrator.state.prediction_history[0].outcome == "pending"
+        assert orchestrator.state.prediction_history[1].follows_from == "spline fits better locally"
+        # pred_id injected back into plan dict
+        assert plan["testable_predictions"][0]["pred_id"] == "1.1"
+        assert plan["testable_predictions"][1]["pred_id"] == "1.2"
+
+    def test_empty_predictions_is_noop(self, orchestrator):
+        orchestrator._apply_prediction_updates({"testable_predictions": []})
+        assert orchestrator.state.prediction_history == []
+
+    def test_missing_key_is_noop(self, orchestrator):
+        orchestrator._apply_prediction_updates({"hypothesis": "test"})
+        assert orchestrator.state.prediction_history == []
+
+
+class TestResolvePredictionOutcomes:
+    def _add_pending(self, orchestrator, prediction_text, pred_id=""):
+        from auto_scientist.state import PredictionRecord
+        orchestrator.state.prediction_history.append(
+            PredictionRecord(
+                pred_id=pred_id,
+                iteration_prescribed=0,
+                prediction=prediction_text,
+                diagnostic="test",
+                if_confirmed="ok",
+                if_refuted="not ok",
+            )
+        )
+
+    def test_matches_by_pred_id(self, orchestrator):
+        orchestrator.state.iteration = 1
+        self._add_pending(orchestrator, "spline fits better locally", pred_id="0.1")
+        analysis = {
+            "prediction_outcomes": [
+                {
+                    "pred_id": "0.1",
+                    "prediction": "totally paraphrased text",
+                    "outcome": "confirmed",
+                    "evidence": "regional RMSE 0.31 vs 0.58",
+                },
+            ],
+        }
+        orchestrator._resolve_prediction_outcomes(analysis)
+        rec = orchestrator.state.prediction_history[0]
+        assert rec.outcome == "confirmed"
+        assert rec.evidence == "regional RMSE 0.31 vs 0.58"
+        assert rec.iteration_evaluated == 1
+
+    def test_falls_back_to_text_when_no_pred_id(self, orchestrator):
+        orchestrator.state.iteration = 1
+        self._add_pending(orchestrator, "spline fits better locally")
+        analysis = {
+            "prediction_outcomes": [
+                {
+                    "prediction": "spline fits better locally",
+                    "outcome": "confirmed",
+                    "evidence": "RMSE 0.31",
+                },
+            ],
+        }
+        orchestrator._resolve_prediction_outcomes(analysis)
+        assert orchestrator.state.prediction_history[0].outcome == "confirmed"
+
+    def test_no_outcomes_is_noop(self, orchestrator):
+        self._add_pending(orchestrator, "test prediction", pred_id="0.1")
+        orchestrator._resolve_prediction_outcomes({"prediction_outcomes": []})
+        assert orchestrator.state.prediction_history[0].outcome == "pending"
+
+    def test_none_analysis_is_noop(self, orchestrator):
+        self._add_pending(orchestrator, "test prediction", pred_id="0.1")
+        orchestrator._resolve_prediction_outcomes(None)
+        assert orchestrator.state.prediction_history[0].outcome == "pending"
+
+    def test_unmatched_id_leaves_record_pending(self, orchestrator):
+        self._add_pending(orchestrator, "prediction A", pred_id="0.1")
+        analysis = {
+            "prediction_outcomes": [
+                {"pred_id": "9.9", "prediction": "different", "outcome": "refuted", "evidence": "n/a"},
+            ],
+        }
+        orchestrator._resolve_prediction_outcomes(analysis)
+        assert orchestrator.state.prediction_history[0].outcome == "pending"
+
+    def test_partial_match_by_id(self, orchestrator):
+        orchestrator.state.iteration = 2
+        self._add_pending(orchestrator, "spline fits better", pred_id="0.1")
+        self._add_pending(orchestrator, "smoothing identifiable", pred_id="0.2")
+        analysis = {
+            "prediction_outcomes": [
+                {
+                    "pred_id": "0.1",
+                    "prediction": "paraphrased",
+                    "outcome": "confirmed",
+                    "evidence": "RMSE 0.31 vs 0.58",
+                },
+            ],
+        }
+        orchestrator._resolve_prediction_outcomes(analysis)
+        assert orchestrator.state.prediction_history[0].outcome == "confirmed"
+        assert orchestrator.state.prediction_history[1].outcome == "pending"

@@ -1,7 +1,6 @@
 """Tests for the critic debate loop with personas and structured output."""
 
 import json
-from pathlib import Path
 from unittest.mock import AsyncMock, patch
 
 import pytest
@@ -15,7 +14,6 @@ from auto_scientist.agents.critic import (
     run_single_critic_debate,
 )
 from auto_scientist.agents.debate_models import CriticOutput, DebateResult, ScientistDefense
-from auto_scientist.images import ImageData
 from auto_scientist.model_config import AgentModelConfig, ReasoningConfig
 
 # Mock paths for the direct API calls used by both critic and scientist
@@ -118,14 +116,6 @@ def plan():
         "should_stop": False,
         "stop_reason": None,
         "notebook_entry": "Learning rate adjustment\n\nReducing lr for convergence",
-        "success_criteria": [
-            {
-                "name": "Convergence improves",
-                "description": "Final loss should decrease with lower learning rate",
-                "metric_key": "final_loss_decreased",
-                "condition": "== true",
-            }
-        ],
     }
 
 
@@ -304,22 +294,6 @@ class TestRunDebate:
         critic_prompt = mock_openai.call_args[0][1]
         assert "<plan>" in critic_prompt
         assert "Adjusting learning rate" in critic_prompt
-
-    @pytest.mark.asyncio
-    async def test_no_analysis_or_script_in_prompts(self, base_kwargs):
-        """Neither the critic nor scientist sees analysis JSON or script content."""
-        with (
-            patch(OPENAI_PATH, new_callable=AsyncMock, return_value=_CR()) as mock_openai,
-            patch(GOOGLE_PATH, new_callable=AsyncMock, return_value=_CR()),
-            patch(ANTHROPIC_PATH, new_callable=AsyncMock, return_value=_DR()) as mock_anthropic,
-        ):
-            await run_debate(**base_kwargs, max_rounds=2)
-
-        critic_prompt = mock_openai.call_args_list[0][0][1]
-        scientist_prompt = mock_anthropic.call_args_list[0][0][1]
-
-        assert "Latest Analysis" not in critic_prompt
-        assert "Current Script" not in scientist_prompt
 
     @pytest.mark.asyncio
     async def test_web_search_enabled_for_critic(self, base_kwargs):
@@ -539,41 +513,47 @@ class TestScientistDefenseValidation:
         assert defense.responses == []
 
 
-# Minimal valid 1x1 PNG for test fixtures
-TINY_PNG = (
-    b"\x89PNG\r\n\x1a\n\x00\x00\x00\rIHDR\x00\x00\x00\x01"
-    b"\x00\x00\x00\x01\x08\x02\x00\x00\x00\x90wS\xde\x00"
-    b"\x00\x00\x0cIDATx\x9cc\xf8\x0f\x00\x00\x01\x01\x00"
-    b"\x05\x18\xd8N\x00\x00\x00\x00IEND\xaeB`\x82"
-)
+class TestBuildCriticPromptContext:
+    def test_analysis_json_included(self):
+        prompt = _build_critic_prompt(
+            {"h": "p"}, "", "", analysis_json='{"key_metrics": {"rmse": 0.52}}',
+        )
+        assert "<analysis>" in prompt
+        assert "rmse" in prompt
 
+    def test_prediction_history_included(self):
+        prompt = _build_critic_prompt(
+            {"h": "p"}, "", "",
+            prediction_history="[1.0] CONFIRMED: polynomial fits well",
+        )
+        assert "<prediction_history>" in prompt
+        assert "polynomial fits well" in prompt
 
-class TestBuildCriticPromptPlots:
-    def test_has_plots_adds_section(self):
-        prompt = _build_critic_prompt({"h": "p"}, "", "", has_plots=True)
-        assert "<plots_attached>" in prompt
-
-    def test_no_plots_omits_section(self):
-        prompt = _build_critic_prompt({"h": "p"}, "", "", has_plots=False)
-        assert "<plots_attached>" not in prompt
-
-    def test_default_no_plots_section(self):
+    def test_empty_analysis_shows_fallback(self):
         prompt = _build_critic_prompt({"h": "p"}, "", "")
-        assert "<plots_attached>" not in prompt
+        assert "(no analysis yet)" in prompt
+
+    def test_empty_prediction_history_shows_fallback(self):
+        prompt = _build_critic_prompt({"h": "p"}, "", "")
+        assert "(no prediction history yet)" in prompt
 
 
-class TestBuildScientistDebatePromptPlots:
-    def test_has_plots_adds_section(self):
+class TestBuildScientistDebatePromptContext:
+    def test_analysis_json_included(self):
         prompt = _build_scientist_debate_user_prompt(
-            {"h": "p"}, "", "", critique="test", has_plots=True,
+            {"h": "p"}, "", "", critique="test",
+            analysis_json='{"key_metrics": {"r2": 0.97}}',
         )
-        assert "<plots_attached>" in prompt
+        assert "<analysis>" in prompt
+        assert "r2" in prompt
 
-    def test_no_plots_omits_section(self):
+    def test_prediction_history_included(self):
         prompt = _build_scientist_debate_user_prompt(
-            {"h": "p"}, "", "", critique="test", has_plots=False,
+            {"h": "p"}, "", "", critique="test",
+            prediction_history="[2.0] REFUTED: linear model insufficient",
         )
-        assert "<plots_attached>" not in prompt
+        assert "<prediction_history>" in prompt
+        assert "linear model insufficient" in prompt
 
 
 class TestBuildScientistDebatePromptStructured:
@@ -593,32 +573,10 @@ class TestBuildScientistDebatePromptStructured:
         assert "(generic critic)" in prompt
 
 
-class TestRunDebateWithPlots:
+class TestRunDebateWithContext:
     @pytest.mark.asyncio
-    async def test_images_forwarded_to_critic(self, plan, two_critics):
-        """When plot_paths are provided, encoded images are forwarded to critic."""
-        with (
-            patch(OPENAI_PATH, new_callable=AsyncMock, return_value=_CR()) as mock_openai,
-            patch(GOOGLE_PATH, new_callable=AsyncMock, return_value=_CR()),
-            patch(
-                "auto_scientist.agents.critic.encode_images_from_paths",
-                return_value=[ImageData(data="abc", media_type="image/png")],
-            ),
-        ):
-            await run_debate(
-                critic_configs=two_critics,
-                plan=plan,
-                notebook_content="",
-                max_rounds=1,
-                plot_paths=[Path("/fake/plot.png")],
-            )
-
-        call_kwargs = mock_openai.call_args.kwargs
-        assert call_kwargs["images"] == [ImageData(data="abc", media_type="image/png")]
-
-    @pytest.mark.asyncio
-    async def test_no_plots_passes_no_images(self, plan, two_critics):
-        """Without plot_paths, images kwarg is empty list."""
+    async def test_analysis_json_in_critic_prompt(self, plan, two_critics):
+        """When analysis_json is provided, critic prompt includes <analysis> section."""
         with (
             patch(OPENAI_PATH, new_callable=AsyncMock, return_value=_CR()) as mock_openai,
             patch(GOOGLE_PATH, new_callable=AsyncMock, return_value=_CR()),
@@ -628,32 +586,54 @@ class TestRunDebateWithPlots:
                 plan=plan,
                 notebook_content="",
                 max_rounds=1,
-            )
-
-        call_kwargs = mock_openai.call_args.kwargs
-        assert call_kwargs.get("images") == []
-
-    @pytest.mark.asyncio
-    async def test_critic_prompt_has_plots_section(self, plan, two_critics):
-        """When plots are provided, critic prompt includes <plots_attached> section."""
-        with (
-            patch(OPENAI_PATH, new_callable=AsyncMock, return_value=_CR()) as mock_openai,
-            patch(GOOGLE_PATH, new_callable=AsyncMock, return_value=_CR()),
-            patch(
-                "auto_scientist.agents.critic.encode_images_from_paths",
-                return_value=[ImageData(data="abc", media_type="image/png")],
-            ),
-        ):
-            await run_debate(
-                critic_configs=two_critics,
-                plan=plan,
-                notebook_content="",
-                max_rounds=1,
-                plot_paths=[Path("/fake/plot.png")],
+                analysis_json='{"key_metrics": {"rmse": 0.52}}',
             )
 
         critic_prompt = mock_openai.call_args[0][1]
-        assert "<plots_attached>" in critic_prompt
+        assert "<analysis>" in critic_prompt
+        assert "rmse" in critic_prompt
+
+    @pytest.mark.asyncio
+    async def test_prediction_history_in_critic_prompt(self, plan, two_critics):
+        """When prediction_history is provided, critic prompt includes it."""
+        with (
+            patch(OPENAI_PATH, new_callable=AsyncMock, return_value=_CR()) as mock_openai,
+            patch(GOOGLE_PATH, new_callable=AsyncMock, return_value=_CR()),
+        ):
+            await run_debate(
+                critic_configs=two_critics,
+                plan=plan,
+                notebook_content="",
+                max_rounds=1,
+                prediction_history="[1.0] CONFIRMED: polynomial fits well",
+            )
+
+        critic_prompt = mock_openai.call_args[0][1]
+        assert "<prediction_history>" in critic_prompt
+        assert "polynomial fits well" in critic_prompt
+
+    @pytest.mark.asyncio
+    async def test_analysis_in_scientist_debate_prompt(self, plan, two_critics):
+        """Scientist debate defense prompt includes analysis and prediction history."""
+        with (
+            patch(OPENAI_PATH, new_callable=AsyncMock, return_value=_CR()),
+            patch(GOOGLE_PATH, new_callable=AsyncMock, return_value=_CR()),
+            patch(ANTHROPIC_PATH, new_callable=AsyncMock, return_value=_DR()) as mock_anthropic,
+        ):
+            await run_debate(
+                critic_configs=two_critics,
+                plan=plan,
+                notebook_content="",
+                max_rounds=2,
+                analysis_json='{"key_metrics": {"r2": 0.97}}',
+                prediction_history="[2.0] REFUTED: linear model",
+            )
+
+        scientist_prompt = mock_anthropic.call_args_list[0][0][1]
+        assert "<analysis>" in scientist_prompt
+        assert "r2" in scientist_prompt
+        assert "<prediction_history>" in scientist_prompt
+        assert "linear model" in scientist_prompt
 
 
 class TestPersonas:

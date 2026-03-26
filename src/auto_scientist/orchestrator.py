@@ -3,7 +3,6 @@
 import json
 import logging
 import os
-import re
 import shutil
 from pathlib import Path
 from typing import Any
@@ -13,7 +12,7 @@ from rich.rule import Rule
 from rich.table import Table
 from rich.text import Text
 
-from auto_scientist.config import DomainConfig, SuccessCriterion
+from auto_scientist.config import DomainConfig
 from auto_scientist.console import (
     AGENT_STYLES,
     AgentPanel,
@@ -25,7 +24,7 @@ from auto_scientist.model_config import AgentModelConfig, ModelConfig
 from auto_scientist.notebook import NOTEBOOK_FILENAME, append_entry, read_notebook
 from auto_scientist.runner import RunResult
 from auto_scientist.scheduler import wait_for_window
-from auto_scientist.state import CriteriaRevision, ExperimentState, VersionEntry
+from auto_scientist.state import ExperimentState, VersionEntry
 from auto_scientist.summarizer import run_with_summaries, summarize_results
 
 logger = logging.getLogger(__name__)
@@ -419,9 +418,9 @@ class Orchestrator:
             if self.state.phase == "report":
                 self._live.start_iteration("Report")
 
-                # Score the final version if it was never evaluated
-                if self.state.versions and self.state.versions[-1].score is None:
-                    await self._score_final_version()
+                # Resolve pending predictions for the final version
+                if self.state.versions:
+                    await self._resolve_final_predictions()
                     self.state.save(state_path)
 
                 await self._run_report()
@@ -455,7 +454,7 @@ class Orchestrator:
         config_path = self.output_dir / "domain_config.json"
 
         cfg = self.model_config.resolve("ingestor")
-        panel = AgentPanel(name="Ingestor", model=cfg.model, style="red")
+        panel = AgentPanel(name="Ingestor", model=cfg.model, style=AGENT_STYLES.get("Ingestor", "bright_red"))
         self._live.add_panel(panel)
         self._live.update_status(phase="INGESTION")
 
@@ -488,7 +487,6 @@ class Orchestrator:
         logger.info(f"=== Iteration {self.state.iteration} start ===")
         self._live.start_iteration(self.state.iteration)
         self._live.update_status(iteration=self.state.iteration)
-        prev_best = self.state.best_score
 
         version = f"v{self.state.iteration:02d}"
         version_dir = self.output_dir / version
@@ -505,15 +503,11 @@ class Orchestrator:
             self.state.domain_knowledge = analysis["domain_knowledge"]
             logger.info("Domain knowledge updated from Analyst")
 
-        # Score the evaluated version with current criteria
-        self._score_latest(analysis)
+        # Resolve any pending prediction outcomes from the Analyst
+        self._resolve_prediction_outcomes(analysis)
 
         # Step 2: Scientist plans next iteration
         plan = await self._run_scientist_plan(analysis)
-
-        # Apply criteria updates from Scientist if present
-        if plan:
-            self._apply_criteria_updates(plan)
 
         # Step 3: Check if Scientist recommends stopping
         if plan and plan.get("should_stop"):
@@ -529,7 +523,7 @@ class Orchestrator:
         # Step 4: Debate (skip on iteration 0, nothing to challenge)
         final_plan = plan
         if self.state.iteration > 0:
-            debate_result = await self._run_debate(plan)
+            debate_result = await self._run_debate(plan, analysis)
             revised_plan = await self._run_scientist_revision(plan, debate_result, analysis)
             final_plan = revised_plan or plan
 
@@ -546,6 +540,10 @@ class Orchestrator:
                     "debate_results": serialized_results,
                     "concern_ledger": concern_ledger,
                 })
+
+        # Apply prediction updates from the final plan (after debate revision)
+        if final_plan:
+            self._apply_prediction_updates(final_plan)
 
         # Persist the final plan (post-debate revision if applicable)
         if final_plan:
@@ -609,41 +607,26 @@ class Orchestrator:
         self._evaluate(run_result, version_entry)
         self.state.record_version(version_entry)
 
-        # Iteration border color: green=improved, yellow=no gain, red=failed
-        best_now = self.state.best_score
-        if version_entry.status != "completed":
-            status_style = "red"
-        elif best_now > prev_best:
-            status_style = "green"
-        elif best_now > 0:
-            status_style = "yellow"
-        else:
-            status_style = "bold"
-        score_str = f" (best: {best_now})" if best_now > 0 else ""
-        # Update status bar with best score
-        self._live.update_status(
-            best_version=self.state.best_version,
-            best_score=self.state.best_score,
-        )
-        self._live.end_iteration(f"{version_entry.status}{score_str}", status_style)
+        # Iteration border color: green=completed, red=failed
+        status_style = "red" if version_entry.status != "completed" else "green"
+        self._live.end_iteration(version_entry.status, status_style)
         self._live.flush_completed()
 
         # Increment at end of loop body
         logger.info(
             f"Iteration {self.state.iteration} complete: "
-            f"status={version_entry.status}, score={version_entry.score}, "
-            f"best={self.state.best_version} ({self.state.best_score})"
+            f"status={version_entry.status}"
         )
         self.state.iteration += 1
 
     def _build_startup_banner(self) -> Panel:
         """Build the Rich startup banner with run config and model info."""
         mc = self.model_config
-        goal_preview = self.state.goal[:80] + ("..." if len(self.state.goal) > 80 else "")
+        goal_preview = " ".join(self.state.goal.split())
 
-        table = Table(show_header=False, box=None, padding=(0, 1))
+        table = Table(show_header=False, box=None, padding=(0, 1), expand=True)
         table.add_column("key", style="bold", no_wrap=True)
-        table.add_column("value")
+        table.add_column("value", ratio=1, overflow="fold")
 
         table.add_row("Input", str(self.data_path) if self.data_path else "(none)")
         table.add_row("Output", str(self.output_dir))
@@ -806,7 +789,7 @@ class Orchestrator:
         domain_knowledge = self.state.domain_knowledge
         cfg = self.model_config.resolve("analyst")
 
-        panel = AgentPanel(name="Analyst", model=cfg.model, style="green")
+        panel = AgentPanel(name="Analyst", model=cfg.model, style=AGENT_STYLES.get("Analyst", "green"))
         self._live.add_panel(panel)
         self._live.update_status(phase="ANALYZE")
 
@@ -818,7 +801,6 @@ class Orchestrator:
                     plot_paths=[],
                     notebook_path=notebook_path,
                     domain_knowledge=domain_knowledge,
-                    success_criteria=self.state.success_criteria,
                     data_dir=self.data_path,
                     model=cfg.model,
                     message_buffer=buf,
@@ -858,11 +840,9 @@ class Orchestrator:
         version_dir = Path(latest.script_path).parent
         plot_paths = sorted(version_dir.glob("*.png"))
 
-        success_criteria = self.state.success_criteria or []
-
         cfg = self.model_config.resolve("analyst")
 
-        panel = AgentPanel(name="Analyst", model=cfg.model, style="green")
+        panel = AgentPanel(name="Analyst", model=cfg.model, style=AGENT_STYLES.get("Analyst", "green"))
         self._live.add_panel(panel)
         self._live.update_status(phase="ANALYZE")
 
@@ -874,18 +854,16 @@ class Orchestrator:
                     plot_paths=plot_paths,
                     notebook_path=notebook_path,
                     domain_knowledge=domain_knowledge,
-                    success_criteria=success_criteria,
                     model=cfg.model,
                     message_buffer=buf,
                 )
 
             analysis = await self._with_summaries(_analyst_coro, "Analyst", buffer, panel=panel)
-            n_criteria = len(analysis.get("criteria_results", []))
             logger.info(
-                f"Analyst complete: {n_criteria} criteria evaluated, "
+                f"Analyst complete: "
                 f"data_summary={'yes' if analysis.get('data_summary') else 'no'}"
             )
-            self._collapse(panel, f"Complete ({n_criteria} criteria evaluated)")
+            self._collapse(panel, "Analysis complete")
             return analysis
         except Exception as e:
             logger.exception(f"Analyst error: {e}")
@@ -905,7 +883,7 @@ class Orchestrator:
 
         cfg = self.model_config.resolve("scientist")
 
-        panel = AgentPanel(name="Scientist", model=cfg.model, style="cyan")
+        panel = AgentPanel(name="Scientist", model=cfg.model, style=AGENT_STYLES.get("Scientist", "cyan"))
         self._live.add_panel(panel)
         self._live.update_status(phase="PLAN")
 
@@ -917,7 +895,7 @@ class Orchestrator:
                     notebook_path=notebook_path,
                     version=version,
                     domain_knowledge=domain_knowledge,
-                    success_criteria=self.state.success_criteria,
+                    prediction_history=self.state.prediction_history,
                     model=cfg.model,
                     message_buffer=buf,
                 )
@@ -946,27 +924,26 @@ class Orchestrator:
         finally:
             self._persist_buffer("scientist", buffer)
 
-    async def _run_debate(self, plan: dict | None) -> list[dict[str, Any]] | None:
+    async def _run_debate(
+        self, plan: dict | None, analysis: dict | None,
+    ) -> list[dict[str, Any]] | None:
         """Send plan to critic model(s) for parallel debate with the Scientist."""
         if not self.model_config.critics or plan is None:
             self._live.log("DEBATE: skipped (no critics configured or no plan)")
             return None
 
         from auto_scientist.agents.critic import run_debate
-        from auto_scientist.agents.scientist import _format_criteria_for_prompt
+        from auto_scientist.agents.scientist import _format_predictions_for_prompt
 
         notebook_content = self._notebook_content()
         domain_knowledge = self.state.domain_knowledge
-        success_criteria = _format_criteria_for_prompt(self.state.success_criteria)
         scientist_cfg = self.model_config.resolve("scientist")
 
-        # Gather plot PNGs from the latest version directory
-        plot_paths: list[Path] = []
-        if self.state.versions:
-            latest = self.state.versions[-1]
-            if latest.script_path:
-                version_dir = Path(latest.script_path).parent
-                plot_paths = sorted(version_dir.glob("*.png"))
+        # Pre-format analysis and prediction history as strings for debate
+        analysis_json = json.dumps(analysis, indent=2) if analysis else ""
+        prediction_history = _format_predictions_for_prompt(
+            self.state.prediction_history,
+        )
 
         self._live.update_status(phase="DEBATE")
 
@@ -980,7 +957,7 @@ class Orchestrator:
             if self._should_summarize():
                 critiques = await self._run_debate_with_summaries(
                     buffers, plan, notebook_content, domain_knowledge,
-                    success_criteria, scientist_cfg, plot_paths,
+                    scientist_cfg, analysis_json, prediction_history,
                 )
             else:
                 critiques = await run_debate(
@@ -988,12 +965,12 @@ class Orchestrator:
                     plan=plan,
                     notebook_content=notebook_content,
                     domain_knowledge=domain_knowledge,
-                    success_criteria=success_criteria,
                     max_rounds=self.debate_rounds,
                     scientist_config=scientist_cfg,
                     message_buffers=buffers,
-                    plot_paths=plot_paths,
                     iteration=self.state.iteration,
+                    analysis_json=analysis_json,
+                    prediction_history=prediction_history,
                 )
             self._live.log(f"DEBATE: received {len(critiques)} critique(s)")
             return critiques
@@ -1012,9 +989,9 @@ class Orchestrator:
         plan: dict,
         notebook_content: str,
         domain_knowledge: str,
-        success_criteria: str,
         scientist_cfg: Any,
-        plot_paths: list[Path],
+        analysis_json: str,
+        prediction_history: str,
     ) -> list:
         """Run per-persona debates in parallel, each with its own summarizer and panel."""
         import asyncio
@@ -1022,16 +999,9 @@ class Orchestrator:
 
         from auto_scientist.agents.critic import run_single_critic_debate
         from auto_scientist.agents.debate_models import DebateResult
-        from auto_scientist.images import ImageData, encode_images_from_paths
         from auto_scientist.prompts.critic import PERSONAS, get_model_index_for_debate
 
         summary_model = self._summary_model
-
-        # Encode plot images once for all debates
-        images: list[ImageData] = []
-        if plot_paths:
-            images = encode_images_from_paths(plot_paths)
-        has_plots = bool(images)
 
         # Create per-persona panels and collectors
         panels: dict[str, AgentPanel] = {}
@@ -1045,7 +1015,7 @@ class Orchestrator:
             )
             config = self.model_config.critics[model_idx]
             label = f"{config.provider}:{config.model}"
-            panel = AgentPanel(name=f"Critic/{name}", model=label, style="yellow")
+            panel = AgentPanel(name=f"Critic/{name}", model=label, style=AGENT_STYLES.get("Critic", "yellow"))
             panels[name] = panel
             collectors[name] = []
             self._live.add_panel(panel)
@@ -1110,14 +1080,12 @@ class Orchestrator:
                     plan=plan,
                     notebook_content=notebook_content,
                     domain_knowledge=domain_knowledge,
-                    success_criteria=success_criteria,
                     max_rounds=self.debate_rounds,
                     scientist_config=scientist_cfg,
                     message_buffer=buf,
-                    plot_paths=plot_paths,
-                    images=images,
-                    has_plots=has_plots,
                     persona=persona,
+                    analysis_json=analysis_json,
+                    prediction_history=prediction_history,
                 )
             try:
                 result = await run_with_summaries(
@@ -1224,7 +1192,7 @@ class Orchestrator:
 
         cfg = self.model_config.resolve("scientist")
 
-        panel = AgentPanel(name="Revision", model=cfg.model, style="cyan")
+        panel = AgentPanel(name="Revision", model=cfg.model, style=AGENT_STYLES.get("Scientist", "cyan"))
         self._live.add_panel(panel)
         self._live.update_status(phase="REVISE")
 
@@ -1238,6 +1206,7 @@ class Orchestrator:
                     notebook_path=notebook_path,
                     version=version,
                     domain_knowledge=domain_knowledge,
+                    prediction_history=self.state.prediction_history,
                     model=cfg.model,
                     message_buffer=buf,
                 )
@@ -1298,11 +1267,6 @@ class Orchestrator:
 
         cfg = self.model_config.resolve("coder")
 
-        # Serialize top-level criteria before entering coder try block
-        top_criteria = [
-            c.model_dump() for c in (self.state.success_criteria or [])
-        ]
-
         # Pre-compute data directory listing so coder doesn't waste turns
         data_dir = Path(data_path) if data_path else None
         if data_dir and data_dir.is_dir():
@@ -1314,7 +1278,7 @@ class Orchestrator:
         else:
             data_files_listing = ""
 
-        panel = AgentPanel(name="Coder", model=cfg.model, style="magenta")
+        panel = AgentPanel(name="Coder", model=cfg.model, style=AGENT_STYLES.get("Coder", "magenta1"))
         self._live.add_panel(panel)
         self._live.update_status(phase="IMPLEMENT")
 
@@ -1333,7 +1297,6 @@ class Orchestrator:
                     message_buffer=buf,
                     run_timeout_minutes=run_timeout,
                     run_command=run_cmd,
-                    top_level_criteria=top_criteria or None,
                     data_files_listing=data_files_listing,
                 )
 
@@ -1349,129 +1312,86 @@ class Orchestrator:
         finally:
             self._persist_buffer("coder", buffer)
 
-    def _apply_criteria_updates(self, plan: dict[str, Any]) -> None:
-        """Check Scientist plan for top_level_criteria or criteria_revision, update state.
+    def _apply_prediction_updates(self, plan: dict[str, Any]) -> None:
+        """Extract testable predictions from the Scientist plan and store as pending records.
 
-        TODO: criteria revision is purely voluntary (Scientist includes criteria_revision
-        in plan output). In toy_function_022, a v02 regression was never addressed because
-        the loop hit max iterations before the Scientist could evaluate it. Consider
-        making revision more systematic, e.g. prompting the Scientist more strongly on
-        score regressions or adding an automatic revision consideration step.
+        Assigns ordinal pred_ids like "1.1", "1.2" and injects them back into the
+        plan dict so the Coder can include them in HYPOTHESIS TESTS output.
         """
-        if plan.get("top_level_criteria"):
-            criteria = [
-                c for raw in plan["top_level_criteria"]
-                if (c := self._parse_criterion(raw)) is not None
-            ]
-            self.state.success_criteria = criteria
-            self.state.criteria_history.append(
-                CriteriaRevision(
-                    iteration=self.state.iteration,
-                    action="defined",
-                    changes="Initial criteria definition",
-                    criteria_snapshot=criteria,
-                )
+        from auto_scientist.state import PredictionRecord
+
+        predictions = plan.get("testable_predictions", [])
+        for i, pred in enumerate(predictions, 1):
+            pred_id = f"{self.state.iteration}.{i}"
+            record = PredictionRecord(
+                pred_id=pred_id,
+                iteration_prescribed=self.state.iteration,
+                prediction=pred.get("prediction", ""),
+                diagnostic=pred.get("diagnostic", ""),
+                if_confirmed=pred.get("if_confirmed", ""),
+                if_refuted=pred.get("if_refuted", ""),
+                follows_from=pred.get("follows_from"),
             )
+            self.state.prediction_history.append(record)
+            # Inject ID back into plan dict so the Coder sees it
+            pred["pred_id"] = pred_id
 
-        elif plan.get("criteria_revision"):
-            rev = plan["criteria_revision"]
-            criteria = [
-                c for raw in rev.get("revised_criteria", [])
-                if (c := self._parse_criterion(raw)) is not None
-            ]
-            self.state.success_criteria = criteria
-            self.state.criteria_history.append(
-                CriteriaRevision(
-                    iteration=self.state.iteration,
-                    action="revised",
-                    changes=rev.get("changes", ""),
-                    criteria_snapshot=criteria,
-                )
-            )
+    def _resolve_prediction_outcomes(self, analysis: dict[str, Any] | None) -> None:
+        """Match Analyst prediction outcomes against pending records in state.
 
-    @staticmethod
-    def _compute_score(
-        criteria_results: list[dict[str, Any]],
-        success_criteria: list[SuccessCriterion],
-    ) -> int:
-        """Compute score deterministically from criteria results.
-
-        Formula: (passing_required / total_required) * 100, rounded to int.
-        Optional criteria are tracked but don't affect the score.
+        Primary matching by pred_id (reliable). Falls back to substring text
+        matching for backward compatibility.
         """
-        required = [c for c in success_criteria if c.required]
-        if not required:
-            return 0
-
-        # Build a lookup from criteria results by name
-        result_by_name = {r["name"]: r["status"] for r in criteria_results}
-
-        passing = sum(
-            1 for c in required if result_by_name.get(c.name) == "pass"
-        )
-        return round((passing / len(required)) * 100)
-
-    def _score_latest(self, analysis: dict[str, Any] | None) -> None:
-        """Score the latest version using criteria_results and current success_criteria.
-
-        Called after _apply_criteria_updates so that criteria defined in the
-        same iteration are available for scoring.
-        """
-        if not self.state.versions:
+        if not analysis:
             return
-        latest = self.state.versions[-1]
-        criteria_results = (analysis or {}).get("criteria_results", [])
-        score = self._compute_score(
-            criteria_results, self.state.success_criteria or [],
-        )
-        latest.score = score
-        if score > self.state.best_score:
-            self.state.best_score = score
-            self.state.best_version = latest.version
-        self._live.log(f"SCORE: {score}")
+        outcomes = analysis.get("prediction_outcomes", [])
+        if not outcomes:
+            return
 
-    async def _score_final_version(self) -> None:
-        """Run the Analyst on the last version so it gets a score before report."""
+        pending = [r for r in self.state.prediction_history if r.outcome == "pending"]
+        if not pending:
+            return
+
+        pending_by_id = {r.pred_id: r for r in pending if r.pred_id}
+
+        def _resolve(record, outcome: dict) -> None:
+            record.outcome = outcome.get("outcome", "inconclusive")
+            record.evidence = outcome.get("evidence", "")
+            record.iteration_evaluated = self.state.iteration
+
+        for outcome in outcomes:
+            # Primary: match by pred_id
+            oid = outcome.get("pred_id", "")
+            if oid and oid in pending_by_id:
+                record = pending_by_id.pop(oid)
+                _resolve(record, outcome)
+                pending.remove(record)
+                continue
+
+            # Fallback: substring text matching
+            outcome_text = outcome.get("prediction", "").lower()
+            best_match = None
+            best_score = 0
+            for record in pending:
+                record_text = record.prediction.lower()
+                if outcome_text in record_text or record_text in outcome_text:
+                    score = len(record_text)
+                    if score > best_score:
+                        best_match = record
+                        best_score = score
+            if best_match:
+                _resolve(best_match, outcome)
+                pending.remove(best_match)
+                pending_by_id.pop(best_match.pred_id, None)
+
+    async def _resolve_final_predictions(self) -> None:
+        """Run the Analyst on the last version to resolve pending predictions."""
         analysis = await self._run_analyst()
         if analysis:
-            self._score_latest(analysis)
+            self._resolve_prediction_outcomes(analysis)
             if self.state.versions:
                 version_dir = self.output_dir / self.state.versions[-1].version
                 self._persist_artifact(version_dir, "final_analysis.json", analysis)
-
-    @staticmethod
-    def _parse_criterion(raw: dict[str, Any]) -> SuccessCriterion | None:
-        """Parse a criterion dict from Scientist output into SuccessCriterion.
-
-        Returns None if the criterion has no numeric target (unmeasurable).
-        """
-        target_min = None
-        target_max = None
-        condition = raw.get("condition", "")
-
-        # Parse condition string: "> 0.95", "< 500", ">= 0.9", "<= 10"
-        match = re.match(r"^\s*([<>]=?)\s*([\d.]+)\s*$", condition)
-        if match:
-            op, val = match.group(1), float(match.group(2))
-            if op in (">", ">="):
-                target_min = val
-            elif op in ("<", "<="):
-                target_max = val
-
-        if target_min is None and target_max is None:
-            logger.warning(
-                f"Rejecting criterion '{raw.get('name', '?')}': "
-                f"no numeric target (condition='{condition}')"
-            )
-            return None
-
-        return SuccessCriterion(
-            name=raw["name"],
-            description=raw.get("description", ""),
-            metric_key=raw.get("metric_key", ""),
-            target_min=target_min,
-            target_max=target_max,
-        )
 
     _INFRA_FILES = {
         "run_result.json", "exitcode.txt", "stderr.txt",
@@ -1581,7 +1501,7 @@ class Orchestrator:
         notebook_path = self.output_dir / NOTEBOOK_FILENAME
 
         cfg = self.model_config.resolve("report")
-        panel = AgentPanel(name="Report", model=cfg.model, style="blue")
+        panel = AgentPanel(name="Report", model=cfg.model, style=AGENT_STYLES.get("Report", "blue"))
         self._live.add_panel(panel)
         self._live.update_status(phase="REPORT")
 
