@@ -109,6 +109,7 @@ def reasoning_to_cc_extra_args(reasoning: ReasoningConfig) -> dict[str, str | No
 class ModelConfig(BaseModel):
     """Top-level model configuration loaded from TOML or presets."""
 
+    preset_name: str | None = None
     defaults: AgentModelConfig
     analyst: AgentModelConfig | None = None
     scientist: AgentModelConfig | None = None
@@ -141,7 +142,9 @@ class ModelConfig(BaseModel):
         """Return a built-in preset by name."""
         if name not in BUILTIN_PRESETS:
             raise ValueError(f"Unknown preset: {name!r}. Available: {list(BUILTIN_PRESETS)}")
-        return cls._from_dict(BUILTIN_PRESETS[name])
+        mc = cls._from_dict(BUILTIN_PRESETS[name])
+        mc.preset_name = name
+        return mc
 
     @classmethod
     def from_toml(cls, path: Path) -> "ModelConfig":

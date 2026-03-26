@@ -222,3 +222,34 @@ model = "claude-opus-4-6"
         # Scientist has override
         cfg = mc.resolve("scientist")
         assert cfg.model == "claude-opus-4-6"
+
+
+class TestPresetName:
+    def test_builtin_preset_sets_preset_name(self):
+        mc = ModelConfig.builtin_preset("fast")
+        assert mc.preset_name == "fast"
+
+    def test_default_preset_name(self):
+        mc = ModelConfig.builtin_preset("default")
+        assert mc.preset_name == "default"
+
+    def test_all_presets_set_name(self):
+        for name in ["default", "medium", "high", "max", "fast"]:
+            mc = ModelConfig.builtin_preset(name)
+            assert mc.preset_name == name
+
+    def test_from_toml_has_no_preset_name(self, tmp_path):
+        toml_content = """
+[defaults]
+model = "claude-haiku-4-5"
+"""
+        toml_file = tmp_path / "test.toml"
+        toml_file.write_text(toml_content)
+        mc = ModelConfig.from_toml(toml_file)
+        assert mc.preset_name is None
+
+    def test_preset_name_roundtrips_through_json(self):
+        mc = ModelConfig.builtin_preset("max")
+        json_str = mc.model_dump_json()
+        restored = ModelConfig.model_validate_json(json_str)
+        assert restored.preset_name == "max"

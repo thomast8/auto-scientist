@@ -48,6 +48,7 @@ class ExperimentState(BaseModel):
     success_criteria: list[SuccessCriterion] | None = None
     domain_knowledge: str = ""
     criteria_history: list[CriteriaRevision] = Field(default_factory=list)
+    ingestion_source: str | None = None
 
     def save(self, path: Path) -> None:
         """Persist state to JSON file."""

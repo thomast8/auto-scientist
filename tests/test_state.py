@@ -275,3 +275,37 @@ class TestDiscoveryPhaseMigration:
         loaded = ExperimentState.load(state_path)
         assert loaded.phase == "iteration"
         assert loaded.iteration == 0
+
+
+class TestIngestionSource:
+    def test_default_is_none(self):
+        state = ExperimentState(domain="auto", goal="test")
+        assert state.ingestion_source is None
+
+    def test_set_ingestion_source(self):
+        state = ExperimentState(
+            domain="auto", goal="test",
+            ingestion_source="/path/to/other/experiment",
+        )
+        assert state.ingestion_source == "/path/to/other/experiment"
+
+    def test_roundtrips_through_save_load(self, tmp_path):
+        state = ExperimentState(
+            domain="auto", goal="test",
+            ingestion_source="/path/to/experiment",
+        )
+        state_path = tmp_path / "state.json"
+        state.save(state_path)
+        loaded = ExperimentState.load(state_path)
+        assert loaded.ingestion_source == "/path/to/experiment"
+
+    def test_legacy_state_without_field_loads_as_none(self, tmp_path):
+        state_path = tmp_path / "state.json"
+        data = {
+            "domain": "auto",
+            "goal": "test",
+            "phase": "iteration",
+        }
+        state_path.write_text(json.dumps(data))
+        loaded = ExperimentState.load(state_path)
+        assert loaded.ingestion_source is None
