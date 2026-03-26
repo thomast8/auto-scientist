@@ -915,9 +915,6 @@ class PipelineApp(App):
 
     def __init__(self, orchestrator) -> None:
         super().__init__()
-        saved_theme = _load_prefs().get("theme")
-        if saved_theme and saved_theme in self.available_themes:
-            self.theme = saved_theme
         self._orchestrator = orchestrator
         self._finished: bool = False
         self._live: PipelineLive = PipelineLive()
@@ -930,6 +927,9 @@ class PipelineApp(App):
         yield Footer()
 
     def on_mount(self) -> None:
+        saved_theme = _load_prefs().get("theme")
+        if saved_theme and saved_theme in self.available_themes:
+            self.theme = saved_theme
         self.title = "Auto-Scientist"
         self._live._app = self
         self._orchestrator._live = self._live
