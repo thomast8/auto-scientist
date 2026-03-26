@@ -134,9 +134,20 @@ class AgentPanel(Widget):
         min-height: 3;
         padding: 0 0;
         margin: 0 0;
+        border: round $accent;
+        border-subtitle-align: right;
+        border-title-align: left;
     }
     AgentPanel:hover {
         background: $surface;
+    }
+    AgentPanel Collapsible {
+        border-top: none;
+        padding-bottom: 0;
+        padding-left: 0;
+    }
+    AgentPanel Collapsible Contents {
+        padding: 0 0 0 1;
     }
     AgentPanel RichLog {
         height: auto;
@@ -149,6 +160,7 @@ class AgentPanel(Widget):
     }
     AgentPanel CollapsibleTitle {
         width: 100%;
+        display: none;
     }
     AgentPanel Collapsible:disabled CollapsibleTitle {
         opacity: 1;
@@ -185,7 +197,9 @@ class AgentPanel(Widget):
     def on_mount(self) -> None:
         self._refresh_timer = self.set_interval(1, self._tick)
         self._dot_count = 0
-        self._apply_title_color()
+        self._apply_border_color()
+        self.border_title = f"{self._panel_name} ({self.model})"
+        self.border_subtitle = self._build_footer()
 
     # Rich markup color names that need translation for Textual CSS styles.color
     _RICH_TO_TEXTUAL_COLOR: dict[str, str] = {
@@ -193,25 +207,28 @@ class AgentPanel(Widget):
         "magenta1": "ansi_bright_magenta",
     }
 
-    def _apply_title_color(self) -> None:
-        """Force the CollapsibleTitle foreground color to match the agent style.
+    def _apply_border_color(self) -> None:
+        """Force the border and title colors to match the agent style.
 
         Without this, some Textual themes override Rich markup colors on the
         CollapsibleTitle widget, making completed panels appear grey.
         """
+        css_color = self._RICH_TO_TEXTUAL_COLOR.get(self.panel_style, self.panel_style)
         try:
             title_widget = self.query_one(CollapsibleTitle)
+            title_widget.styles.color = css_color
         except NoMatches:
-            return
-        css_color = self._RICH_TO_TEXTUAL_COLOR.get(self.panel_style, self.panel_style)
-        title_widget.styles.color = css_color
+            pass
+        self.styles.border = ("round", css_color)
+        self.styles.border_title_color = css_color
+        self.styles.border_subtitle_color = css_color
 
     def _tick(self) -> None:
-        """Update the Collapsible title with elapsed time and animate description dots."""
+        """Update border subtitle with elapsed time and animate description dots."""
         if self.done and hasattr(self, "_refresh_timer"):
             self._refresh_timer.stop()
             return
-        self._update_title()
+        self.border_subtitle = self._build_footer()
         if self._description and not self.all_lines:
             self._dot_count = (self._dot_count + 1) % 4
             dots = "." * self._dot_count if self._dot_count else ""
@@ -235,9 +252,8 @@ class AgentPanel(Widget):
             rich_log.write(Text(line), expand=True)
 
     def _make_title(self) -> str:
-        """Build the Collapsible title string."""
-        footer = self._build_footer()
-        return f"[{self.panel_style}]{self._panel_name} ({self.model}) | {footer}[/]"
+        """Build the Collapsible title string (empty while running, summary when done)."""
+        return ""
 
     def _update_title(self) -> None:
         """Update the Collapsible title in the DOM."""
@@ -317,15 +333,21 @@ class AgentPanel(Widget):
         summary = self.done_summary
         if summary.startswith("[done] "):
             summary = summary[len("[done] "):]
-        collapsible.title = (
-            f"[{self.panel_style}]{self._panel_name}: {summary} | {self._build_footer()}[/]"
-        )
+        collapsible.title = f"[{self.panel_style}]{summary}[/]"
+        self.border_title = f"{self._panel_name}: {summary}"
+        self.border_subtitle = self._build_footer()
+        # Show the CollapsibleTitle now that we have content to toggle
+        try:
+            title_widget = collapsible.query_one(CollapsibleTitle)
+            title_widget.styles.display = "block"
+        except NoMatches:
+            pass
         # Suppress Textual's built-in scroll-on-collapse (Collapsible._watch_collapsed
         # calls self.call_after_refresh(self.scroll_visible) unconditionally)
         collapsible.scroll_visible = lambda *a, **kw: None
         collapsible.collapsed = True
         del collapsible.scroll_visible  # Restore inherited method for user-initiated toggles
-        self._apply_title_color()
+        self._apply_border_color()
         if len(self.all_lines) <= 1:
             collapsible.disabled = True
             try:
@@ -361,11 +383,17 @@ class AgentPanel(Widget):
             rich_log = self.query_one(RichLog)
         except NoMatches:
             return
-        collapsible.title = (
-            f"[{self.panel_style}]{self._panel_name}:[/] [red][error] {msg}[/red] | {self._build_footer()}"
-        )
+        collapsible.title = f"[red][error] {msg}[/red]"
+        self.border_title = f"{self._panel_name}: [error] {msg}"
+        self.border_subtitle = self._build_footer()
+        # Show the CollapsibleTitle for the error message
+        try:
+            title_widget = collapsible.query_one(CollapsibleTitle)
+            title_widget.styles.display = "block"
+        except NoMatches:
+            pass
         rich_log.write(Text(f"[error] {msg}", style="red"))
-        self._apply_title_color()
+        self._apply_border_color()
 
     def set_tokens(self, input_tokens: int, output_tokens: int) -> None:
         """Set token usage metadata."""
