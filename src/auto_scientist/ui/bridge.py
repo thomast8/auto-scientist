@@ -12,6 +12,13 @@ from auto_scientist.ui.widgets import AgentPanel, IterationContainer
 
 if TYPE_CHECKING:
     from auto_scientist.ui.app import PipelineApp
+    from auto_scientist.ui.experiment_screen import ExperimentScreen
+
+    # The mount target can be either PipelineApp (legacy single-experiment mode)
+    # or ExperimentScreen (multi-experiment mode). Both expose the same API:
+    # _mount_panel, _mount_iteration, _mount_static, _do_panel_collapse,
+    # _on_status_update, _is_near_bottom, _scroll_to_end
+    MountTarget = PipelineApp | ExperimentScreen
 
 
 class PipelineLive:
@@ -19,14 +26,34 @@ class PipelineLive:
 
     In app mode (_app is set): mounts widgets via call_from_thread.
     In headless mode (_app is None): tracks state only, no rendering.
+
+    _app can be a PipelineApp (legacy) or an ExperimentScreen (multi-experiment).
     """
 
     def __init__(self) -> None:
         self._panels: list[AgentPanel] = []
-        self._app: PipelineApp | None = None
+        self._app: MountTarget | None = None
         self._current_iteration: IterationContainer | None = None
         self._file_console: Console | None = None
         self._file_handle = None
+
+    def _call_from_thread(self, fn, *args, **kwargs) -> None:
+        """Route a call to the UI thread regardless of target type.
+
+        Works for both PipelineApp (has call_from_thread) and
+        ExperimentScreen (delegates to self.app.call_from_thread).
+        """
+        target = self._app
+        if target is None:
+            return
+        # Both PipelineApp(App) and ExperimentScreen(Screen) support this:
+        # App has call_from_thread natively, Screen gets it from self.app
+        if hasattr(target, "call_from_thread"):
+            target.call_from_thread(fn, *args, **kwargs)
+        elif hasattr(target, "app"):
+            target.app.call_from_thread(fn, *args, **kwargs)
+        else:
+            fn(*args, **kwargs)
 
     def start(self, log_path: Path | None = None) -> None:
         """Open the optional log file."""
@@ -47,7 +74,7 @@ class PipelineLive:
         """Track a panel and mount it in the app if running."""
         self._panels.append(panel)
         if self._app is not None:
-            self._app.call_from_thread(self._app._mount_panel, panel)
+            self._call_from_thread(self._app._mount_panel, panel)
 
     def collapse_panel(
         self, panel: AgentPanel, done_summary: str = "",
@@ -55,7 +82,7 @@ class PipelineLive:
         """Mark a panel as complete and accumulate stats."""
         panel.complete(done_summary)
         if self._app is not None:
-            self._app.call_from_thread(
+            self._call_from_thread(
                 self._app._do_panel_collapse, panel,
             )
         if self._file_console is not None:
@@ -72,7 +99,7 @@ class PipelineLive:
         container = IterationContainer(iter_title=iter_title)
         self._current_iteration = container
         if self._app is not None:
-            self._app.call_from_thread(
+            self._call_from_thread(
                 self._app._mount_iteration, container,
             )
         if self._file_console is not None:
@@ -84,7 +111,7 @@ class PipelineLive:
         """Finalize the iteration container with a result."""
         if self._current_iteration is not None:
             if self._app is not None:
-                self._app.call_from_thread(
+                self._call_from_thread(
                     self._current_iteration.set_result, subtitle, style,
                 )
             else:
@@ -106,12 +133,12 @@ class PipelineLive:
         if panel in self._panels:
             self._panels.remove(panel)
         if self._app is not None:
-            self._app.call_from_thread(panel.remove)
+            self._call_from_thread(panel.remove)
 
     def update_status(self, **kwargs) -> None:
         """Update the metrics bar fields."""
         if self._app is not None:
-            self._app.call_from_thread(
+            self._call_from_thread(
                 self._app._on_status_update, **kwargs,
             )
 
@@ -123,7 +150,7 @@ class PipelineLive:
     def print_static(self, renderable: RenderableType) -> None:
         """Print a renderable. In app mode, mount as Static widget."""
         if self._app is not None:
-            self._app.call_from_thread(
+            self._call_from_thread(
                 self._app._mount_static, renderable,
             )
         else:
@@ -134,7 +161,7 @@ class PipelineLive:
     def add_rule(self, rule: RenderableType) -> None:
         """Add a rule/separator. In app mode, mount as Static widget."""
         if self._app is not None:
-            self._app.call_from_thread(self._app._mount_static, rule)
+            self._call_from_thread(self._app._mount_static, rule)
         if self._file_console is not None:
             self._file_console.print(rule)
 
