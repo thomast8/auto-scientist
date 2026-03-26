@@ -357,7 +357,26 @@ class Orchestrator:
             self._live.print_static(self._build_startup_banner())
 
         try:
-            # Phase 0: Ingestion
+            # Phase 0: Ingestion (skip if reusing from another experiment)
+            if self.state.phase == "ingestion" and self.state.ingestion_source:
+                source_dir = Path(self.state.ingestion_source)
+                source_state_path = source_dir / "state.json"
+                if source_state_path.exists():
+                    source_state = ExperimentState.load(source_state_path)
+                    if source_state.data_path:
+                        self.state.data_path = source_state.data_path
+                        self.data_path = Path(source_state.data_path)
+                    if source_state.config_path:
+                        self.state.config_path = source_state.config_path
+                        cfg_path = Path(source_state.config_path)
+                        config_data = json.loads(cfg_path.read_text())
+                        self.config = DomainConfig.model_validate(config_data)
+                    self.state.phase = "iteration"
+                    self.state.save(state_path)
+                    logger.info(
+                        f"Reusing ingestion from {self.state.ingestion_source}"
+                    )
+
             if self.state.phase == "ingestion":
                 self.state.raw_data_path = self.state.data_path
                 self.state.save(state_path)

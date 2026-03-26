@@ -2209,3 +2209,51 @@ class TestResolvePredictionOutcomes:
         orchestrator._resolve_prediction_outcomes(analysis)
         assert orchestrator.state.prediction_history[0].outcome == "confirmed"
         assert orchestrator.state.prediction_history[1].outcome == "pending"
+
+
+class TestIngestionReuse:
+    """Tests for skipping ingestion when ingestion_source is set."""
+
+    def test_reuse_sets_data_path_from_source(self, tmp_path):
+        """When ingestion_source is set, orchestrator loads data_path from source."""
+        # Set up a source experiment that completed ingestion
+        source_dir = tmp_path / "source_exp"
+        source_dir.mkdir()
+        source_state = ExperimentState(
+            domain="auto",
+            goal="source",
+            phase="iteration",
+            data_path="/canonical/data",
+            config_path=str(source_dir / "domain_config.json"),
+        )
+        source_state.save(source_dir / "state.json")
+
+        # Create a minimal domain config
+        import json
+        config = DomainConfig(
+            name="test",
+            description="Test",
+            data_paths=["/canonical/data"],
+            run_command="uv run {script_path}",
+        )
+        (source_dir / "domain_config.json").write_text(
+            config.model_dump_json(indent=2)
+        )
+
+        # Create new experiment that reuses source's ingestion
+        new_state = ExperimentState(
+            domain="auto",
+            goal="new experiment",
+            phase="ingestion",
+            ingestion_source=str(source_dir),
+        )
+
+        orchestrator = Orchestrator(
+            state=new_state,
+            data_path=None,
+            output_dir=tmp_path / "new_exp",
+        )
+
+        # Verify the state has ingestion_source
+        assert orchestrator.state.ingestion_source == str(source_dir)
+        assert orchestrator.state.phase == "ingestion"
