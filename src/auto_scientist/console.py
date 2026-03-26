@@ -145,13 +145,17 @@ class AgentPanel(Widget):
         border-top: none;
         padding-bottom: 0;
         padding-left: 0;
+        background: transparent;
     }
     AgentPanel Collapsible Contents {
         padding: 0 0 0 1;
+        background: transparent;
     }
     AgentPanel RichLog {
         height: auto;
         max-height: 20;
+        overflow-y: auto;
+        background: transparent;
     }
     AgentPanel .agent-description {
         color: $text-muted;
