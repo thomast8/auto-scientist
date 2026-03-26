@@ -1026,6 +1026,7 @@ class PipelineApp(App):
             return
         first_collapsible = panels[0].query_one(Collapsible)
         collapsing = not first_collapsible.collapsed
+        was_near_bottom = self._is_near_bottom()
         for panel in panels:
             if collapsing and not panel.done:
                 continue
@@ -1033,8 +1034,12 @@ class PipelineApp(App):
                 c = panel.query_one(Collapsible)
             except NoMatches:
                 continue
+            # Suppress Textual's scroll_visible during batch toggle
+            c.scroll_visible = lambda *a, **kw: None
             c.collapsed = collapsing
-        self._scroll_to_end()
+            del c.scroll_visible
+        if was_near_bottom:
+            self._scroll_to_end()
 
     def action_quit(self) -> None:
         """Quit with confirmation if pipeline is still running."""
