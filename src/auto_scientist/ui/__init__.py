@@ -1,6 +1,7 @@
 """Auto-scientist UI package. Re-exports all public names for backward compatibility."""
 
 from auto_scientist.ui.app import PipelineApp
+from auto_scientist.ui.tab_bar import TabBar
 from auto_scientist.ui.bridge import PipelineLive
 from auto_scientist.ui.commands import PipelineCommandProvider
 from auto_scientist.ui.detail_screen import AgentDetailScreen, QuitConfirmScreen
@@ -28,6 +29,7 @@ __all__ = [
     "PipelineCommandProvider",
     "PipelineLive",
     "QuitConfirmScreen",
+    "TabBar",
     "_format_elapsed",
     "_load_prefs",
     "_save_prefs",
