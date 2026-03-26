@@ -11,28 +11,18 @@ cause validation failures.
 
 from typing import Any, Literal
 
-from pydantic import BaseModel, ConfigDict
+from pydantic import BaseModel, ConfigDict, Field
 
 
-class CriterionResult(BaseModel):
-    """A single criterion evaluation result from the Analyst."""
-
-    model_config = ConfigDict(extra="ignore")
-
-    name: str
-    measured_value: str | int | float | None
-    target: str
-    status: Literal["pass", "fail", "unable_to_measure"]
-
-
-class IterationCriterionResult(BaseModel):
-    """Per-iteration criterion result from the Analyst."""
+class PredictionOutcome(BaseModel):
+    """An outcome for a testable prediction, extracted by the Analyst."""
 
     model_config = ConfigDict(extra="ignore")
 
-    name: str
-    status: Literal["pass", "fail"]
-    measured_value: str
+    pred_id: str = ""
+    prediction: str
+    outcome: Literal["confirmed", "refuted", "inconclusive"]
+    evidence: str
 
 
 class AnalystOutput(BaseModel):
@@ -40,12 +30,11 @@ class AnalystOutput(BaseModel):
 
     model_config = ConfigDict(extra="ignore")
 
-    criteria_results: list[CriterionResult]
     key_metrics: dict[str, float]
     improvements: list[str]
     regressions: list[str]
     observations: list[str]
-    iteration_criteria_results: list[IterationCriterionResult]
+    prediction_outcomes: list[PredictionOutcome] = Field(default_factory=list)
     domain_knowledge: str = ""
     data_summary: dict[str, Any] | None = None
 
@@ -61,26 +50,6 @@ class PlanChange(BaseModel):
     priority: int
 
 
-class CriterionDefinition(BaseModel):
-    """A criterion definition from the Scientist's plan output."""
-
-    model_config = ConfigDict(extra="ignore")
-
-    name: str
-    description: str
-    metric_key: str
-    condition: str
-
-
-class CriteriaRevisionOutput(BaseModel):
-    """Criteria revision block from the Scientist's plan."""
-
-    model_config = ConfigDict(extra="ignore")
-
-    changes: str
-    revised_criteria: list[CriterionDefinition]
-
-
 class CoderRunResult(BaseModel):
     """Validated schema for run_result.json written by the Coder's experiment script."""
 
@@ -91,6 +60,18 @@ class CoderRunResult(BaseModel):
     timed_out: bool = False
     error: str | None = None
     attempts: int = 1
+
+
+class HypothesisPrediction(BaseModel):
+    """A testable prediction from the Scientist's plan output."""
+
+    model_config = ConfigDict(extra="ignore")
+
+    prediction: str
+    diagnostic: str
+    if_confirmed: str
+    if_refuted: str
+    follows_from: str | None = None
 
 
 class ScientistPlanOutput(BaseModel):
@@ -105,6 +86,4 @@ class ScientistPlanOutput(BaseModel):
     should_stop: bool
     stop_reason: str | None
     notebook_entry: str
-    success_criteria: list[CriterionDefinition]
-    top_level_criteria: list[CriterionDefinition] | None = None
-    criteria_revision: CriteriaRevisionOutput | None = None
+    testable_predictions: list[HypothesisPrediction] = Field(default_factory=list)

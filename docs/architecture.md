@@ -39,29 +39,29 @@ Phase 1: ITERATION (unified loop)
     Debate skipped (nothing to challenge yet)
     Coder implements exploration script
 
-  Iteration 1 (criteria definition):
+  Iteration 1 (first hypothesis):
     Analyst reads exploration results + plots
-    Scientist defines top-level success criteria + first hypothesis
+    Scientist formulates first hypothesis with testable predictions
     Debate challenges the plan
     Coder implements first real experiment
 
   Iteration 2+ (normal science):
-    Analyst reads results, evaluates against criteria
-    Scientist plans next hypothesis (may revise criteria)
+    Analyst reads results, evaluates prediction outcomes
+    Scientist plans next hypothesis informed by prediction trajectory
     Debate challenges the plan
     Coder implements
 
   [1] Analyst Agent (Claude, read-only observer)
-      Input: results text + plots + lab notebook + success criteria
+      Input: results text + plots + lab notebook
       (Iteration 0: raw data files instead of results)
-      Output: structured JSON observation (score, criteria, metrics, observations)
+      Output: structured JSON observation (key_metrics, improvements, regressions,
+              observations, prediction_outcomes)
       (Iteration 0: also domain_knowledge, data_summary)
 
-  [2] Scientist Agent (Claude, no tools, prompt-in/JSON-out)
-      Input: analysis JSON + lab notebook + domain knowledge + success criteria
-      Output: structured JSON plan (hypothesis, strategy, changes, notebook entry,
-              per-iteration success criteria)
-      Optionally: top_level_criteria (iteration 1), criteria_revision (iteration 2+)
+  [2] Scientist Agent (Claude, prompt-in/JSON-out, web search)
+      Input: analysis JSON + lab notebook + domain knowledge + prediction history
+      Output: structured JSON plan (hypothesis, strategy, changes, expected_impact,
+              should_stop, stop_reason, notebook_entry, testable_predictions)
       Does NOT read Python code. Analysis + notebook is sufficient for planning.
 
   [3] Stop Check
@@ -70,8 +70,8 @@ Phase 1: ITERATION (unified loop)
   [4] Critic-Scientist Debate (skipped on iteration 0)
       Round 1: Critic (GPT/Gemini/other) critiques the Scientist's plan
       Round 2+: Scientist (Claude API) responds, Critic refines
-      Input: plan JSON + lab notebook + domain knowledge
-      Both sides get symmetric context (no analysis, no script)
+      Input: plan JSON + analysis JSON + prediction history + lab notebook + domain knowledge
+      Both sides share the full evidence base; neither sees experiment scripts
       Both sides have web search for claim verification and literature lookup
       Output: debate transcript (all rounds)
 
@@ -98,17 +98,18 @@ Phase 2: REPORT (one-time)
 
 A core design principle: each agent sees only the information relevant to its role.
 
-| Agent | Sees code? | Sees analysis JSON? | Sees notebook? | Has tools? |
-|-------|-----------|-------------------|---------------|------------|
-| Ingestor | No | No | Writes structure summary | Bash, Read, Write, Glob, Grep |
-| Analyst | No | Produces it | Yes | Read, Glob |
-| Scientist | No | Yes (input) | Yes | None |
-| Critic (debate) | No | No | Yes | Web search |
-| Coder | Yes (only agent) | No | No | Bash, Read, Write, Glob |
+| Agent | Sees code? | Sees analysis JSON? | Sees prediction history? | Sees notebook? | Has tools? |
+|-------|-----------|-------------------|------------------------|---------------|------------|
+| Ingestor | No | No | No | Writes structure summary | Bash, Read, Write, Glob, Grep |
+| Analyst | No | Produces it | No | Yes | Read, Glob |
+| Scientist | No | Yes (input) | Yes | Yes | Web search |
+| Critic (debate) | No | Yes | Yes | Yes | Web search |
+| Coder | Yes (only agent) | No | No | No | Bash, Read, Write, Glob |
 
-Why: The plan already incorporates the analysis, so passing both to the Critic
-is redundant. Code is an implementation detail that only the implementer needs.
-The Critic and Scientist debate strategy on equal footing with symmetric context.
+Why: Debate participants share the full evidence base (analysis, prediction
+history, notebook, domain knowledge) so critics can make grounded arguments
+based on actual metrics and what has already been tested. Code is an
+implementation detail that only the Coder needs.
 
 ### Agent Details
 
@@ -121,42 +122,42 @@ The Critic and Scientist debate strategy on equal footing with symmetric context
 **Analyst Agent** (Phase 1, step 1):
 - Uses `query()` (fresh session each iteration, bounded context)
 - Tools: Read (results file + plot PNGs), Glob (find output files)
-- Input: results text + plot images + lab notebook + success criteria
+- Input: results text + plot images + lab notebook
 - (Iteration 0: raw data directory instead of results)
-- Output: structured JSON: `success_score`, `criteria_results[]`, `key_metrics`, `improvements`, `regressions`, `observations`, `iteration_criteria_results[]`
+- Output: structured JSON: `key_metrics`, `improvements`, `regressions`, `observations`, `prediction_outcomes[]`
 - (Iteration 0: also `domain_knowledge`, `data_summary`)
+- `prediction_outcomes` entries: `{pred_id, prediction, outcome, evidence}` where outcome is "confirmed", "refuted", or "inconclusive"
 - Role: pure observer, reports facts only, no recommendations
-- Evaluates two tiers: top-level criteria (from state, drives stopping) and per-iteration criteria (from Scientist, transcribed from script output)
-- `max_turns`: 5
+- `max_turns`: 30
 
 **Scientist Agent** (Phase 1, step 2):
-- Pure prompt-in, JSON-out call (no tools, `max_turns`: 1)
-- Input (via prompt injection): analysis JSON + lab notebook + domain knowledge + success criteria
+- Prompt-in, JSON-out call with web search (`max_turns`: 10)
+- Input (via prompt injection): analysis JSON + lab notebook + domain knowledge + prediction history
 - Does NOT read Python code; analysis + notebook is sufficient for strategic planning
-- Output: structured JSON plan: `hypothesis`, `strategy`, `changes[]`, `expected_impact`, `should_stop`, `stop_reason`, `notebook_entry`, `success_criteria[]`
-- Optionally: `top_level_criteria` (defines investigation-wide goals on iteration 1), `criteria_revision` (revises criteria with justification)
+- Output: structured JSON plan: `hypothesis`, `strategy`, `changes[]`, `expected_impact`, `should_stop`, `stop_reason`, `notebook_entry`, `testable_predictions[]`
+- `testable_predictions` entries: `{prediction, diagnostic, if_confirmed, if_refuted, follows_from}` where `follows_from` links to a prior pred_id to form reasoning trajectories
 - Role: strategic thinker, formulates hypotheses and plans, does NOT write code
-- Defines 3-8 per-iteration success criteria: concrete, measurable predictions of the hypothesis that the experiment script evaluates
+- Decides when to stop via `should_stop` based on scientific judgment (goal satisfaction, diminishing returns, structural limits), not metric thresholds
 
-**Critic-Scientist Debate** (Phase 2, step 4):
+**Critic-Scientist Debate** (Phase 1, step 4):
 - Multi-round debate between external critic models and the Scientist (Claude via API)
 - Round 1: plain API call to critic model (OpenAI/Google/Anthropic SDK)
 - Round 2+: Scientist responds to critique, then critic refines
-- Input: plan JSON + lab notebook + domain knowledge
-- Neither side sees analysis JSON or experiment scripts (symmetric context)
+- Input: plan JSON + analysis JSON + prediction history + lab notebook + domain knowledge
+- Both sides share the full evidence base; neither sees experiment scripts
 - Both Critic and Scientist have web search (verify claims, look up papers, check methods)
 - Returns full debate transcript for the Scientist revision step
 - Configurable: `--debate-rounds N` (default 2; 1 = single-pass, no debate)
 - Configurable: list of critic models to consult (can be empty to skip debate entirely)
 - Scientist debate model defaults to `claude-sonnet-4-6`
 
-**Scientist Revision** (Phase 2, step 5):
+**Scientist Revision** (Phase 1, step 5):
 - Second `query()` call to the Scientist after the debate
 - Input: original plan + debate transcript + analysis JSON + notebook + domain knowledge
 - Output: revised plan JSON (same schema, incorporating valid critique)
 - The Coder never sees the debate transcript or critique directly
 
-**Coder Agent** (Phase 2, step 6):
+**Coder Agent** (Phase 1, step 6):
 - Uses `query()` (fresh session, reads/writes files via tools)
 - Tools: Read, Write, Edit, Bash, Glob, Grep
 - Input (via prompt): revised plan JSON + previous script path + run config
@@ -167,7 +168,10 @@ The Critic and Scientist debate strategy on equal footing with symmetric context
 - `max_turns`: 50 (to accommodate write-run-fix cycles)
 - `results.txt` is compiled by the experiment script itself via print statements.
   The Coder writes scripts that print structured output (approach spec, parameters,
-  metrics, diagnostics, success criteria). No LLM post-processing needed.
+  metrics, diagnostics, HYPOTHESIS TESTS). No LLM post-processing needed.
+- HYPOTHESIS TESTS section: if the plan includes `testable_predictions`, the script
+  prints each prediction's outcome with a bracketed pred_id (e.g., `[1.1]`) so the
+  Analyst can match results back to predictions
 - `run_result.json` reports success/failure, return code, timeout status, and attempts
 - Safety hooks: block writes outside experiments/ dir, block writes to data files
 
@@ -313,11 +317,25 @@ class ExperimentState(BaseModel):
     versions: list[VersionEntry] = []
     dead_ends: list[str] = []
     best_version: str | None = None
-    best_score: int = 0
     schedule: str | None = None              # e.g., "22:00-06:00"
-    success_criteria: list[SuccessCriterion] | None = None  # Set by Scientist
+    consecutive_failures: int = 0
+    data_path: str | None = None
+    raw_data_path: str | None = None
+    config_path: str | None = None
     domain_knowledge: str = ""               # Set by Analyst iteration 0
-    criteria_history: list[CriteriaRevision] = []
+    prediction_history: list[PredictionRecord] = []
+
+class PredictionRecord(BaseModel):
+    pred_id: str                             # "{iteration}.{index}", e.g., "1.1"
+    iteration_prescribed: int
+    iteration_evaluated: int | None = None
+    prediction: str
+    diagnostic: str
+    if_confirmed: str
+    if_refuted: str
+    follows_from: str | None = None          # pred_id of parent prediction
+    outcome: str = "pending"                 # "pending", "confirmed", "refuted", "inconclusive"
+    evidence: str = ""
 ```
 
 ---
@@ -400,17 +418,15 @@ Regressions:
   - gamma = 1.30 at upper bound in Stage B.
 ```
 
-### Example: Success Criteria (what the system evaluates)
+### Example: Hypothesis Tests (what the script outputs)
 
 ```
- # Criterion                              Result    Status
- 1 b_s in (0.8, 1.2)                      1.75      FAIL
- 2 tau_0 in [10, 30]                       15.0      PASS
- 3 p in [1.5, 3.5]                         3.52      FAIL (borderline)
- 4 Saturation < 5%                         0.4%      PASS
- 5 Deltas not at bounds                    0/5       PASS
- ...
-Score: 9/15 PASS, 6 FAIL
+HYPOTHESIS TESTS
+----------------
+[1.1] Power-law descent produces identifiable curvature: CONFIRMED (p=2.8, non-monotone tau_0 profile)
+[1.2] Baseline correction eliminates saturation: CONFIRMED (0.4% vs 17.6% in v7.04)
+[1.3] b_s converges near 1.0: REFUTED (b_s=1.75, amplifying deviation)
+[1.4] Delta range < 10s: REFUTED (delta range=20.2s, improved but still wide)
 ```
 
 ### Example: Paradigm Shift Pattern (v6 to v7)
@@ -450,7 +466,7 @@ QC-pass R2a    0.57      0.97    +70% (dramatic)
 
 ### Reproduction test (the real validation)
 1. `auto-scientist run --data domains/spo2/seed/data/ --goal "Model SpO2 dynamics during breath-holds in a physiologically grounded, transferable way" --max-iterations 20 --schedule "22:00-06:00"`
-2. Let it run from scratch (iteration 0 explores, iteration 1 defines criteria and first approach)
+2. Let it run from scratch (iteration 0 explores, iteration 1 formulates first hypothesis with testable predictions)
 3. Compare: does it converge to something comparable to the manual v7.05 result? Does it discover similar structural insights (baseline correction, power-law curvature)?
 4. This is the ultimate test of the framework
 

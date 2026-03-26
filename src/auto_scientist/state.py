@@ -2,10 +2,9 @@
 
 import json
 from pathlib import Path
+from typing import Literal
 
 from pydantic import BaseModel, Field
-
-from auto_scientist.config import SuccessCriterion
 
 
 class VersionEntry(BaseModel):
@@ -15,18 +14,23 @@ class VersionEntry(BaseModel):
     iteration: int
     script_path: str
     results_path: str | None = None
-    score: int | None = None
     hypothesis: str = ""
-    status: str = "pending"  # pending, running, completed, failed, crashed
+    status: Literal["pending", "running", "completed", "failed", "crashed"] = "pending"
 
 
-class CriteriaRevision(BaseModel):
-    """Audit trail entry for when top-level success criteria are defined or revised."""
+class PredictionRecord(BaseModel):
+    """A testable prediction and its outcome, persisted across iterations."""
 
-    iteration: int
-    action: str  # "defined" | "revised"
-    changes: str  # What changed and why
-    criteria_snapshot: list[SuccessCriterion]
+    pred_id: str = ""  # "{iteration}.{index}" assigned by orchestrator
+    iteration_prescribed: int
+    iteration_evaluated: int | None = None
+    prediction: str
+    diagnostic: str
+    if_confirmed: str
+    if_refuted: str
+    follows_from: str | None = None
+    outcome: Literal["pending", "confirmed", "refuted", "inconclusive"] = "pending"
+    evidence: str = ""
 
 
 class ExperimentState(BaseModel):
@@ -34,20 +38,17 @@ class ExperimentState(BaseModel):
 
     domain: str
     goal: str
-    phase: str = "ingestion"  # ingestion, iteration, report, stopped
+    phase: Literal["ingestion", "iteration", "report", "stopped"] = "ingestion"
     iteration: int = 0
     versions: list[VersionEntry] = Field(default_factory=list)
     dead_ends: list[str] = Field(default_factory=list)
-    best_version: str | None = None
-    best_score: int = 0
     schedule: str | None = None
     consecutive_failures: int = 0
     data_path: str | None = None
     raw_data_path: str | None = None
     config_path: str | None = None
-    success_criteria: list[SuccessCriterion] | None = None
     domain_knowledge: str = ""
-    criteria_history: list[CriteriaRevision] = Field(default_factory=list)
+    prediction_history: list[PredictionRecord] = Field(default_factory=list)
 
     def save(self, path: Path) -> None:
         """Persist state to JSON file."""
@@ -65,11 +66,8 @@ class ExperimentState(BaseModel):
         return cls.model_validate(data)
 
     def record_version(self, entry: VersionEntry) -> None:
-        """Add a version entry and update best tracking."""
+        """Add a version entry."""
         self.versions.append(entry)
-        if entry.score is not None and entry.score > self.best_score:
-            self.best_score = entry.score
-            self.best_version = entry.version
 
     def record_failure(self) -> None:
         """Increment consecutive failure counter."""

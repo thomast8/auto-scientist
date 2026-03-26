@@ -3,22 +3,11 @@
 from pydantic import BaseModel, Field, field_validator
 
 
-class SuccessCriterion(BaseModel):
-    """A single success criterion for evaluating experiment results."""
-
-    name: str
-    description: str
-    metric_key: str
-    target_min: float | None = None
-    target_max: float | None = None
-    required: bool = True
-
-
 class DomainConfig(BaseModel):
     """Operational configuration for a specific scientific domain.
 
     Contains only runtime/infrastructure settings. Scientific concerns
-    (success_criteria, domain_knowledge) live in ExperimentState.
+    (domain_knowledge, prediction_history) live in ExperimentState.
     """
 
     name: str

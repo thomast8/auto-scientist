@@ -1,144 +1,811 @@
-"""Tests for console streaming helpers."""
+"""Tests for Textual console components: AgentPanel, MetricsBar, PipelineLive, PipelineApp."""
 
-import os
-from unittest.mock import patch
+import pytest
+from textual.app import App, ComposeResult
+from textual.widgets import Collapsible, RichLog
 
 from auto_scientist.console import (
-    BLUE,
-    CYAN,
-    GREEN,
-    MAGENTA,
-    RED,
-    YELLOW,
-    _color_for_label,
-    make_stream_printer,
-    print_summary,
-    stream_separator,
+    AGENT_STYLES,
+    PHASE_STYLES,
+    AgentDetailScreen,
+    AgentPanel,
+    IterationContainer,
+    MetricsBar,
+    PipelineApp,
+    PipelineLive,
+    QuitConfirmScreen,
+    _format_elapsed,
 )
 
-
-class TestColorForLabel:
-    def test_critic_gets_yellow(self):
-        assert _color_for_label("Critic (openai:gpt-4o) round 1") == YELLOW
-
-    def test_scientist_gets_cyan(self):
-        assert _color_for_label("Scientist round 1") == CYAN
-
-    def test_coder_gets_magenta(self):
-        assert _color_for_label("Coder") == MAGENTA
-
-    def test_analyst_gets_green(self):
-        assert _color_for_label("Analyst iteration 1") == GREEN
-
-    def test_ingestor_gets_red(self):
-        assert _color_for_label("Ingestor") == RED
-
-    def test_report_gets_blue(self):
-        assert _color_for_label("Report generation") == BLUE
-
-    def test_debate_gets_yellow(self):
-        assert _color_for_label("Debate") == YELLOW
-
-    def test_unknown_falls_back_to_cyan(self):
-        assert _color_for_label("Unknown agent") == CYAN
+# ---------------------------------------------------------------------------
+# Minimal test apps for widget-level testing
+# ---------------------------------------------------------------------------
 
 
-class TestMakeStreamPrinter:
-    def test_first_call_prints_label_then_token(self, capsys):
-        printer = make_stream_printer("Critic (openai:gpt-4o)")
-        printer("Hello")
+class PanelTestApp(App):
+    def __init__(self, panel: AgentPanel) -> None:
+        super().__init__()
+        self._panel = panel
 
-        captured = capsys.readouterr()
-        assert "Critic (openai:gpt-4o)" in captured.out
-        assert "Hello" in captured.out
-
-    def test_subsequent_calls_print_only_token(self, capsys):
-        printer = make_stream_printer("Critic")
-        printer("Hello")
-        printer(" world")
-
-        captured = capsys.readouterr()
-        # Label appears exactly once
-        assert captured.out.count("Critic") == 1
-        assert "Hello world" in captured.out
-
-    def test_critic_label_uses_yellow(self, capsys):
-        printer = make_stream_printer("Critic (openai:gpt-4o)")
-        printer("x")
-        captured = capsys.readouterr()
-        assert YELLOW in captured.out
-
-    def test_scientist_label_uses_cyan(self, capsys):
-        printer = make_stream_printer("Scientist round 1")
-        printer("x")
-        captured = capsys.readouterr()
-        assert CYAN in captured.out
-
-    def test_no_color_env_strips_ansi(self, capsys):
-        with patch.dict(os.environ, {"NO_COLOR": "1"}):
-            printer = make_stream_printer("Test")
-            printer("token")
-
-        captured = capsys.readouterr()
-        assert "\033[" not in captured.out
-        assert "Test" in captured.out
-        assert "token" in captured.out
+    def compose(self) -> ComposeResult:
+        yield self._panel
 
 
-class TestPrintSummary:
-    def test_with_label(self, capsys):
-        print_summary("Analyst", "Found key metrics.", label="done")
-        captured = capsys.readouterr()
-        assert "> [done] " in captured.out
-        assert "Found key metrics." in captured.out
+class MetricsBarTestApp(App):
+    def __init__(self, bar: MetricsBar) -> None:
+        super().__init__()
+        self._bar = bar
 
-    def test_without_label(self, capsys):
-        with patch.dict(os.environ, {"NO_COLOR": "1"}):
-            print_summary("Results", "R2=0.82 on test set.")
-        captured = capsys.readouterr()
-        assert "> R2=0.82" in captured.out
-        # No brackets when label is empty (check without ANSI codes)
-        assert "[" not in captured.out
-
-    def test_truncates_long_progress_text(self, capsys):
-        long_text = "x" * 250
-        print_summary("Analyst", long_text, label="15s")
-        captured = capsys.readouterr()
-        assert "..." in captured.out
-
-    def test_truncates_long_final_text(self, capsys):
-        long_text = "x" * 450
-        print_summary("Analyst", long_text, label="done")
-        captured = capsys.readouterr()
-        assert "..." in captured.out
-
-    def test_uses_agent_color(self, capsys):
-        print_summary("Analyst", "test summary", label="done")
-        captured = capsys.readouterr()
-        assert GREEN in captured.out
-
-    def test_empty_prints_nothing(self, capsys):
-        print_summary("Analyst", "")
-        captured = capsys.readouterr()
-        assert captured.out == ""
-
-    def test_no_color_env(self, capsys):
-        with patch.dict(os.environ, {"NO_COLOR": "1"}):
-            print_summary("Analyst", "test summary", label="done")
-        captured = capsys.readouterr()
-        assert "\033[" not in captured.out
-        assert "[done]" in captured.out
-
-    def test_truncates_long_summary(self, capsys):
-        long_text = "a" * 500
-        print_summary("Analyst", long_text, label="done")
-        captured = capsys.readouterr()
-        # The full 500 chars should not appear
-        assert "a" * 500 not in captured.out
+    def compose(self) -> ComposeResult:
+        yield self._bar
 
 
-class TestStreamSeparator:
-    def test_prints_newlines(self, capsys):
-        stream_separator()
-        captured = capsys.readouterr()
-        assert captured.out == "\n\n"
+# ---------------------------------------------------------------------------
+# Helper function tests
+# ---------------------------------------------------------------------------
+
+
+class TestHelperFunctions:
+    def test_format_elapsed_zero(self):
+        assert _format_elapsed(0) == "0s"
+
+    def test_format_elapsed_seconds(self):
+        assert _format_elapsed(45) == "45s"
+
+    def test_format_elapsed_one_minute(self):
+        assert _format_elapsed(60) == "1m 0s"
+
+    def test_format_elapsed_minutes_and_seconds(self):
+        assert _format_elapsed(125) == "2m 5s"
+
+
+
+# ---------------------------------------------------------------------------
+# Constants tests
+# ---------------------------------------------------------------------------
+
+
+class TestConstants:
+    def test_agent_styles_has_all_agents(self):
+        expected = {
+            "Analyst", "Scientist", "Coder", "Ingestor",
+            "Report", "Critic", "Debate", "Results",
+        }
+        assert set(AGENT_STYLES.keys()) == expected
+
+    def test_phase_styles_has_all_phases(self):
+        expected = {
+            "INGESTION", "ANALYZE", "PLAN", "DEBATE",
+            "REVISE", "IMPLEMENT", "REPORT",
+        }
+        assert set(PHASE_STYLES.keys()) == expected
+
+
+# ---------------------------------------------------------------------------
+# AgentPanel tests
+# ---------------------------------------------------------------------------
+
+
+class TestAgentPanel:
+    @pytest.mark.asyncio
+    async def test_construction(self):
+        panel = AgentPanel(name="Analyst", model="claude-sonnet-4-6", style="green")
+        async with PanelTestApp(panel).run_test():
+            assert panel.panel_name == "Analyst"
+            assert panel.model == "claude-sonnet-4-6"
+            assert not panel.done
+
+    @pytest.mark.asyncio
+    async def test_has_collapsible_and_richlog(self):
+        panel = AgentPanel(name="Analyst", model="claude-sonnet-4-6", style="green")
+        async with PanelTestApp(panel).run_test():
+            assert panel.query_one(Collapsible) is not None
+            assert panel.query_one(RichLog) is not None
+
+    @pytest.mark.asyncio
+    async def test_add_line(self):
+        panel = AgentPanel(name="Analyst", model="claude-sonnet-4-6", style="green")
+        async with PanelTestApp(panel).run_test():
+            panel.add_line("[15s] Analyzing data")
+            assert len(panel.all_lines) == 1
+            assert panel.all_lines[0] == "[15s] Analyzing data"
+
+    @pytest.mark.asyncio
+    async def test_lines_property_returns_all_lines(self):
+        panel = AgentPanel(name="Analyst", model="claude-sonnet-4-6", style="green")
+        async with PanelTestApp(panel).run_test():
+            panel.add_line("line 1")
+            panel.add_line("line 2")
+            assert panel.lines is panel.all_lines
+            assert len(panel.lines) == 2
+
+    @pytest.mark.asyncio
+    async def test_multiple_lines_accumulate(self):
+        panel = AgentPanel(name="Analyst", model="claude-sonnet-4-6", style="green")
+        async with PanelTestApp(panel).run_test():
+            for i in range(7):
+                panel.add_line(f"line {i}")
+            assert len(panel.all_lines) == 7
+
+    @pytest.mark.asyncio
+    async def test_complete(self):
+        panel = AgentPanel(name="Analyst", model="claude-sonnet-4-6", style="green")
+        async with PanelTestApp(panel).run_test():
+            panel.add_line("[15s] Working...")
+            panel.complete("Analysis complete, found 3 metrics")
+            assert panel.done
+            assert panel.done_summary == "Analysis complete, found 3 metrics"
+
+    @pytest.mark.asyncio
+    async def test_complete_uses_last_line_as_fallback(self):
+        panel = AgentPanel(name="Analyst", model="claude-sonnet-4-6", style="green")
+        async with PanelTestApp(panel).run_test():
+            panel.add_line("[done] strategy=incremental")
+            panel.complete()
+            assert panel.done_summary == "[done] strategy=incremental"
+
+    @pytest.mark.asyncio
+    async def test_complete_collapses_collapsible(self):
+        panel = AgentPanel(name="Analyst", model="claude-sonnet-4-6", style="green")
+        async with PanelTestApp(panel).run_test():
+            panel.complete("done")
+            panel._apply_complete_dom()
+            collapsible = panel.query_one(Collapsible)
+            assert collapsible.collapsed is True
+
+    @pytest.mark.asyncio
+    async def test_complete_single_entry_not_expandable(self):
+        panel = AgentPanel(name="Scientist", model="claude-sonnet-4-6", style="cyan")
+        async with PanelTestApp(panel).run_test():
+            panel.add_line("Planned experiment A")
+            panel.complete("Planned experiment A")
+            panel._apply_complete_dom()
+            collapsible = panel.query_one(Collapsible)
+            assert collapsible.collapsed is True
+            assert collapsible.disabled is True
+            title_widget = collapsible.query_one("CollapsibleTitle")
+            assert title_widget.collapsed_symbol == "●"
+
+    @pytest.mark.asyncio
+    async def test_complete_multi_entry_stays_expandable(self):
+        panel = AgentPanel(name="Analyst", model="claude-sonnet-4-6", style="green")
+        async with PanelTestApp(panel).run_test():
+            panel.add_line("Step 1")
+            panel.add_line("Step 2")
+            panel.add_line("Step 3")
+            panel.complete("Analysis complete")
+            panel._apply_complete_dom()
+            collapsible = panel.query_one(Collapsible)
+            assert collapsible.collapsed is True
+            assert collapsible.disabled is False
+
+    @pytest.mark.asyncio
+    async def test_error(self):
+        panel = AgentPanel(name="Analyst", model="claude-sonnet-4-6", style="green")
+        async with PanelTestApp(panel).run_test():
+            panel.error("Connection timeout")
+            assert panel.done
+            assert panel.error_msg == "Connection timeout"
+
+    @pytest.mark.asyncio
+    async def test_set_tokens(self):
+        panel = AgentPanel(name="Critic", model="gpt-4o", style="yellow")
+        async with PanelTestApp(panel).run_test():
+            panel.set_tokens(2340, 890)
+            assert panel.input_tokens == 2340
+            assert panel.output_tokens == 890
+
+    @pytest.mark.asyncio
+    async def test_set_stats(self):
+        panel = AgentPanel(name="Critic", model="gpt-4o", style="yellow")
+        async with PanelTestApp(panel).run_test():
+            panel.set_stats(input_tokens=100, output_tokens=50, num_turns=3)
+            assert panel.input_tokens == 100
+            assert panel.output_tokens == 50
+            assert panel.num_turns == 3
+
+    @pytest.mark.asyncio
+    async def test_add_line_noop_after_done(self):
+        panel = AgentPanel(name="Analyst", model="claude-sonnet-4-6", style="green")
+        async with PanelTestApp(panel).run_test():
+            panel.add_line("working")
+            panel.complete("done")
+            panel.add_line("this should be ignored")
+            assert len(panel.all_lines) == 1
+
+    @pytest.mark.asyncio
+    async def test_elapsed_freezes_on_complete(self):
+        panel = AgentPanel(name="Analyst", model="claude-sonnet-4-6", style="green")
+        async with PanelTestApp(panel).run_test():
+            panel.complete("done")
+            assert panel._end_time is not None
+
+    @pytest.mark.asyncio
+    async def test_build_footer_with_tokens_and_turns(self):
+        panel = AgentPanel(name="Analyst", model="claude-sonnet-4-6", style="green")
+        async with PanelTestApp(panel).run_test():
+            panel.set_stats(input_tokens=100, output_tokens=50, num_turns=3)
+            footer = panel._build_footer()
+            assert "100 in / 50 out" in footer
+            assert "3 turns" in footer
+
+    @pytest.mark.asyncio
+    async def test_build_footer_singular_turn(self):
+        panel = AgentPanel(name="Analyst", model="claude-sonnet-4-6", style="green")
+        async with PanelTestApp(panel).run_test():
+            panel.set_stats(input_tokens=10, output_tokens=5, num_turns=1)
+            footer = panel._build_footer()
+            assert "1 turn" in footer
+            assert "turns" not in footer
+
+
+class TestAgentPanelIdempotency:
+    @pytest.mark.asyncio
+    async def test_double_complete(self):
+        panel = AgentPanel(name="Analyst", model="claude-sonnet-4-6", style="green")
+        async with PanelTestApp(panel).run_test():
+            panel.complete("first")
+            panel.complete("second")
+            assert panel.done_summary == "first"
+
+    @pytest.mark.asyncio
+    async def test_double_error(self):
+        panel = AgentPanel(name="Analyst", model="claude-sonnet-4-6", style="green")
+        async with PanelTestApp(panel).run_test():
+            panel.error("err1")
+            panel.error("err2")
+            assert panel.error_msg == "err1"
+
+    @pytest.mark.asyncio
+    async def test_error_after_complete_is_noop(self):
+        panel = AgentPanel(name="Analyst", model="claude-sonnet-4-6", style="green")
+        async with PanelTestApp(panel).run_test():
+            panel.complete("done")
+            panel.error("err")
+            assert panel.error_msg == ""
+            assert panel.done_summary == "done"
+
+
+# ---------------------------------------------------------------------------
+# IterationContainer tests
+# ---------------------------------------------------------------------------
+
+
+class TestIterationContainer:
+    def test_construction(self):
+        container = IterationContainer(iter_title="Iteration 0")
+        assert container.border_title == "Iteration 0"
+
+    def test_set_result(self):
+        container = IterationContainer(iter_title="Iteration 1")
+        container.set_result("completed (85)", "green")
+        assert container.border_subtitle == "completed (85)"
+
+
+# ---------------------------------------------------------------------------
+# MetricsBar tests
+# ---------------------------------------------------------------------------
+
+
+class TestMetricsBar:
+    @pytest.mark.asyncio
+    async def test_construction(self):
+        bar = MetricsBar()
+        async with MetricsBarTestApp(bar).run_test():
+            assert bar.iteration == 0
+            assert bar.phase == ""
+            assert bar.finished is False
+
+    @pytest.mark.asyncio
+    async def test_set_status(self):
+        bar = MetricsBar()
+        async with MetricsBarTestApp(bar).run_test():
+            bar.set_status(iteration=3, phase="DEBATE")
+            assert bar.iteration == 3
+            assert bar.phase == "DEBATE"
+
+    @pytest.mark.asyncio
+    async def test_set_status_partial_update(self):
+        bar = MetricsBar()
+        async with MetricsBarTestApp(bar).run_test():
+            bar.set_status(iteration=5)
+            bar.set_status(phase="DEBATE")
+            assert bar.iteration == 5
+            assert bar.phase == "DEBATE"
+
+    @pytest.mark.asyncio
+    async def test_add_agent_stats(self):
+        bar = MetricsBar()
+        panel = AgentPanel(
+            name="Analyst", model="claude-sonnet-4-6", style="green",
+        )
+        async with MetricsBarTestApp(bar).run_test():
+            panel.set_stats(input_tokens=100, output_tokens=50, num_turns=3)
+            bar.add_agent_stats(panel)
+            assert bar.total_input_tokens == 100
+            assert bar.total_output_tokens == 50
+            assert bar.total_turns == 3
+
+    @pytest.mark.asyncio
+    async def test_finish_freezes_timer(self):
+        bar = MetricsBar()
+        async with MetricsBarTestApp(bar).run_test():
+            bar.finish()
+            assert bar.finished is True
+            assert bar._end_time is not None
+
+    @pytest.mark.asyncio
+    async def test_render_with_scores(self):
+        bar = MetricsBar()
+        async with MetricsBarTestApp(bar).run_test():
+            bar.scores = [20, 40, 60, 80]
+            rendered = bar.render()
+            assert "[" in rendered.plain
+            assert "]" in rendered.plain
+
+    @pytest.mark.asyncio
+    async def test_render_with_all_zero_scores(self):
+        bar = MetricsBar()
+        async with MetricsBarTestApp(bar).run_test():
+            bar.scores = [0, 0, 0]
+            rendered = bar.render()
+            assert "[" in rendered.plain
+
+
+# ---------------------------------------------------------------------------
+# PipelineLive headless tests
+# ---------------------------------------------------------------------------
+
+
+class TestPipelineLiveHeadless:
+    def test_lifecycle(self):
+        live = PipelineLive()
+        live.start()
+        live.stop()
+
+    def test_add_panel_tracks_internally(self):
+        live = PipelineLive()
+        live.start()
+        panel = AgentPanel(
+            name="Analyst", model="claude-sonnet-4-6", style="green",
+        )
+        live.add_panel(panel)
+        assert live.has_panel(panel)
+        assert live.panel_count == 1
+        live.stop()
+
+    def test_collapse_panel(self):
+        live = PipelineLive()
+        live.start()
+        panel = AgentPanel(
+            name="Analyst", model="claude-sonnet-4-6", style="green",
+        )
+        live.add_panel(panel)
+        live.collapse_panel(panel, "done")
+        assert panel.done
+        assert panel.done_summary == "done"
+        live.stop()
+
+    def test_collapse_panel_file_logging(self, tmp_path):
+        log_path = tmp_path / "console.log"
+        live = PipelineLive()
+        live.start(log_path=log_path)
+        panel = AgentPanel(
+            name="Analyst", model="claude-sonnet-4-6", style="green",
+        )
+        live.add_panel(panel)
+        live.collapse_panel(panel, "analysis done")
+        live.stop()
+        content = log_path.read_text()
+        assert "Analyst" in content
+        assert "analysis done" in content
+
+    def test_file_logging(self, tmp_path):
+        log_path = tmp_path / "console.log"
+        live = PipelineLive()
+        live.start(log_path=log_path)
+        live.log("Test log message")
+        live.stop()
+        content = log_path.read_text()
+        assert "Test log message" in content
+
+    def test_panel_count(self):
+        live = PipelineLive()
+        live.start()
+        p1 = AgentPanel(
+            name="Analyst", model="claude-sonnet-4-6", style="green",
+        )
+        p2 = AgentPanel(
+            name="Scientist", model="claude-sonnet-4-6", style="cyan",
+        )
+        live.add_panel(p1)
+        live.add_panel(p2)
+        assert live.panel_count == 2
+        live.stop()
+
+    def test_remove_panel(self):
+        live = PipelineLive()
+        live.start()
+        panel = AgentPanel(
+            name="Analyst", model="claude-sonnet-4-6", style="green",
+        )
+        live.add_panel(panel)
+        live.remove_panel(panel)
+        assert not live.has_panel(panel)
+        assert live.panel_count == 0
+        live.stop()
+
+    def test_update_status(self):
+        live = PipelineLive()
+        live.start()
+        live.update_status(iteration=1, phase="PLAN")
+        live.stop()
+
+    def test_wait_for_dismiss_noop(self):
+        live = PipelineLive()
+        live.start()
+        live.wait_for_dismiss()
+        live.stop()
+
+    def test_flush_completed(self):
+        live = PipelineLive()
+        live.start()
+        panel = AgentPanel(
+            name="Analyst", model="claude-sonnet-4-6", style="green",
+        )
+        live.add_panel(panel)
+        live.collapse_panel(panel, "done")
+        live.flush_completed()
+        live.stop()
+
+    def test_start_end_iteration(self):
+        live = PipelineLive()
+        live.start()
+        live.start_iteration(0)
+        live.end_iteration("completed (85)", "green")
+        live.flush_completed()
+        live.stop()
+
+    def test_panels_list_tracks_all(self):
+        live = PipelineLive()
+        live.start()
+        p1 = AgentPanel(
+            name="Analyst", model="claude-sonnet-4-6", style="green",
+        )
+        p2 = AgentPanel(
+            name="Scientist", model="claude-sonnet-4-6", style="cyan",
+        )
+        live.add_panel(p1)
+        live.add_panel(p2)
+        assert p1 in live._panels
+        assert p2 in live._panels
+        live.stop()
+
+    def test_refresh_is_noop(self):
+        live = PipelineLive()
+        live.start()
+        live.refresh()
+        live.stop()
+
+    def test_print_static_headless(self):
+        live = PipelineLive()
+        live.start()
+        live.print_static("hello")
+        live.stop()
+
+    def test_add_rule_headless(self):
+        live = PipelineLive()
+        live.start()
+        live.add_rule("---")
+        live.stop()
+
+    def test_print_static_writes_to_log(self, tmp_path):
+        log_path = tmp_path / "console.log"
+        live = PipelineLive()
+        live.start(log_path=log_path)
+        live.print_static("banner text")
+        live.stop()
+        content = log_path.read_text()
+        assert "banner text" in content
+
+    def test_iteration_flush_and_restart(self):
+        live = PipelineLive()
+        live.start()
+        live.start_iteration(0)
+        live.end_iteration("done", "green")
+        live.flush_completed()
+        assert live._current_iteration is None
+        live.start_iteration(1)
+        assert live._current_iteration is not None
+        assert live._current_iteration.border_title == "Iteration 1"
+        live.stop()
+
+
+# ---------------------------------------------------------------------------
+# PipelineApp tests
+# ---------------------------------------------------------------------------
+
+
+class TestPipelineApp:
+    @pytest.mark.asyncio
+    async def test_lifecycle_with_mock_orchestrator(self):
+        class FakeOrch:
+            _live: PipelineLive | None = None
+
+            async def run(self):
+                pass
+
+        orch = FakeOrch()
+        app = PipelineApp(orch)
+        async with app.run_test():
+            assert app.query_one("#main-scroll") is not None
+            assert app.query_one(MetricsBar) is not None
+
+    @pytest.mark.asyncio
+    async def test_add_panel_mounts_widget(self):
+        class FakeOrch:
+            _live: PipelineLive | None = None
+
+            async def run(self):
+                self._live.add_panel(
+                    AgentPanel(
+                        name="Analyst", model="claude-sonnet-4-6",
+                        style="green",
+                    )
+                )
+
+        orch = FakeOrch()
+        app = PipelineApp(orch)
+        async with app.run_test() as pilot:
+            await pilot.pause()
+            panels = app.query(AgentPanel)
+            assert len(panels) >= 1
+
+    def test_start_iteration_creates_container_headless(self):
+        live = PipelineLive()
+        live.start()
+        live.start_iteration(0)
+        assert live._current_iteration is not None
+        assert live._current_iteration.border_title == "Iteration 0"
+        live.stop()
+
+    @pytest.mark.asyncio
+    async def test_update_status(self):
+        class FakeOrch:
+            _live: PipelineLive | None = None
+
+            async def run(self):
+                self._live.update_status(iteration=1, phase="PLAN")
+
+        orch = FakeOrch()
+        app = PipelineApp(orch)
+        async with app.run_test() as pilot:
+            await pilot.pause()
+            bar = app.query_one(MetricsBar)
+            assert bar.iteration == 1
+            assert bar.phase == "PLAN"
+
+    @pytest.mark.asyncio
+    async def test_worker_completion_sets_finished(self):
+        class FakeOrch:
+            _live: PipelineLive | None = None
+
+            async def run(self):
+                pass
+
+        orch = FakeOrch()
+        app = PipelineApp(orch)
+        async with app.run_test() as pilot:
+            await pilot.pause()
+            assert app._finished is True
+            bar = app.query_one(MetricsBar)
+            assert bar.finished is True
+            assert bar._end_time is not None
+
+    @pytest.mark.asyncio
+    async def test_collapse_panel_accumulates_stats(self):
+        class FakeOrch:
+            _live: PipelineLive | None = None
+
+            async def run(self):
+                panel = AgentPanel(
+                    name="Analyst", model="claude-sonnet-4-6",
+                    style="green",
+                )
+                panel.set_stats(
+                    input_tokens=500, output_tokens=200, num_turns=3,
+                )
+                self._live.add_panel(panel)
+                self._live.collapse_panel(panel, "done")
+
+        orch = FakeOrch()
+        app = PipelineApp(orch)
+        async with app.run_test() as pilot:
+            await pilot.pause()
+            bar = app.query_one(MetricsBar)
+            assert bar.total_input_tokens == 500
+            assert bar.total_output_tokens == 200
+            assert bar.total_turns == 3
+
+
+# ---------------------------------------------------------------------------
+# Orchestrator pause/skip flag tests
+# ---------------------------------------------------------------------------
+
+
+class TestOrchestratorFlags:
+    def test_flags_default_false(self):
+        from unittest.mock import MagicMock
+
+        from auto_scientist.orchestrator import Orchestrator
+
+        state = MagicMock()
+        state.phase = "ingestion"
+        orch = Orchestrator(
+            state=state, data_path=None, output_dir=MagicMock(),
+        )
+        assert orch.pause_requested is False
+        assert orch.skip_to_report is False
+
+
+# ---------------------------------------------------------------------------
+# Screen tests
+# ---------------------------------------------------------------------------
+
+
+class TestAgentDetailScreen:
+    @pytest.mark.asyncio
+    async def test_detail_screen_shows_lines(self):
+        class FakeOrch:
+            _live: PipelineLive | None = None
+
+            async def run(self):
+                pass
+
+        orch = FakeOrch()
+        app = PipelineApp(orch)
+        async with app.run_test() as pilot:
+            await pilot.pause()
+            app.push_screen(AgentDetailScreen(
+                panel_name="Analyst",
+                model="claude-sonnet-4-6",
+                stats="5s | 100 in / 50 out",
+                lines=["line 1", "line 2", "line 3"],
+            ))
+            await pilot.pause()
+            rich_log = app.screen.query_one(RichLog)
+            assert rich_log is not None
+
+    @pytest.mark.asyncio
+    async def test_detail_screen_escape_dismisses(self):
+        class FakeOrch:
+            _live: PipelineLive | None = None
+
+            async def run(self):
+                pass
+
+        orch = FakeOrch()
+        app = PipelineApp(orch)
+        async with app.run_test() as pilot:
+            await pilot.pause()
+            app.push_screen(AgentDetailScreen(
+                panel_name="Analyst",
+                model="claude-sonnet-4-6",
+                stats="5s",
+                lines=["line 1"],
+            ))
+            await pilot.pause()
+            assert isinstance(app.screen, AgentDetailScreen)
+            await pilot.press("escape")
+            await pilot.pause()
+            assert not isinstance(app.screen, AgentDetailScreen)
+
+
+class TestQuitConfirmScreen:
+    @pytest.mark.asyncio
+    async def test_quit_confirm_y_dismisses_with_true(self):
+        class FakeOrch:
+            _live: PipelineLive | None = None
+
+            async def run(self):
+                pass
+
+        results = []
+        orch = FakeOrch()
+        app = PipelineApp(orch)
+        async with app.run_test() as pilot:
+            await pilot.pause()
+            app._finished = False  # Pretend still running
+            app.push_screen(
+                QuitConfirmScreen(), callback=results.append,
+            )
+            await pilot.pause()
+            await pilot.press("y")
+            await pilot.pause()
+            assert results == [True]
+
+    @pytest.mark.asyncio
+    async def test_quit_confirm_n_dismisses_with_false(self):
+        class FakeOrch:
+            _live: PipelineLive | None = None
+
+            async def run(self):
+                pass
+
+        results = []
+        orch = FakeOrch()
+        app = PipelineApp(orch)
+        async with app.run_test() as pilot:
+            await pilot.pause()
+            app.push_screen(
+                QuitConfirmScreen(), callback=results.append,
+            )
+            await pilot.pause()
+            await pilot.press("n")
+            await pilot.pause()
+            assert results == [False]
+
+    @pytest.mark.asyncio
+    async def test_quit_when_finished_exits_immediately(self):
+        class FakeOrch:
+            _live: PipelineLive | None = None
+
+            async def run(self):
+                pass
+
+        orch = FakeOrch()
+        app = PipelineApp(orch)
+        async with app.run_test() as pilot:
+            await pilot.pause()
+            assert app._finished is True
+            # Should exit without showing modal
+            await pilot.press("ctrl+q")
+            await pilot.pause()
+
+    @pytest.mark.asyncio
+    async def test_quit_when_running_shows_modal(self):
+        import threading
+
+        gate = threading.Event()
+
+        class FakeOrch:
+            _live: PipelineLive | None = None
+
+            async def run(self):
+                gate.wait()
+
+        orch = FakeOrch()
+        app = PipelineApp(orch)
+        async with app.run_test() as pilot:
+            await pilot.pause()
+            assert app._finished is False
+            await pilot.press("ctrl+q")
+            await pilot.pause()
+            assert isinstance(app.screen, QuitConfirmScreen)
+            await pilot.press("n")
+            await pilot.pause()
+            gate.set()
+
+
+# ---------------------------------------------------------------------------
+# Theme cycling test
+# ---------------------------------------------------------------------------
+
+
+class TestThemeCycling:
+    @pytest.mark.asyncio
+    async def test_ctrl_t_changes_theme(self):
+        class FakeOrch:
+            _live: PipelineLive | None = None
+
+            async def run(self):
+                pass
+
+        orch = FakeOrch()
+        app = PipelineApp(orch)
+        async with app.run_test() as pilot:
+            await pilot.pause()
+            initial_theme = app.theme
+            await pilot.press("ctrl+t")
+            await pilot.pause()
+            assert app.theme != initial_theme

@@ -26,7 +26,7 @@ from auto_scientist.prompts.coder import (
     CODER_SYSTEM,
     CODER_USER,
 )
-from auto_scientist.sdk_utils import append_block_to_buffer
+from auto_scientist.sdk_utils import append_block_to_buffer, collect_text_from_query
 
 logger = logging.getLogger(__name__)
 
@@ -57,7 +57,7 @@ async def run_coder(
     message_buffer: list[str] | None = None,
     run_timeout_minutes: int = 120,
     run_command: str = "uv run {script_path}",
-    top_level_criteria: list[dict[str, Any]] | None = None,
+    data_files_listing: str = "",
 ) -> Path:
     """Implement the scientist's plan as a runnable experiment script.
 
@@ -68,7 +68,7 @@ async def run_coder(
         version: Version string for the new experiment (e.g., 'v01').
         domain_knowledge: Domain-specific context.
         data_path: Absolute path to the dataset.
-        top_level_criteria: Investigation-wide success criteria from orchestrator.
+        data_files_listing: Pre-computed listing of files in data_path directory.
 
     Returns:
         Path to the newly created experiment script.
@@ -92,29 +92,27 @@ async def run_coder(
         run_command=run_command,
     )
 
-    # Build top-level criteria section for the prompt
-    if top_level_criteria:
-        criteria_lines = json.dumps(top_level_criteria, indent=2)
-        top_level_section = (
-            f"\n<top_level_criteria>\n"
-            f"These are the investigation-wide success criteria. Your script "
-            f"MUST compute and print these metrics for the best method in the "
-            f"TOP-LEVEL SUCCESS CRITERIA section (after the per-iteration "
-            f"SUCCESS CRITERIA section). The Analyst uses these to score the "
-            f"version.\n{criteria_lines}\n</top_level_criteria>"
+    # Build data files section so coder doesn't need to discover files
+    if data_files_listing:
+        data_files_section = (
+            f"\n<data_files>\n"
+            f"Files in the data directory ({data_path}):\n"
+            f"{data_files_listing}\n"
+            f"</data_files>"
         )
     else:
-        top_level_section = ""
+        data_files_section = ""
 
     user_prompt = CODER_USER.format(
         domain_knowledge=domain_knowledge or "(no domain knowledge provided)",
         plan_json=json.dumps(plan, indent=2),
         previous_script_section=previous_script_section,
         new_script_path=str(new_script_path),
+        version_dir=str(version_dir),
         version=version,
         run_timeout_minutes=run_timeout_minutes,
         run_command=run_command,
-        top_level_section=top_level_section,
+        data_files_section=data_files_section,
     )
 
     options = ClaudeCodeOptions(
@@ -138,7 +136,9 @@ async def run_coder(
                         for block in message.content:
                             append_block_to_buffer(block, message_buffer)
                 elif isinstance(message, ResultMessage):
-                    pass  # Agent is done
+                    usage = getattr(message, "usage", None) or {}
+                    usage["num_turns"] = getattr(message, "num_turns", 0)
+                    collect_text_from_query.last_usage = usage  # type: ignore[attr-defined]
         except Exception as e:
             if attempt == MAX_ATTEMPTS - 1:
                 raise

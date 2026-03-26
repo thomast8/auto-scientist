@@ -12,7 +12,6 @@ from typing import Any, TypeVar
 
 from openai import AsyncOpenAI
 
-from auto_scientist.console import print_summary
 
 T = TypeVar("T")
 
@@ -20,53 +19,56 @@ logger = logging.getLogger(__name__)
 
 PROGRESS_PREFIX = (
     "Reply with ONE sentence, max 15 words. "
-    "Use present participle (-ing) voice: 'Inspecting...', 'Writing...', 'Computing...'."
+    "Use present participle (-ing) voice: 'Inspecting...', 'Writing...', 'Computing...'. "
+    "Never refer to the agent in third person. Write as if you are the agent."
 )
 FINAL_PREFIX = (
     "Reply with 2-3 sentences, max 40 words total. "
     "Use past tense. First sentence: the main outcome. "
-    "Remaining sentences: key metrics, notable findings, or comparisons to prior iterations."
+    "Remaining sentences: key metrics, notable findings, or comparisons to prior iterations. "
+    "Never refer to the agent in third person (no 'they', 'the agent', 'it'). "
+    "Write as if you are the agent: 'Loaded 200 rows...', 'Found high variance in y...'."
 )
 
 SUMMARY_PROMPTS: dict[str, str] = {
     "Ingestor": (
-        "You are summarizing an Ingestor agent's output. "
-        "Focus on: what files are being processed and what transformations are being applied?"
+        "Summarize this data ingestion output in first person. "
+        "Focus on: what files were processed and what transformations were applied."
     ),
     "Analyst": (
-        "You are summarizing an Analyst agent's output. "
-        "Focus on: what findings have been observed? What metrics stand out? "
-        "Any improvements or regressions?"
+        "Summarize this analysis output in first person. "
+        "Focus on: what findings were observed, what metrics stand out, "
+        "any improvements or regressions."
     ),
     "Scientist": (
-        "You are summarizing a Scientist agent's output. "
-        "Focus on: what hypothesis and strategy are being formulated? "
-        "What is the expected impact?"
+        "Summarize this planning output in first person. "
+        "Focus on: what hypothesis and strategy are being formulated, "
+        "what is the expected impact."
     ),
     "Scientist Revision": (
-        "You are summarizing a Scientist Revision agent's output. "
-        "Focus on: what is changing from the original plan? "
-        "What revisions were adopted from the debate?"
+        "Summarize this plan revision output in first person. "
+        "Focus on: what changed from the original plan, "
+        "what revisions were adopted from the debate."
     ),
     "Debate": (
-        "You are summarizing a Debate phase's output. "
+        "Summarize this debate output in first person. "
         "Messages are prefixed [Critic] or [Scientist]. "
-        "Always lead with who is speaking (Critic: ... / Scientist: ...). "
-        "Focus on: what is being challenged and what positions are forming?"
+        "Do not prefix with 'Critic:' since the panel already identifies who this is. "
+        "Focus on: what is being challenged and what positions are forming."
     ),
     "Coder": (
-        "You are summarizing a Coder agent's output. "
-        "Focus on: what code is being written and what approach is being taken? "
+        "Summarize this coding output in first person. "
+        "Focus on: what code was written and what approach was taken. "
         "Describe the script structure, not line-by-line details."
     ),
     "Results": (
-        "You are summarizing experiment results. "
-        "Focus on: what did the experiment produce? Key numeric outcomes, "
+        "Summarize these experiment results in first person. "
+        "Focus on: what the experiment produced, key numeric outcomes, "
         "whether the hypothesis was supported, comparison to previous iteration."
     ),
     "Report": (
-        "You are summarizing a Report agent's output. "
-        "Focus on: what key findings and results are being documented?"
+        "Summarize this report output in first person. "
+        "Focus on: what key findings and results are being documented."
     ),
 }
 
@@ -108,7 +110,14 @@ async def summarize_agent_output(
 
     try:
         fallback = "Summarize the following agent output in 1-2 sentences."
-        instruction = SUMMARY_PROMPTS.get(agent_name, fallback)
+        instruction = SUMMARY_PROMPTS.get(agent_name)
+        if instruction is None:
+            for key in SUMMARY_PROMPTS:
+                if agent_name.startswith(key):
+                    instruction = SUMMARY_PROMPTS[key]
+                    break
+        if instruction is None:
+            instruction = fallback
         prefix = PROGRESS_PREFIX if progress else FINAL_PREFIX
         instructions = f"{instruction}\n\n{prefix}"
         max_tokens = 60 if progress else 150
@@ -153,6 +162,8 @@ async def run_with_summaries(
     summary_model: str,
     message_buffer: list[str],
     interval: int | float = 15,
+    label_prefix: str = "",
+    summary_collector: list[tuple[str, str, str]] | None = None,
 ) -> T:
     """Run an agent coroutine with periodic live summaries.
 
@@ -169,29 +180,49 @@ async def run_with_summaries(
         summary_model: OpenAI model for summarization.
         message_buffer: Shared list that the agent appends text to.
         interval: Seconds between periodic polls.
+        label_prefix: Prefix for time/done labels (e.g. "Debate: openai:gpt-4o | ").
 
     Returns:
         The result of the agent coroutine.
     """
-    elapsed = 0
+    elapsed = 0.0
+    max_interval = interval * 16  # Cap backoff at 16x base interval
+    progress_summaries: list[str] = []
 
     async def poll_loop():
         nonlocal elapsed
-        while True:
-            await asyncio.sleep(interval)
-            elapsed += interval
+        current_interval = interval
+        last_seen_len = 0
 
-            if not message_buffer:
+        while True:
+            await asyncio.sleep(current_interval)
+            elapsed += current_interval
+
+            buf_len = len(message_buffer)
+            if buf_len == 0:
                 continue
 
+            if buf_len == last_seen_len:
+                # Buffer unchanged, back off
+                current_interval = min(current_interval * 2, max_interval)
+                continue
+
+            # New content arrived, reset backoff
+            last_seen_len = buf_len
+            current_interval = interval
+
             tail = "\n".join(message_buffer[-10:])
-            label = f"{int(elapsed)}s"
+            label = f"{label_prefix}{int(elapsed)}s"
             try:
                 summary = await summarize_agent_output(
                     agent_name, tail, summary_model, progress=True,
                 )
                 if summary:
-                    print_summary(agent_name, summary, label=label)
+                    progress_summaries.append(summary)
+                    if summary_collector is not None:
+                        summary_collector.append((agent_name, summary, label))
+                    else:
+                        logger.info(f"{agent_name} [{label}]: {summary}")
             except Exception as e:
                 logger.warning(f"Periodic poll error for {agent_name}: {e}")
 
@@ -203,15 +234,20 @@ async def run_with_summaries(
         with contextlib.suppress(asyncio.CancelledError):
             await poll_task
 
-        # Final summary of all output
+        # Final summary: use the agent's actual output trace (tail) so the
+        # recap reflects real results, not a lossy summary-of-summaries.
         if message_buffer:
             try:
-                full_output = "\n".join(message_buffer)
+                tail = "\n".join(message_buffer[-20:])
                 summary = await summarize_agent_output(
-                    agent_name, full_output, summary_model, progress=False,
+                    agent_name, tail, summary_model, progress=False,
                 )
                 if summary:
-                    print_summary(agent_name, summary, label="done")
+                    done_label = f"{label_prefix}done"
+                    if summary_collector is not None:
+                        summary_collector.append((agent_name, summary, done_label))
+                    else:
+                        logger.info(f"{agent_name} [{done_label}]: {summary}")
             except Exception as e:
                 logger.warning(f"Final summary error for {agent_name}: {e}")
 

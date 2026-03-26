@@ -37,12 +37,39 @@ class AgentModelConfig(BaseModel):
 BUILTIN_PRESETS: dict[str, dict] = {
     "default": {
         "defaults": {"model": "claude-sonnet-4-6"},
-        "analyst": {"model": "claude-opus-4-6"},
         "scientist": {"model": "claude-opus-4-6"},
         "summarizer": {"provider": "openai", "model": "gpt-5.4-nano"},
         "critics": [
             {"provider": "google", "model": "gemini-3.1-pro-preview"},
             {"provider": "openai", "model": "gpt-5.4"},
+        ],
+    },
+    "medium": {
+        "defaults": {"model": "claude-sonnet-4-6", "reasoning": "medium"},
+        "scientist": {"model": "claude-opus-4-6", "reasoning": "medium"},
+        "summarizer": {"provider": "openai", "model": "gpt-5.4-nano"},
+        "critics": [
+            {"provider": "google", "model": "gemini-3.1-pro-preview", "reasoning": "medium"},
+            {"provider": "openai", "model": "gpt-5.4", "reasoning": "medium"},
+        ],
+    },
+    "high": {
+        "defaults": {"model": "claude-sonnet-4-6", "reasoning": "high"},
+        "scientist": {"model": "claude-opus-4-6", "reasoning": "high"},
+        "summarizer": {"provider": "openai", "model": "gpt-5.4-nano"},
+        "critics": [
+            {"provider": "google", "model": "gemini-3.1-pro-preview", "reasoning": "high"},
+            {"provider": "openai", "model": "gpt-5.4", "reasoning": "high"},
+        ],
+    },
+    "max": {
+        "defaults": {"model": "claude-opus-4-6", "reasoning": "max"},
+        "analyst": {"model": "claude-opus-4-6", "reasoning": "max"},
+        "scientist": {"model": "claude-opus-4-6", "reasoning": "max"},
+        "summarizer": {"provider": "openai", "model": "gpt-5.4-mini"},
+        "critics": [
+            {"provider": "google", "model": "gemini-3.1-pro-preview", "reasoning": "max"},
+            {"provider": "openai", "model": "gpt-5.4", "reasoning": "max"},
         ],
     },
     "fast": {

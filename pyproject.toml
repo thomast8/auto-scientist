@@ -12,6 +12,8 @@ dependencies = [
     "google-genai",
     "anthropic",
     "python-dotenv>=1.2.2",
+    "rich>=14.3.3",
+    "textual>=8.0.0",
 ]
 
 [project.optional-dependencies]
@@ -44,5 +46,6 @@ testpaths = ["tests"]
 
 [dependency-groups]
 dev = [
+    "pytest-asyncio>=1.3.0",
     "pytest-cov>=7.0.0",
 ]

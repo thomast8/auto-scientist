@@ -2,8 +2,8 @@
 
 Uses query() (fresh session each iteration, bounded context).
 Tools: Read (results file + plot PNGs), Glob (find output files).
-Input: results text + lab notebook + success criteria.
-Output: structured JSON with criteria_results, metrics, observations.
+Input: results text + lab notebook.
+Output: structured JSON with metrics, observations.
 max_turns: 30
 """
 
@@ -14,7 +14,6 @@ from typing import Any
 
 from claude_code_sdk import ClaudeCodeOptions
 
-from auto_scientist.config import SuccessCriterion
 from auto_scientist.prompts.analyst import ANALYST_SYSTEM, ANALYST_USER
 from auto_scientist.schemas import AnalystOutput
 from auto_scientist.sdk_utils import (
@@ -31,67 +30,36 @@ MAX_ATTEMPTS = 3
 ANALYST_SCHEMA = {
     "type": "object",
     "properties": {
-        "criteria_results": {
-            "type": "array",
-            "items": {
-                "type": "object",
-                "properties": {
-                    "name": {"type": "string"},
-                    "measured_value": {"type": ["string", "number", "null"]},
-                    "target": {"type": "string"},
-                    "status": {"type": "string", "enum": ["pass", "fail", "unable_to_measure"]},
-                },
-                "required": ["name", "measured_value", "target", "status"],
-            },
-        },
         "key_metrics": {"type": "object", "additionalProperties": {"type": "number"}},
         "improvements": {"type": "array", "items": {"type": "string"}},
         "regressions": {"type": "array", "items": {"type": "string"}},
         "observations": {"type": "array", "items": {"type": "string"}},
-        "iteration_criteria_results": {
+        "prediction_outcomes": {
             "type": "array",
             "items": {
                 "type": "object",
                 "properties": {
-                    "name": {"type": "string"},
-                    "status": {"type": "string", "enum": ["pass", "fail"]},
-                    "measured_value": {"type": "string"},
+                    "pred_id": {"type": "string"},
+                    "prediction": {"type": "string"},
+                    "outcome": {
+                        "type": "string",
+                        "enum": ["confirmed", "refuted", "inconclusive"],
+                    },
+                    "evidence": {"type": "string"},
                 },
-                "required": ["name", "status", "measured_value"],
+                "required": ["pred_id", "prediction", "outcome", "evidence"],
             },
         },
         "domain_knowledge": {"type": "string"},
         "data_summary": {"type": "object"},
     },
     "required": [
-        "criteria_results",
         "key_metrics",
         "improvements",
         "regressions",
         "observations",
-        "iteration_criteria_results",
     ],
 }
-
-
-def _format_success_criteria(criteria: list[SuccessCriterion]) -> str:
-    """Format success criteria into a readable string for the prompt."""
-    if not criteria:
-        return "(no success criteria defined)"
-    lines = []
-    for i, c in enumerate(criteria, 1):
-        target = ""
-        if c.target_min is not None and c.target_max is not None:
-            target = f"target: [{c.target_min}, {c.target_max}]"
-        elif c.target_min is not None:
-            target = f"target: >= {c.target_min}"
-        elif c.target_max is not None:
-            target = f"target: <= {c.target_max}"
-        required = "REQUIRED" if c.required else "optional"
-        lines.append(
-            f"{i}. [{required}] {c.name} (metric: {c.metric_key}, {target}): {c.description}"
-        )
-    return "\n".join(lines)
 
 
 async def run_analyst(
@@ -99,7 +67,6 @@ async def run_analyst(
     plot_paths: list[Path],
     notebook_path: Path,
     domain_knowledge: str = "",
-    success_criteria: list[SuccessCriterion] | None = None,
     data_dir: Path | None = None,
     model: str | None = None,
     message_buffer: list[str] | None = None,
@@ -111,14 +78,12 @@ async def run_analyst(
         plot_paths: Paths to output plot PNGs (read as images).
         notebook_path: Path to the lab notebook.
         domain_knowledge: Domain-specific context injected into the prompt.
-        success_criteria: List of success criteria to evaluate against.
         data_dir: Path to canonical data directory (set on iteration 0).
         model: Model override.
         message_buffer: Optional buffer for streaming messages.
 
     Returns:
         Structured dict with keys:
-            criteria_results: list[dict] (name, measured_value, target, status)
             key_metrics: dict[str, float]
             improvements: list[str]
             regressions: list[str]
@@ -130,12 +95,18 @@ async def run_analyst(
 
     # Build the data section depending on iteration 0 vs normal
     if data_dir is not None and (results_path is None or not results_path.exists()):
-        data_section = (
-            f"<data_directory>{data_dir}</data_directory>\n"
-            "Use the Glob tool to list files in this directory, then use the Read tool\n"
-            "to examine each data file. Describe the structure of each file factually."
+        abs_data_dir = Path(data_dir).resolve()
+        # Pre-compute file listing so the analyst doesn't need to Glob
+        file_listing = "\n".join(
+            f"- {f.name}" for f in sorted(abs_data_dir.iterdir()) if f.is_file()
         )
-        cwd = data_dir
+        data_section = (
+            f"<data_directory>{abs_data_dir}</data_directory>\n"
+            f"<data_files>\n{file_listing}\n</data_files>\n"
+            "Use the Read tool to examine each data file listed above. "
+            "Describe the structure of each file factually."
+        )
+        cwd = abs_data_dir
     else:
         results_content = (
             results_path.read_text()
@@ -160,7 +131,6 @@ async def run_analyst(
 
     user_prompt = ANALYST_USER.format(
         domain_knowledge=domain_knowledge or "(no domain knowledge provided)",
-        success_criteria=_format_success_criteria(success_criteria or []),
         data_section=data_section,
         notebook_content=notebook_content,
     )

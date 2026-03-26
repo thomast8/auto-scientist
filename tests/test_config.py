@@ -3,34 +3,7 @@
 import pytest
 from pydantic import ValidationError
 
-from auto_scientist.config import DomainConfig, SuccessCriterion
-
-
-class TestSuccessCriterion:
-    def test_required_fields(self):
-        sc = SuccessCriterion(name="acc", description="accuracy", metric_key="accuracy")
-        assert sc.name == "acc"
-        assert sc.description == "accuracy"
-        assert sc.metric_key == "accuracy"
-
-    def test_defaults(self):
-        sc = SuccessCriterion(name="a", description="b", metric_key="c")
-        assert sc.target_min is None
-        assert sc.target_max is None
-        assert sc.required is True
-
-    def test_optional_targets(self):
-        sc = SuccessCriterion(
-            name="a", description="b", metric_key="c",
-            target_min=0.5, target_max=1.0, required=False,
-        )
-        assert sc.target_min == 0.5
-        assert sc.target_max == 1.0
-        assert sc.required is False
-
-    def test_missing_required_field_raises(self):
-        with pytest.raises(ValidationError):
-            SuccessCriterion(name="a", description="b")  # missing metric_key
+from auto_scientist.config import DomainConfig
 
 
 class TestDomainConfig:
@@ -63,28 +36,6 @@ class TestDomainConfig:
     def test_no_domain_knowledge_field(self):
         """DomainConfig should not have domain_knowledge (moved to ExperimentState)."""
         assert "domain_knowledge" not in DomainConfig.model_fields
-
-
-class TestSuccessCriterionSerialization:
-    def test_roundtrip(self):
-        sc = SuccessCriterion(
-            name="acc", description="accuracy", metric_key="accuracy",
-            target_min=0.8, target_max=1.0, required=False,
-        )
-        json_str = sc.model_dump_json()
-        loaded = SuccessCriterion.model_validate_json(json_str)
-        assert loaded.name == "acc"
-        assert loaded.target_min == 0.8
-        assert loaded.target_max == 1.0
-        assert loaded.required is False
-
-    def test_negative_target_values(self):
-        sc = SuccessCriterion(
-            name="err", description="error", metric_key="error",
-            target_min=-1.0, target_max=-0.5,
-        )
-        assert sc.target_min == -1.0
-        assert sc.target_max == -0.5
 
 
 class TestDomainConfigSerialization:

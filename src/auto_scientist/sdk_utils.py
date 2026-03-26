@@ -181,16 +181,23 @@ async def collect_text_from_query(
     Prefers ResultMessage.result; falls back to concatenated AssistantMessage
     TextBlocks. Raises RuntimeError if no text is produced.
 
+    Token usage from ResultMessage.usage is stored on the module-level
+    `last_usage` dict for the caller to read after the call completes.
+
     This extracts the common pattern shared by Analyst, Scientist, and
     Scientist Revision agents.
     """
     result_text = ""
     assistant_texts: list[str] = []
+    usage: dict[str, Any] = {}
 
     async for message in query(prompt=prompt, options=options):
         if isinstance(message, ResultMessage):
             if message.result:
                 result_text = message.result
+            usage = getattr(message, "usage", None) or {}
+            usage["num_turns"] = getattr(message, "num_turns", 0)
+            usage["total_cost_usd"] = getattr(message, "total_cost_usd", None)
         elif isinstance(message, AssistantMessage):
             for block in message.content:
                 if isinstance(block, TextBlock):
@@ -203,4 +210,11 @@ async def collect_text_from_query(
     if not raw:
         raise RuntimeError(f"{agent_name} agent returned no output")
 
+    # Store usage on the function for the caller to read
+    collect_text_from_query.last_usage = usage  # type: ignore[attr-defined]
+
     return raw
+
+
+# Initialize the usage attribute
+collect_text_from_query.last_usage = {}  # type: ignore[attr-defined]

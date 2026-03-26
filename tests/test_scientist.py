@@ -7,57 +7,28 @@ import pytest
 from claude_code_sdk import AssistantMessage, ResultMessage, TextBlock
 
 from auto_scientist.agents.scientist import (
-    _format_criteria_for_prompt,
+    _format_predictions_for_prompt,
     run_scientist,
     run_scientist_revision,
 )
-from auto_scientist.config import SuccessCriterion
+from auto_scientist.state import PredictionRecord
 from auto_scientist.sdk_utils import OutputValidationError
 
+SAMPLE_LEDGER = [
+    {
+        "claim": "weak point", "severity": "medium",
+        "confidence": "medium", "category": "methodology",
+        "persona": "Methodologist", "critic_model": "test",
+    },
+]
 
-class TestFormatCriteriaForPrompt:
-    def test_none_returns_placeholder(self):
-        result = _format_criteria_for_prompt(None)
-        assert "no top-level success criteria" in result
-
-    def test_empty_list_returns_placeholder(self):
-        result = _format_criteria_for_prompt([])
-        assert "no top-level success criteria" in result
-
-    def test_target_min_only(self):
-        sc = SuccessCriterion(name="acc", description="accuracy", metric_key="acc", target_min=0.9)
-        result = _format_criteria_for_prompt([sc])
-        assert ">= 0.9" in result
-
-    def test_target_max_only(self):
-        sc = SuccessCriterion(name="loss", description="low loss", metric_key="loss", target_max=0.1)
-        result = _format_criteria_for_prompt([sc])
-        assert "<= 0.1" in result
-
-    def test_both_bounds(self):
-        sc = SuccessCriterion(
-            name="f1", description="f1 score", metric_key="f1",
-            target_min=0.8, target_max=1.0,
-        )
-        result = _format_criteria_for_prompt([sc])
-        assert "[0.8, 1.0]" in result
-
-    def test_required_vs_optional_labels(self):
-        req = SuccessCriterion(name="a", description="d", metric_key="a", required=True)
-        opt = SuccessCriterion(name="b", description="d", metric_key="b", required=False)
-        result = _format_criteria_for_prompt([req, opt])
-        assert "REQUIRED" in result
-        assert "optional" in result
-
-    def test_multiple_numbered(self):
-        criteria = [
-            SuccessCriterion(name=f"c{i}", description="d", metric_key=f"c{i}")
-            for i in range(3)
-        ]
-        result = _format_criteria_for_prompt(criteria)
-        assert result.startswith("1.")
-        assert "2." in result
-        assert "3." in result
+SAMPLE_LEDGER_SMALL = [
+    {
+        "claim": "test concern", "severity": "low",
+        "confidence": "low", "category": "other",
+        "persona": "Test", "critic_model": "test",
+    },
+]
 
 
 SAMPLE_PLAN = {
@@ -68,9 +39,6 @@ SAMPLE_PLAN = {
     "should_stop": False,
     "stop_reason": None,
     "notebook_entry": "First hypothesis\n\nTesting incremental approach",
-    "success_criteria": [
-        {"name": "metric", "description": "desc", "metric_key": "m", "condition": "> 0.5"}
-    ],
 }
 
 
@@ -139,8 +107,8 @@ class TestRunScientist:
 
     @pytest.mark.asyncio
     @patch("auto_scientist.sdk_utils.query")
-    async def test_web_search_only(self, mock_query, tmp_path):
-        """Scientist should only have WebSearch (no code/file tools)."""
+    async def test_has_web_search_only(self, mock_query, tmp_path):
+        """Scientist should have WebSearch only (file access is the Analyst's job)."""
         from claude_code_sdk import ResultMessage
         result_msg = MagicMock(spec=ResultMessage)
         result_msg.result = json.dumps(SAMPLE_PLAN)
@@ -215,7 +183,7 @@ class TestRunScientistMessageBuffer:
         buf: list[str] = []
         await run_scientist_revision(
             original_plan=SAMPLE_PLAN,
-            debate_transcript=[{"role": "critic", "content": "weak"}],
+            concern_ledger=SAMPLE_LEDGER,
             analysis={},
             notebook_path=notebook_path,
             version="v01",
@@ -242,7 +210,6 @@ class TestRunScientistExploration:
             "should_stop": False,
             "stop_reason": None,
             "notebook_entry": "Data exploration\n\nFirst look at the data",
-            "success_criteria": [],
         }
 
         from claude_code_sdk import ResultMessage
@@ -261,143 +228,6 @@ class TestRunScientistExploration:
             version="v00",
         )
         assert result["strategy"] == "exploratory"
-        assert "top_level_criteria" not in result or not result.get("top_level_criteria")
-
-
-class TestRunScientistCriteriaDefinition:
-    """Rich analysis + no criteria -> plan includes top_level_criteria."""
-
-    @pytest.mark.asyncio
-    @patch("auto_scientist.sdk_utils.query")
-    async def test_defines_criteria(self, mock_query, tmp_path):
-        plan_with_criteria = {
-            "hypothesis": "Polynomial fit will model the observed pattern",
-            "strategy": "structural",
-            "changes": [
-                {"what": "Fit polynomial", "why": "Data shows curve",
-                 "how": "np.polyfit degree 2-5", "priority": 1},
-            ],
-            "expected_impact": "R-squared above 0.9",
-            "should_stop": False,
-            "stop_reason": None,
-            "notebook_entry": "First hypothesis\n\nDefining initial approach",
-            "success_criteria": [
-                {"name": "R-squared", "description": "Fit quality",
-                 "metric_key": "r_squared", "condition": "> 0.9"},
-            ],
-            "top_level_criteria": [
-                {"name": "Final R-squared", "description": "Investigation goal",
-                 "metric_key": "r_squared", "condition": "> 0.95"},
-            ],
-        }
-
-        from claude_code_sdk import ResultMessage
-        result_msg = MagicMock(spec=ResultMessage)
-        result_msg.result = json.dumps(plan_with_criteria)
-
-        async def fake_query(**kwargs):
-            yield result_msg
-
-        mock_query.side_effect = fake_query
-
-        notebook_path = tmp_path / "notebook.md"
-        notebook_path.write_text("# Notebook\n## v00 exploration results")
-
-        result = await run_scientist(
-            analysis={"observations": ["200 rows, polynomial shape"]},
-            notebook_path=notebook_path,
-            version="v01",
-        )
-        assert "top_level_criteria" in result
-        assert len(result["top_level_criteria"]) == 1
-        assert result["top_level_criteria"][0]["condition"] == "> 0.95"
-
-
-class TestRunScientistCriteriaRevision:
-    """Existing criteria -> plan may include criteria_revision."""
-
-    @pytest.mark.asyncio
-    @patch("auto_scientist.sdk_utils.query")
-    async def test_revises_criteria(self, mock_query, tmp_path):
-        plan_with_revision = {
-            "hypothesis": "Lower target is more realistic given noise",
-            "strategy": "incremental",
-            "changes": [
-                {"what": "Add regularization", "why": "Reduce overfitting",
-                 "how": "L2 penalty", "priority": 1},
-            ],
-            "expected_impact": "Stable R-squared around 0.90",
-            "should_stop": False,
-            "stop_reason": None,
-            "notebook_entry": "Adjusting targets\n\nRevising criteria based on evidence",
-            "success_criteria": [
-                {"name": "R-squared", "description": "Fit quality",
-                 "metric_key": "r_squared", "condition": "> 0.85"},
-            ],
-            "criteria_revision": {
-                "changes": (
-                    "Lowered R-squared target from 0.95 to 0.90"
-                    " because noise floor limits achievable accuracy"
-                ),
-                "revised_criteria": [
-                    {"name": "Final R-squared", "description": "Investigation goal",
-                     "metric_key": "r_squared", "condition": "> 0.90"},
-                ],
-            },
-        }
-
-        from claude_code_sdk import ResultMessage
-        result_msg = MagicMock(spec=ResultMessage)
-        result_msg.result = json.dumps(plan_with_revision)
-
-        async def fake_query(**kwargs):
-            yield result_msg
-
-        mock_query.side_effect = fake_query
-
-        notebook_path = tmp_path / "notebook.md"
-        notebook_path.write_text("# Notebook")
-
-        existing_criteria = [
-            SuccessCriterion(name="Final R-squared", description="goal",
-                             metric_key="r_squared", target_min=0.95),
-        ]
-        result = await run_scientist(
-            analysis={"observations": []},
-            notebook_path=notebook_path,
-            version="v03",
-            success_criteria=existing_criteria,
-        )
-        assert "criteria_revision" in result
-        assert result["criteria_revision"]["revised_criteria"][0]["condition"] == "> 0.90"
-
-    @pytest.mark.asyncio
-    @patch("auto_scientist.sdk_utils.query")
-    async def test_accepts_success_criteria_param(self, mock_query, tmp_path):
-        """run_scientist should accept a success_criteria parameter."""
-        from claude_code_sdk import ResultMessage
-        result_msg = MagicMock(spec=ResultMessage)
-        result_msg.result = json.dumps(SAMPLE_PLAN)
-
-        captured_prompt = {}
-
-        async def fake_query(**kwargs):
-            captured_prompt["prompt"] = kwargs.get("prompt", "")
-            yield result_msg
-
-        mock_query.side_effect = fake_query
-
-        notebook_path = tmp_path / "notebook.md"
-        criteria = [
-            SuccessCriterion(name="acc", description="accuracy",
-                             metric_key="accuracy", target_min=0.9),
-        ]
-        await run_scientist(
-            analysis={}, notebook_path=notebook_path, version="v02",
-            success_criteria=criteria,
-        )
-        # Criteria should appear in the prompt
-        assert "accuracy" in captured_prompt["prompt"]
 
 
 class TestRunScientistRevision:
@@ -416,14 +246,16 @@ class TestRunScientistRevision:
         notebook_path = tmp_path / "notebook.md"
         notebook_path.write_text("# Notebook")
 
-        transcript = [
-            {"role": "critic", "content": "This is weak"},
-            {"role": "scientist", "content": "I disagree"},
+        ledger = [
+            {"claim": "This is weak", "severity": "high", "confidence": "high",
+             "category": "methodology", "persona": "Methodologist",
+             "critic_model": "test", "scientist_verdict": "rejected",
+             "scientist_reasoning": "I disagree"},
         ]
 
         result = await run_scientist_revision(
             original_plan=SAMPLE_PLAN,
-            debate_transcript=transcript,
+            concern_ledger=ledger,
             analysis={"observations": []},
             notebook_path=notebook_path,
             version="v01",
@@ -448,7 +280,7 @@ class TestRunScientistRevision:
         with pytest.raises(RuntimeError, match="returned no output"):
             await run_scientist_revision(
                 original_plan=SAMPLE_PLAN,
-                debate_transcript=[],
+                concern_ledger=[],
                 analysis={},
                 notebook_path=notebook_path,
                 version="v01",
@@ -477,7 +309,7 @@ class TestRunScientistRevision:
 
         result = await run_scientist_revision(
             original_plan=SAMPLE_PLAN,
-            debate_transcript=[{"role": "critic", "content": "test"}],
+            concern_ledger=SAMPLE_LEDGER_SMALL,
             analysis={},
             notebook_path=notebook_path,
             version="v01",
@@ -604,7 +436,7 @@ class TestScientistRetry:
 
         result = await run_scientist_revision(
             original_plan=SAMPLE_PLAN,
-            debate_transcript=[{"role": "critic", "content": "weak"}],
+            concern_ledger=SAMPLE_LEDGER,
             analysis={},
             notebook_path=notebook_path,
             version="v01",
@@ -613,69 +445,141 @@ class TestScientistRetry:
         assert call_count == 2
 
 
-class TestScientistStructuredOutput:
-    """Tests for the direct API structured output path."""
+class TestFormatPredictionsForPrompt:
+    def test_none_returns_placeholder(self):
+        result = _format_predictions_for_prompt(None)
+        assert "no prediction history" in result
 
-    @pytest.mark.asyncio
-    @patch("auto_scientist.agents.scientist.query_anthropic")
-    async def test_anthropic_model_uses_direct_api(self, mock_query, tmp_path):
-        mock_query.return_value = json.dumps(SAMPLE_PLAN)
-        notebook_path = tmp_path / "notebook.md"
+    def test_empty_list_returns_placeholder(self):
+        result = _format_predictions_for_prompt([])
+        assert "no prediction history" in result
 
-        result = await run_scientist(
-            analysis={}, notebook_path=notebook_path, version="v01",
-            model="claude-sonnet-4-6",
-            use_structured_output=True,
-        )
-        assert result["hypothesis"] == "test hypothesis"
-        mock_query.assert_called_once()
-        call_kwargs = mock_query.call_args.kwargs
-        assert call_kwargs.get("system_prompt") is not None
-        assert call_kwargs.get("response_schema") is not None
+    def test_single_pending_prediction(self):
+        history = [
+            PredictionRecord(
+                iteration_prescribed=1,
+                prediction="noise is additive",
+                diagnostic="compute residual-x correlation",
+                if_confirmed="OLS is appropriate",
+                if_refuted="switch to WLS",
+            ),
+        ]
+        result = _format_predictions_for_prompt(history)
+        assert "PENDING" in result
+        assert "noise is additive" in result
+        assert "Diagnostic:" in result
+        assert "If confirmed:" in result
+        assert "If refuted:" in result
 
-    @pytest.mark.asyncio
-    @patch("auto_scientist.agents.scientist.query_openai")
-    async def test_openai_model_uses_direct_api(self, mock_query, tmp_path):
-        mock_query.return_value = json.dumps(SAMPLE_PLAN)
-        notebook_path = tmp_path / "notebook.md"
+    def test_resolved_prediction_shows_evidence(self):
+        history = [
+            PredictionRecord(
+                iteration_prescribed=1,
+                iteration_evaluated=1,
+                prediction="spline fits better locally",
+                diagnostic="compare regional RMSE",
+                if_confirmed="focus on local fit",
+                if_refuted="problem is elsewhere",
+                outcome="confirmed",
+                evidence="spline RMSE=0.31, polynomial RMSE=0.58",
+            ),
+        ]
+        result = _format_predictions_for_prompt(history)
+        assert "CONFIRMED" in result
+        assert "spline RMSE=0.31" in result
+        assert "focus on local fit" in result
 
-        result = await run_scientist(
-            analysis={}, notebook_path=notebook_path, version="v01",
-            model="gpt-5.4",
-            use_structured_output=True,
-        )
-        assert result["hypothesis"] == "test hypothesis"
-        mock_query.assert_called_once()
+    def test_trajectory_chain(self):
+        history = [
+            PredictionRecord(
+                pred_id="1.1",
+                iteration_prescribed=1,
+                iteration_evaluated=1,
+                prediction="spline fits better locally",
+                diagnostic="compare regional RMSE",
+                if_confirmed="focus on local fit",
+                if_refuted="problem is elsewhere",
+                outcome="confirmed",
+                evidence="RMSE 0.31 vs 0.58",
+            ),
+            PredictionRecord(
+                pred_id="2.1",
+                iteration_prescribed=2,
+                prediction="boundary constraints reduce edge error",
+                diagnostic="measure error at x boundaries",
+                if_confirmed="boundary solved",
+                if_refuted="need different approach",
+                follows_from="1.1",
+            ),
+        ]
+        result = _format_predictions_for_prompt(history)
+        # Both should appear, child indented under parent
+        assert "spline fits better locally" in result
+        assert "boundary constraints reduce edge error" in result
 
-    @pytest.mark.asyncio
-    @patch("auto_scientist.agents.scientist.query_google")
-    async def test_google_model_uses_direct_api(self, mock_query, tmp_path):
-        mock_query.return_value = json.dumps(SAMPLE_PLAN)
-        notebook_path = tmp_path / "notebook.md"
+    def test_orphaned_follows_from_becomes_root(self):
+        history = [
+            PredictionRecord(
+                iteration_prescribed=2,
+                prediction="re-test after structural change",
+                diagnostic="profile again",
+                if_confirmed="now works",
+                if_refuted="still broken",
+                follows_from="nonexistent prediction",
+            ),
+        ]
+        result = _format_predictions_for_prompt(history)
+        assert "re-test after structural change" in result
 
-        result = await run_scientist(
-            analysis={}, notebook_path=notebook_path, version="v01",
-            model="gemini-2.5-pro",
-            use_structured_output=True,
-        )
-        assert result["hypothesis"] == "test hypothesis"
-        mock_query.assert_called_once()
+    def test_mixed_resolved_and_pending(self):
+        history = [
+            PredictionRecord(
+                iteration_prescribed=1,
+                iteration_evaluated=1,
+                prediction="A",
+                diagnostic="d",
+                if_confirmed="ok",
+                if_refuted="bad",
+                outcome="refuted",
+                evidence="did not hold",
+            ),
+            PredictionRecord(
+                iteration_prescribed=2,
+                prediction="B",
+                diagnostic="d",
+                if_confirmed="ok",
+                if_refuted="bad",
+            ),
+        ]
+        result = _format_predictions_for_prompt(history)
+        assert "REFUTED" in result
+        assert "PENDING" in result
 
-    @pytest.mark.asyncio
-    @patch("auto_scientist.sdk_utils.query")
-    async def test_unknown_model_falls_back_to_sdk(self, mock_query, tmp_path):
-        """Unknown provider with use_structured_output falls back to SDK path."""
-        async def fake_query(**kwargs):
-            msg = MagicMock(spec=ResultMessage)
-            msg.result = json.dumps(SAMPLE_PLAN)
-            yield msg
+    def test_pred_id_shown_when_present(self):
+        history = [
+            PredictionRecord(
+                pred_id="1.1",
+                iteration_prescribed=1,
+                prediction="test prediction",
+                diagnostic="d",
+                if_confirmed="ok",
+                if_refuted="bad",
+            ),
+        ]
+        result = _format_predictions_for_prompt(history)
+        assert "[1.1]" in result
 
-        mock_query.side_effect = fake_query
-        notebook_path = tmp_path / "notebook.md"
+    def test_falls_back_to_version_when_no_pred_id(self):
+        history = [
+            PredictionRecord(
+                iteration_prescribed=2,
+                prediction="old prediction",
+                diagnostic="d",
+                if_confirmed="ok",
+                if_refuted="bad",
+            ),
+        ]
+        result = _format_predictions_for_prompt(history)
+        assert "[v02]" in result
 
-        result = await run_scientist(
-            analysis={}, notebook_path=notebook_path, version="v01",
-            model="unknown-model",
-            use_structured_output=True,
-        )
-        assert result["hypothesis"] == "test hypothesis"
+

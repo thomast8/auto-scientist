@@ -176,6 +176,7 @@ class TestRunWithSummaries:
     async def test_periodic_polls_fire(self):
         """Fake coroutine that takes ~0.6s with 0.2s interval should get >= 2 polls."""
         buf: list[str] = []
+        collector: list[tuple[str, str, str]] = []
 
         async def slow_coro(message_buffer):
             for i in range(3):
@@ -183,41 +184,34 @@ class TestRunWithSummaries:
                 await asyncio.sleep(0.2)
             return "done"
 
-        with (
-            patch("auto_scientist.summarizer.summarize_agent_output", new_callable=AsyncMock, return_value="progress"),
-            patch("auto_scientist.summarizer.print_summary") as mock_print,
-        ):
+        with patch("auto_scientist.summarizer.summarize_agent_output", new_callable=AsyncMock, return_value="progress"):
             result = await run_with_summaries(
                 slow_coro, "Analyst", "gpt-4o-mini", buf, interval=0.2,
+                summary_collector=collector,
             )
             assert result == "done"
-            periodic_calls = [
-                c for c in mock_print.call_args_list
-                if c[1].get("label") != "done"
-            ]
-            assert len(periodic_calls) >= 2
+            periodic = [c for c in collector if not c[2].endswith("done")]
+            assert len(periodic) >= 2
 
     @pytest.mark.asyncio
-    async def test_final_summary_printed(self):
+    async def test_final_summary_collected(self):
+        """Final summary recaps progress summaries, not raw buffer."""
         buf: list[str] = []
+        collector: list[tuple[str, str, str]] = []
 
-        async def fast_coro(message_buffer):
+        async def slow_coro(message_buffer):
             message_buffer.append("output")
+            await asyncio.sleep(0.3)
             return 42
 
-        with (
-            patch("auto_scientist.summarizer.summarize_agent_output", new_callable=AsyncMock, return_value="final result"),
-            patch("auto_scientist.summarizer.print_summary") as mock_print,
-        ):
+        with patch("auto_scientist.summarizer.summarize_agent_output", new_callable=AsyncMock, return_value="summary"):
             result = await run_with_summaries(
-                fast_coro, "Coder", "gpt-4o-mini", buf, interval=100,
+                slow_coro, "Coder", "gpt-4o-mini", buf, interval=0.1,
+                summary_collector=collector,
             )
             assert result == 42
-            final_calls = [
-                c for c in mock_print.call_args_list
-                if c[1].get("label") == "done"
-            ]
-            assert len(final_calls) == 1
+            final = [c for c in collector if c[2].endswith("done")]
+            assert len(final) == 1
 
     @pytest.mark.asyncio
     async def test_empty_buffer_skips_poll(self):
@@ -230,7 +224,6 @@ class TestRunWithSummaries:
 
         with (
             patch("auto_scientist.summarizer.summarize_agent_output", new_callable=AsyncMock, return_value="summary") as mock_summarize,
-            patch("auto_scientist.summarizer.print_summary"),
         ):
             await run_with_summaries(
                 empty_coro, "Analyst", "gpt-4o-mini", buf, interval=0.1,
@@ -242,36 +235,33 @@ class TestRunWithSummaries:
             assert len(periodic_calls) == 0
 
     @pytest.mark.asyncio
-    async def test_incremental_only_new_content(self):
-        """Each periodic poll should only send new entries since last poll."""
-        captured_outputs = []
+    async def test_stale_buffer_skips_summarize(self):
+        """When buffer hasn't changed between polls, no summarize call fires."""
+        progress_calls = 0
 
-        async def capture_summarize(agent, output, model, **kwargs):
-            captured_outputs.append(output)
+        async def count_summarize(agent, output, model, **kwargs):
+            nonlocal progress_calls
+            if kwargs.get("progress"):
+                progress_calls += 1
             return "summary"
 
         buf: list[str] = []
 
         async def staged_coro(message_buffer):
             message_buffer.append("first")
-            await asyncio.sleep(0.25)
-            message_buffer.append("second")
-            await asyncio.sleep(0.25)
+            await asyncio.sleep(0.15)
+            # Buffer stays stale for the remaining 0.35s
+            await asyncio.sleep(0.35)
             return "done"
 
         with (
-            patch("auto_scientist.summarizer.summarize_agent_output", new_callable=AsyncMock, side_effect=capture_summarize),
-            patch("auto_scientist.summarizer.print_summary"),
+            patch("auto_scientist.summarizer.summarize_agent_output", new_callable=AsyncMock, side_effect=count_summarize),
         ):
             await run_with_summaries(
-                staged_coro, "Analyst", "gpt-4o-mini", buf, interval=0.2,
+                staged_coro, "Analyst", "gpt-4o-mini", buf, interval=0.1,
             )
-            progress_outputs = [
-                o for i, o in enumerate(captured_outputs)
-                if i < len(captured_outputs) - 1
-            ]
-            if len(progress_outputs) >= 2:
-                assert "first" not in progress_outputs[1]
+            # Only 1 progress call (when "first" appeared), stale polls are skipped
+            assert progress_calls == 1
 
     @pytest.mark.asyncio
     async def test_exception_in_coro_still_cleans_up(self):
@@ -283,7 +273,6 @@ class TestRunWithSummaries:
 
         with (
             patch("auto_scientist.summarizer.summarize_agent_output", new_callable=AsyncMock, return_value="summary"),
-            patch("auto_scientist.summarizer.print_summary"),
         ):
             with pytest.raises(ValueError, match="boom"):
                 await run_with_summaries(
@@ -301,9 +290,75 @@ class TestRunWithSummaries:
 
         with (
             patch("auto_scientist.summarizer.summarize_agent_output", new_callable=AsyncMock, side_effect=RuntimeError("API down")),
-            patch("auto_scientist.summarizer.print_summary"),
         ):
             result = await run_with_summaries(
                 coro, "Analyst", "gpt-4o-mini", buf, interval=100,
             )
             assert result == "result"
+
+    @pytest.mark.asyncio
+    async def test_stale_buffer_backs_off(self):
+        """When buffer hasn't changed, polls should back off exponentially."""
+        poll_times: list[float] = []
+        loop = asyncio.get_event_loop()
+        start = loop.time()
+
+        async def track_summarize(agent, output, model, **kwargs):
+            poll_times.append(loop.time() - start)
+            return "summary"
+
+        buf: list[str] = ["initial data"]
+
+        async def long_coro(message_buffer):
+            # Buffer stays stale the whole time
+            await asyncio.sleep(2.0)
+            return "done"
+
+        with (
+            patch("auto_scientist.summarizer.summarize_agent_output", new_callable=AsyncMock, side_effect=track_summarize),
+        ):
+            await run_with_summaries(
+                long_coro, "Coder", "gpt-4o-mini", buf, interval=0.1,
+            )
+
+        # With 0.1s base interval and 2.0s runtime, without backoff we'd get ~20 polls.
+        # With backoff (0.1, 0.2, 0.4, 0.8, 1.6) we expect around 4-5 polls.
+        assert len(poll_times) <= 8, (
+            f"Expected backoff to reduce polls, got {len(poll_times)}"
+        )
+
+    @pytest.mark.asyncio
+    async def test_backoff_resets_on_new_content(self):
+        """After backoff, rapid new content resets the poll interval."""
+        poll_count = 0
+
+        async def count_summarize(agent, output, model, **kwargs):
+            nonlocal poll_count
+            if kwargs.get("progress"):
+                poll_count += 1
+            return "summary"
+
+        buf: list[str] = []
+
+        async def staged_coro(message_buffer):
+            # Phase 1: single item then stale (triggers backoff)
+            message_buffer.append("chunk1")
+            await asyncio.sleep(1.0)
+            # Phase 2: rapid content stream (resets backoff, multiple polls)
+            for i in range(20):
+                message_buffer.append(f"rapid-{i}")
+                await asyncio.sleep(0.05)
+            return "done"
+
+        with (
+            patch("auto_scientist.summarizer.summarize_agent_output", new_callable=AsyncMock, side_effect=count_summarize),
+        ):
+            await run_with_summaries(
+                staged_coro, "Coder", "gpt-4o-mini", buf, interval=0.1,
+            )
+
+        # Phase 1: 1 poll. Phase 2: ~10 polls at 0.1s interval over 1.0s.
+        # If backoff didn't reset, phase 2 would get far fewer polls.
+        assert poll_count >= 4, (
+            f"Expected backoff reset to produce multiple polls, got {poll_count}"
+        )

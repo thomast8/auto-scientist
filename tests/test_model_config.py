@@ -97,7 +97,7 @@ class TestBuiltinPresets:
     def test_default_preset(self):
         mc = ModelConfig.builtin_preset("default")
         assert mc.defaults.model == "claude-sonnet-4-6"
-        assert mc.resolve("analyst").model == "claude-opus-4-6"
+        assert mc.resolve("analyst").model == "claude-sonnet-4-6"
         assert mc.resolve("scientist").model == "claude-opus-4-6"
         assert mc.resolve("coder").model == "claude-sonnet-4-6"
         assert mc.resolve("ingestor").model == "claude-sonnet-4-6"

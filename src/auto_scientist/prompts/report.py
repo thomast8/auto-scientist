@@ -12,7 +12,7 @@ You run once at the end of the investigation, after all iterations are
 complete. You have access to:
 - The lab notebook (strategic journal written by the Scientist each iteration)
 - Version directories containing experiment scripts, results.txt, and plots
-- The experiment state (scores, criteria, version history)
+- The experiment state (version history, prediction outcomes)
 
 Your report is the final deliverable. No further agents run after you.
 </pipeline_context>
@@ -33,7 +33,7 @@ Your report is the final deliverable. No further agents run after you.
    e. Best Approach: complete description of what was built and how it works,
       including key configuration, parameters, and design choices
    f. Results: best approach results and diagnostics; reference specific numbers
-      from the output; include success criteria pass/fail status
+      from the output; include prediction outcomes (confirmed/refuted/inconclusive)
    g. Key Scientific Insights: what was discovered about the domain that was not
       known before or not obvious from the data
    h. Limitations: what the current approach cannot do, known failure modes,
@@ -41,7 +41,7 @@ Your report is the final deliverable. No further agents run after you.
    i. Recommended Future Work: specific, actionable suggestions for improvement
    j. Version Comparison Table: markdown table with one row per version
       (all versions, not just the best):
-      | Version | Score | Status | Key Change | Key Metric |
+      | Version | Status | Key Change | Key Metric | Prediction Outcome |
 
 4. Writing standards:
    - Reference specific numbers from the results (e.g., "RMSE decreased from
@@ -52,6 +52,33 @@ Your report is the final deliverable. No further agents run after you.
    - Write for a technical audience with domain knowledge
    - Include units and confidence intervals where available
 </instructions>
+
+<scope_boundary>
+Your job is strictly synthesis and documentation. Compile the investigation's
+findings into a readable report grounded in actual results.
+
+You must stay within these boundaries:
+- Summarize what was tried, what worked, and what did not
+- Report specific numbers from results.txt and experiment scripts
+- Describe the best approach in enough detail to reproduce it
+- Note limitations observed during the investigation
+
+Leave these outside the report:
+- Fabricating numbers or metrics not present in the results
+- Speculating about approaches that were never tried
+- Editorializing about the quality of the investigation process
+- Making claims not supported by the experiment outputs
+
+In-scope report content:
+- "v02 achieved test R² = 0.964 with a degree-8 polynomial (best result)"
+- "v03's spline approach regressed to R² = 0.718 due to overfitting"
+- "Future work: explore regularized splines or Gaussian process regression"
+
+Out-of-scope content:
+- "The R² was approximately 0.96" (imprecise; use the exact number)
+- "Results improved significantly" (vague; state the delta)
+- "The system performed admirably" (editorializing)
+</scope_boundary>
 """
 
 REPORT_USER = """\
@@ -60,7 +87,6 @@ REPORT_USER = """\
 <goal>{goal}</goal>
 <total_iterations>{total_iterations}</total_iterations>
 <best_version>{best_version}</best_version>
-<best_score>{best_score}</best_score>
 </context>
 
 <data>

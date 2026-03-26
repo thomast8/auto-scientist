@@ -15,8 +15,9 @@ import json
 import sys
 import tempfile
 from pathlib import Path
-from unittest.mock import AsyncMock, patch
+from unittest.mock import patch
 
+from auto_scientist.agent_result import AgentResult
 from auto_scientist.agents.critic import MIN_RESPONSE_LENGTH
 from auto_scientist.model_config import AgentModelConfig, ModelConfig
 from auto_scientist.orchestrator import Orchestrator
@@ -59,6 +60,14 @@ PLAN_ITER0 = {
     "should_stop": False,
     "stop_reason": None,
     "notebook_entry": "## Exploration\nFirst look at the data structure.",
+    "top_level_criteria": [
+        {
+            "name": "C1",
+            "description": "Model R2 exceeds 0.8",
+            "metric_key": "r2",
+            "condition": "> 0.8",
+        }
+    ],
 }
 
 PLAN_ITER1 = {
@@ -76,14 +85,6 @@ PLAN_ITER1 = {
     "should_stop": False,
     "stop_reason": None,
     "notebook_entry": "## Linear model\nFitting a linear model to x,y data.",
-    "top_level_criteria": [
-        {
-            "name": "C1",
-            "description": "Model R2 exceeds 0.8",
-            "metric_key": "r2",
-            "condition": "> 0.8",
-        }
-    ],
 }
 
 REVISED_PLAN = {
@@ -109,6 +110,30 @@ REVISED_PLAN = {
 # ---------------------------------------------------------------------------
 
 
+def _make_delayed_side_effect(delay: float, values: list):
+    """Return an async callable that sleeps then yields values from a list."""
+    idx = 0
+
+    async def _delayed(*args, **kwargs):
+        nonlocal idx
+        await asyncio.sleep(delay)
+        val = values[min(idx, len(values) - 1)]
+        idx += 1
+        return val
+
+    return _delayed
+
+
+async def _drip_buffer(buf: list[str] | None, entries: list[str], delay: float = 0.3):
+    """Feed buffer entries one at a time with delays between them."""
+    if buf is None:
+        await asyncio.sleep(delay * len(entries))
+        return
+    for entry in entries:
+        buf.append(entry)
+        await asyncio.sleep(delay)
+
+
 def _make_ingestor_mock():
     async def fake(
         raw_data_path, output_dir, goal, interactive=False,
@@ -119,8 +144,12 @@ def _make_ingestor_mock():
         for f in raw_data_path.iterdir():
             if f.is_file():
                 (dest / f.name).write_text(f.read_text())
-        if message_buffer is not None:
-            message_buffer.append("[Ingestor] Canonicalized 1 file")
+        await _drip_buffer(message_buffer, [
+            "[Ingestor] Reading raw data files",
+            "[Ingestor] Validating CSV schema and column types",
+            "[Ingestor] Copying canonical data to output directory",
+            "[Ingestor] Canonicalized 1 file",
+        ])
         return dest
 
     return fake
@@ -133,8 +162,12 @@ def _make_analyst_mock():
     async def fake(**kwargs):
         nonlocal call_idx
         buf = kwargs.get("message_buffer")
-        if buf is not None:
-            buf.append("[Analyst] Analyzing data")
+        await _drip_buffer(buf, [
+            "[Analyst] Loading data and checking structure",
+            "[Analyst] Computing summary statistics",
+            "[Analyst] Evaluating success criteria",
+            "[Analyst] Analysis complete",
+        ])
         result = results[min(call_idx, len(results) - 1)]
         call_idx += 1
         return result
@@ -149,8 +182,12 @@ def _make_scientist_mock():
     async def fake(**kwargs):
         nonlocal call_idx
         buf = kwargs.get("message_buffer")
-        if buf is not None:
-            buf.append("[Scientist] Formulating plan")
+        await _drip_buffer(buf, [
+            "[Scientist] Reviewing analysis results",
+            "[Scientist] Formulating hypothesis",
+            "[Scientist] Designing experimental strategy",
+            "[Scientist] Plan complete",
+        ])
         result = results[min(call_idx, len(results) - 1)]
         call_idx += 1
         return result
@@ -161,8 +198,11 @@ def _make_scientist_mock():
 def _make_revision_mock():
     async def fake(**kwargs):
         buf = kwargs.get("message_buffer")
-        if buf is not None:
-            buf.append("[Scientist Revision] Revising plan after debate")
+        await _drip_buffer(buf, [
+            "[Revision] Reading critic feedback",
+            "[Revision] Incorporating suggestions into plan",
+            "[Revision] Revised plan ready",
+        ])
         return REVISED_PLAN
 
     return fake
@@ -188,10 +228,14 @@ def _make_coder_mock():
             json.dumps({"success": True, "return_code": 0, "timed_out": False})
         )
 
-        if message_buffer is not None:
-            message_buffer.append(f"[Coder] Writing {version} experiment script")
-            message_buffer.append("[Coder] Running experiment... success")
-
+        await _drip_buffer(message_buffer, [
+            f"[Coder] Reading plan for {version}",
+            f"[Coder] Writing {version} experiment script",
+            "[Coder] Verifying script syntax",
+            "[Coder] Running experiment...",
+            "[Coder] Collecting results and generating plots",
+            "[Coder] Experiment completed successfully",
+        ])
         return script
 
     return fake
@@ -200,12 +244,55 @@ def _make_coder_mock():
 def _make_report_mock():
     async def fake(**kwargs):
         buf = kwargs.get("message_buffer")
-        if buf is not None:
-            buf.append("[Report] Generating final summary")
+        await _drip_buffer(buf, [
+            "[Report] Gathering results from all iterations",
+            "[Report] Compiling findings and recommendations",
+            "[Report] Writing final summary",
+        ])
         return "# Smoke Test Report\n\nAll experiments completed successfully."
 
     return fake
 
+
+# ---------------------------------------------------------------------------
+# Canned LLM responses for debate mocks
+# ---------------------------------------------------------------------------
+
+# With 3 personas x 2 critic models x debate_rounds=2, we need enough
+# responses. Each persona debate: 2 critic calls + 1 scientist defense.
+
+
+def _cr(text: str, inp: int = 100, out: int = 50) -> AgentResult:
+    """Build a padded AgentResult for critic/defense mock responses."""
+    return AgentResult(text=_pad(text), input_tokens=inp, output_tokens=out)
+
+
+oai_critic_responses = [
+    _cr("OAI R1: Hypothesis lacks specificity about linearity."),
+    _cr("OAI R2: Revised, sample size concern addressed."),
+    _cr("OAI R3: Skeptical of generalization to larger datasets."),
+    _cr("OAI R4: Optimistic about cross-validation plan."),
+    _cr("OAI R5: Final round critique, methodology sound."),
+    _cr("OAI R6: Remaining concerns addressed satisfactorily."),
+]
+
+google_critic_responses = [
+    _cr("Google R1: Consider confounding variables.", 80, 40),
+    _cr("Google R2: Methodology concerns partially addressed.", 80, 40),
+    _cr("Google R3: Skeptical view on statistical power.", 80, 40),
+    _cr("Google R4: Positive about bootstrap approach.", 80, 40),
+    _cr("Google R5: Final assessment, approach is reasonable.", 80, 40),
+    _cr("Google R6: All major concerns resolved.", 80, 40),
+]
+
+anthropic_defense_responses = [
+    _cr("Scientist: Valid points, will add R2 threshold.", 90, 45),
+    _cr("Scientist: Agreed on confounders, adding residuals.", 90, 45),
+    _cr("Scientist: Adding cross-validation for generalization.", 90, 45),
+    _cr("Scientist: Bootstrap intervals quantify uncertainty.", 90, 45),
+    _cr("Scientist: Statistical power via sample size analysis.", 90, 45),
+    _cr("Scientist: All critiques incorporated into plan.", 90, 45),
+]
 
 # ---------------------------------------------------------------------------
 # Main
@@ -246,49 +333,92 @@ async def run_smoke(output_dir: Path) -> None:
         stream=False,
     )
 
+    # Counter for varying fake token stats per agent call
+    _call_count = 0
+    _token_table = [
+        (1200, 400, 3),   # Ingestor
+        (800, 300, 2),    # Analyst iter 0
+        (1500, 600, 4),   # Scientist iter 0
+        (2200, 900, 8),   # Coder iter 0
+        (900, 350, 2),    # Analyst iter 1
+        (1800, 700, 5),   # Scientist iter 1
+        (1600, 650, 4),   # Revision iter 1
+        (3500, 1400, 12), # Coder iter 1
+        (700, 250, 2),    # Analyst (final scoring)
+        (2000, 800, 6),   # Report
+    ]
+
+    def _fake_sdk_usage(panel):
+        nonlocal _call_count
+        entry = _token_table[min(_call_count, len(_token_table) - 1)]
+        panel.set_stats(input_tokens=entry[0], output_tokens=entry[1], num_turns=entry[2])
+        _call_count += 1
+
+    # Reduce summarizer poll interval so it fires during short agent runs
+    import auto_scientist.summarizer as _summarizer_mod
+    _orig_rws = _summarizer_mod.run_with_summaries
+    async def _fast_rws(*args, interval=0.5, **kwargs):
+        return await _orig_rws(*args, interval=interval, **kwargs)
+
     with (
         # Infrastructure
         patch.object(Orchestrator, "_validate_prerequisites"),
+        # Patch at both locations: module def and orchestrator import
+        patch("auto_scientist.summarizer.run_with_summaries", side_effect=_fast_rws),
+        patch("auto_scientist.orchestrator.run_with_summaries", side_effect=_fast_rws),
+        patch.object(
+            Orchestrator, "_apply_sdk_usage",
+            staticmethod(_fake_sdk_usage),
+        ),
 
         # Agent-level mocks
         patch("auto_scientist.agents.ingestor.run_ingestor", side_effect=_make_ingestor_mock()),
         patch("auto_scientist.agents.analyst.run_analyst", side_effect=_make_analyst_mock()),
         patch("auto_scientist.agents.scientist.run_scientist", side_effect=_make_scientist_mock()),
-        patch("auto_scientist.agents.scientist.run_scientist_revision", side_effect=_make_revision_mock()),
+        patch(
+            "auto_scientist.agents.scientist.run_scientist_revision",
+            side_effect=_make_revision_mock(),
+        ),
         patch("auto_scientist.agents.coder.run_coder", side_effect=_make_coder_mock()),
         patch("auto_scientist.agents.report.run_report", side_effect=_make_report_mock()),
 
-        # LLM-level mocks (debate loop runs for real)
+        # LLM-level mocks (debate loop runs for real, with delays)
+        #
+        # With 3 personas, 2 critic models (OpenAI, Google), debate_rounds=2:
+        #   Each debate = 2 critic calls + 1 scientist defense (Anthropic) = 3 LLM calls
         patch(
             "auto_scientist.agents.critic.query_openai",
-            new_callable=AsyncMock,
-            side_effect=[
-                _pad("OAI Critique R1: The hypothesis lacks specificity about what linear means."),
-                _pad("OAI Critique R2: Revised, sample size concern addressed. Need cross-validation."),
-            ],
+            side_effect=_make_delayed_side_effect(0.5, oai_critic_responses),
         ),
         patch(
             "auto_scientist.agents.critic.query_google",
-            new_callable=AsyncMock,
-            side_effect=[
-                _pad("Google Critique R1: Consider confounding variables in the x-y relationship."),
-                _pad("Google Critique R2: Methodology concerns partially addressed. Proceed with caution."),
-            ],
+            side_effect=_make_delayed_side_effect(1.5, google_critic_responses),
         ),
         patch(
-            "auto_scientist.agents.critic.collect_text_from_query",
-            new_callable=AsyncMock,
-            side_effect=[
-                _pad("Scientist to OAI: Valid points about specificity. Will add R2 threshold."),
-                _pad("Scientist to Google: Agreed on confounders. Will add residual analysis."),
-            ],
+            "auto_scientist.agents.critic.query_anthropic",
+            side_effect=_make_delayed_side_effect(0.4, anthropic_defense_responses),
         ),
 
-        # Summarizer LLM mock
+        # Summarizer LLM mock - varied responses so panels accumulate
+        # multiple lines (tests expand/compact toggle)
         patch(
             "auto_scientist.summarizer._query_summary",
-            new_callable=AsyncMock,
-            return_value="Summarizing agent progress...",
+            side_effect=_make_delayed_side_effect(0.1, [
+                "Inspecting raw data files and checking column types.",
+                "Reading CSV headers and validating schema consistency.",
+                "Computing summary statistics for all numeric columns.",
+                "Evaluating data quality: missing values, outliers, distributions.",
+                "Formulating hypothesis based on observed data patterns.",
+                "Planning experimental strategy with cross-validation approach.",
+                "Writing experiment script with polynomial regression pipeline.",
+                "Running experiment, collecting metrics and generating plots.",
+                "Comparing results against baseline and previous iterations.",
+                "Reviewing methodology and suggesting alternative approaches.",
+                "Analyzing critic feedback and identifying valid concerns.",
+                "Revising plan to incorporate cross-validation per critic feedback.",
+                "Generating final report with all findings and recommendations.",
+                "[done] Pipeline step completed successfully.",
+            ]),
         ),
     ):
         await orchestrator.run()
@@ -308,32 +438,43 @@ async def run_smoke(output_dir: Path) -> None:
         ("Debate on iter 1", (experiment_dir / "v01" / "debate.json").exists()),
         ("No debate on iter 0", not (experiment_dir / "v00" / "debate.json").exists()),
         ("Report generated", (experiment_dir / "report.md").exists()),
-        ("Criteria defined", final_state.success_criteria is not None and len(final_state.success_criteria) > 0),
-        ("v01 scored", final_state.versions[1].score is not None),
-        ("Best version tracked", final_state.best_version == "v01"),
+        (
+            "Predictions tracked",
+            len(final_state.prediction_history) > 0,
+        ),
     ]
 
-    # Validate debate transcript
+    # Validate debate transcript (3 personas, each with rounds)
     debate_ok = False
     debate_path = experiment_dir / "v01" / "debate.json"
     if debate_path.exists():
         debate_data = json.loads(debate_path.read_text())
-        critiques = debate_data.get("critiques", [])
-        if len(critiques) == 2:
-            models = {c["model"] for c in critiques}
-            transcripts_ok = all(
-                len(c["transcript"]) == 3
-                and c["transcript"][0]["role"] == "critic"
-                and c["transcript"][1]["role"] == "scientist"
-                and c["transcript"][2]["role"] == "critic"
-                for c in critiques
-            )
+        debate_results = debate_data.get("debate_results", [])
+        if len(debate_results) == 3:
+            models = {r["critic_model"] for r in debate_results}
+            has_rounds = all(len(r.get("rounds", [])) > 0 for r in debate_results)
             debate_ok = (
                 "openai:gpt-4o" in models
                 and "google:gemini-2.5-pro" in models
-                and transcripts_ok
+                and has_rounds
             )
     checks.append(("Debate transcripts valid", debate_ok))
+
+    # Validate panel tracking via PipelineLive._panels
+    all_panels = orchestrator._live._panels
+    checks.append(("Panels tracked after flush", len(all_panels) > 0))
+    all_collapsed = all(not p.expanded for p in all_panels)
+    checks.append(("All panels collapsed after stop", all_collapsed))
+
+    has_all_lines = any(len(p.all_lines) > 0 for p in all_panels)
+    checks.append(("Panels retain all_lines history", has_all_lines))
+
+    # Check that panels have multiple lines (for expand/compact testing)
+    multi_line_panels = [p for p in all_panels if len(p.all_lines) > 1]
+    checks.append((
+        f"Panels have multi-line history ({len(multi_line_panels)}/{len(all_panels)})",
+        len(multi_line_panels) > 0,
+    ))
 
     print("\n" + "=" * 50)
     print("SMOKE TEST VALIDATION")

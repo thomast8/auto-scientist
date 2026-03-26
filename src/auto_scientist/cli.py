@@ -1,6 +1,5 @@
 """CLI entry point: run, resume, status commands."""
 
-import asyncio
 from pathlib import Path
 
 import click
@@ -8,7 +7,7 @@ from dotenv import load_dotenv
 
 load_dotenv()
 
-from auto_scientist.console import YELLOW, print_step
+from auto_scientist.console import PipelineApp, console
 from auto_scientist.model_config import ModelConfig
 from auto_scientist.orchestrator import Orchestrator
 from auto_scientist.state import ExperimentState
@@ -17,7 +16,8 @@ from auto_scientist.state import ExperimentState
 def _run_orchestrator(orchestrator: Orchestrator) -> None:
     """Run the orchestrator with user-friendly error handling."""
     try:
-        asyncio.run(orchestrator.run())
+        app = PipelineApp(orchestrator)
+        app.run()
     except RuntimeError as e:
         msg = str(e)
         if "Pre-flight check failed" not in msg:
@@ -114,9 +114,9 @@ def cli():
 @click.option("--interactive", is_flag=True, help="Enable interactive mode")
 @click.option(
     "--debate-rounds",
-    default=2,
+    default=1,
     type=int,
-    help="Number of critic-scientist debate rounds (1 = single-pass, default 2)",
+    help="Number of critic-scientist debate rounds per persona (1 = single-pass, default 1)",
 )
 @click.option(
     "--output-dir",
@@ -154,10 +154,10 @@ def run(
 
     resolved_output = _next_output_dir(Path(output_dir))
     if resolved_output != Path(output_dir):
-        print_step(
+        console.print(
             f"Previous run detected in {output_dir}/. "
             f"Using {resolved_output}/ instead.",
-            color=YELLOW,
+            style="yellow",
         )
 
     state = ExperimentState(
@@ -251,7 +251,6 @@ def status(state: str):
     click.echo(f"Domain:     {loaded_state.domain}")
     click.echo(f"Phase:      {loaded_state.phase}")
     click.echo(f"Iteration:  {loaded_state.iteration}")
-    click.echo(f"Best:       {loaded_state.best_version} (score {loaded_state.best_score})")
     click.echo(f"Versions:   {len(loaded_state.versions)}")
     click.echo(f"Dead ends:  {len(loaded_state.dead_ends)}")
 

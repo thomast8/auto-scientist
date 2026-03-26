@@ -5,11 +5,14 @@ from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
+from auto_scientist.images import ImageData
 from auto_scientist.model_config import ReasoningConfig
 from auto_scientist.models.anthropic_client import query_anthropic
 from auto_scientist.models.google_client import query_google
 from auto_scientist.models.openai_client import query_openai
 from auto_scientist.schemas import ScientistPlanOutput
+
+FAKE_IMAGE = ImageData(data="aW1hZ2VieXRlcw==", media_type="image/png")
 
 
 class TestQueryOpenAIStreaming:
@@ -35,7 +38,7 @@ class TestQueryOpenAIStreaming:
         tokens = []
         result = await query_openai("gpt-5.4", "test", on_token=tokens.append)
 
-        assert result == "hello"
+        assert result.text == "hello"
         assert tokens == ["hel", "lo"]
 
     @pytest.mark.asyncio
@@ -57,7 +60,7 @@ class TestQueryOpenAIStreaming:
         tokens = []
         result = await query_openai("gpt-5.4", "q", web_search=True, on_token=tokens.append)
 
-        assert result == "searched"
+        assert result.text == "searched"
         assert tokens == ["search", "ed"]
 
     @pytest.mark.asyncio
@@ -71,7 +74,7 @@ class TestQueryOpenAIStreaming:
 
         result = await query_openai("gpt-5.4", "test")
 
-        assert result == "hello"
+        assert result.text == "hello"
         call_kwargs = mock_client.chat.completions.create.call_args.kwargs
         assert "stream" not in call_kwargs
 
@@ -84,11 +87,14 @@ class TestQueryOpenAI:
         mock_cls.return_value = mock_client
         mock_response = MagicMock()
         mock_response.choices = [MagicMock(message=MagicMock(content="hello"))]
+        mock_response.usage = MagicMock(prompt_tokens=50, completion_tokens=20)
         mock_client.chat.completions.create.return_value = mock_response
 
         result = await query_openai("gpt-5.4", "test prompt")
 
-        assert result == "hello"
+        assert result.text == "hello"
+        assert result.input_tokens == 50
+        assert result.output_tokens == 20
         mock_client.chat.completions.create.assert_called_once()
         call_kwargs = mock_client.chat.completions.create.call_args.kwargs
         assert call_kwargs["model"] == "gpt-5.4"
@@ -104,7 +110,7 @@ class TestQueryOpenAI:
 
         result = await query_openai("gpt-5.4", "search this", web_search=True)
 
-        assert result == "searched result"
+        assert result.text == "searched result"
         mock_client.responses.create.assert_called_once()
         call_kwargs = mock_client.responses.create.call_args.kwargs
         assert any(t["type"] == "web_search_preview" for t in call_kwargs["tools"])
@@ -120,7 +126,7 @@ class TestQueryOpenAI:
 
         result = await query_openai("gpt-5.4", "prompt")
 
-        assert result == ""
+        assert result.text == ""
 
 
 class TestQueryOpenAIMaxTokens:
@@ -187,7 +193,7 @@ class TestQueryGoogleStreaming:
         tokens = []
         result = await query_google("gemini-3.1-pro-preview", "test", on_token=tokens.append)
 
-        assert result == "google"
+        assert result.text == "google"
         assert tokens == ["goo", "gle"]
 
     @pytest.mark.asyncio
@@ -204,7 +210,7 @@ class TestQueryGoogleStreaming:
         tokens = []
         result = await query_google("gemini-3.1-pro-preview", "test", on_token=tokens.append)
 
-        assert result == "data"
+        assert result.text == "data"
         assert tokens == ["data"]
 
     @pytest.mark.asyncio
@@ -217,7 +223,7 @@ class TestQueryGoogleStreaming:
 
         result = await query_google("gemini-3.1-pro-preview", "test")
 
-        assert result == "response"
+        assert result.text == "response"
         mock_genai.Client.return_value.aio.models.generate_content.assert_called_once()
 
 
@@ -226,13 +232,16 @@ class TestQueryGoogle:
     @patch("auto_scientist.models.google_client.genai")
     async def test_standard_call(self, mock_genai):
         mock_response = MagicMock(text="google response")
+        mock_response.usage_metadata = MagicMock(prompt_token_count=80, candidates_token_count=30)
         mock_genai.Client.return_value.aio.models.generate_content = AsyncMock(
             return_value=mock_response
         )
 
         result = await query_google("gemini-3.1-pro-preview", "test prompt")
 
-        assert result == "google response"
+        assert result.text == "google response"
+        assert result.input_tokens == 80
+        assert result.output_tokens == 30
 
     @pytest.mark.asyncio
     @patch("auto_scientist.models.google_client.genai")
@@ -244,7 +253,7 @@ class TestQueryGoogle:
 
         result = await query_google("gemini-3.1-pro-preview", "search", web_search=True)
 
-        assert result == "searched"
+        assert result.text == "searched"
         call_kwargs = mock_genai.Client.return_value.aio.models.generate_content.call_args.kwargs
         assert call_kwargs["config"] is not None
 
@@ -258,7 +267,7 @@ class TestQueryGoogle:
 
         result = await query_google("gemini-3.1-pro-preview", "prompt")
 
-        assert result == ""
+        assert result.text == ""
 
 
 def _make_anthropic_stream_mock(chunks):
@@ -288,7 +297,7 @@ class TestQueryAnthropicStreaming:
         tokens = []
         result = await query_anthropic("claude-sonnet-4-6", "test", on_token=tokens.append)
 
-        assert result == "anthropic"
+        assert result.text == "anthropic"
         assert tokens == ["anthro", "pic"]
         mock_client.messages.stream.assert_called_once()
 
@@ -305,7 +314,7 @@ class TestQueryAnthropicStreaming:
             "claude-sonnet-4-6", "q", web_search=True, on_token=tokens.append
         )
 
-        assert result == "result"
+        assert result.text == "result"
         call_kwargs = mock_client.messages.stream.call_args.kwargs
         assert any(t["type"] == "web_search_20250305" for t in call_kwargs["tools"])
 
@@ -321,7 +330,7 @@ class TestQueryAnthropicStreaming:
 
         result = await query_anthropic("claude-sonnet-4-6", "test")
 
-        assert result == "hello"
+        assert result.text == "hello"
         mock_client.messages.create.assert_called_once()
         mock_client.messages.stream.assert_not_called()
 
@@ -334,11 +343,14 @@ class TestQueryAnthropic:
         mock_cls.return_value = mock_client
         mock_block = MagicMock(text="anthropic response")
         mock_response = MagicMock(content=[mock_block])
+        mock_response.usage = MagicMock(input_tokens=120, output_tokens=45)
         mock_client.messages.create.return_value = mock_response
 
         result = await query_anthropic("claude-sonnet-4-6", "test prompt")
 
-        assert result == "anthropic response"
+        assert result.text == "anthropic response"
+        assert result.input_tokens == 120
+        assert result.output_tokens == 45
         call_kwargs = mock_client.messages.create.call_args.kwargs
         assert call_kwargs["model"] == "claude-sonnet-4-6"
         assert "tools" not in call_kwargs
@@ -354,7 +366,7 @@ class TestQueryAnthropic:
 
         result = await query_anthropic("claude-sonnet-4-6", "search", web_search=True)
 
-        assert result == "searched"
+        assert result.text == "searched"
         call_kwargs = mock_client.messages.create.call_args.kwargs
         assert any(t["type"] == "web_search_20250305" for t in call_kwargs["tools"])
 
@@ -370,7 +382,7 @@ class TestQueryAnthropic:
 
         result = await query_anthropic("claude-sonnet-4-6", "prompt")
 
-        assert result == ""
+        assert result.text == ""
 
     @pytest.mark.asyncio
     @patch("auto_scientist.models.anthropic_client.AsyncAnthropic")
@@ -384,7 +396,7 @@ class TestQueryAnthropic:
 
         result = await query_anthropic("claude-sonnet-4-6", "prompt")
 
-        assert result == "part1\npart2"
+        assert result.text == "part1\npart2"
 
 
 # ── Anthropic reasoning tests ────────────────────────────────────────────────
@@ -640,7 +652,7 @@ class TestAnthropicStructuredOutput:
         # Should force tool choice
         assert call_kwargs.get("tool_choice", {}).get("type") == "tool"
         # Result should be JSON string of tool input
-        parsed = json.loads(result)
+        parsed = json.loads(result.text)
         assert parsed["hypothesis"] == "test"
 
     @pytest.mark.asyncio
@@ -679,7 +691,7 @@ class TestOpenAIStructuredOutput:
         rf = call_kwargs.get("response_format")
         assert rf is not None
         assert rf["type"] == "json_schema"
-        assert result == '{"hypothesis": "test"}'
+        assert result.text =='{"hypothesis": "test"}'
 
     @pytest.mark.asyncio
     @patch("auto_scientist.models.openai_client.AsyncOpenAI")
@@ -718,7 +730,7 @@ class TestGoogleStructuredOutput:
         call_kwargs = mock_genai.Client.return_value.aio.models.generate_content.call_args.kwargs
         config = call_kwargs.get("config")
         assert config is not None
-        assert result == '{"hypothesis": "test"}'
+        assert result.text =='{"hypothesis": "test"}'
 
     @pytest.mark.asyncio
     @patch("auto_scientist.models.google_client.genai")
@@ -736,3 +748,138 @@ class TestGoogleStructuredOutput:
         call_kwargs = mock_genai.Client.return_value.aio.models.generate_content.call_args.kwargs
         config = call_kwargs.get("config")
         assert config is not None
+
+
+# ── Multimodal image tests ─────────────────────────────────────────────────
+
+
+class TestAnthropicImages:
+    @pytest.mark.asyncio
+    @patch("auto_scientist.models.anthropic_client.AsyncAnthropic")
+    async def test_images_builds_content_blocks(self, mock_cls):
+        mock_client = AsyncMock()
+        mock_cls.return_value = mock_client
+        mock_response = MagicMock(content=[MagicMock(text="ok")])
+        mock_client.messages.create.return_value = mock_response
+
+        await query_anthropic("claude-sonnet-4-6", "describe", images=[FAKE_IMAGE])
+
+        call_kwargs = mock_client.messages.create.call_args.kwargs
+        content = call_kwargs["messages"][0]["content"]
+        assert isinstance(content, list)
+        assert content[0] == {"type": "text", "text": "describe"}
+        assert content[1]["type"] == "image"
+        assert content[1]["source"]["type"] == "base64"
+        assert content[1]["source"]["data"] == FAKE_IMAGE.data
+
+    @pytest.mark.asyncio
+    @patch("auto_scientist.models.anthropic_client.AsyncAnthropic")
+    async def test_no_images_keeps_string_content(self, mock_cls):
+        mock_client = AsyncMock()
+        mock_cls.return_value = mock_client
+        mock_response = MagicMock(content=[MagicMock(text="ok")])
+        mock_client.messages.create.return_value = mock_response
+
+        await query_anthropic("claude-sonnet-4-6", "test prompt")
+
+        call_kwargs = mock_client.messages.create.call_args.kwargs
+        assert call_kwargs["messages"][0]["content"] == "test prompt"
+
+    @pytest.mark.asyncio
+    @patch("auto_scientist.models.anthropic_client.AsyncAnthropic")
+    async def test_empty_images_keeps_string_content(self, mock_cls):
+        mock_client = AsyncMock()
+        mock_cls.return_value = mock_client
+        mock_response = MagicMock(content=[MagicMock(text="ok")])
+        mock_client.messages.create.return_value = mock_response
+
+        await query_anthropic("claude-sonnet-4-6", "test", images=[])
+
+        call_kwargs = mock_client.messages.create.call_args.kwargs
+        assert call_kwargs["messages"][0]["content"] == "test"
+
+
+class TestOpenAIImages:
+    @pytest.mark.asyncio
+    @patch("auto_scientist.models.openai_client.AsyncOpenAI")
+    async def test_images_chat_completions(self, mock_cls):
+        mock_client = AsyncMock()
+        mock_cls.return_value = mock_client
+        mock_response = MagicMock()
+        mock_response.choices = [MagicMock(message=MagicMock(content="ok"))]
+        mock_client.chat.completions.create.return_value = mock_response
+
+        await query_openai("gpt-5.4", "describe", images=[FAKE_IMAGE])
+
+        call_kwargs = mock_client.chat.completions.create.call_args.kwargs
+        content = call_kwargs["messages"][-1]["content"]
+        assert isinstance(content, list)
+        assert content[0] == {"type": "text", "text": "describe"}
+        assert content[1]["type"] == "image_url"
+        assert "data:image/png;base64," in content[1]["image_url"]["url"]
+
+    @pytest.mark.asyncio
+    @patch("auto_scientist.models.openai_client.AsyncOpenAI")
+    async def test_images_responses_api(self, mock_cls):
+        mock_client = AsyncMock()
+        mock_cls.return_value = mock_client
+        mock_response = MagicMock(output_text="ok")
+        mock_client.responses.create.return_value = mock_response
+
+        await query_openai("gpt-5.4", "describe", web_search=True, images=[FAKE_IMAGE])
+
+        call_kwargs = mock_client.responses.create.call_args.kwargs
+        inp = call_kwargs["input"]
+        assert isinstance(inp, list)
+        content = inp[0]["content"]
+        assert content[0] == {"type": "input_text", "text": "describe"}
+        assert content[1]["type"] == "input_image"
+
+    @pytest.mark.asyncio
+    @patch("auto_scientist.models.openai_client.AsyncOpenAI")
+    async def test_no_images_keeps_string(self, mock_cls):
+        mock_client = AsyncMock()
+        mock_cls.return_value = mock_client
+        mock_response = MagicMock()
+        mock_response.choices = [MagicMock(message=MagicMock(content="ok"))]
+        mock_client.chat.completions.create.return_value = mock_response
+
+        await query_openai("gpt-5.4", "test prompt")
+
+        call_kwargs = mock_client.chat.completions.create.call_args.kwargs
+        assert call_kwargs["messages"][-1]["content"] == "test prompt"
+
+
+class TestGoogleImages:
+    @pytest.mark.asyncio
+    @patch("auto_scientist.models.google_client.genai")
+    @patch("auto_scientist.models.google_client.types")
+    async def test_images_builds_contents_list(self, mock_types, mock_genai):
+        mock_response = MagicMock(text="ok")
+        mock_genai.Client.return_value.aio.models.generate_content = AsyncMock(
+            return_value=mock_response
+        )
+        mock_part = MagicMock()
+        mock_types.Part.from_bytes.return_value = mock_part
+
+        await query_google("gemini-2.5-pro", "describe", images=[FAKE_IMAGE])
+
+        call_kwargs = mock_genai.Client.return_value.aio.models.generate_content.call_args.kwargs
+        contents = call_kwargs["contents"]
+        assert isinstance(contents, list)
+        assert contents[0] == "describe"
+        assert contents[1] is mock_part
+        mock_types.Part.from_bytes.assert_called_once()
+
+    @pytest.mark.asyncio
+    @patch("auto_scientist.models.google_client.genai")
+    async def test_no_images_keeps_string(self, mock_genai):
+        mock_response = MagicMock(text="ok")
+        mock_genai.Client.return_value.aio.models.generate_content = AsyncMock(
+            return_value=mock_response
+        )
+
+        await query_google("gemini-2.5-pro", "test prompt")
+
+        call_kwargs = mock_genai.Client.return_value.aio.models.generate_content.call_args.kwargs
+        assert call_kwargs["contents"] == "test prompt"
