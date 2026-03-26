@@ -1312,35 +1312,48 @@ class Orchestrator:
         finally:
             self._persist_buffer("coder", buffer)
 
+    _VALID_OUTCOMES = {"confirmed", "refuted", "inconclusive"}
+
     def _apply_prediction_updates(self, plan: dict[str, Any]) -> None:
         """Extract testable predictions from the Scientist plan and store as pending records.
 
         Assigns ordinal pred_ids like "1.1", "1.2" and injects them back into the
         plan dict so the Coder can include them in HYPOTHESIS TESTS output.
+        Skips malformed or empty prediction entries.
         """
         from auto_scientist.state import PredictionRecord
 
         predictions = plan.get("testable_predictions", [])
+        stored = []
         for i, pred in enumerate(predictions, 1):
+            if not isinstance(pred, dict):
+                logger.warning(f"Prediction {i}: expected dict, got {type(pred).__name__}; skipping")
+                continue
+            text = pred.get("prediction", "")
+            if not text or not isinstance(text, str) or not text.strip():
+                logger.warning(f"Prediction {i}: empty or invalid prediction text; skipping")
+                continue
             pred_id = f"{self.state.iteration}.{i}"
             record = PredictionRecord(
                 pred_id=pred_id,
                 iteration_prescribed=self.state.iteration,
-                prediction=pred.get("prediction", ""),
+                prediction=text,
                 diagnostic=pred.get("diagnostic", ""),
                 if_confirmed=pred.get("if_confirmed", ""),
                 if_refuted=pred.get("if_refuted", ""),
                 follows_from=pred.get("follows_from"),
             )
             self.state.prediction_history.append(record)
-            # Inject ID back into plan dict so the Coder sees it
             pred["pred_id"] = pred_id
+            stored.append(pred_id)
+        if stored:
+            logger.info(f"Stored {len(stored)} predictions: {', '.join(stored)}")
 
     def _resolve_prediction_outcomes(self, analysis: dict[str, Any] | None) -> None:
         """Match Analyst prediction outcomes against pending records in state.
 
         Primary matching by pred_id (reliable). Falls back to substring text
-        matching for backward compatibility.
+        matching for backward compatibility with a minimum length guard.
         """
         if not analysis:
             return
@@ -1354,22 +1367,40 @@ class Orchestrator:
 
         pending_by_id = {r.pred_id: r for r in pending if r.pred_id}
 
-        def _resolve(record, outcome: dict) -> None:
-            record.outcome = outcome.get("outcome", "inconclusive")
+        def _resolve(record, outcome: dict) -> bool:
+            raw_outcome = outcome.get("outcome", "")
+            normalized = raw_outcome.strip().lower() if isinstance(raw_outcome, str) else ""
+            if normalized not in self._VALID_OUTCOMES:
+                logger.warning(
+                    f"Prediction {record.pred_id}: invalid outcome '{raw_outcome}', leaving pending"
+                )
+                return False
+            record.outcome = normalized
             record.evidence = outcome.get("evidence", "")
             record.iteration_evaluated = self.state.iteration
+            return True
 
         for outcome in outcomes:
+            if not isinstance(outcome, dict):
+                logger.warning(f"Prediction outcome: expected dict, got {type(outcome).__name__}; skipping")
+                continue
+
             # Primary: match by pred_id
             oid = outcome.get("pred_id", "")
             if oid and oid in pending_by_id:
                 record = pending_by_id.pop(oid)
-                _resolve(record, outcome)
-                pending.remove(record)
+                if _resolve(record, outcome):
+                    logger.info(f"Prediction {oid}: resolved by ID as '{record.outcome}'")
+                    pending.remove(record)
                 continue
 
-            # Fallback: substring text matching
-            outcome_text = outcome.get("prediction", "").lower()
+            # Fallback: substring text matching (minimum length guard)
+            outcome_text = outcome.get("prediction", "")
+            outcome_text = outcome_text.lower().strip() if isinstance(outcome_text, str) else ""
+            if len(outcome_text) < 10:
+                logger.warning(f"Prediction outcome text too short for text matching: '{outcome_text}'")
+                continue
+
             best_match = None
             best_score = 0
             for record in pending:
@@ -1380,9 +1411,14 @@ class Orchestrator:
                         best_match = record
                         best_score = score
             if best_match:
-                _resolve(best_match, outcome)
-                pending.remove(best_match)
-                pending_by_id.pop(best_match.pred_id, None)
+                if _resolve(best_match, outcome):
+                    logger.info(
+                        f"Prediction {best_match.pred_id}: resolved by text fallback as '{best_match.outcome}'"
+                    )
+                    pending.remove(best_match)
+                    pending_by_id.pop(best_match.pred_id, None)
+            else:
+                logger.warning(f"Prediction outcome unmatched: pred_id='{oid}', text='{outcome_text[:80]}'...")
 
     async def _resolve_final_predictions(self) -> None:
         """Run the Analyst on the last version to resolve pending predictions."""

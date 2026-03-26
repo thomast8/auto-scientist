@@ -108,7 +108,15 @@ def _format_predictions_for_prompt(
         else:
             children[None].append(rec)
 
+    visited: set[str] = set()
+
     def _render_record(rec: PredictionRecord, indent: int) -> list[str]:
+        # Guard against circular follows_from links
+        if rec.pred_id and rec.pred_id in visited:
+            return []
+        if rec.pred_id:
+            visited.add(rec.pred_id)
+
         prefix = "  " * indent
         tag = rec.pred_id or f"v{rec.iteration_prescribed:02d}"
         status = rec.outcome.upper()
@@ -119,7 +127,12 @@ def _format_predictions_for_prompt(
             lines.append(f"{prefix}  If confirmed: {rec.if_confirmed}")
             lines.append(f"{prefix}  If refuted: {rec.if_refuted}")
         else:
-            implication = rec.if_confirmed if rec.outcome == "confirmed" else rec.if_refuted
+            if rec.outcome == "confirmed":
+                implication = rec.if_confirmed
+            elif rec.outcome == "refuted":
+                implication = rec.if_refuted
+            else:
+                implication = None  # inconclusive: neither implication applies
             lines.append(f"{prefix}[{tag}] {status}: {rec.prediction}")
             lines.append(f"{prefix}  Evidence: {rec.evidence}")
             if implication:

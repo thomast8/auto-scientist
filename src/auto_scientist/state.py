@@ -2,6 +2,7 @@
 
 import json
 from pathlib import Path
+from typing import Literal
 
 from pydantic import BaseModel, Field
 
@@ -29,7 +30,7 @@ class PredictionRecord(BaseModel):
     if_confirmed: str
     if_refuted: str
     follows_from: str | None = None
-    outcome: str = "pending"  # confirmed | refuted | inconclusive | pending
+    outcome: Literal["pending", "confirmed", "refuted", "inconclusive"] = "pending"
     evidence: str = ""
 
 
