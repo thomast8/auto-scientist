@@ -6,70 +6,11 @@ from pydantic import ValidationError
 from auto_scientist.schemas import (
     AnalystOutput,
     CoderRunResult,
-    CriteriaRevisionOutput,
-    CriterionDefinition,
-    CriterionResult,
-    IterationCriterionResult,
     PlanChange,
+    PredictionOutcome,
     ScientistPlanOutput,
+    TestablePrediction,
 )
-
-
-# ---------------------------------------------------------------------------
-# CriterionResult
-# ---------------------------------------------------------------------------
-
-class TestCriterionResult:
-    def test_valid(self):
-        r = CriterionResult(
-            name="accuracy", measured_value=0.95, target=">= 0.9", status="pass",
-        )
-        assert r.name == "accuracy"
-        assert r.measured_value == 0.95
-        assert r.status == "pass"
-
-    def test_measured_value_string(self):
-        r = CriterionResult(
-            name="accuracy", measured_value="0.95", target=">= 0.9", status="pass",
-        )
-        assert r.measured_value == "0.95"
-
-    def test_measured_value_none(self):
-        r = CriterionResult(
-            name="accuracy", measured_value=None, target=">= 0.9", status="unable_to_measure",
-        )
-        assert r.measured_value is None
-
-    def test_invalid_status(self):
-        with pytest.raises(ValidationError):
-            CriterionResult(
-                name="accuracy", measured_value=0.95, target=">= 0.9", status="maybe",
-            )
-
-    def test_missing_required_field(self):
-        with pytest.raises(ValidationError):
-            CriterionResult(name="accuracy", measured_value=0.95, target=">= 0.9")
-
-    def test_extra_fields_ignored(self):
-        r = CriterionResult(
-            name="accuracy", measured_value=0.95, target=">= 0.9",
-            status="pass", extra_field="should be ignored",
-        )
-        assert not hasattr(r, "extra_field")
-
-
-# ---------------------------------------------------------------------------
-# IterationCriterionResult
-# ---------------------------------------------------------------------------
-
-class TestIterationCriterionResult:
-    def test_valid(self):
-        r = IterationCriterionResult(name="loss_decreases", status="pass", measured_value="0.01")
-        assert r.status == "pass"
-
-    def test_invalid_status(self):
-        with pytest.raises(ValidationError):
-            IterationCriterionResult(name="x", status="unknown", measured_value="0")
 
 
 # ---------------------------------------------------------------------------
@@ -80,12 +21,10 @@ class TestAnalystOutput:
     @pytest.fixture
     def minimal_valid(self):
         return {
-            "criteria_results": [],
             "key_metrics": {},
             "improvements": [],
             "regressions": [],
             "observations": ["data loaded"],
-            "iteration_criteria_results": [],
         }
 
     def test_minimal_valid(self, minimal_valid):
@@ -100,17 +39,9 @@ class TestAnalystOutput:
         assert a.domain_knowledge == "This is SpO2 pulse oximetry data"
         assert a.data_summary == {"rows": 1000, "columns": 5}
 
-    def test_with_criteria_results(self, minimal_valid):
-        minimal_valid["criteria_results"] = [
-            {"name": "accuracy", "measured_value": 0.95, "target": ">= 0.9", "status": "pass"},
-            {"name": "latency", "measured_value": None, "target": "< 500", "status": "unable_to_measure"},
-        ]
-        a = AnalystOutput.model_validate(minimal_valid)
-        assert len(a.criteria_results) == 2
-
     def test_missing_required_field(self):
         with pytest.raises(ValidationError):
-            AnalystOutput.model_validate({"criteria_results": [], "key_metrics": {}})
+            AnalystOutput.model_validate({"key_metrics": {}})
 
     def test_extra_fields_ignored(self, minimal_valid):
         minimal_valid["unexpected_key"] = "should be ignored"
@@ -185,33 +116,6 @@ class TestPlanChange:
 
 
 # ---------------------------------------------------------------------------
-# CriterionDefinition
-# ---------------------------------------------------------------------------
-
-class TestCriterionDefinition:
-    def test_valid(self):
-        c = CriterionDefinition(
-            name="accuracy", description="Model accuracy", metric_key="accuracy", condition=">= 0.9",
-        )
-        assert c.condition == ">= 0.9"
-
-
-# ---------------------------------------------------------------------------
-# CriteriaRevisionOutput
-# ---------------------------------------------------------------------------
-
-class TestCriteriaRevisionOutput:
-    def test_valid(self):
-        r = CriteriaRevisionOutput(
-            changes="Relaxed accuracy threshold",
-            revised_criteria=[
-                {"name": "accuracy", "description": "Model accuracy", "metric_key": "accuracy", "condition": ">= 0.8"},
-            ],
-        )
-        assert len(r.revised_criteria) == 1
-
-
-# ---------------------------------------------------------------------------
 # ScientistPlanOutput
 # ---------------------------------------------------------------------------
 
@@ -228,9 +132,6 @@ class TestScientistPlanOutput:
             "should_stop": False,
             "stop_reason": None,
             "notebook_entry": "## Iteration 1\nAdding L2 regularization.",
-            "success_criteria": [
-                {"name": "test_error", "description": "Test error", "metric_key": "test_error", "condition": "< 0.1"},
-            ],
         }
 
     def test_minimal_valid(self, minimal_valid):
@@ -239,25 +140,6 @@ class TestScientistPlanOutput:
         assert p.strategy == "incremental"
         assert len(p.changes) == 1
         assert p.should_stop is False
-        assert p.top_level_criteria is None
-        assert p.criteria_revision is None
-
-    def test_with_top_level_criteria(self, minimal_valid):
-        minimal_valid["top_level_criteria"] = [
-            {"name": "accuracy", "description": "Overall accuracy", "metric_key": "accuracy", "condition": ">= 0.9"},
-        ]
-        p = ScientistPlanOutput.model_validate(minimal_valid)
-        assert len(p.top_level_criteria) == 1
-
-    def test_with_criteria_revision(self, minimal_valid):
-        minimal_valid["criteria_revision"] = {
-            "changes": "Relaxed threshold",
-            "revised_criteria": [
-                {"name": "accuracy", "description": "Accuracy", "metric_key": "accuracy", "condition": ">= 0.8"},
-            ],
-        }
-        p = ScientistPlanOutput.model_validate(minimal_valid)
-        assert p.criteria_revision.changes == "Relaxed threshold"
 
     def test_invalid_strategy(self, minimal_valid):
         minimal_valid["strategy"] = "random"
@@ -289,3 +171,137 @@ class TestScientistPlanOutput:
         assert d.get("should_stop") is False
         assert isinstance(d.get("changes"), list)
         assert d["changes"][0].get("what") == "add L2"
+
+
+# ---------------------------------------------------------------------------
+# TestablePrediction
+# ---------------------------------------------------------------------------
+
+class TestTestablePrediction:
+    def test_valid(self):
+        p = TestablePrediction(
+            prediction="residual correlation < 0.1",
+            diagnostic="compute Pearson r between residuals and x",
+            if_confirmed="noise is additive, continue with OLS",
+            if_refuted="noise is multiplicative, switch to WLS",
+        )
+        assert p.follows_from is None
+
+    def test_with_follows_from(self):
+        p = TestablePrediction(
+            prediction="re-test spline after structural change",
+            diagnostic="profile smoothing parameter",
+            if_confirmed="spline is now identifiable",
+            if_refuted="still unidentifiable, fix parameter",
+            follows_from="smoothing parameter has interior minimum",
+        )
+        assert p.follows_from == "smoothing parameter has interior minimum"
+
+    def test_extra_fields_ignored(self):
+        p = TestablePrediction(
+            prediction="test", diagnostic="test",
+            if_confirmed="ok", if_refuted="nope", extra_field="ignored",
+        )
+        assert not hasattr(p, "extra_field")
+
+
+# ---------------------------------------------------------------------------
+# PredictionOutcome
+# ---------------------------------------------------------------------------
+
+class TestPredictionOutcome:
+    def test_valid_outcomes(self):
+        for outcome in ("confirmed", "refuted", "inconclusive"):
+            p = PredictionOutcome(
+                prediction="test", outcome=outcome, evidence="measured 0.5",
+            )
+            assert p.outcome == outcome
+
+    def test_invalid_outcome_rejected(self):
+        with pytest.raises(ValidationError):
+            PredictionOutcome(prediction="test", outcome="maybe", evidence="n/a")
+
+    def test_extra_fields_ignored(self):
+        p = PredictionOutcome(
+            prediction="test", outcome="confirmed", evidence="ok", bonus="nope",
+        )
+        assert not hasattr(p, "bonus")
+
+
+# ---------------------------------------------------------------------------
+# ScientistPlanOutput - testable_predictions
+# ---------------------------------------------------------------------------
+
+class TestScientistPlanOutputPredictions:
+    @pytest.fixture
+    def minimal_plan(self):
+        return {
+            "hypothesis": "test",
+            "strategy": "incremental",
+            "changes": [{"what": "x", "why": "y", "how": "z", "priority": 1}],
+            "expected_impact": "better",
+            "should_stop": False,
+            "stop_reason": None,
+            "notebook_entry": "title\nbody",
+        }
+
+    def test_defaults_to_empty_list(self, minimal_plan):
+        p = ScientistPlanOutput.model_validate(minimal_plan)
+        assert p.testable_predictions == []
+
+    def test_with_predictions(self, minimal_plan):
+        minimal_plan["testable_predictions"] = [
+            {
+                "prediction": "spline fits better locally",
+                "diagnostic": "compare regional RMSE",
+                "if_confirmed": "focus on local fit",
+                "if_refuted": "problem is elsewhere",
+            },
+        ]
+        p = ScientistPlanOutput.model_validate(minimal_plan)
+        assert len(p.testable_predictions) == 1
+        assert p.testable_predictions[0].follows_from is None
+
+    def test_with_follows_from(self, minimal_plan):
+        minimal_plan["testable_predictions"] = [
+            {
+                "prediction": "re-test after change",
+                "diagnostic": "profile again",
+                "if_confirmed": "now works",
+                "if_refuted": "still broken",
+                "follows_from": "original prediction",
+            },
+        ]
+        p = ScientistPlanOutput.model_validate(minimal_plan)
+        assert p.testable_predictions[0].follows_from == "original prediction"
+
+
+# ---------------------------------------------------------------------------
+# AnalystOutput - prediction_outcomes
+# ---------------------------------------------------------------------------
+
+class TestAnalystOutputPredictions:
+    @pytest.fixture
+    def minimal_analysis(self):
+        return {
+            "key_metrics": {},
+            "improvements": [],
+            "regressions": [],
+            "observations": [],
+        }
+
+    def test_defaults_to_empty_list(self, minimal_analysis):
+        a = AnalystOutput.model_validate(minimal_analysis)
+        assert a.prediction_outcomes == []
+
+    def test_with_outcomes(self, minimal_analysis):
+        minimal_analysis["prediction_outcomes"] = [
+            {
+                "prediction": "spline fits better locally",
+                "outcome": "confirmed",
+                "evidence": "regional RMSE 0.31 vs 0.58",
+            },
+        ]
+        a = AnalystOutput.model_validate(minimal_analysis)
+        assert len(a.prediction_outcomes) == 1
+        assert a.prediction_outcomes[0].outcome == "confirmed"

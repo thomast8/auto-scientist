@@ -12,7 +12,6 @@ from typing import Any
 
 from claude_code_sdk import ClaudeCodeOptions
 
-from auto_scientist.config import SuccessCriterion
 from auto_scientist.prompts.scientist import (
     SCIENTIST_REVISION_SYSTEM,
     SCIENTIST_REVISION_USER,
@@ -25,6 +24,7 @@ from auto_scientist.sdk_utils import (
     collect_text_from_query,
     validate_json_output,
 )
+from auto_scientist.state import PredictionRecord
 
 logger = logging.getLogger(__name__)
 
@@ -55,51 +55,19 @@ SCIENTIST_PLAN_SCHEMA = {
         "should_stop": {"type": "boolean"},
         "stop_reason": {"type": ["string", "null"]},
         "notebook_entry": {"type": "string"},
-        "success_criteria": {
+        "testable_predictions": {
             "type": "array",
             "items": {
                 "type": "object",
                 "properties": {
-                    "name": {"type": "string"},
-                    "description": {"type": "string"},
-                    "metric_key": {"type": "string"},
-                    "condition": {"type": "string"},
+                    "prediction": {"type": "string"},
+                    "diagnostic": {"type": "string"},
+                    "if_confirmed": {"type": "string"},
+                    "if_refuted": {"type": "string"},
+                    "follows_from": {"type": ["string", "null"]},
                 },
-                "required": ["name", "description", "metric_key", "condition"],
+                "required": ["prediction", "diagnostic", "if_confirmed", "if_refuted"],
             },
-        },
-        "top_level_criteria": {
-            "type": "array",
-            "items": {
-                "type": "object",
-                "properties": {
-                    "name": {"type": "string"},
-                    "description": {"type": "string"},
-                    "metric_key": {"type": "string"},
-                    "condition": {"type": "string"},
-                },
-                "required": ["name", "description", "metric_key", "condition"],
-            },
-        },
-        "criteria_revision": {
-            "type": "object",
-            "properties": {
-                "changes": {"type": "string"},
-                "revised_criteria": {
-                    "type": "array",
-                    "items": {
-                        "type": "object",
-                        "properties": {
-                            "name": {"type": "string"},
-                            "description": {"type": "string"},
-                            "metric_key": {"type": "string"},
-                            "condition": {"type": "string"},
-                        },
-                        "required": ["name", "description", "metric_key", "condition"],
-                    },
-                },
-            },
-            "required": ["changes", "revised_criteria"],
         },
     },
     "required": [
@@ -110,29 +78,63 @@ SCIENTIST_PLAN_SCHEMA = {
         "should_stop",
         "stop_reason",
         "notebook_entry",
-        "success_criteria",
     ],
 }
 
 
-def _format_criteria_for_prompt(criteria: list[SuccessCriterion] | None) -> str:
-    """Format existing success criteria for injection into the Scientist prompt."""
-    if not criteria:
-        return "(no top-level success criteria defined yet)"
-    lines = []
-    for i, c in enumerate(criteria, 1):
-        target = ""
-        if c.target_min is not None and c.target_max is not None:
-            target = f"[{c.target_min}, {c.target_max}]"
-        elif c.target_min is not None:
-            target = f">= {c.target_min}"
-        elif c.target_max is not None:
-            target = f"<= {c.target_max}"
-        required = "REQUIRED" if c.required else "optional"
-        lines.append(
-            f"{i}. [{required}] {c.name} (metric: {c.metric_key}, {target}): {c.description}"
-        )
-    return "\n".join(lines)
+def _format_predictions_for_prompt(
+    prediction_history: list[PredictionRecord] | None,
+) -> str:
+    """Format prediction history as reasoning trajectories for the Scientist prompt.
+
+    Builds a forest from follows_from links and renders each tree as a
+    trajectory chain showing the reasoning flow across iterations.
+    """
+    if not prediction_history:
+        return "(no prediction history yet)"
+
+    # Build parent→children index using pred_id
+    by_id: dict[str, PredictionRecord] = {}
+    children: dict[str | None, list[PredictionRecord]] = {None: []}
+    for rec in prediction_history:
+        if rec.pred_id:
+            by_id[rec.pred_id] = rec
+
+    # Classify each record as root or child
+    for rec in prediction_history:
+        parent = rec.follows_from
+        if parent and parent in by_id:
+            children.setdefault(parent, []).append(rec)
+        else:
+            children[None].append(rec)
+
+    def _render_record(rec: PredictionRecord, indent: int) -> list[str]:
+        prefix = "  " * indent
+        tag = rec.pred_id or f"v{rec.iteration_prescribed:02d}"
+        status = rec.outcome.upper()
+        lines = []
+        if rec.outcome == "pending":
+            lines.append(f"{prefix}[{tag}] PENDING: {rec.prediction}")
+            lines.append(f"{prefix}  Diagnostic: {rec.diagnostic}")
+            lines.append(f"{prefix}  If confirmed: {rec.if_confirmed}")
+            lines.append(f"{prefix}  If refuted: {rec.if_refuted}")
+        else:
+            implication = rec.if_confirmed if rec.outcome == "confirmed" else rec.if_refuted
+            lines.append(f"{prefix}[{tag}] {status}: {rec.prediction}")
+            lines.append(f"{prefix}  Evidence: {rec.evidence}")
+            if implication:
+                lines.append(f"{prefix}  -> {implication}")
+        # Render children (keyed by parent's pred_id)
+        for child in children.get(rec.pred_id, []):
+            lines.extend(_render_record(child, indent + 1))
+        return lines
+
+    trajectories = []
+    for root in children[None]:
+        trajectory_lines = _render_record(root, 1)
+        trajectories.append("\n".join(trajectory_lines))
+
+    return "\n\n".join(trajectories)
 
 
 async def run_scientist(
@@ -140,7 +142,7 @@ async def run_scientist(
     notebook_path: Path,
     version: str,
     domain_knowledge: str = "",
-    success_criteria: list[SuccessCriterion] | None = None,
+    prediction_history: list[PredictionRecord] | None = None,
     model: str | None = None,
     message_buffer: list[str] | None = None,
 ) -> dict[str, Any]:
@@ -155,14 +157,14 @@ async def run_scientist(
         notebook_path: Path to the lab notebook (read for context).
         version: Version string for the new experiment (e.g., 'v01').
         domain_knowledge: Domain-specific context.
-        success_criteria: Existing top-level criteria (None if not yet defined).
+        prediction_history: Accumulated testable predictions and outcomes.
         model: Model override.
         message_buffer: Optional buffer for streaming messages.
 
     Returns:
         Structured plan dict with keys: hypothesis, strategy, changes,
         expected_impact, should_stop, stop_reason, notebook_entry.
-        Optionally: top_level_criteria, criteria_revision.
+        Optionally: testable_predictions.
     """
     notebook_path = Path(notebook_path)
     notebook_content = notebook_path.read_text() if notebook_path.exists() else ""
@@ -173,7 +175,7 @@ async def run_scientist(
             json.dumps(analysis, indent=2) if analysis else "(no analysis yet - first iteration)"
         ),
         notebook_content=notebook_content or "(empty notebook - first iteration)",
-        success_criteria=_format_criteria_for_prompt(success_criteria),
+        prediction_history=_format_predictions_for_prompt(prediction_history),
         version=version,
     )
 
@@ -226,6 +228,7 @@ async def run_scientist_revision(
     notebook_path: Path,
     version: str,
     domain_knowledge: str = "",
+    prediction_history: list[PredictionRecord] | None = None,
     model: str | None = None,
     message_buffer: list[str] | None = None,
 ) -> dict[str, Any]:
@@ -238,6 +241,7 @@ async def run_scientist_revision(
         notebook_path: Path to the lab notebook.
         version: Version string.
         domain_knowledge: Domain-specific context.
+        prediction_history: Accumulated testable predictions and outcomes.
         model: Model override.
         message_buffer: Optional buffer for streaming messages.
 
@@ -257,6 +261,7 @@ async def run_scientist_revision(
         notebook_content=notebook_content or "(empty notebook)",
         original_plan=json.dumps(original_plan, indent=2),
         concern_ledger=ledger_text,
+        prediction_history=_format_predictions_for_prompt(prediction_history),
         version=version,
     )
 

@@ -150,12 +150,10 @@ class TestOutputValidationError:
 class TestValidateJsonOutput:
     def test_valid_json_valid_schema(self):
         data = {
-            "criteria_results": [],
             "key_metrics": {},
             "improvements": [],
             "regressions": [],
             "observations": ["ok"],
-            "iteration_criteria_results": [],
         }
         raw = json.dumps(data)
         result = validate_json_output(raw, AnalystOutput, "Analyst")
@@ -164,12 +162,10 @@ class TestValidateJsonOutput:
 
     def test_strips_markdown_fencing(self):
         data = {
-            "criteria_results": [],
             "key_metrics": {},
             "improvements": [],
             "regressions": [],
             "observations": [],
-            "iteration_criteria_results": [],
         }
         raw = f"```json\n{json.dumps(data)}\n```"
         result = validate_json_output(raw, AnalystOutput, "Analyst")
@@ -188,12 +184,10 @@ class TestValidateJsonOutput:
 
     def test_extra_fields_tolerated(self):
         data = {
-            "criteria_results": [],
             "key_metrics": {},
             "improvements": [],
             "regressions": [],
             "observations": [],
-            "iteration_criteria_results": [],
             "llm_reasoning": "should be ignored",
         }
         result = validate_json_output(json.dumps(data), AnalystOutput, "Analyst")

@@ -37,7 +37,6 @@ class AgentModelConfig(BaseModel):
 BUILTIN_PRESETS: dict[str, dict] = {
     "default": {
         "defaults": {"model": "claude-sonnet-4-6"},
-        "analyst": {"model": "claude-opus-4-6"},
         "scientist": {"model": "claude-opus-4-6"},
         "summarizer": {"provider": "openai", "model": "gpt-5.4-nano"},
         "critics": [
@@ -47,7 +46,6 @@ BUILTIN_PRESETS: dict[str, dict] = {
     },
     "medium": {
         "defaults": {"model": "claude-sonnet-4-6", "reasoning": "medium"},
-        "analyst": {"model": "claude-opus-4-6", "reasoning": "medium"},
         "scientist": {"model": "claude-opus-4-6", "reasoning": "medium"},
         "summarizer": {"provider": "openai", "model": "gpt-5.4-nano"},
         "critics": [
@@ -57,7 +55,6 @@ BUILTIN_PRESETS: dict[str, dict] = {
     },
     "high": {
         "defaults": {"model": "claude-sonnet-4-6", "reasoning": "high"},
-        "analyst": {"model": "claude-opus-4-6", "reasoning": "high"},
         "scientist": {"model": "claude-opus-4-6", "reasoning": "high"},
         "summarizer": {"provider": "openai", "model": "gpt-5.4-nano"},
         "critics": [

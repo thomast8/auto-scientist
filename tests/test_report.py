@@ -35,7 +35,7 @@ class TestRunReport:
 
         state = ExperimentState(
             domain="test", goal="test goal",
-            iteration=5, best_version="v03", best_score=85,
+            iteration=5, best_version="v03",
         )
         notebook_path = tmp_path / "lab_notebook.xml"
         notebook_path.write_text("# Lab Notebook")
@@ -120,7 +120,7 @@ class TestRunReport:
 
         state = ExperimentState(
             domain="spo2", goal="predict oxygen levels",
-            iteration=10, best_version="v07", best_score=92,
+            iteration=10, best_version="v07",
         )
         notebook_path = tmp_path / "lab_notebook.xml"
         notebook_path.write_text("# Notebook")
@@ -131,7 +131,6 @@ class TestRunReport:
         assert "spo2" in prompt
         assert "predict oxygen levels" in prompt
         assert "v07" in prompt
-        assert "92" in prompt
 
     @pytest.mark.asyncio
     @patch("auto_scientist.agents.report.safe_query")

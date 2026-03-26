@@ -251,7 +251,7 @@ def status(state: str):
     click.echo(f"Domain:     {loaded_state.domain}")
     click.echo(f"Phase:      {loaded_state.phase}")
     click.echo(f"Iteration:  {loaded_state.iteration}")
-    click.echo(f"Best:       {loaded_state.best_version} (score {loaded_state.best_score})")
+    click.echo(f"Best:       {loaded_state.best_version}")
     click.echo(f"Versions:   {len(loaded_state.versions)}")
     click.echo(f"Dead ends:  {len(loaded_state.dead_ends)}")
 

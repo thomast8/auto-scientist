@@ -57,7 +57,6 @@ async def run_coder(
     message_buffer: list[str] | None = None,
     run_timeout_minutes: int = 120,
     run_command: str = "uv run {script_path}",
-    top_level_criteria: list[dict[str, Any]] | None = None,
     data_files_listing: str = "",
 ) -> Path:
     """Implement the scientist's plan as a runnable experiment script.
@@ -69,7 +68,6 @@ async def run_coder(
         version: Version string for the new experiment (e.g., 'v01').
         domain_knowledge: Domain-specific context.
         data_path: Absolute path to the dataset.
-        top_level_criteria: Investigation-wide success criteria from orchestrator.
         data_files_listing: Pre-computed listing of files in data_path directory.
 
     Returns:
@@ -94,20 +92,6 @@ async def run_coder(
         run_command=run_command,
     )
 
-    # Build top-level criteria section for the prompt
-    if top_level_criteria:
-        criteria_lines = json.dumps(top_level_criteria, indent=2)
-        top_level_section = (
-            f"\n<top_level_criteria>\n"
-            f"These are the investigation-wide success criteria. Your script "
-            f"MUST compute and print these metrics for the best method in the "
-            f"TOP-LEVEL SUCCESS CRITERIA section (after the per-iteration "
-            f"SUCCESS CRITERIA section). The Analyst uses these to score the "
-            f"version.\n{criteria_lines}\n</top_level_criteria>"
-        )
-    else:
-        top_level_section = ""
-
     # Build data files section so coder doesn't need to discover files
     if data_files_listing:
         data_files_section = (
@@ -128,7 +112,6 @@ async def run_coder(
         version=version,
         run_timeout_minutes=run_timeout_minutes,
         run_command=run_command,
-        top_level_section=top_level_section,
         data_files_section=data_files_section,
     )
 

@@ -13,7 +13,7 @@ class TestStatusCommand:
     def test_displays_state_info(self, tmp_path):
         state = ExperimentState(
             domain="auto", goal="test", phase="iteration",
-            iteration=5, best_version="v03", best_score=75,
+            iteration=5, best_version="v03",
         )
         state_path = tmp_path / "state.json"
         state.save(state_path)
@@ -26,7 +26,6 @@ class TestStatusCommand:
         assert "iteration" in result.output
         assert "5" in result.output
         assert "v03" in result.output
-        assert "75" in result.output
 
 
 class TestRunCommand:

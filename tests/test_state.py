@@ -1,12 +1,10 @@
 """Tests for experiment state persistence and crash recovery."""
 
 import json
-from pathlib import Path
 
 import pytest
 
-from auto_scientist.config import SuccessCriterion
-from auto_scientist.state import CriteriaRevision, ExperimentState, VersionEntry
+from auto_scientist.state import ExperimentState, PredictionRecord, VersionEntry
 
 
 @pytest.fixture
@@ -56,19 +54,13 @@ class TestExperimentState:
         assert len(loaded.versions) == 1
         assert loaded.versions[0].version == "v1.01"
         assert loaded.versions[0].score == 7
-        assert loaded.best_version == "v1.01"
-        assert loaded.best_score == 7
 
-    def test_record_version_updates_best(self):
+    def test_record_version_appends(self):
         state = ExperimentState(domain="test", goal="g")
         state.record_version(VersionEntry(version="v1", iteration=1, script_path="a", score=5))
-        assert state.best_version == "v1"
         state.record_version(VersionEntry(version="v2", iteration=2, script_path="b", score=8))
-        assert state.best_version == "v2"
-        assert state.best_score == 8
-        # Lower score doesn't replace best
         state.record_version(VersionEntry(version="v3", iteration=3, script_path="c", score=3))
-        assert state.best_version == "v2"
+        assert len(state.versions) == 3
 
     def test_consecutive_failures(self):
         state = ExperimentState(domain="test", goal="g")
@@ -111,85 +103,15 @@ class TestExperimentState:
         loaded = ExperimentState.load(tmp_state_path)
         assert loaded.raw_data_path == "/raw/data.csv"
 
-    def test_success_criteria_defaults_to_none(self):
-        state = ExperimentState(domain="test", goal="g")
-        assert state.success_criteria is None
-
     def test_domain_knowledge_defaults_to_empty(self):
         state = ExperimentState(domain="test", goal="g")
         assert state.domain_knowledge == ""
-
-    def test_criteria_history_defaults_to_empty(self):
-        state = ExperimentState(domain="test", goal="g")
-        assert state.criteria_history == []
-
-    def test_success_criteria_roundtrip(self, tmp_state_path):
-        criteria = [
-            SuccessCriterion(
-                name="acc", description="accuracy", metric_key="accuracy",
-                target_min=0.9,
-            ),
-        ]
-        state = ExperimentState(domain="test", goal="g", success_criteria=criteria)
-        state.save(tmp_state_path)
-        loaded = ExperimentState.load(tmp_state_path)
-        assert len(loaded.success_criteria) == 1
-        assert loaded.success_criteria[0].name == "acc"
-        assert loaded.success_criteria[0].target_min == 0.9
 
     def test_domain_knowledge_roundtrip(self, tmp_state_path):
         state = ExperimentState(domain="test", goal="g", domain_knowledge="test knowledge")
         state.save(tmp_state_path)
         loaded = ExperimentState.load(tmp_state_path)
         assert loaded.domain_knowledge == "test knowledge"
-
-
-class TestCriteriaRevision:
-    def test_construct(self):
-        criteria = [
-            SuccessCriterion(name="a", description="b", metric_key="c"),
-        ]
-        rev = CriteriaRevision(
-            iteration=1,
-            action="defined",
-            changes="Initial criteria definition",
-            criteria_snapshot=criteria,
-        )
-        assert rev.iteration == 1
-        assert rev.action == "defined"
-        assert len(rev.criteria_snapshot) == 1
-
-    def test_serialize_deserialize_roundtrip(self, tmp_path):
-        criteria = [
-            SuccessCriterion(name="a", description="b", metric_key="c", target_min=0.5),
-        ]
-        rev = CriteriaRevision(
-            iteration=2,
-            action="revised",
-            changes="Lowered target",
-            criteria_snapshot=criteria,
-        )
-        path = tmp_path / "rev.json"
-        path.write_text(rev.model_dump_json(indent=2))
-        loaded = CriteriaRevision.model_validate_json(path.read_text())
-        assert loaded.iteration == 2
-        assert loaded.action == "revised"
-        assert loaded.criteria_snapshot[0].target_min == 0.5
-
-    def test_criteria_history_roundtrip(self, tmp_path):
-        criteria = [SuccessCriterion(name="a", description="b", metric_key="c")]
-        rev = CriteriaRevision(
-            iteration=1, action="defined", changes="Initial",
-            criteria_snapshot=criteria,
-        )
-        state = ExperimentState(
-            domain="test", goal="g", criteria_history=[rev],
-        )
-        state_path = tmp_path / "state.json"
-        state.save(state_path)
-        loaded = ExperimentState.load(state_path)
-        assert len(loaded.criteria_history) == 1
-        assert loaded.criteria_history[0].action == "defined"
 
 
 class TestVersionEntry:
@@ -223,19 +145,11 @@ class TestVersionEntry:
 
 
 class TestExperimentStateExtended:
-    def test_record_version_zero_score_no_update(self):
+    def test_record_version_appends_all(self):
         state = ExperimentState(domain="test", goal="g")
         state.record_version(VersionEntry(version="v1", iteration=1, script_path="a", score=5))
-        assert state.best_score == 5
         state.record_version(VersionEntry(version="v2", iteration=2, script_path="b", score=0))
-        assert state.best_version == "v1"
-        assert state.best_score == 5
-
-    def test_record_version_equal_score_no_update(self):
-        state = ExperimentState(domain="test", goal="g")
-        state.record_version(VersionEntry(version="v1", iteration=1, script_path="a", score=5))
-        state.record_version(VersionEntry(version="v2", iteration=2, script_path="b", score=5))
-        assert state.best_version == "v1"
+        assert len(state.versions) == 2
 
     def test_should_stop_custom_max(self):
         state = ExperimentState(domain="test", goal="g")
@@ -249,8 +163,6 @@ class TestExperimentStateExtended:
                 VersionEntry(version=f"v{i:02d}", iteration=i, script_path=f"s{i}.py", score=i),
             )
         assert len(state.versions) == 5
-        assert state.best_version == "v04"
-        assert state.best_score == 4
 
     def test_dead_ends_persistence(self, tmp_path):
         state = ExperimentState(domain="test", goal="g", dead_ends=["v01", "v03"])
@@ -275,3 +187,78 @@ class TestDiscoveryPhaseMigration:
         loaded = ExperimentState.load(state_path)
         assert loaded.phase == "iteration"
         assert loaded.iteration == 0
+
+
+# ---------------------------------------------------------------------------
+# PredictionRecord
+# ---------------------------------------------------------------------------
+
+class TestPredictionRecord:
+    def test_defaults(self):
+        r = PredictionRecord(
+            iteration_prescribed=1,
+            prediction="test prediction",
+            diagnostic="run diagnostic",
+            if_confirmed="do A",
+            if_refuted="do B",
+        )
+        assert r.outcome == "pending"
+        assert r.evidence == ""
+        assert r.iteration_evaluated is None
+        assert r.follows_from is None
+
+    def test_with_all_fields(self):
+        r = PredictionRecord(
+            iteration_prescribed=1,
+            iteration_evaluated=2,
+            prediction="spline is identifiable",
+            diagnostic="profile smoothing parameter",
+            if_confirmed="fine-tune",
+            if_refuted="fix parameter",
+            follows_from="initial hypothesis",
+            outcome="refuted",
+            evidence="CV loss flat for s in [0.5, 100]",
+        )
+        assert r.outcome == "refuted"
+        assert r.follows_from == "initial hypothesis"
+
+
+# ---------------------------------------------------------------------------
+# ExperimentState - prediction_history
+# ---------------------------------------------------------------------------
+
+class TestExperimentStatePredictions:
+    def test_defaults_to_empty(self):
+        state = ExperimentState(domain="test", goal="g")
+        assert state.prediction_history == []
+
+    def test_roundtrip(self, tmp_path):
+        state = ExperimentState(domain="test", goal="g")
+        state.prediction_history.append(
+            PredictionRecord(
+                iteration_prescribed=1,
+                prediction="noise is additive",
+                diagnostic="compute residual-x correlation",
+                if_confirmed="OLS is appropriate",
+                if_refuted="switch to WLS",
+                outcome="confirmed",
+                evidence="correlation = 0.03",
+                iteration_evaluated=1,
+            )
+        )
+        path = tmp_path / "state.json"
+        state.save(path)
+
+        loaded = ExperimentState.load(path)
+        assert len(loaded.prediction_history) == 1
+        rec = loaded.prediction_history[0]
+        assert rec.prediction == "noise is additive"
+        assert rec.outcome == "confirmed"
+        assert rec.iteration_evaluated == 1
+
+    def test_backward_compat_missing_field(self, tmp_path):
+        data = {"domain": "test", "goal": "g", "phase": "iteration", "iteration": 0}
+        path = tmp_path / "state.json"
+        path.write_text(json.dumps(data))
+        loaded = ExperimentState.load(path)
+        assert loaded.prediction_history == []

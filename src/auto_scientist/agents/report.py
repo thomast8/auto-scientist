@@ -49,7 +49,6 @@ async def run_report(
         goal=state.goal,
         total_iterations=state.iteration,
         best_version=state.best_version or "none",
-        best_score=state.best_score,
         notebook_content=notebook_content,
     )
 
