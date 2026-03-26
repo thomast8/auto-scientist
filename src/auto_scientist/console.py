@@ -1086,8 +1086,12 @@ class PipelineApp(App):
             for task in asyncio.all_tasks(self._worker_loop):
                 task.cancel()
 
-    def _persist_theme(self, theme_name: str) -> None:
-        """Save the selected theme to user preferences."""
+    def watch_theme(self, theme_name: str) -> None:
+        """Persist every theme change, regardless of how it was triggered.
+
+        Catches changes from Ctrl+T, the custom command palette, AND the
+        built-in Textual ThemeProvider (which otherwise bypasses persistence).
+        """
         prefs = _load_prefs()
         prefs["theme"] = theme_name
         _save_prefs(prefs)
@@ -1103,7 +1107,6 @@ class PipelineApp(App):
             self.theme = themes[(idx + 1) % len(themes)]
         except ValueError:
             self.theme = themes[0]
-        self._persist_theme(self.theme)
         self.notify(f"Theme: {self.theme}")
 
     def action_open_focused_detail(self) -> None:
@@ -1147,7 +1150,6 @@ class PipelineApp(App):
     def _set_theme(self, theme_name: str) -> None:
         """Switch to a named theme."""
         self.theme = theme_name
-        self._persist_theme(theme_name)
         self.notify(f"Theme: {theme_name}")
 
     def _set_orchestrator_flag(self, flag_name: str) -> None:
