@@ -8,6 +8,7 @@ from dotenv import load_dotenv
 load_dotenv()
 
 from auto_scientist.console import PipelineApp, console
+from auto_scientist.experiment_store import next_output_dir
 from auto_scientist.model_config import ModelConfig
 from auto_scientist.orchestrator import Orchestrator
 from auto_scientist.state import ExperimentState
@@ -57,18 +58,6 @@ def _run_orchestrator(orchestrator: Orchestrator) -> None:
             "Run with --help for details."
         )
         raise click.ClickException("\n".join(parts)) from None
-
-
-def _next_output_dir(base: Path) -> Path:
-    """If *base* already contains a state.json, return base_001, base_002, etc."""
-    if not (base / "state.json").exists():
-        return base
-    seq = 1
-    while True:
-        candidate = base.parent / f"{base.name}_{seq:03d}"
-        if not (candidate / "state.json").exists():
-            return candidate
-        seq += 1
 
 
 def _resolve_model_config(
@@ -152,7 +141,7 @@ def run(
 
     data_abs = str(Path(data).resolve())
 
-    resolved_output = _next_output_dir(Path(output_dir))
+    resolved_output = next_output_dir(Path(output_dir))
     if resolved_output != Path(output_dir):
         console.print(
             f"Previous run detected in {output_dir}/. "

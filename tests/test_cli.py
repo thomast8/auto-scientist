@@ -4,7 +4,8 @@ from unittest.mock import patch
 
 from click.testing import CliRunner
 
-from auto_scientist.cli import _next_output_dir, cli
+from auto_scientist.cli import cli
+from auto_scientist.experiment_store import next_output_dir
 from auto_scientist.model_config import ModelConfig
 from auto_scientist.state import ExperimentState
 
@@ -153,17 +154,17 @@ class TestNextOutputDir:
     def test_returns_base_when_no_state_exists(self, tmp_path):
         base = tmp_path / "experiments"
         base.mkdir()
-        assert _next_output_dir(base) == base
+        assert next_output_dir(base) == base
 
     def test_returns_base_when_dir_does_not_exist(self, tmp_path):
         base = tmp_path / "experiments"
-        assert _next_output_dir(base) == base
+        assert next_output_dir(base) == base
 
     def test_increments_when_state_exists(self, tmp_path):
         base = tmp_path / "experiments"
         base.mkdir()
         (base / "state.json").write_text("{}")
-        assert _next_output_dir(base) == tmp_path / "experiments_001"
+        assert next_output_dir(base) == tmp_path / "experiments_001"
 
     def test_skips_existing_numbered_dirs(self, tmp_path):
         base = tmp_path / "experiments"
@@ -174,7 +175,7 @@ class TestNextOutputDir:
         d1.mkdir()
         (d1 / "state.json").write_text("{}")
 
-        assert _next_output_dir(base) == tmp_path / "experiments_002"
+        assert next_output_dir(base) == tmp_path / "experiments_002"
 
     def test_three_sequential_increments(self, tmp_path):
         base = tmp_path / "experiments"
@@ -189,7 +190,7 @@ class TestNextOutputDir:
         d2.mkdir()
         (d2 / "state.json").write_text("{}")
 
-        assert _next_output_dir(base) == tmp_path / "experiments_003"
+        assert next_output_dir(base) == tmp_path / "experiments_003"
 
 
 class TestRunCommandOptions:
