@@ -9,7 +9,7 @@ from auto_scientist.schemas import (
     PlanChange,
     PredictionOutcome,
     ScientistPlanOutput,
-    TestablePrediction,
+    HypothesisPrediction,
 )
 
 
@@ -174,12 +174,12 @@ class TestScientistPlanOutput:
 
 
 # ---------------------------------------------------------------------------
-# TestablePrediction
+# HypothesisPrediction
 # ---------------------------------------------------------------------------
 
-class TestTestablePrediction:
+class TestHypothesisPrediction:
     def test_valid(self):
-        p = TestablePrediction(
+        p = HypothesisPrediction(
             prediction="residual correlation < 0.1",
             diagnostic="compute Pearson r between residuals and x",
             if_confirmed="noise is additive, continue with OLS",
@@ -188,7 +188,7 @@ class TestTestablePrediction:
         assert p.follows_from is None
 
     def test_with_follows_from(self):
-        p = TestablePrediction(
+        p = HypothesisPrediction(
             prediction="re-test spline after structural change",
             diagnostic="profile smoothing parameter",
             if_confirmed="spline is now identifiable",
@@ -198,7 +198,7 @@ class TestTestablePrediction:
         assert p.follows_from == "smoothing parameter has interior minimum"
 
     def test_extra_fields_ignored(self):
-        p = TestablePrediction(
+        p = HypothesisPrediction(
             prediction="test", diagnostic="test",
             if_confirmed="ok", if_refuted="nope", extra_field="ignored",
         )

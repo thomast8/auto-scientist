@@ -105,7 +105,7 @@ def _validate_reasoning_configs(mc: ModelConfig) -> list[str]:
 
         elif cfg.provider == "google":
             model = cfg.model
-            is_3x = "3" in model and "2.5" not in model and "2.0" not in model
+            is_3x = "gemini-3" in model
             is_25 = "2.5" in model
 
             if is_3x:
@@ -1138,35 +1138,44 @@ class Orchestrator:
             if not result.rounds:
                 continue
 
-            # Use the last round's critic output for concerns
-            last_round = result.rounds[-1]
-            critic_output = last_round.critic_output
-
-            # Gather scientist defense responses (positional matching)
-            # Use the latest defense available from any round
-            defense_responses = []
+            # Build ledger from each round's concerns paired with that
+            # round's defense (not cross-round positional matching).
+            seen_claims: set[str] = set()
             for rnd in result.rounds:
-                if rnd.scientist_defense:
-                    defense_responses = rnd.scientist_defense.responses
-
-            for i, concern in enumerate(critic_output.concerns):
-                verdict = None
-                reasoning = None
-                if i < len(defense_responses):
-                    verdict = defense_responses[i].verdict
-                    reasoning = defense_responses[i].reasoning
-
-                entry = ConcernLedgerEntry(
-                    claim=concern.claim,
-                    severity=concern.severity,
-                    confidence=concern.confidence,
-                    category=concern.category,
-                    persona=result.persona,
-                    critic_model=result.critic_model,
-                    scientist_verdict=verdict,
-                    scientist_reasoning=reasoning,
+                critic_output = rnd.critic_output
+                defense_responses = (
+                    rnd.scientist_defense.responses if rnd.scientist_defense else []
                 )
-                ledger.append(entry.model_dump())
+                # Build a lookup by concern text for fuzzy matching
+                defense_by_text = {}
+                for resp in defense_responses:
+                    defense_by_text[resp.concern.lower().strip()] = resp
+
+                for i, concern in enumerate(critic_output.concerns):
+                    # Deduplicate concerns that appear across rounds
+                    claim_key = concern.claim.lower().strip()
+                    if claim_key in seen_claims:
+                        continue
+                    seen_claims.add(claim_key)
+
+                    # Try text match first, fall back to positional
+                    resp = defense_by_text.get(claim_key)
+                    if resp is None and i < len(defense_responses):
+                        resp = defense_responses[i]
+                    verdict = resp.verdict if resp else None
+                    reasoning = resp.reasoning if resp else None
+
+                    entry = ConcernLedgerEntry(
+                        claim=concern.claim,
+                        severity=concern.severity,
+                        confidence=concern.confidence,
+                        category=concern.category,
+                        persona=result.persona,
+                        critic_model=result.critic_model,
+                        scientist_verdict=verdict,
+                        scientist_reasoning=reasoning,
+                    )
+                    ledger.append(entry.model_dump())
 
         return ledger
 
@@ -1388,10 +1397,11 @@ class Orchestrator:
             # Primary: match by pred_id
             oid = outcome.get("pred_id", "")
             if oid and oid in pending_by_id:
-                record = pending_by_id.pop(oid)
+                record = pending_by_id[oid]
                 if _resolve(record, outcome):
-                    logger.info(f"Prediction {oid}: resolved by ID as '{record.outcome}'")
+                    pending_by_id.pop(oid)
                     pending.remove(record)
+                    logger.info(f"Prediction {oid}: resolved by ID as '{record.outcome}'")
                 continue
 
             # Fallback: substring text matching (minimum length guard)

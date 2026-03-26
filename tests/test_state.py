@@ -43,7 +43,6 @@ class TestExperimentState:
             iteration=1,
             script_path="/tmp/script.py",
             results_path="/tmp/results.txt",
-            score=7,
             hypothesis="Test hypothesis",
             status="completed",
         )
@@ -53,13 +52,13 @@ class TestExperimentState:
         loaded = ExperimentState.load(tmp_state_path)
         assert len(loaded.versions) == 1
         assert loaded.versions[0].version == "v1.01"
-        assert loaded.versions[0].score == 7
+        assert loaded.versions[0].hypothesis == "Test hypothesis"
 
     def test_record_version_appends(self):
         state = ExperimentState(domain="test", goal="g")
-        state.record_version(VersionEntry(version="v1", iteration=1, script_path="a", score=5))
-        state.record_version(VersionEntry(version="v2", iteration=2, script_path="b", score=8))
-        state.record_version(VersionEntry(version="v3", iteration=3, script_path="c", score=3))
+        state.record_version(VersionEntry(version="v1", iteration=1, script_path="a"))
+        state.record_version(VersionEntry(version="v2", iteration=2, script_path="b"))
+        state.record_version(VersionEntry(version="v3", iteration=3, script_path="c"))
         assert len(state.versions) == 3
 
     def test_consecutive_failures(self):
@@ -118,20 +117,18 @@ class TestVersionEntry:
     def test_defaults(self):
         entry = VersionEntry(version="v01", iteration=1, script_path="/tmp/s.py")
         assert entry.results_path is None
-        assert entry.score is None
         assert entry.hypothesis == ""
         assert entry.status == "pending"
 
     def test_serialization_roundtrip(self):
         entry = VersionEntry(
             version="v03", iteration=3, script_path="/tmp/s.py",
-            results_path="/tmp/r.txt", score=85,
+            results_path="/tmp/r.txt",
             hypothesis="Test hypothesis", status="completed",
         )
         json_str = entry.model_dump_json()
         loaded = VersionEntry.model_validate_json(json_str)
         assert loaded.version == "v03"
-        assert loaded.score == 85
         assert loaded.status == "completed"
         assert loaded.hypothesis == "Test hypothesis"
 

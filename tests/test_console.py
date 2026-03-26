@@ -15,7 +15,6 @@ from auto_scientist.console import (
     PipelineLive,
     QuitConfirmScreen,
     _format_elapsed,
-    _score_style,
 )
 
 # ---------------------------------------------------------------------------
@@ -59,17 +58,6 @@ class TestHelperFunctions:
     def test_format_elapsed_minutes_and_seconds(self):
         assert _format_elapsed(125) == "2m 5s"
 
-    def test_score_style_green(self):
-        assert _score_style(70) == "green"
-        assert _score_style(100) == "green"
-
-    def test_score_style_yellow(self):
-        assert _score_style(40) == "yellow"
-        assert _score_style(69) == "yellow"
-
-    def test_score_style_red(self):
-        assert _score_style(0) == "red"
-        assert _score_style(39) == "red"
 
 
 # ---------------------------------------------------------------------------
@@ -312,14 +300,9 @@ class TestMetricsBar:
     async def test_set_status(self):
         bar = MetricsBar()
         async with MetricsBarTestApp(bar).run_test():
-            bar.set_status(
-                iteration=3, phase="DEBATE",
-                best_version="v02", best_score=85,
-            )
+            bar.set_status(iteration=3, phase="DEBATE")
             assert bar.iteration == 3
             assert bar.phase == "DEBATE"
-            assert bar.best_version == "v02"
-            assert bar.best_score == 85
 
     @pytest.mark.asyncio
     async def test_set_status_partial_update(self):
@@ -359,24 +342,6 @@ class TestMetricsBar:
             rendered = bar.render()
             assert "[" in rendered.plain
             assert "]" in rendered.plain
-
-    @pytest.mark.asyncio
-    async def test_render_with_best_score(self):
-        bar = MetricsBar()
-        async with MetricsBarTestApp(bar).run_test():
-            bar.set_status(best_version="v02", best_score=85)
-            rendered = bar.render()
-            assert "best:" in rendered.plain
-            assert "85" in rendered.plain
-
-    @pytest.mark.asyncio
-    async def test_render_malformed_best_version(self):
-        bar = MetricsBar()
-        async with MetricsBarTestApp(bar).run_test():
-            bar.best_version = "bad"
-            bar.best_score = 50
-            rendered = bar.render()
-            assert "?" in rendered.plain
 
     @pytest.mark.asyncio
     async def test_render_with_all_zero_scores(self):

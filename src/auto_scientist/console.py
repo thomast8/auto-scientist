@@ -31,11 +31,14 @@ def _load_prefs() -> dict:
 
 
 def _save_prefs(prefs: dict) -> None:
-    """Save user preferences to disk (atomic write)."""
-    _PREFS_PATH.parent.mkdir(parents=True, exist_ok=True)
-    tmp = _PREFS_PATH.with_suffix(".tmp")
-    tmp.write_text(json.dumps(prefs, indent=2))
-    tmp.replace(_PREFS_PATH)
+    """Save user preferences to disk (atomic write). Silently ignores write failures."""
+    try:
+        _PREFS_PATH.parent.mkdir(parents=True, exist_ok=True)
+        tmp = _PREFS_PATH.with_suffix(".tmp")
+        tmp.write_text(json.dumps(prefs, indent=2))
+        tmp.replace(_PREFS_PATH)
+    except OSError:
+        pass  # Non-critical: preferences are best-effort
 
 from rich.console import Console, RenderableType
 from rich.text import Text
@@ -43,6 +46,7 @@ from textual.app import App, ComposeResult
 from textual.binding import Binding
 from textual.command import Hit, Hits, Provider
 from textual.containers import Center, Vertical, VerticalScroll
+from textual._context import NoActiveAppError
 from textual.css.query import NoMatches
 from textual.screen import ModalScreen
 from textual.widget import Widget
@@ -95,15 +99,6 @@ PHASE_STYLES = {
     "IMPLEMENT": "magenta1",
     "REPORT": "blue",
 }
-
-
-def _score_style(score: int) -> str:
-    """Return a Rich style string for a 0-100 score."""
-    if score >= 70:
-        return "green"
-    if score >= 40:
-        return "yellow"
-    return "red"
 
 
 def _format_elapsed(seconds: float) -> str:
@@ -284,7 +279,7 @@ class AgentPanel(Widget):
         self.all_lines.append(cleaned)
         try:
             app = self.app
-        except Exception:
+        except NoActiveAppError:
             return
         if app._thread_id == threading.get_ident():
             self._write_to_richlog(cleaned)
@@ -304,7 +299,7 @@ class AgentPanel(Widget):
         try:
             app = self.app
             near_bottom = app._is_near_bottom()
-        except Exception:
+        except (NoActiveAppError, NoMatches, AttributeError):
             near_bottom = False
         rich_log.write(Text(text), expand=True)
         if near_bottom:
@@ -371,7 +366,7 @@ class AgentPanel(Widget):
         self._end_time = time.monotonic()
         try:
             app = self.app
-        except Exception:
+        except NoActiveAppError:
             return
         if app._thread_id == threading.get_ident():
             self._apply_error_dom(msg)
@@ -458,8 +453,6 @@ class MetricsBar(Widget):
         self.start_time = time.monotonic()
         self.iteration = 0
         self.phase = ""
-        self.best_version = ""
-        self.best_score: int | None = None
         self.total_input_tokens = 0
         self.total_output_tokens = 0
         self.total_turns = 0
@@ -474,18 +467,12 @@ class MetricsBar(Widget):
         self,
         iteration: int | None = None,
         phase: str | None = None,
-        best_version: str | None = None,
-        best_score: int | None = None,
     ) -> None:
         """Update metrics bar fields. Only non-None values are changed."""
         if iteration is not None:
             self.iteration = iteration
         if phase is not None:
             self.phase = phase
-        if best_version is not None:
-            self.best_version = best_version
-        if best_score is not None:
-            self.best_score = best_score
         self.refresh()
 
     def finish(self) -> None:
@@ -521,17 +508,6 @@ class MetricsBar(Widget):
         if self.total_turns:
             label = "turn" if self.total_turns == 1 else "turns"
             line.append(f" | {self.total_turns} {label}", style="dim")
-
-        if self.best_score is not None:
-            try:
-                best_iter = int(self.best_version.lstrip("v")) + 1
-            except (ValueError, AttributeError):
-                best_iter = "?"
-            style = _score_style(self.best_score)
-            line.append(
-                f"  best: iter {best_iter} ({self.best_score})",
-                style=style,
-            )
 
         if self.scores:
             blocks = " \u2581\u2582\u2583\u2584\u2585\u2586\u2587\u2588"
@@ -1161,7 +1137,7 @@ class PipelineApp(App):
         """Open a directory in the system file manager."""
         try:
             subprocess.Popen(["open", str(path)])
-        except FileNotFoundError:
+        except OSError:
             self.notify(f"Directory: {path}", timeout=10)
 
     # -- Mount helpers (called via call_from_thread from PipelineLive) --

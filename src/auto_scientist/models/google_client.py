@@ -72,10 +72,20 @@ async def query_google(
     thinking_config = None
     if reasoning is not None and reasoning.level not in ("default", "off"):
         if _is_gemini_25(model):
-            budget = reasoning.budget or GOOGLE_BUDGET_DEFAULTS.get(reasoning.level, 4096)
+            budget = reasoning.budget or GOOGLE_BUDGET_DEFAULTS.get(reasoning.level)
+            if budget is None:
+                valid = ", ".join(GOOGLE_BUDGET_DEFAULTS.keys())
+                raise ValueError(
+                    f"Unknown Google reasoning level: {reasoning.level!r}. Valid levels: {valid}"
+                )
             thinking_config = types.ThinkingConfig(thinking_budget=budget)
         else:
-            level_str = GOOGLE_LEVEL_MAP.get(reasoning.level, "HIGH")
+            level_str = GOOGLE_LEVEL_MAP.get(reasoning.level)
+            if level_str is None:
+                valid = ", ".join(GOOGLE_LEVEL_MAP.keys())
+                raise ValueError(
+                    f"Unknown Google reasoning level: {reasoning.level!r}. Valid levels: {valid}"
+                )
             thinking_config = types.ThinkingConfig(thinking_level=level_str)
     elif reasoning is not None and reasoning.level == "off" and _is_gemini_25(model):
         thinking_config = types.ThinkingConfig(thinking_budget=0)

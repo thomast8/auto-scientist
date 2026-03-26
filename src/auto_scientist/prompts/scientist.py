@@ -182,7 +182,23 @@ incremental improvement: polynomial soil features reduced RMSE \
 from 580 to 550. However, soil and weather are still treated as \
 independent. Errors concentrate in high-rainfall periods, \
 suggesting interactions matter.\\n\\nAdding interaction terms \
-and regularization."
+and regularization.",
+  "testable_predictions": [
+    {{
+      "prediction": "Soil-weather interaction terms will reduce high-rainfall RMSE by >30%",
+      "diagnostic": "Compare residual MAE for rainfall>80th percentile before and after adding interactions",
+      "if_confirmed": "Interactions capture cross-factor effects; refine with feature selection",
+      "if_refuted": "Non-linearity is within-variable, not cross-variable; try polynomial weather features alone",
+      "follows_from": null
+    }},
+    {{
+      "prediction": "L2 regularization will reduce train-test gap below 5%",
+      "diagnostic": "Compare train vs test RMSE gap with and without regularization",
+      "if_confirmed": "Overfitting is controlled; proceed to feature engineering",
+      "if_refuted": "Overfitting has a different source; investigate data leakage or feature correlation",
+      "follows_from": null
+    }}
+  ]
 }}
 </output>
 </example>
@@ -239,7 +255,16 @@ dead end: tuning lag windows 5-30min gave no improvement (r2 \
 stayed 0.31). The fundamental problem: regression treats each \
 intersection as isolated. A queue at intersection A spills back \
 to B, but regression has no concept of topology.\\n\\nStructural \
-shift to cell-transmission simulation."
+shift to cell-transmission simulation.",
+  "testable_predictions": [
+    {{
+      "prediction": "Cell-transmission model will achieve queue R-squared above 0.5",
+      "diagnostic": "Compare queue predictions vs observed queue lengths across all intersections",
+      "if_confirmed": "Network-level modeling captures congestion propagation; calibrate per-intersection",
+      "if_refuted": "Queue dynamics depend on factors beyond topology (signal timing, pedestrians); add those inputs",
+      "follows_from": null
+    }}
+  ]
 }}
 </output>
 </example>
@@ -346,7 +371,8 @@ pairs",
   "notebook_entry": "Data exploration\\n\\nFirst iteration. \
 No prior results. Goal: understand the data before \
 forming hypotheses.\\n\\nPlan: compute distributions, check data \
-quality, correlations, and diagnostic plots."
+quality, correlations, and diagnostic plots.",
+  "testable_predictions": []
 }}
 </output>
 </example>
@@ -400,7 +426,16 @@ and RMSE on held-out 20% test set",
   "notebook_entry": "Polynomial fitting\\n\\nExploration \
 (v00) found 200 points with x in [0,10] and y in [-2.7, 9.8]. \
 The data follows a smooth curve with additive noise.\\n\\nFirst \
-hypothesis: polynomial fit. Testing degrees 2-6 with CV."
+hypothesis: polynomial fit. Testing degrees 2-6 with CV.",
+  "testable_predictions": [
+    {{
+      "prediction": "Cross-validated polynomial (degree 2-6) will achieve test R-squared above 0.9",
+      "diagnostic": "Report 5-fold CV mean test R-squared for each degree",
+      "if_confirmed": "Polynomial captures the underlying function; check residuals for systematic patterns",
+      "if_refuted": "Relationship is not polynomial; try splines or Fourier basis functions",
+      "follows_from": null
+    }}
+  ]
 }}
 </output>
 </example>
@@ -432,7 +467,8 @@ R-squared=0.94 (> 0.85). Converged since v06.",
   "notebook_entry": "Investigation complete\\n\\nAll \
 metrics converged since v06. v07 further improved settling 5% to 3%. \
 Transport RMSE (0.08) well below 0.15, shear R-squared (0.94) \
-exceeds 0.85.\\n\\nStopping: converged, all targets met."
+exceeds 0.85.\\n\\nStopping: converged, all targets met.",
+  "testable_predictions": []
 }}
 </output>
 </example>
@@ -531,8 +567,8 @@ complete revised plan as JSON, not a diff against the original.
 </role>
 
 <pipeline_context>
-You receive the original Scientist plan plus the full debate transcript
-(Critic challenges and Scientist defenses). Your revised plan goes directly
+You receive the original Scientist plan plus a structured concern ledger
+(tagged concerns from critics and your prior defense verdicts). Your revised plan goes directly
 to the Coder for implementation. The Coder never sees the debate, only your
 final revised plan, so it must be self-contained and complete.
 

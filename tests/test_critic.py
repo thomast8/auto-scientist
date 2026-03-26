@@ -7,7 +7,6 @@ import pytest
 
 from auto_scientist.agent_result import AgentResult
 from auto_scientist.agents.critic import (
-    MIN_RESPONSE_LENGTH,
     _build_critic_prompt,
     _build_scientist_debate_user_prompt,
     run_debate,
@@ -60,10 +59,11 @@ def _valid_defense_json(
 
 
 def _pad(text: str) -> str:
-    """Pad a response to meet MIN_RESPONSE_LENGTH for tests."""
-    if len(text) >= MIN_RESPONSE_LENGTH:
+    """Pad a response to minimum length for tests."""
+    min_len = 50
+    if len(text) >= min_len:
         return text
-    return text + " " + "x" * (MIN_RESPONSE_LENGTH - len(text) - 1)
+    return text + " " + "x" * (min_len - len(text) - 1)
 
 
 def _critic_result(text: str) -> AgentResult:
@@ -321,18 +321,18 @@ class TestRunDebate:
             assert call.kwargs.get("web_search") is True
 
     @pytest.mark.asyncio
-    async def test_unknown_provider_returns_empty(self, plan):
-        """Unknown provider is captured as a failed debate."""
+    async def test_unknown_provider_raises_when_all_fail(self, plan):
+        """Unknown provider causes all debates to fail, raising RuntimeError."""
         bad_config = AgentModelConfig.model_validate(
             {"provider": "openai", "model": "model"}
         )
         object.__setattr__(bad_config, "provider", "unknown")
-        result = await run_debate(
-            critic_configs=[bad_config],
-            plan=plan,
-            notebook_content="",
-        )
-        assert result == []
+        with pytest.raises(RuntimeError, match="All .* critic debates failed"):
+            await run_debate(
+                critic_configs=[bad_config],
+                plan=plan,
+                notebook_content="",
+            )
 
     @pytest.mark.asyncio
     async def test_anthropic_critic_dispatches_correctly(self, plan):
@@ -429,6 +429,19 @@ class TestCriticRetry:
         # Some debates may fail, but we get results from successful ones
         assert isinstance(result, list)
 
+    @pytest.mark.asyncio
+    async def test_all_debates_fail_raises_runtime_error(self, plan, two_critics):
+        """When all debates fail, run_debate raises RuntimeError."""
+        with (
+            patch(OPENAI_PATH, new_callable=AsyncMock, side_effect=RuntimeError("API error")),
+            patch(GOOGLE_PATH, new_callable=AsyncMock, side_effect=RuntimeError("API error")),
+            pytest.raises(RuntimeError, match="All .* critic debates failed"),
+        ):
+            await run_debate(
+                critic_configs=two_critics, plan=plan,
+                notebook_content="", max_rounds=1,
+            )
+
 
 class TestCriticValidation:
     @pytest.mark.asyncio
@@ -467,8 +480,8 @@ class TestCriticValidation:
         co = result.rounds[0].critic_output
         assert isinstance(co, CriticOutput)
         assert len(co.concerns) == 1
-        assert "[PARSE ERROR]" in co.concerns[0].claim
-        assert co.concerns[0].severity == "high"
+        assert "[SYNTHETIC - PARSE ERROR]" in co.concerns[0].claim
+        assert co.concerns[0].severity == "low"
         assert co.concerns[0].category == "other"
 
 

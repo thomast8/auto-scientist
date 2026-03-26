@@ -439,13 +439,9 @@ async def run_smoke(output_dir: Path) -> None:
         ("No debate on iter 0", not (experiment_dir / "v00" / "debate.json").exists()),
         ("Report generated", (experiment_dir / "report.md").exists()),
         (
-            "Criteria defined in iter 0",
-            final_state.success_criteria is not None
-            and len(final_state.success_criteria) > 0,
+            "Predictions tracked",
+            len(final_state.prediction_history) > 0,
         ),
-        ("v00 scored (by iter 1 analyst)", final_state.versions[0].score is not None),
-        ("v01 scored (by final scoring)", final_state.versions[1].score is not None),
-        ("Best score > 0", final_state.best_score > 0),
     ]
 
     # Validate debate transcript (3 personas, each with rounds)

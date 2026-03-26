@@ -14,9 +14,8 @@ class VersionEntry(BaseModel):
     iteration: int
     script_path: str
     results_path: str | None = None
-    score: int | None = None
     hypothesis: str = ""
-    status: str = "pending"  # pending, running, completed, failed, crashed
+    status: Literal["pending", "running", "completed", "failed", "crashed"] = "pending"
 
 
 class PredictionRecord(BaseModel):
@@ -39,11 +38,10 @@ class ExperimentState(BaseModel):
 
     domain: str
     goal: str
-    phase: str = "ingestion"  # ingestion, iteration, report, stopped
+    phase: Literal["ingestion", "iteration", "report", "stopped"] = "ingestion"
     iteration: int = 0
     versions: list[VersionEntry] = Field(default_factory=list)
     dead_ends: list[str] = Field(default_factory=list)
-    best_version: str | None = None
     schedule: str | None = None
     consecutive_failures: int = 0
     data_path: str | None = None

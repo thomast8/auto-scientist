@@ -48,7 +48,7 @@ async def run_report(
         domain=state.domain,
         goal=state.goal,
         total_iterations=state.iteration,
-        best_version=state.best_version or "none",
+        best_version=state.versions[-1].version if state.versions else "none",
         notebook_content=notebook_content,
     )
 

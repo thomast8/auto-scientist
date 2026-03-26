@@ -57,6 +57,11 @@ async def query_openai(
     effort: str | None = None
     if reasoning is not None and reasoning.level not in ("default", "off"):
         effort = OPENAI_EFFORT_MAP.get(reasoning.level)
+        if effort is None:
+            valid = ", ".join(OPENAI_EFFORT_MAP.keys())
+            raise ValueError(
+                f"Unknown OpenAI reasoning level: {reasoning.level!r}. Valid levels: {valid}"
+            )
 
     if web_search:
         # Build input (multimodal when images provided)

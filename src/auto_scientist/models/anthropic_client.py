@@ -119,6 +119,16 @@ async def query_anthropic(
                 result = json.dumps(block.input)
                 logger.debug(f"Anthropic response (structured): {len(result)} chars")
                 return AgentResult(text=result, input_tokens=in_tok, output_tokens=out_tok)
+        # Structured output requested but no tool_use block found
+        block_types = [getattr(b, "type", type(b).__name__) for b in response.content]
+        logger.error(
+            f"Anthropic response contained no tool_use block despite response_schema="
+            f"{response_schema.__name__}. Content block types: {block_types}"
+        )
+        raise RuntimeError(
+            f"Anthropic structured output failed: no tool_use block in response "
+            f"for schema {response_schema.__name__}"
+        )
 
     # Extract text blocks (skip tool_use/web_search result blocks)
     text_parts = []

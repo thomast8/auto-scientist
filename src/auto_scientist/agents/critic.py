@@ -45,7 +45,6 @@ from auto_scientist.sdk_utils import OutputValidationError, validate_json_output
 logger = logging.getLogger(__name__)
 
 MAX_RETRIES = 1  # 1 retry = 2 total attempts
-MIN_RESPONSE_LENGTH = 50  # minimum chars for a substantive response
 
 
 # ---------------------------------------------------------------------------
@@ -114,14 +113,14 @@ async def _query_critic_structured(
                 correction_hint = f"\n\n{e.correction_prompt()}"
                 logger.warning(f"{label} validation failed, retrying: {e}")
             else:
-                logger.warning(
-                    f"{label} validation failed after retries, preserving raw text as concern"
+                logger.error(
+                    f"{label} validation failed after retries, preserving raw text as synthetic concern"
                 )
                 raw = (result.text or "(empty response)")[:500]
                 fallback = CriticOutput(
                     concerns=[Concern(
-                        claim=f"[PARSE ERROR] {raw}",
-                        severity="high",
+                        claim=f"[SYNTHETIC - PARSE ERROR] {raw}",
+                        severity="low",
                         confidence="low",
                         category="other",
                     )],
@@ -130,11 +129,7 @@ async def _query_critic_structured(
                 )
                 return fallback, result
 
-    # Should not reach here, but satisfy type checker
-    return CriticOutput(
-        concerns=[], alternative_hypotheses=[],
-        overall_assessment="(unreachable fallback)",
-    ), result
+    raise RuntimeError(f"Unreachable: critic structured query loop exited without return")
 
 
 async def _query_scientist_structured(
@@ -171,17 +166,14 @@ async def _query_scientist_structured(
                 correction_hint = f"\n\n{e.correction_prompt()}"
                 logger.warning(f"{label} validation failed, retrying: {e}")
             else:
-                logger.warning(f"{label} validation failed after retries, using raw text")
+                logger.error(f"{label} defense validation failed after retries, using raw text")
                 fallback = ScientistDefense(
                     responses=[],
                     additional_points=result.text or "(empty response)",
                 )
                 return fallback, result
 
-    fallback = ScientistDefense(
-        responses=[], additional_points=result.text or "(empty response)",
-    )
-    return fallback, result
+    raise RuntimeError(f"Unreachable: scientist defense query loop exited without return")
 
 
 # ---------------------------------------------------------------------------
@@ -383,6 +375,12 @@ async def run_debate(
             logger.error(f"Critic debate failed for {persona_name}: {r}", exc_info=r)
         else:
             successful.append(r)
+    if not successful:
+        failed_msgs = [str(r) for r in raw_results if isinstance(r, BaseException)]
+        raise RuntimeError(
+            f"All {len(raw_results)} critic debates failed. "
+            f"Check API keys and network connectivity. Errors: {failed_msgs}"
+        )
     if len(successful) < len(raw_results):
         logger.warning(
             f"Debate: {len(successful)}/{len(raw_results)} debates succeeded"

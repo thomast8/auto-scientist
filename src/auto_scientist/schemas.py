@@ -62,7 +62,7 @@ class CoderRunResult(BaseModel):
     attempts: int = 1
 
 
-class TestablePrediction(BaseModel):
+class HypothesisPrediction(BaseModel):
     """A testable prediction from the Scientist's plan output."""
 
     model_config = ConfigDict(extra="ignore")
@@ -86,4 +86,4 @@ class ScientistPlanOutput(BaseModel):
     should_stop: bool
     stop_reason: str | None
     notebook_entry: str
-    testable_predictions: list[TestablePrediction] = Field(default_factory=list)
+    testable_predictions: list[HypothesisPrediction] = Field(default_factory=list)

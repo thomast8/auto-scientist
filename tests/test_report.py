@@ -35,7 +35,7 @@ class TestRunReport:
 
         state = ExperimentState(
             domain="test", goal="test goal",
-            iteration=5, best_version="v03",
+            iteration=5,
         )
         notebook_path = tmp_path / "lab_notebook.xml"
         notebook_path.write_text("# Lab Notebook")
@@ -120,8 +120,10 @@ class TestRunReport:
 
         state = ExperimentState(
             domain="spo2", goal="predict oxygen levels",
-            iteration=10, best_version="v07",
+            iteration=10,
         )
+        from auto_scientist.state import VersionEntry
+        state.versions.append(VersionEntry(version="v07", iteration=7, script_path="/tmp/s.py"))
         notebook_path = tmp_path / "lab_notebook.xml"
         notebook_path.write_text("# Notebook")
 
