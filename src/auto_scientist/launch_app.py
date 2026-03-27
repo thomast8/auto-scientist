@@ -15,7 +15,6 @@ from textual.widgets import (
     Button,
     DirectoryTree,
     Footer,
-    Header,
     Input,
     Label,
     Rule,
@@ -80,7 +79,8 @@ class BrowseScreen(ModalScreen[str | None]):
     #browse-container {
         width: 80%;
         height: 80%;
-        border: thick $accent;
+        border: round cyan;
+        border-title-color: cyan;
         background: $surface;
         padding: 1;
     }
@@ -89,13 +89,28 @@ class BrowseScreen(ModalScreen[str | None]):
     }
     #browse-selected {
         height: auto;
-        padding: 1;
+        padding: 1 0 0 0;
         color: $text-muted;
     }
     #browse-buttons {
         height: auto;
         dock: bottom;
         padding-top: 1;
+    }
+    #browse-buttons Button {
+        border: none;
+        height: 1;
+        min-height: 1;
+        padding: 0 2;
+        margin-right: 1;
+        background: $surface-lighten-1;
+        min-width: 0;
+    }
+    #browse-select-btn {
+        color: cyan;
+    }
+    #browse-cancel-btn {
+        color: $text-muted;
     }
     """
 
@@ -109,14 +124,14 @@ class BrowseScreen(ModalScreen[str | None]):
         self._selected: str | None = None
 
     def compose(self) -> ComposeResult:
-        with Vertical(id="browse-container"):
-            yield Static("Select a file or directory:", id="browse-header")
+        with Vertical(id="browse-container") as container:
+            container.border_title = "Browse"
             yield DirectoryTree(self._start_path, id="browse-tree")
             yield Static("", id="browse-selected")
             with Horizontal(id="browse-buttons"):
-                yield Button("Select", variant="primary", id="browse-select-btn")
-                yield Button("Select directory", variant="default", id="browse-dir-btn")
-                yield Button("Cancel", variant="error", id="browse-cancel-btn")
+                yield Button("Select", variant="default", id="browse-select-btn")
+                yield Button("Select dir", variant="default", id="browse-dir-btn")
+                yield Button("Cancel", variant="default", id="browse-cancel-btn")
 
     @on(DirectoryTree.FileSelected)
     def _on_file_selected(self, event: DirectoryTree.FileSelected) -> None:
@@ -154,10 +169,12 @@ class LaunchApp(App[ExperimentConfig | None]):
 
     CSS = """
     Screen {
-        layout: vertical;
-        overflow-y: auto;
+        align: center middle;
     }
     #form-container {
+        max-width: 100;
+        border: round cyan;
+        border-title-color: cyan;
         padding: 1 2;
     }
     .form-row {
@@ -165,12 +182,14 @@ class LaunchApp(App[ExperimentConfig | None]):
         margin-bottom: 1;
     }
     .form-label {
-        width: 18;
-        padding: 1 1 0 0;
+        width: 14;
+        padding: 0 1 0 0;
         text-align: right;
+        color: cyan;
+        text-style: bold;
     }
     #goal-input {
-        height: 6;
+        height: 4;
     }
     .short-input {
         width: 20;
@@ -181,18 +200,55 @@ class LaunchApp(App[ExperimentConfig | None]):
     #domain-select {
         width: 1fr;
     }
+    Input {
+        border: none;
+        height: 1;
+        padding: 0 1;
+    }
+    Input:focus {
+        border: none;
+    }
+    TextArea {
+        border: none;
+        padding: 0 1;
+    }
+    TextArea:focus {
+        border: none;
+    }
+    Select {
+        height: auto;
+    }
+    SelectCurrent {
+        border: none;
+        height: 1;
+        padding: 0 1;
+    }
+    Select:focus SelectCurrent {
+        border: none;
+    }
     #browse-btn, #browse-output-btn {
         width: auto;
-        min-width: 10;
+        min-width: 8;
         margin-left: 1;
+        border: none;
+        height: 1;
+        min-height: 1;
+        padding: 0 1;
+        background: $surface;
+        color: $text-muted;
+    }
+    #browse-btn:hover, #browse-output-btn:hover {
+        color: $text;
+        text-style: bold;
     }
     #error-display {
         color: red;
-        padding-left: 19;
+        padding-left: 14;
         height: auto;
     }
-    Button {
-        margin-right: 2;
+    Rule {
+        color: $text-muted;
+        margin: 1 0 0 0;
     }
     """
 
@@ -216,8 +272,9 @@ class LaunchApp(App[ExperimentConfig | None]):
         self._yaml_path: Path | None = None
 
     def compose(self) -> ComposeResult:
-        yield Header()
-        with VerticalScroll(id="form-container"):
+        with VerticalScroll(id="form-container") as container:
+            container.border_title = "Auto-Scientist"
+
             # Domain picker (only if domains are available)
             if self._domain_options:
                 with Horizontal(classes="form-row"):
@@ -232,7 +289,8 @@ class LaunchApp(App[ExperimentConfig | None]):
                         allow_blank=False,
                         id="domain-select",
                     )
-                yield Rule()
+
+            yield Rule()
 
             # Data path with Browse button
             with Horizontal(classes="form-row"):
@@ -248,6 +306,8 @@ class LaunchApp(App[ExperimentConfig | None]):
                 yield Label("Goal:", classes="form-label")
                 yield TextArea(id="goal-input")
 
+            yield Rule()
+
             # Preset
             with Horizontal(classes="form-row"):
                 yield Label("Preset:", classes="form-label")
@@ -259,9 +319,9 @@ class LaunchApp(App[ExperimentConfig | None]):
                     classes="short-input",
                 )
 
-            # Max iterations
+            # Iterations
             with Horizontal(classes="form-row"):
-                yield Label("Max iterations:", classes="form-label")
+                yield Label("Iterations:", classes="form-label")
                 yield Input(
                     value="20",
                     type="integer",
@@ -269,9 +329,9 @@ class LaunchApp(App[ExperimentConfig | None]):
                     classes="short-input",
                 )
 
-            # Debate rounds
+            # Debate
             with Horizontal(classes="form-row"):
-                yield Label("Debate rounds:", classes="form-label")
+                yield Label("Debate:", classes="form-label")
                 yield Input(
                     value="1",
                     type="integer",
@@ -281,13 +341,12 @@ class LaunchApp(App[ExperimentConfig | None]):
 
             # Output dir with Browse button
             with Horizontal(classes="form-row"):
-                yield Label("Output dir:", classes="form-label")
+                yield Label("Output:", classes="form-label")
                 yield Input(
                     value="experiments",
                     id="output-dir-input",
                 )
                 yield Button("Browse", id="browse-output-btn")
-
 
             # Error display
             yield Static("", id="error-display")
