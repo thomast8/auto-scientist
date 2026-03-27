@@ -17,8 +17,6 @@ class TestLaunchAppConstruction:
             assert app.query_one("#max-iterations-input") is not None
             assert app.query_one("#debate-rounds-input") is not None
             assert app.query_one("#output-dir-input") is not None
-            assert app.query_one("#run-button") is not None
-            assert app.query_one("#save-button") is not None
 
     async def test_prefill_from_config(self):
         cfg = ExperimentConfig(
@@ -38,7 +36,7 @@ class TestLaunchAppConstruction:
 
 
 class TestLaunchAppRun:
-    async def test_run_button_stores_config(self):
+    async def test_ctrl_r_stores_config(self):
         app = LaunchApp()
         async with app.run_test(size=(120, 50)) as pilot:
             from textual.widgets import Input, TextArea
@@ -46,25 +44,25 @@ class TestLaunchAppRun:
             app.query_one("#data-input", Input).value = "/tmp/data.csv"
             app.query_one("#goal-input", TextArea).text = "My test goal"
 
-            await pilot.click("#run-button")
+            await pilot.press("ctrl+r")
 
             assert app.result_config is not None
             assert app.result_config.data == "/tmp/data.csv"
             assert app.result_config.goal == "My test goal"
             assert app.result_config.preset == "default"
 
-    async def test_run_button_validates_required_fields(self):
+    async def test_ctrl_r_validates_required_fields(self):
         app = LaunchApp()
         async with app.run_test(size=(120, 50)) as pilot:
             # Don't fill in data/goal
-            await pilot.click("#run-button")
+            await pilot.press("ctrl+r")
 
             # App should still be running (not exited)
             assert app.result_config is None
 
 
 class TestLaunchAppSave:
-    async def test_save_button_writes_yaml(self, tmp_path):
+    async def test_ctrl_s_writes_yaml(self, tmp_path):
         app = LaunchApp(save_path=tmp_path / "saved.yaml")
         async with app.run_test(size=(120, 50)) as pilot:
             from textual.widgets import Input, TextArea
@@ -72,7 +70,7 @@ class TestLaunchAppSave:
             app.query_one("#data-input", Input).value = "/tmp/data.csv"
             app.query_one("#goal-input", TextArea).text = "Save test"
 
-            await pilot.click("#save-button")
+            await pilot.press("ctrl+s")
 
         out = tmp_path / "saved.yaml"
         assert out.exists()

@@ -186,11 +186,6 @@ class LaunchApp(App[ExperimentConfig | None]):
         min-width: 10;
         margin-left: 1;
     }
-    .button-row {
-        height: auto;
-        margin-top: 1;
-        padding-left: 19;
-    }
     #error-display {
         color: red;
         padding-left: 19;
@@ -202,6 +197,8 @@ class LaunchApp(App[ExperimentConfig | None]):
     """
 
     BINDINGS = [
+        ("ctrl+r", "run", "Run"),
+        ("ctrl+s", "save", "Save config"),
         ("ctrl+q", "quit", "Quit"),
     ]
 
@@ -295,11 +292,6 @@ class LaunchApp(App[ExperimentConfig | None]):
             # Error display
             yield Static("", id="error-display")
 
-            # Buttons
-            with Horizontal(classes="button-row"):
-                yield Button("Run", variant="primary", id="run-button")
-                yield Button("Save config", variant="default", id="save-button")
-
         yield Footer()
 
     def on_mount(self) -> None:
@@ -390,15 +382,13 @@ class LaunchApp(App[ExperimentConfig | None]):
             self.query_one("#error-display", Static).update(str(e))
             return None
 
-    @on(Button.Pressed, "#run-button")
-    def _on_run(self, event: Button.Pressed) -> None:
+    def action_run(self) -> None:
         config = self._build_config()
         if config is not None:
             self.result_config = config
             self.exit(config)
 
-    @on(Button.Pressed, "#save-button")
-    def _on_save(self, event: Button.Pressed) -> None:
+    def action_save(self) -> None:
         config = self._build_config()
         if config is None:
             return
