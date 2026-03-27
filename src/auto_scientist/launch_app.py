@@ -13,7 +13,6 @@ from textual.containers import Horizontal, Vertical, VerticalScroll
 from textual.screen import ModalScreen
 from textual.widgets import (
     Button,
-    Checkbox,
     DirectoryTree,
     Footer,
     Header,
@@ -187,11 +186,6 @@ class LaunchApp(App[ExperimentConfig | None]):
         min-width: 10;
         margin-left: 1;
     }
-    .checkbox-row {
-        height: auto;
-        margin-bottom: 1;
-        padding-left: 19;
-    }
     .button-row {
         height: auto;
         margin-top: 1;
@@ -297,10 +291,6 @@ class LaunchApp(App[ExperimentConfig | None]):
                 )
                 yield Button("Browse", id="browse-output-btn")
 
-            # Checkboxes
-            with Horizontal(classes="checkbox-row"):
-                yield Checkbox("Interactive", id="interactive-checkbox")
-                yield Checkbox("Verbose", id="verbose-checkbox")
 
             # Error display
             yield Static("", id="error-display")
@@ -324,8 +314,6 @@ class LaunchApp(App[ExperimentConfig | None]):
         self.query_one("#max-iterations-input", Input).value = str(cfg.max_iterations)
         self.query_one("#debate-rounds-input", Input).value = str(cfg.debate_rounds)
         self.query_one("#output-dir-input", Input).value = cfg.output_dir
-        self.query_one("#interactive-checkbox", Checkbox).value = cfg.interactive
-        self.query_one("#verbose-checkbox", Checkbox).value = cfg.verbose
 
     @on(Button.Pressed, "#browse-btn")
     def _on_browse(self, event: Button.Pressed) -> None:
@@ -397,8 +385,6 @@ class LaunchApp(App[ExperimentConfig | None]):
                 ),
                 output_dir=self.query_one("#output-dir-input", Input).value
                 or "experiments",
-                interactive=self.query_one("#interactive-checkbox", Checkbox).value,
-                verbose=self.query_one("#verbose-checkbox", Checkbox).value,
             )
         except (ValidationError, ValueError) as e:
             self.query_one("#error-display", Static).update(str(e))
