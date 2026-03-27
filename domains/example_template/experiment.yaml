@@ -1,0 +1,6 @@
+data: seed/data/
+goal: >
+  Replace this with your investigation goal.
+  Use YAML folded scalar (>) for multiline goals.
+max_iterations: 5
+preset: default

@@ -183,3 +183,37 @@ class TestToYaml:
 
 
 from pathlib import Path
+
+# Root of the project (tests/ is one level down from repo root)
+PROJECT_ROOT = Path(__file__).parent.parent
+
+
+class TestDomainExperimentYamls:
+    @pytest.mark.parametrize("domain", [
+        "toy_function",
+        "spo2",
+        "alien_minerals",
+        "alloy_design",
+        "water_treatment",
+        "example_template",
+    ])
+    def test_domain_yaml_valid_schema(self, domain):
+        yaml_path = PROJECT_ROOT / "domains" / domain / "experiment.yaml"
+        assert yaml_path.exists(), f"Missing experiment.yaml for domain {domain}"
+
+        cfg = ExperimentConfig.from_yaml(yaml_path)
+        assert cfg.data
+        assert cfg.goal
+
+    @pytest.mark.parametrize("domain", [
+        "toy_function",
+        "spo2",
+        "alien_minerals",
+        "alloy_design",
+        "water_treatment",
+    ])
+    def test_domain_yaml_data_path_exists(self, domain):
+        yaml_path = PROJECT_ROOT / "domains" / domain / "experiment.yaml"
+        cfg = ExperimentConfig.from_yaml(yaml_path)
+        resolved = cfg.resolve_data_path(yaml_path.parent)
+        assert resolved.exists(), f"Data path {resolved} does not exist for domain {domain}"

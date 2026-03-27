@@ -1,0 +1,8 @@
+data: seed/data/spo2.db
+goal: >
+  Model SpO2 dynamics during voluntary breath-holds using a two-stage
+  approach: sensor calibration (latent SaO2 + gamma kernel) then
+  physiology (Severinghaus ODC). Single subject, 5 breath-holds at
+  different lung volumes.
+max_iterations: 10
+preset: default

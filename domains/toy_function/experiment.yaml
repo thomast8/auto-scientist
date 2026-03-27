@@ -1,0 +1,6 @@
+data: seed/data/toy_function.csv
+goal: >
+  Discover the mathematical function that generated this dataset.
+  The data contains x and y columns with some noise.
+max_iterations: 5
+preset: default
