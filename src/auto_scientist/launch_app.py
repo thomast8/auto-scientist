@@ -122,6 +122,41 @@ def _discover_domains() -> list[tuple[str, str]]:
     return [(label, path) for _, label, path in results]
 
 
+class _PlainDirectoryTree(DirectoryTree):
+    """DirectoryTree with plain text icons instead of emoji."""
+
+    ICON_NODE = "+ "
+    ICON_NODE_EXPANDED = "- "
+    ICON_FILE = "  "
+
+    COMPONENT_CLASSES = {
+        "tree--cursor",
+        "tree--guides",
+        "tree--guides-hover",
+        "tree--guides-selected",
+        "tree--highlight",
+        "tree--highlight-line",
+    }
+
+    DEFAULT_CSS = """
+    _PlainDirectoryTree {
+        color: $text;
+    }
+    _PlainDirectoryTree > .tree--guides {
+        color: grey;
+    }
+    _PlainDirectoryTree > .tree--guides-hover {
+        color: grey;
+    }
+    _PlainDirectoryTree > .tree--guides-selected {
+        color: grey;
+    }
+    _PlainDirectoryTree > .tree--highlight-line {
+        color: grey;
+    }
+    """
+
+
 class BrowseScreen(ModalScreen[str | None]):
     """Modal file/directory browser using DirectoryTree."""
 
@@ -138,6 +173,33 @@ class BrowseScreen(ModalScreen[str | None]):
     }
     #browse-tree {
         height: 1fr;
+        scrollbar-color: grey;
+    }
+    _PlainDirectoryTree {
+        color: $text;
+    }
+    _PlainDirectoryTree > .tree--guides {
+        color: grey;
+    }
+    _PlainDirectoryTree > .tree--guides-hover {
+        color: grey;
+    }
+    _PlainDirectoryTree > .tree--guides-selected {
+        color: grey;
+    }
+    _PlainDirectoryTree > .tree--cursor {
+        background: $surface-lighten-1;
+        color: $text;
+        text-style: bold;
+    }
+    _PlainDirectoryTree:focus > .tree--cursor {
+        background: $surface-lighten-2;
+    }
+    _PlainDirectoryTree > .tree--highlight {
+        background: $surface-lighten-1;
+    }
+    _PlainDirectoryTree > .tree--highlight-line {
+        color: grey;
     }
     #browse-selected {
         height: auto;
@@ -159,7 +221,8 @@ class BrowseScreen(ModalScreen[str | None]):
         min-width: 0;
     }
     #browse-select-btn {
-        color: cyan;
+        color: $text;
+        text-style: bold;
     }
     #browse-cancel-btn {
         color: $text-muted;
@@ -178,7 +241,7 @@ class BrowseScreen(ModalScreen[str | None]):
     def compose(self) -> ComposeResult:
         with Vertical(id="browse-container") as container:
             container.border_title = "Browse"
-            yield DirectoryTree(self._start_path, id="browse-tree")
+            yield _PlainDirectoryTree(self._start_path, id="browse-tree")
             yield Static("", id="browse-selected")
             with Horizontal(id="browse-buttons"):
                 yield Button("Select", variant="default", id="browse-select-btn")
