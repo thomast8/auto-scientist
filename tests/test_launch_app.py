@@ -40,7 +40,7 @@ class TestLaunchAppConstruction:
 class TestLaunchAppRun:
     async def test_run_button_stores_config(self):
         app = LaunchApp()
-        async with app.run_test(size=(120, 40)) as pilot:
+        async with app.run_test(size=(120, 50)) as pilot:
             from textual.widgets import Input, TextArea
 
             app.query_one("#data-input", Input).value = "/tmp/data.csv"
@@ -55,7 +55,7 @@ class TestLaunchAppRun:
 
     async def test_run_button_validates_required_fields(self):
         app = LaunchApp()
-        async with app.run_test(size=(120, 40)) as pilot:
+        async with app.run_test(size=(120, 50)) as pilot:
             # Don't fill in data/goal
             await pilot.click("#run-button")
 
@@ -66,7 +66,7 @@ class TestLaunchAppRun:
 class TestLaunchAppSave:
     async def test_save_button_writes_yaml(self, tmp_path):
         app = LaunchApp(save_path=tmp_path / "saved.yaml")
-        async with app.run_test(size=(120, 40)) as pilot:
+        async with app.run_test(size=(120, 50)) as pilot:
             from textual.widgets import Input, TextArea
 
             app.query_one("#data-input", Input).value = "/tmp/data.csv"

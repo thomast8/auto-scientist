@@ -17,6 +17,7 @@ from textual.widgets import (
     Header,
     Input,
     Label,
+    Rule,
     Select,
     Static,
     TextArea,
@@ -25,7 +26,29 @@ from textual.widgets import (
 from auto_scientist.experiment_config import ExperimentConfig
 from auto_scientist.model_config import BUILTIN_PRESETS
 
-PRESET_OPTIONS = [(name, name) for name in BUILTIN_PRESETS if name != "medium"]
+PRESET_OPTIONS = [
+    ("default (medium)", "default"),
+    ("fast", "fast"),
+    ("high", "high"),
+    ("max", "max"),
+]
+
+# Sentinel for "no domain selected" in the domain picker
+_CUSTOM = "__custom__"
+
+
+def _discover_domains() -> list[tuple[str, str]]:
+    """Find domains that have experiment.yaml files, return (label, path) pairs."""
+    domains_dir = Path("domains")
+    if not domains_dir.is_dir():
+        return []
+    results = []
+    for candidate in sorted(domains_dir.iterdir()):
+        yaml_path = candidate / "experiment.yaml"
+        if yaml_path.is_file() and candidate.name != "example_template":
+            label = candidate.name.replace("_", " ").title()
+            results.append((label, str(yaml_path)))
+    return results
 
 
 class LaunchApp(App[ExperimentConfig | None]):
@@ -56,6 +79,9 @@ class LaunchApp(App[ExperimentConfig | None]):
     }
     #data-input, #output-dir-input {
         width: 1fr;
+    }
+    #domain-select {
+        width: 40;
     }
     .checkbox-row {
         height: auto;
@@ -90,10 +116,29 @@ class LaunchApp(App[ExperimentConfig | None]):
         self._prefill = prefill
         self._save_path = save_path
         self.result_config: ExperimentConfig | None = None
+        self._domain_options = _discover_domains()
+        # Track the YAML path for domain-relative data resolution
+        self._yaml_path: Path | None = None
 
     def compose(self) -> ComposeResult:
         yield Header()
         with VerticalScroll(id="form-container"):
+            # Domain picker (only if domains are available)
+            if self._domain_options:
+                with Horizontal(classes="form-row"):
+                    yield Label("Domain:", classes="form-label")
+                    domain_choices = [
+                        ("Custom", _CUSTOM),
+                        *self._domain_options,
+                    ]
+                    yield Select(
+                        domain_choices,
+                        value=_CUSTOM,
+                        allow_blank=False,
+                        id="domain-select",
+                    )
+                yield Rule()
+
             # Data path
             with Horizontal(classes="form-row"):
                 yield Label("Data path:", classes="form-label")
@@ -163,20 +208,42 @@ class LaunchApp(App[ExperimentConfig | None]):
 
     def on_mount(self) -> None:
         if self._prefill:
-            self.query_one("#data-input", Input).value = self._prefill.data
-            self.query_one("#goal-input", TextArea).text = self._prefill.goal
-            self.query_one("#preset-select", Select).value = self._prefill.preset
-            self.query_one("#max-iterations-input", Input).value = str(
-                self._prefill.max_iterations
-            )
-            self.query_one("#debate-rounds-input", Input).value = str(
-                self._prefill.debate_rounds
-            )
-            self.query_one("#output-dir-input", Input).value = self._prefill.output_dir
-            self.query_one("#interactive-checkbox", Checkbox).value = (
-                self._prefill.interactive
-            )
-            self.query_one("#verbose-checkbox", Checkbox).value = self._prefill.verbose
+            self._apply_config(self._prefill)
+
+    def _apply_config(self, cfg: ExperimentConfig) -> None:
+        """Fill the form from an ExperimentConfig."""
+        self.query_one("#data-input", Input).value = cfg.data
+        self.query_one("#goal-input", TextArea).text = cfg.goal
+        self.query_one("#preset-select", Select).value = cfg.preset
+        self.query_one("#max-iterations-input", Input).value = str(cfg.max_iterations)
+        self.query_one("#debate-rounds-input", Input).value = str(cfg.debate_rounds)
+        self.query_one("#output-dir-input", Input).value = cfg.output_dir
+        self.query_one("#interactive-checkbox", Checkbox).value = cfg.interactive
+        self.query_one("#verbose-checkbox", Checkbox).value = cfg.verbose
+
+    @on(Select.Changed, "#domain-select")
+    def _on_domain_changed(self, event: Select.Changed) -> None:
+        """When a domain is selected, load its experiment.yaml and fill the form."""
+        if event.value == _CUSTOM:
+            self._yaml_path = None
+            return
+
+        yaml_path = Path(str(event.value))
+        if not yaml_path.exists():
+            return
+
+        try:
+            cfg = ExperimentConfig.from_yaml(yaml_path)
+        except ValueError:
+            return
+
+        self._yaml_path = yaml_path
+        # Resolve data path relative to the YAML file for display
+        resolved_data = cfg.resolve_data_path(yaml_path.parent)
+        cfg.data = str(resolved_data)
+        # Set output dir to domain name
+        cfg.output_dir = f"experiments/{yaml_path.parent.name}"
+        self._apply_config(cfg)
 
     def _build_config(self) -> ExperimentConfig | None:
         """Collect form values and build an ExperimentConfig, or None on validation error."""
