@@ -100,7 +100,7 @@ class BrowseScreen(ModalScreen[str | None]):
     """
 
     BINDINGS = [
-        ("escape", "cancel", "Cancel"),
+        ("ctrl+q", "cancel", "Cancel"),
     ]
 
     def __init__(self, start_path: str = ".") -> None:
@@ -202,7 +202,7 @@ class LaunchApp(App[ExperimentConfig | None]):
     """
 
     BINDINGS = [
-        ("escape", "quit", "Quit"),
+        ("ctrl+q", "quit", "Quit"),
     ]
 
     def __init__(
