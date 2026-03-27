@@ -9,10 +9,12 @@ from pathlib import Path
 
 from textual import on
 from textual.app import App, ComposeResult
-from textual.containers import Horizontal, VerticalScroll
+from textual.containers import Horizontal, Vertical, VerticalScroll
+from textual.screen import ModalScreen
 from textual.widgets import (
     Button,
     Checkbox,
+    DirectoryTree,
     Footer,
     Header,
     Input,
@@ -24,7 +26,6 @@ from textual.widgets import (
 )
 
 from auto_scientist.experiment_config import ExperimentConfig
-from auto_scientist.model_config import BUILTIN_PRESETS
 
 PRESET_OPTIONS = [
     ("default (medium)", "default"),
@@ -36,30 +37,117 @@ PRESET_OPTIONS = [
 # Sentinel for "no domain selected" in the domain picker
 _CUSTOM = "__custom__"
 
-
-DOMAIN_DIFFICULTY: dict[str, str] = {
-    "toy_function": "easy",
-    "alien_minerals": "medium",
-    "alloy_design": "medium",
-    "water_treatment": "hard",
-    "spo2": "hard",
+DOMAIN_DIFFICULTY: dict[str, tuple[str, int]] = {
+    "toy_function": ("easy", 0),
+    "alien_minerals": ("medium", 1),
+    "alloy_design": ("medium", 2),
+    "water_treatment": ("hard", 3),
+    "spo2": ("hard", 4),
 }
 
 
 def _discover_domains() -> list[tuple[str, str]]:
-    """Find domains that have experiment.yaml files, return (label, path) pairs."""
+    """Find domains that have experiment.yaml files, return (label, yaml_path) pairs.
+
+    Sorted by difficulty (easy to hard).
+    """
     domains_dir = Path("domains")
     if not domains_dir.is_dir():
         return []
     results = []
-    for candidate in sorted(domains_dir.iterdir()):
+    for candidate in domains_dir.iterdir():
         yaml_path = candidate / "experiment.yaml"
         if yaml_path.is_file() and candidate.name != "example_template":
             name = candidate.name.replace("_", " ").title()
-            difficulty = DOMAIN_DIFFICULTY.get(candidate.name, "")
-            label = f"{name} ({difficulty})" if difficulty else name
-            results.append((label, str(yaml_path)))
-    return results
+            diff_info = DOMAIN_DIFFICULTY.get(candidate.name)
+            if diff_info:
+                label = f"{name} ({diff_info[0]})"
+                sort_key = diff_info[1]
+            else:
+                label = name
+                sort_key = 99
+            results.append((sort_key, label, str(yaml_path)))
+    results.sort(key=lambda x: x[0])
+    return [(label, path) for _, label, path in results]
+
+
+class BrowseScreen(ModalScreen[str | None]):
+    """Modal file/directory browser using DirectoryTree."""
+
+    CSS = """
+    BrowseScreen {
+        align: center middle;
+    }
+    #browse-container {
+        width: 80%;
+        height: 80%;
+        border: thick $accent;
+        background: $surface;
+        padding: 1;
+    }
+    #browse-tree {
+        height: 1fr;
+    }
+    #browse-selected {
+        height: auto;
+        padding: 1;
+        color: $text-muted;
+    }
+    #browse-buttons {
+        height: auto;
+        dock: bottom;
+        padding-top: 1;
+    }
+    """
+
+    BINDINGS = [
+        ("escape", "cancel", "Cancel"),
+    ]
+
+    def __init__(self, start_path: str = ".") -> None:
+        super().__init__()
+        self._start_path = start_path
+        self._selected: str | None = None
+
+    def compose(self) -> ComposeResult:
+        with Vertical(id="browse-container"):
+            yield Static("Select a file or directory:", id="browse-header")
+            yield DirectoryTree(self._start_path, id="browse-tree")
+            yield Static("", id="browse-selected")
+            with Horizontal(id="browse-buttons"):
+                yield Button("Select", variant="primary", id="browse-select-btn")
+                yield Button("Select directory", variant="default", id="browse-dir-btn")
+                yield Button("Cancel", variant="error", id="browse-cancel-btn")
+
+    @on(DirectoryTree.FileSelected)
+    def _on_file_selected(self, event: DirectoryTree.FileSelected) -> None:
+        self._selected = str(event.path)
+        self.query_one("#browse-selected", Static).update(f"Selected: {event.path}")
+
+    @on(DirectoryTree.DirectorySelected)
+    def _on_dir_selected(self, event: DirectoryTree.DirectorySelected) -> None:
+        self._selected = str(event.path)
+        self.query_one("#browse-selected", Static).update(f"Selected: {event.path}")
+
+    @on(Button.Pressed, "#browse-select-btn")
+    def _on_select(self, event: Button.Pressed) -> None:
+        if self._selected:
+            self.dismiss(self._selected)
+
+    @on(Button.Pressed, "#browse-dir-btn")
+    def _on_select_dir(self, event: Button.Pressed) -> None:
+        # Use the currently highlighted node's path (directory)
+        tree = self.query_one("#browse-tree", DirectoryTree)
+        if tree.cursor_node and tree.cursor_node.data:
+            path = tree.cursor_node.data.path
+            self.dismiss(str(path))
+
+    @on(Button.Pressed, "#browse-cancel-btn")
+    def _on_cancel(self, event: Button.Pressed) -> None:
+        self.dismiss(None)
+
+    def action_cancel(self) -> None:
+        self.dismiss(None)
 
 
 class LaunchApp(App[ExperimentConfig | None]):
@@ -92,7 +180,12 @@ class LaunchApp(App[ExperimentConfig | None]):
         width: 1fr;
     }
     #domain-select {
-        width: 40;
+        width: 1fr;
+    }
+    #browse-btn {
+        width: auto;
+        min-width: 10;
+        margin-left: 1;
     }
     .checkbox-row {
         height: auto;
@@ -150,13 +243,14 @@ class LaunchApp(App[ExperimentConfig | None]):
                     )
                 yield Rule()
 
-            # Data path
+            # Data path with Browse button
             with Horizontal(classes="form-row"):
                 yield Label("Data path:", classes="form-label")
                 yield Input(
                     placeholder="path/to/dataset.csv or directory",
                     id="data-input",
                 )
+                yield Button("Browse", id="browse-btn")
 
             # Goal
             with Horizontal(classes="form-row"):
@@ -231,6 +325,16 @@ class LaunchApp(App[ExperimentConfig | None]):
         self.query_one("#output-dir-input", Input).value = cfg.output_dir
         self.query_one("#interactive-checkbox", Checkbox).value = cfg.interactive
         self.query_one("#verbose-checkbox", Checkbox).value = cfg.verbose
+
+    @on(Button.Pressed, "#browse-btn")
+    def _on_browse(self, event: Button.Pressed) -> None:
+        """Open the file browser modal."""
+        self.push_screen(BrowseScreen("."), self._on_browse_result)
+
+    def _on_browse_result(self, result: str | None) -> None:
+        """Handle the result from the file browser."""
+        if result is not None:
+            self.query_one("#data-input", Input).value = result
 
     @on(Select.Changed, "#domain-select")
     def _on_domain_changed(self, event: Select.Changed) -> None:
