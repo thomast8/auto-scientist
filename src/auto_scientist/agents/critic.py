@@ -18,6 +18,8 @@ import json
 import logging
 from typing import Any
 
+from pydantic import BaseModel
+
 from auto_scientist.agent_result import AgentResult
 from auto_scientist.agents.debate_models import (
     CRITIC_OUTPUT_SCHEMA,
@@ -55,22 +57,27 @@ MAX_RETRIES = 1  # 1 retry = 2 total attempts
 async def _query_critic(
     config: AgentModelConfig,
     prompt: str,
+    *,
+    response_schema: type[BaseModel] | None = None,
 ) -> AgentResult:
     """Dispatch a prompt to the appropriate provider with web search enabled."""
     if config.provider == "openai":
         return await query_openai(
             config.model, prompt,
             web_search=True, reasoning=config.reasoning,
+            response_schema=response_schema,
         )
     elif config.provider == "google":
         return await query_google(
             config.model, prompt,
             web_search=True, reasoning=config.reasoning,
+            response_schema=response_schema,
         )
     elif config.provider == "anthropic":
         return await query_anthropic(
             config.model, prompt,
             web_search=True, reasoning=config.reasoning,
+            response_schema=response_schema,
         )
     else:
         raise ValueError(f"Unknown critic provider: {config.provider!r}")
@@ -98,7 +105,9 @@ async def _query_critic_structured(
     for attempt in range(MAX_RETRIES + 1):
         effective_prompt = prompt + correction_hint
         try:
-            result = await _query_critic(config, effective_prompt)
+            result = await _query_critic(
+                config, effective_prompt, response_schema=CriticOutput,
+            )
         except Exception as e:
             if attempt < MAX_RETRIES:
                 logger.warning(f"{label} error ({e}), retrying (attempt {attempt + 1})")
@@ -151,7 +160,9 @@ async def _query_scientist_structured(
         effective_prompt = prompt + correction_hint
         full_prompt = f"{system_prompt}\n\n{effective_prompt}"
         try:
-            result = await _query_critic(config, full_prompt)
+            result = await _query_critic(
+                config, full_prompt, response_schema=ScientistDefense,
+            )
         except Exception as e:
             if attempt < MAX_RETRIES:
                 logger.warning(f"{label} error ({e}), retrying (attempt {attempt + 1})")
@@ -192,6 +203,7 @@ async def run_single_critic_debate(
     persona: dict[str, str] | None = None,
     analysis_json: str = "",
     prediction_history: str = "",
+    goal: str = "",
 ) -> DebateResult:
     """Run a multi-round debate between one critic (with persona) and the scientist.
 
@@ -216,6 +228,7 @@ async def run_single_critic_debate(
         persona_text=persona_text,
         analysis_json=analysis_json,
         prediction_history=prediction_history,
+        goal=goal,
     )
     critic_output, critic_result = await _query_critic_structured(
         config, critic_prompt,
@@ -245,6 +258,7 @@ async def run_single_critic_debate(
                 critic_persona=persona_name,
                 analysis_json=analysis_json,
                 prediction_history=prediction_history,
+                goal=goal,
             )
             scientist_defense, sci_result = await _query_scientist_structured(
                 scientist_config, scientist_user_prompt, scientist_system,
@@ -269,6 +283,7 @@ async def run_single_critic_debate(
                 persona_text=persona_text,
                 analysis_json=analysis_json,
                 prediction_history=prediction_history,
+                goal=goal,
             )
             critic_output, critic_result = await _query_critic_structured(
                 config, critic_prompt,
@@ -310,6 +325,7 @@ async def run_debate(
     iteration: int = 0,
     analysis_json: str = "",
     prediction_history: str = "",
+    goal: str = "",
 ) -> list[DebateResult]:
     """Run parallel debates, one per persona, with rotating model assignment.
 
@@ -328,6 +344,7 @@ async def run_debate(
         iteration: Current iteration number (for model rotation).
         analysis_json: Serialized analysis JSON from the Analyst.
         prediction_history: Formatted prediction history string.
+        goal: Investigation goal string passed through to prompt builders.
 
     Returns:
         List of DebateResult, one per persona (always 3 unless no critics).
@@ -364,6 +381,7 @@ async def run_debate(
                 persona=persona,
                 analysis_json=analysis_json,
                 prediction_history=prediction_history,
+                goal=goal,
             )
         )
 
@@ -401,6 +419,7 @@ def _build_critic_prompt(
     persona_text: str = "",
     analysis_json: str = "",
     prediction_history: str = "",
+    goal: str = "",
 ) -> str:
     """Build the prompt sent to critic models.
 
@@ -420,6 +439,7 @@ def _build_critic_prompt(
     )
 
     user = CRITIC_USER.format(
+        goal=goal or "(no goal specified)",
         domain_knowledge=domain_knowledge or "(none provided)",
         notebook_content=notebook_content or "(empty)",
         analysis_json=analysis_json or "(no analysis yet)",
@@ -438,9 +458,11 @@ def _build_scientist_debate_user_prompt(
     critic_persona: str = "",
     analysis_json: str = "",
     prediction_history: str = "",
+    goal: str = "",
 ) -> str:
     """Build the user prompt for the Scientist responding to a critique during debate."""
     return SCIENTIST_DEBATE_USER.format(
+        goal=goal or "(no goal specified)",
         domain_knowledge=domain_knowledge or "(none provided)",
         notebook_content=notebook_content or "(empty)",
         analysis_json=analysis_json or "(no analysis yet)",

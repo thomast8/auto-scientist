@@ -583,3 +583,37 @@ class TestFormatPredictionsForPrompt:
         assert "[v02]" in result
 
 
+class TestGoalInPrompts:
+    """Verify that the goal placeholder is present and populated in prompts."""
+
+    def test_goal_in_scientist_user(self):
+        from auto_scientist.prompts.scientist import SCIENTIST_USER
+
+        prompt = SCIENTIST_USER.format(
+            goal="discover causal relationships",
+            domain_knowledge="dk",
+            prediction_history="ph",
+            notebook_content="nb",
+            analysis_json="{}",
+            version="v01",
+        )
+        assert "discover causal relationships" in prompt
+        assert "<goal>" in prompt
+
+    def test_goal_in_scientist_revision_user(self):
+        from auto_scientist.prompts.scientist import SCIENTIST_REVISION_USER
+
+        prompt = SCIENTIST_REVISION_USER.format(
+            goal="find classification rules",
+            domain_knowledge="dk",
+            prediction_history="ph",
+            notebook_content="nb",
+            analysis_json="{}",
+            original_plan="{}",
+            concern_ledger="[]",
+            version="v01",
+        )
+        assert "find classification rules" in prompt
+        assert "<goal>" in prompt
+
+

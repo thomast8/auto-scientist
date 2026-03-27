@@ -181,8 +181,8 @@ async def collect_text_from_query(
     Prefers ResultMessage.result; falls back to concatenated AssistantMessage
     TextBlocks. Raises RuntimeError if no text is produced.
 
-    Token usage from ResultMessage.usage is stored on the module-level
-    `last_usage` dict for the caller to read after the call completes.
+    Token usage from ResultMessage.usage is stored on the function-level
+    `last_usage` attribute for the caller to read after the call completes.
 
     This extracts the common pattern shared by Analyst, Scientist, and
     Scientist Revision agents.
@@ -218,3 +218,71 @@ async def collect_text_from_query(
 
 # Initialize the usage attribute
 collect_text_from_query.last_usage = {}  # type: ignore[attr-defined]
+
+
+# ── Report structure validation ─────────────────────────────────────────────
+
+# Expected heading keywords for fuzzy matching (case-insensitive substring)
+_EXPECTED_HEADINGS = [
+    "executive summary",
+    "problem statement",
+    "methodology",
+    "journey",
+    "best approach",
+    "results",
+    "insights",
+    "limitations",
+    "future work",
+    "version comparison",
+]
+
+
+def validate_report_structure(text: str) -> list[str]:
+    """Validate that a report has the expected section structure.
+
+    Returns a list of issue strings (empty = valid).
+    Checks for: required headings, non-empty sections, markdown table in
+    Version Comparison section.
+    """
+    issues: list[str] = []
+    lines = text.split("\n")
+
+    # Find all ## headings and their line indices
+    heading_indices: list[tuple[int, str]] = []
+    for i, line in enumerate(lines):
+        if line.startswith("## "):
+            heading_indices.append((i, line[3:].strip()))
+
+    # Check for expected headings (case-insensitive substring match)
+    found_headings = [h.lower() for _, h in heading_indices]
+    for expected in _EXPECTED_HEADINGS:
+        if not any(expected in h for h in found_headings):
+            issues.append(f"Missing section: {expected}")
+
+    # Check each section has non-empty content
+    for idx, (line_num, heading) in enumerate(heading_indices):
+        if idx + 1 < len(heading_indices):
+            next_line_num = heading_indices[idx + 1][0]
+        else:
+            next_line_num = len(lines)
+        section_content = "\n".join(lines[line_num + 1 : next_line_num]).strip()
+        if not section_content:
+            issues.append(f"Empty section: {heading}")
+
+    # Check Version Comparison Table has a markdown table
+    for line_num, heading in heading_indices:
+        if "version comparison" in heading.lower():
+            # Find content until next heading or end
+            end = len(lines)
+            for future_num, _ in heading_indices:
+                if future_num > line_num:
+                    end = future_num
+                    break
+            section = "\n".join(lines[line_num + 1 : end])
+            if "|" not in section:
+                issues.append(
+                    "Version Comparison Table section missing markdown table"
+                )
+            break
+
+    return issues

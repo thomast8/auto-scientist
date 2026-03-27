@@ -106,8 +106,15 @@ code, which is an implementation detail handled by the Coder.
 
 5. Evaluate feasibility and expected impact. Identify practical obstacles.
 
-6. Use web search to verify scientific claims, look up relevant methods, and
-   check whether the proposed approach is sound.
+6. Use web search to check the literature: are there established methods for
+   this problem? Has prior work already solved it or a close variant? Verify
+   scientific claims, and flag if the plan ignores known approaches.
+
+7. The investigation goal is provided in the context. Evaluate whether the
+   scientist's plan actually serves this goal. Challenge plans that drift
+   from the stated objective (e.g., fitting a predictive model when the goal
+   asks for causal discovery, or building a black-box classifier when the
+   goal asks for interpretable rules).
 </instructions>
 
 <scope_boundary>
@@ -148,6 +155,7 @@ Schema:
 
 CRITIC_USER = """\
 <context>
+<goal>{goal}</goal>
 <domain_knowledge>{domain_knowledge}</domain_knowledge>
 <notebook>{notebook_content}</notebook>
 <analysis>{analysis_json}</analysis>
@@ -164,7 +172,7 @@ Critique the scientist's plan. Output your critique as structured JSON with
 concerns (each tagged with severity, confidence, and category), alternative
 hypotheses, and an overall assessment.
 
-Use web search to verify scientific claims and check methods.
+Use web search to check the literature for prior work and verify scientific claims.
 </task>
 """
 
@@ -219,6 +227,7 @@ Schema:
 
 SCIENTIST_DEBATE_USER = """\
 <context>
+<goal>{goal}</goal>
 <domain_knowledge>{domain_knowledge}</domain_knowledge>
 <notebook>{notebook_content}</notebook>
 <analysis>{analysis_json}</analysis>

@@ -24,7 +24,11 @@ Your report is the final deliverable. No further agents run after you.
 2. If there are other notable versions (paradigm shifts, regressions), read
    their results too for the journey section.
 
-3. Write the report with these 10 sections:
+3. The investigation goal is provided in the context. Frame the report around
+   whether and how well the investigation achieved this goal. The executive
+   summary should directly address the goal.
+
+4. Write the report with these 10 sections:
    a. Executive Summary: problem, approach, best result in 3-4 sentences
    b. Problem Statement and Data: what data was used, what was the goal
    c. Methodology: how the autonomous iteration loop worked
@@ -43,7 +47,7 @@ Your report is the final deliverable. No further agents run after you.
       (all versions, not just the best):
       | Version | Status | Key Change | Key Metric | Prediction Outcome |
 
-4. Writing standards:
+5. Writing standards:
    - Reference specific numbers from the results (e.g., "RMSE decreased from
      12.3 to 8.7" rather than "RMSE improved significantly")
    - State limitations with their practical impact (e.g., "fails on inputs

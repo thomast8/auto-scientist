@@ -6,6 +6,7 @@ When interactive: also AskUserQuestion.
 Produces: canonical dataset in {output_dir}/data/.
 """
 
+import json
 import logging
 from pathlib import Path
 
@@ -15,7 +16,9 @@ from claude_code_sdk import (
     ResultMessage,
     TextBlock,
 )
+from pydantic import ValidationError
 
+from auto_scientist.config import DomainConfig
 from auto_scientist.notebook import NOTEBOOK_FILENAME
 from auto_scientist.prompts.ingestor import INGESTOR_SYSTEM, INGESTOR_USER
 from auto_scientist.sdk_utils import append_block_to_buffer, collect_text_from_query, safe_query
@@ -78,13 +81,16 @@ async def run_ingestor(
     )
 
     correction_hint = ""
-    last_error: Exception | None = None
+    last_sdk_error: Exception | None = None
+    session_id: str | None = None
+
     for attempt in range(MAX_ATTEMPTS):
         effective_prompt = prompt + correction_hint
 
         try:
             async for msg in safe_query(prompt=effective_prompt, options=options):
                 if isinstance(msg, ResultMessage):
+                    session_id = getattr(msg, "session_id", None)
                     usage = getattr(msg, "usage", None) or {}
                     usage["num_turns"] = getattr(msg, "num_turns", 0)
                     collect_text_from_query.last_usage = usage  # type: ignore[attr-defined]
@@ -95,7 +101,7 @@ async def run_ingestor(
                         elif isinstance(block, TextBlock):
                             print(f"  [ingestor] {block.text[:200]}")
         except Exception as e:
-            last_error = e
+            last_sdk_error = e
             if attempt == MAX_ATTEMPTS - 1:
                 raise
             logger.warning(f"Ingestor attempt {attempt + 1}: SDK error ({e}), retrying")
@@ -104,20 +110,83 @@ async def run_ingestor(
         # Verify something was produced in data_dir
         data_files = list(data_dir.iterdir())
         output_files = [f for f in data_files if f.name != "ingest.py"]
-        if output_files:
-            return data_dir
-
-        if attempt == MAX_ATTEMPTS - 1:
-            raise FileNotFoundError(
-                f"Ingestor agent did not produce any data files in {data_dir}"
+        if not output_files:
+            if attempt == MAX_ATTEMPTS - 1:
+                msg = f"Ingestor agent did not produce any data files in {data_dir}"
+                if last_sdk_error:
+                    msg += f" (prior SDK error: {last_sdk_error})"
+                raise FileNotFoundError(msg)
+            correction_hint = (
+                "\n\n<validation_error>\n"
+                f"No data files were produced in {data_dir}. "
+                "You must write at least one canonical data file to the data directory.\n"
+                "</validation_error>"
             )
+            logger.warning(f"Ingestor attempt {attempt + 1}: no data files, retrying")
+            continue
 
-        correction_hint = (
-            "\n\n<validation_error>\n"
-            f"No data files were produced in {data_dir}. "
-            "You must write at least one canonical data file to the data directory.\n"
-            "</validation_error>"
-        )
-        logger.warning(f"Ingestor attempt {attempt + 1}: no data files, retrying")
+        # Validate domain_config.json if a config_path was requested
+        if config_path is not None:
+            config_error: str | None = None
+
+            if not config_path.exists():
+                config_error = (
+                    f"domain_config.json was not written to {config_path}. "
+                    "You must create this file."
+                )
+            else:
+                try:
+                    raw_config = json.loads(config_path.read_text())
+                    # Strict validation: reject dict data_paths at write time
+                    if isinstance(raw_config.get("data_paths"), dict):
+                        raise ValueError(
+                            "data_paths must be a JSON list "
+                            f'(e.g. ["data/file.csv"]), got dict: '
+                            f"{raw_config['data_paths']}"
+                        )
+                    DomainConfig.model_validate(raw_config)
+                except (
+                    ValidationError, json.JSONDecodeError, TypeError, ValueError,
+                ) as e:
+                    config_error = str(e)
+
+            if config_error is not None:
+                if attempt == MAX_ATTEMPTS - 1:
+                    raise RuntimeError(
+                        f"Ingestor config validation failed after "
+                        f"{MAX_ATTEMPTS} attempts: {config_error}"
+                    )
+                correction_hint = (
+                    f"\n\n<validation_error>\n"
+                    f"The domain_config.json at {config_path} is invalid:\n"
+                    f"{config_error}\n\n"
+                    f"data_paths MUST be a JSON list (e.g. "
+                    f'["data/file.csv"]), not a dict. Please fix the file.\n'
+                    f"</validation_error>"
+                )
+                # Resume same session so the agent has context
+                if session_id:
+                    logger.warning(
+                        f"Ingestor attempt {attempt + 1}: invalid "
+                        f"domain_config.json, resuming session to fix"
+                    )
+                    options = ClaudeCodeOptions(
+                        system_prompt=INGESTOR_SYSTEM,
+                        allowed_tools=tools,
+                        max_turns=10,
+                        permission_mode="acceptEdits",
+                        cwd=output_dir,
+                        model=model,
+                        resume=session_id,
+                        extra_args={"setting-sources": ""},
+                    )
+                else:
+                    logger.warning(
+                        f"Ingestor attempt {attempt + 1}: invalid "
+                        f"domain_config.json, retrying (no session to resume)"
+                    )
+                continue
+
+        return data_dir
 
     return data_dir  # unreachable

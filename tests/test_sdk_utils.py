@@ -14,6 +14,7 @@ from auto_scientist.sdk_utils import (
     collect_text_from_query,
     safe_query,
     validate_json_output,
+    validate_report_structure,
 )
 
 
@@ -276,3 +277,86 @@ class TestCollectTextFromQuery:
             with patch("auto_scientist.sdk_utils.append_block_to_buffer") as mock_append:
                 await collect_text_from_query("prompt", MagicMock(), message_buffer=buffer)
                 mock_append.assert_called_once_with(text_block, buffer)
+
+
+# Valid report with all 10 sections
+_VALID_REPORT = """\
+## Executive Summary
+This report summarizes our investigation.
+
+## Problem Statement and Data
+We studied the dataset to discover patterns.
+
+## Methodology
+We used an iterative autonomous loop.
+
+## Journey
+v01 explored linear models. v02 switched to polynomial.
+
+## Best Approach
+Degree-4 polynomial with regularization.
+
+## Results
+Test R² = 0.964 with RMSE = 1.23.
+
+## Key Scientific Insights
+The relationship is nonlinear with a cubic component.
+
+## Limitations
+Fails for x > 100 due to polynomial divergence.
+
+## Recommended Future Work
+Try Gaussian process regression.
+
+## Version Comparison Table
+| Version | Status | Key Change | Key Metric | Prediction Outcome |
+|---------|--------|------------|------------|-------------------|
+| v01 | baseline | Linear model | R²=0.72 | N/A |
+| v02 | best | Polynomial | R²=0.964 | CONFIRMED |
+"""
+
+
+class TestValidateReportStructure:
+    def test_valid_report_returns_empty(self):
+        issues = validate_report_structure(_VALID_REPORT)
+        assert issues == []
+
+    def test_missing_heading_reported(self):
+        # Remove the "Journey" section
+        journey_section = "## Journey\nv01 explored linear models. v02 switched to polynomial.\n\n"
+        report = _VALID_REPORT.replace(journey_section, "")
+        issues = validate_report_structure(report)
+        assert any("journey" in issue.lower() for issue in issues)
+
+    def test_empty_section_reported(self):
+        # Make "Limitations" section empty
+        report = _VALID_REPORT.replace(
+            "## Limitations\nFails for x > 100 due to polynomial divergence.",
+            "## Limitations\n",
+        )
+        issues = validate_report_structure(report)
+        assert any("limitations" in issue.lower() for issue in issues)
+
+    def test_missing_version_table_reported(self):
+        # Remove the table from Version Comparison Table
+        report = _VALID_REPORT.replace(
+            "| Version | Status | Key Change | Key Metric | Prediction Outcome |\n"
+            "|---------|--------|------------|------------|-------------------|\n"
+            "| v01 | baseline | Linear model | R²=0.72 | N/A |\n"
+            "| v02 | best | Polynomial | R²=0.964 | CONFIRMED |\n",
+            "No table here.\n",
+        )
+        issues = validate_report_structure(report)
+        assert any("table" in issue.lower() for issue in issues)
+
+    def test_fuzzy_heading_match(self):
+        # "Problem Statement and Data" should match the expected "Problem Statement"
+        report = _VALID_REPORT  # Already uses "Problem Statement and Data"
+        issues = validate_report_structure(report)
+        assert issues == []
+
+    def test_alternative_heading_names(self):
+        # "Insights" should match "Key Scientific Insights"
+        report = _VALID_REPORT.replace("## Key Scientific Insights", "## Insights")
+        issues = validate_report_structure(report)
+        assert issues == []

@@ -42,14 +42,19 @@ To serve both agents well, your canonical output should be:
    the content. For large files, sample first (head/random rows) to understand
    structure before full conversion.
 
-2. Clarify ambiguities based on mode:
+2. The investigation goal is provided in the context. Use it to decide which
+   parts of the data are relevant to canonicalize and how to structure the
+   output. Preserve all data that could be useful for the goal, even if its
+   relevance isn't immediately obvious.
+
+3. Clarify ambiguities based on mode:
    - Interactive mode: ask the human about column semantics, table
      relationships, units, encodings, and which parts of the data are relevant
      to the goal using AskUserQuestion.
    - Autonomous mode: make best-effort structural decisions and log every
      assumption to the lab notebook.
 
-3. Choose the canonical format based on what the data actually is:
+4. Choose the canonical format based on what the data actually is:
 
    Tabular data:
    - CSV: simple flat tables under ~100 MB
@@ -73,7 +78,7 @@ To serve both agents well, your canonical output should be:
    - For multi-file datasets, include a manifest.json listing all files,
      their format, and what they contain
 
-4. Apply structural cleanup where needed:
+5. Apply structural cleanup where needed:
    - Encoding: convert to UTF-8 if not already
    - Column names: lowercase, no special characters, descriptive (rename
      only if originals are genuinely ambiguous like "col1", "V2")
@@ -84,7 +89,7 @@ To serve both agents well, your canonical output should be:
    - Do NOT drop data, impute missing values, or apply domain-specific
      transformations. Those are scientific decisions for later agents.
 
-5. Write a self-contained conversion script to {{data_dir}}/ingest.py:
+6. Write a self-contained conversion script to {{data_dir}}/ingest.py:
    - Read from the original data at the provided absolute path (preserve
      original files, never modify them)
    - Convert to the chosen canonical format
@@ -104,9 +109,9 @@ To serve both agents well, your canonical output should be:
    - If no external dependencies are needed, include the metadata header with
      an empty dependencies list.
 
-6. Run the script to produce the canonical output.
+7. Run the script to produce the canonical output.
 
-7. Update the lab notebook (XML format) with a data structure summary. The
+8. Update the lab notebook (XML format) with a data structure summary. The
    Scientist agent reads this entry to understand the dataset (it never sees
    the data directly), so be thorough and precise.
 
@@ -133,14 +138,15 @@ To serve both agents well, your canonical output should be:
 
    Include only structural facts, not scientific observations.
 
-8. Present a final summary: input received, output produced, structural
+9. Present a final summary: input received, output produced, structural
    decisions made.
 
-9. If a config path is provided, write a domain configuration JSON file at
+10. If a config path is provided, write a domain configuration JSON file at
    that path with operational settings for the experiment runner:
    - name: short lowercase name derived from the goal
    - description: one-line description of the domain
-   - data_paths: paths to the canonical data files you just created
+   - data_paths: a flat JSON list of canonical data file paths, e.g.
+     ["experiments/data/canonical.csv"]. Must be a list, not a dict.
    - run_command: MUST be exactly the literal string "uv run {script_path}"
      including the curly braces. The orchestrator substitutes {script_path}
      at runtime. Do NOT replace {script_path} with an actual path.

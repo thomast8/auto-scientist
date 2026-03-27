@@ -1,6 +1,6 @@
 """Report agent: Phase 3 final summary generation.
 
-Generates a comprehensive report covering the best model, the journey from
+Generates a comprehensive report covering the best approach, the journey from
 first to final version, key insights, and recommendations for future work.
 
 Returns the report content as a string; the orchestrator handles file writing.
@@ -12,7 +12,7 @@ from pathlib import Path
 from claude_code_sdk import AssistantMessage, ClaudeCodeOptions, ResultMessage, TextBlock
 
 from auto_scientist.prompts.report import REPORT_SYSTEM, REPORT_USER
-from auto_scientist.sdk_utils import append_block_to_buffer, safe_query
+from auto_scientist.sdk_utils import append_block_to_buffer, safe_query, validate_report_structure
 from auto_scientist.state import ExperimentState
 
 logger = logging.getLogger(__name__)
@@ -63,6 +63,9 @@ async def run_report(
     )
 
     correction_hint = ""
+    session_id: str | None = None
+    full_text = ""
+
     for attempt in range(MAX_ATTEMPTS):
         effective_prompt = user_prompt + correction_hint
 
@@ -77,7 +80,7 @@ async def run_report(
                         if isinstance(block, TextBlock):
                             report_parts.append(block.text)
                 elif isinstance(message, ResultMessage):
-                    pass  # Agent is done
+                    session_id = getattr(message, "session_id", None)
         except Exception as e:
             if attempt == MAX_ATTEMPTS - 1:
                 raise
@@ -94,18 +97,72 @@ async def run_report(
         full_text = full_text.strip()
 
         # Validate: report should be non-empty and substantial
-        if len(full_text) >= MIN_REPORT_LENGTH:
+        if len(full_text) < MIN_REPORT_LENGTH:
+            if attempt < MAX_ATTEMPTS - 1:
+                correction_hint = (
+                    "\n\n<validation_error>\n"
+                    "Your previous output was too short or empty. "
+                    "Please generate a comprehensive markdown report with headings, "
+                    "covering the experiment journey, key findings, and recommendations.\n"
+                    "</validation_error>"
+                )
+                logger.warning(f"Report attempt {attempt + 1}: output too short, retrying")
+                continue
+            break
+
+        # Structural validation: check for required sections
+        structure_issues = validate_report_structure(full_text)
+        if not structure_issues:
             return full_text
 
         if attempt < MAX_ATTEMPTS - 1:
+            issues_list = "\n".join(f"- {issue}" for issue in structure_issues)
             correction_hint = (
-                "\n\n<validation_error>\n"
-                "Your previous output was too short or empty. "
-                "Please generate a comprehensive markdown report with headings, "
-                "covering the experiment journey, key findings, and recommendations.\n"
-                "</validation_error>"
+                f"\n\n<validation_error>\n"
+                f"Your report is missing required sections or has structural issues:\n"
+                f"{issues_list}\n\n"
+                f"Please regenerate the report with all 10 required sections.\n"
+                f"</validation_error>"
             )
-            logger.warning(f"Report attempt {attempt + 1}: output too short, retrying")
+            # Resume same session for targeted correction
+            if session_id:
+                logger.warning(
+                    f"Report attempt {attempt + 1}: structural issues "
+                    f"({len(structure_issues)} found), resuming session to fix"
+                )
+                options = ClaudeCodeOptions(
+                    system_prompt=REPORT_SYSTEM,
+                    allowed_tools=["Read", "Glob"],
+                    max_turns=10,
+                    permission_mode="acceptEdits",
+                    cwd=output_dir,
+                    model=model,
+                    resume=session_id,
+                    extra_args={"setting-sources": ""},
+                )
+            else:
+                logger.warning(
+                    f"Report attempt {attempt + 1}: structural issues "
+                    f"({len(structure_issues)} found), retrying (no session to resume)"
+                )
+            continue
 
-    # Return whatever we have, even if short
+    # Return whatever we have, with a visible warning if incomplete
+    if not full_text:
+        raise RuntimeError(
+            f"Report generation produced no output after {MAX_ATTEMPTS} attempts"
+        )
+
+    remaining = validate_report_structure(full_text)
+    if remaining:
+        logger.warning(
+            f"Returning incomplete report after {MAX_ATTEMPTS} attempts. "
+            f"Remaining issues: {remaining}"
+        )
+        warning_header = (
+            "> **WARNING: This report is incomplete.** "
+            f"Missing sections: {', '.join(remaining)}\n\n"
+        )
+        full_text = warning_header + full_text
+
     return full_text

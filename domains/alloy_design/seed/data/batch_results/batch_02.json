@@ -1,0 +1,230 @@
+{
+  "batch_id": "batch_02",
+  "test_method": {
+    "hardness": "Vickers",
+    "corrosion": "salt_spray"
+  },
+  "lab": "Lab Alpha",
+  "results": [
+    {
+      "composition": {
+        "Fe": 72.07,
+        "Cr": 15.46,
+        "Ni": 1.34,
+        "Mo": 3.44,
+        "V": 7.69
+      },
+      "hardness": 1292.28,
+      "corrosion": 19.3165
+    },
+    {
+      "composition": {
+        "Fe": 79.88,
+        "Cr": 11.61,
+        "Ni": 5.74,
+        "Mo": 1.05,
+        "V": 1.71
+      },
+      "hardness": 548.83,
+      "corrosion": 53.5737
+    },
+    {
+      "composition": {
+        "Fe": 84.39,
+        "Cr": 7.55,
+        "Ni": 6.4,
+        "Mo": 1.36,
+        "V": 0.3
+      },
+      "hardness": 507.5,
+      "corrosion": 40.6012
+    },
+    {
+      "composition": {
+        "Fe": 80.99,
+        "Cr": 11.9,
+        "Ni": 6.77,
+        "Mo": 0.28,
+        "V": 0.06
+      },
+      "hardness": 469.09,
+      "corrosion": 63.186
+    },
+    {
+      "composition": {
+        "Fe": 74.73,
+        "Cr": 17.43,
+        "Ni": 2.23,
+        "Mo": 3.84,
+        "V": 1.78
+      },
+      "hardness": 1398.92,
+      "corrosion": 40.096
+    },
+    {
+      "composition": {
+        "Fe": 76.0,
+        "Cr": 15.62,
+        "Ni": 5.49,
+        "Mo": 2.05,
+        "V": 0.85
+      },
+      "hardness": 893.56,
+      "corrosion": 69.0658
+    },
+    {
+      "composition": {
+        "Fe": 69.58,
+        "Cr": 17.25,
+        "Ni": 4.23,
+        "Mo": 0.84,
+        "V": 8.09
+      },
+      "hardness": 585.72,
+      "corrosion": 59.6965
+    },
+    {
+      "composition": {
+        "Fe": 72.96,
+        "Cr": 5.78,
+        "Ni": 14.0,
+        "Mo": 0.15,
+        "V": 7.11
+      },
+      "hardness": -372.57,
+      "corrosion": 59.9798
+    },
+    {
+      "composition": {
+        "Fe": 83.7,
+        "Cr": 6.69,
+        "Ni": 7.17,
+        "Mo": 0.63,
+        "V": 1.82
+      },
+      "hardness": 343.55,
+      "corrosion": 39.1886
+    },
+    {
+      "composition": {
+        "Fe": 76.77,
+        "Cr": 17.93,
+        "Ni": 4.84,
+        "Mo": 0.34,
+        "V": 0.13
+      },
+      "hardness": 591.99,
+      "corrosion": 70.9497
+    },
+    {
+      "composition": {
+        "Fe": 78.35,
+        "Cr": 12.67,
+        "Ni": 6.48,
+        "Mo": 1.61,
+        "V": 0.89
+      },
+      "hardness": 689.89,
+      "corrosion": 64.3777
+    },
+    {
+      "composition": {
+        "Fe": 79.25,
+        "Cr": 11.93,
+        "Ni": 5.5,
+        "Mo": 1.89,
+        "V": 1.43
+      },
+      "hardness": 706.53,
+      "corrosion": 53.737
+    },
+    {
+      "composition": {
+        "Fe": 79.17,
+        "Cr": 7.01,
+        "Ni": 0.24,
+        "Mo": 2.51,
+        "V": 11.07
+      },
+      "hardness": 888.12,
+      "corrosion": -0.2224
+    },
+    {
+      "composition": {
+        "Fe": 74.08,
+        "Cr": 17.22,
+        "Ni": 5.02,
+        "Mo": 2.08,
+        "V": 1.6
+      },
+      "hardness": 952.18,
+      "corrosion": 69.8191
+    },
+    {
+      "composition": {
+        "Fe": 79.97,
+        "Cr": 15.66,
+        "Ni": 0.02,
+        "Mo": 2.48,
+        "V": 1.87
+      },
+      "hardness": 1016.45,
+      "corrosion": 15.0047
+    },
+    {
+      "composition": {
+        "Fe": 90.3,
+        "Cr": 5.77,
+        "Ni": 1.61,
+        "Mo": 2.2,
+        "V": 0.12
+      },
+      "hardness": 515.64,
+      "corrosion": 14.292
+    },
+    {
+      "composition": {
+        "Fe": 81.8,
+        "Cr": 11.16,
+        "Ni": 6.72,
+        "Mo": 0.28,
+        "V": 0.04
+      },
+      "hardness": 468.55,
+      "corrosion": 59.0353
+    },
+    {
+      "composition": {
+        "Fe": 81.1,
+        "Cr": 11.65,
+        "Ni": 6.49,
+        "Mo": 0.51,
+        "V": 0.25
+      },
+      "hardness": 499.86,
+      "corrosion": 60.0938
+    },
+    {
+      "composition": {
+        "Fe": 80.78,
+        "Cr": 8.05,
+        "Ni": 5.84,
+        "Mo": 3.8,
+        "V": 1.53
+      },
+      "hardness": 782.03,
+      "corrosion": 38.8595
+    },
+    {
+      "composition": {
+        "Fe": 67.94,
+        "Cr": 10.39,
+        "Ni": 16.65,
+        "Mo": 3.66,
+        "V": 1.37
+      },
+      "hardness": 849.47,
+      "corrosion": 119.989
+    }
+  ]
+}

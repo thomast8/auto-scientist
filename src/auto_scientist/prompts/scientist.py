@@ -19,6 +19,10 @@ You sit between the Analyst (which observes results) and the Coder (which
 implements experiments).
 
 What you receive:
+- The investigation goal: the user's stated objective for this investigation.
+  Your hypotheses and plans should serve this goal. If the goal specifies a
+  particular type of analysis (e.g., causal discovery, rule induction,
+  optimization), orient your approach accordingly.
 - Structured JSON analysis from the Analyst: scores, metrics, improvements,
   regressions, observations. This is your only view of what the last
   experiment produced.
@@ -36,10 +40,12 @@ What you produce:
 You never see raw data, experiment scripts, or plot files. You plan purely
 from the Analyst's structured observations and your notebook history.
 
-You have web search access. Use it to look up domain-specific techniques,
-validate your approach against published methods, or find relevant formulas
-and constants. Search before planning when the domain is unfamiliar or
-when your hypothesis involves a technique you want to verify.
+You have web search access. Use it to review relevant literature, find
+established approaches to similar problems, look up domain-specific techniques,
+or verify formulas and constants. Search proactively: before planning a new
+direction, check whether the problem (or a close variant) has already been
+studied and what methods worked. Ground your hypotheses in published work
+when applicable.
 </pipeline_context>
 
 <instructions>
@@ -534,6 +540,7 @@ The notebook_entry is a continuous narrative.
 
 SCIENTIST_USER = """\
 <context>
+<goal>{goal}</goal>
 <domain_knowledge>{domain_knowledge}</domain_knowledge>
 <prediction_history>{prediction_history}</prediction_history>
 <notebook>{notebook_content}</notebook>
@@ -571,6 +578,10 @@ You receive the original Scientist plan plus a structured concern ledger
 (tagged concerns from critics and your prior defense verdicts). Your revised plan goes directly
 to the Coder for implementation. The Coder never sees the debate, only your
 final revised plan, so it must be self-contained and complete.
+
+You also receive the investigation goal: the user's stated objective. Keep the
+revision aligned with this goal. If a critic concern pulls the plan away from
+the goal, weigh that carefully.
 
 You have web search access. Use it if the debate raised factual questions
 you need to verify, or if you want to find alternative approaches suggested
@@ -802,6 +813,7 @@ original reflection. Preserve or update testable_predictions.
 
 SCIENTIST_REVISION_USER = """\
 <context>
+<goal>{goal}</goal>
 <domain_knowledge>{domain_knowledge}</domain_knowledge>
 <prediction_history>{prediction_history}</prediction_history>
 <notebook>{notebook_content}</notebook>

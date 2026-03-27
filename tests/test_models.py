@@ -9,7 +9,7 @@ from auto_scientist.images import ImageData
 from auto_scientist.model_config import ReasoningConfig
 from auto_scientist.models.anthropic_client import query_anthropic
 from auto_scientist.models.google_client import query_google
-from auto_scientist.models.openai_client import query_openai
+from auto_scientist.models.openai_client import _make_strict_schema, query_openai
 from auto_scientist.schemas import ScientistPlanOutput
 
 FAKE_IMAGE = ImageData(data="aW1hZ2VieXRlcw==", media_type="image/png")
@@ -431,13 +431,13 @@ class TestQueryAnthropicReasoning:
 
     @pytest.mark.asyncio
     @patch("auto_scientist.models.anthropic_client.AsyncAnthropic")
-    async def test_default_reasoning_omits_thinking(self, mock_cls):
+    async def test_off_reasoning_omits_thinking(self, mock_cls):
         mock_client = AsyncMock()
         mock_cls.return_value = mock_client
         mock_response = MagicMock(content=[MagicMock(text="ok")])
         mock_client.messages.create.return_value = mock_response
 
-        await query_anthropic("claude-sonnet-4-6", "test", reasoning=ReasoningConfig(level="default"))
+        await query_anthropic("claude-sonnet-4-6", "test", reasoning=ReasoningConfig(level="off"))
 
         call_kwargs = mock_client.messages.create.call_args.kwargs
         assert "thinking" not in call_kwargs
@@ -636,6 +636,7 @@ class TestAnthropicStructuredOutput:
         # Simulate tool_use response
         tool_block = MagicMock()
         tool_block.type = "tool_use"
+        tool_block.name = "submit_response"
         tool_block.input = {"hypothesis": "test", "strategy": "incremental"}
         mock_response = MagicMock(content=[tool_block])
         mock_client.messages.create.return_value = mock_response
@@ -670,6 +671,154 @@ class TestAnthropicStructuredOutput:
 
         call_kwargs = mock_client.messages.create.call_args.kwargs
         assert call_kwargs.get("system") == "You are a scientist."
+
+    @pytest.mark.asyncio
+    @patch("auto_scientist.models.anthropic_client.AsyncAnthropic")
+    async def test_response_schema_with_web_search_no_forced_tool_choice(self, mock_cls):
+        mock_client = AsyncMock()
+        mock_cls.return_value = mock_client
+
+        # Simulate tool_use response with submit_response
+        tool_block = MagicMock()
+        tool_block.type = "tool_use"
+        tool_block.name = "submit_response"
+        tool_block.input = {"hypothesis": "test", "strategy": "incremental"}
+        mock_response = MagicMock(content=[tool_block])
+        mock_client.messages.create.return_value = mock_response
+
+        result = await query_anthropic(
+            "claude-sonnet-4-6", "plan something",
+            web_search=True,
+            response_schema=ScientistPlanOutput,
+        )
+
+        call_kwargs = mock_client.messages.create.call_args.kwargs
+        tools = call_kwargs.get("tools", [])
+        # Should have both web_search and submit_response tools
+        assert any(t.get("type") == "web_search_20250305" for t in tools)
+        assert any(t.get("name") == "submit_response" for t in tools)
+        # Should NOT force tool_choice when web_search is also enabled
+        assert "tool_choice" not in call_kwargs
+        # Should still extract the submit_response tool input
+        parsed = json.loads(result.text)
+        assert parsed["hypothesis"] == "test"
+
+    @pytest.mark.asyncio
+    @patch("auto_scientist.models.anthropic_client.AsyncAnthropic")
+    async def test_response_schema_extracts_submit_from_mixed_blocks(self, mock_cls):
+        """When response has web_search + submit_response blocks, extract submit_response."""
+        mock_client = AsyncMock()
+        mock_cls.return_value = mock_client
+
+        web_block = MagicMock()
+        web_block.type = "tool_use"
+        web_block.name = "web_search"
+        web_block.input = {"query": "test"}
+        text_block = MagicMock()
+        text_block.type = "text"
+        text_block.text = "some reasoning"
+        submit_block = MagicMock()
+        submit_block.type = "tool_use"
+        submit_block.name = "submit_response"
+        submit_block.input = {"hypothesis": "found it", "strategy": "exploratory"}
+        mock_response = MagicMock(content=[web_block, text_block, submit_block])
+        mock_client.messages.create.return_value = mock_response
+
+        result = await query_anthropic(
+            "claude-sonnet-4-6", "test",
+            web_search=True,
+            response_schema=ScientistPlanOutput,
+        )
+
+        parsed = json.loads(result.text)
+        assert parsed["hypothesis"] == "found it"
+
+    @pytest.mark.asyncio
+    @patch("auto_scientist.models.anthropic_client.AsyncAnthropic")
+    async def test_response_schema_ignores_non_submit_tool_use(self, mock_cls):
+        mock_client = AsyncMock()
+        mock_cls.return_value = mock_client
+
+        # Response has a tool_use block that is NOT submit_response
+        other_tool_block = MagicMock()
+        other_tool_block.type = "tool_use"
+        other_tool_block.name = "web_search"
+        other_tool_block.input = {"query": "test"}
+        mock_response = MagicMock(content=[other_tool_block])
+        mock_client.messages.create.return_value = mock_response
+
+        with pytest.raises(RuntimeError, match="did not call submit_response"):
+            await query_anthropic(
+                "claude-sonnet-4-6", "test",
+                response_schema=ScientistPlanOutput,
+            )
+
+
+class TestMakeStrictSchema:
+    def test_adds_additional_properties_to_objects(self):
+        schema = {
+            "type": "object",
+            "properties": {"name": {"type": "string"}},
+        }
+        result = _make_strict_schema(schema)
+        assert result["additionalProperties"] is False
+
+    def test_recursive_into_defs(self):
+        schema = {
+            "$defs": {
+                "Item": {
+                    "type": "object",
+                    "properties": {"id": {"type": "integer"}},
+                },
+            },
+            "type": "object",
+            "properties": {"items": {"type": "array"}},
+        }
+        result = _make_strict_schema(schema)
+        assert result["additionalProperties"] is False
+        assert result["$defs"]["Item"]["additionalProperties"] is False
+
+    def test_preserves_existing_additional_properties(self):
+        schema = {
+            "type": "object",
+            "additionalProperties": True,
+            "properties": {},
+        }
+        result = _make_strict_schema(schema)
+        assert result["additionalProperties"] is True
+
+    def test_non_object_types_unchanged(self):
+        schema = {"type": "string"}
+        result = _make_strict_schema(schema)
+        assert "additionalProperties" not in result
+
+
+class TestOpenAIStructuredOutputWithWebSearch:
+    @pytest.mark.asyncio
+    @patch("auto_scientist.models.openai_client.AsyncOpenAI")
+    async def test_response_schema_with_web_search_uses_text_format(self, mock_cls):
+        mock_client = AsyncMock()
+        mock_cls.return_value = mock_client
+        mock_response = MagicMock(output_text='{"hypothesis": "test"}')
+        mock_client.responses.create.return_value = mock_response
+
+        result = await query_openai(
+            "gpt-5.4", "plan something",
+            web_search=True,
+            response_schema=ScientistPlanOutput,
+        )
+
+        call_kwargs = mock_client.responses.create.call_args.kwargs
+        # Should use Responses API with text.format for structured output
+        text_format = call_kwargs.get("text", {}).get("format", {})
+        assert text_format.get("type") == "json_schema"
+        assert "schema" in text_format
+        # Schema should have additionalProperties: false for OpenAI strict mode
+        schema = text_format["schema"]
+        assert schema.get("additionalProperties") is False
+        # Should still have web search tool
+        assert any(t["type"] == "web_search_preview" for t in call_kwargs["tools"])
+        assert result.text == '{"hypothesis": "test"}'
 
 
 class TestOpenAIStructuredOutput:
@@ -731,6 +880,28 @@ class TestGoogleStructuredOutput:
         config = call_kwargs.get("config")
         assert config is not None
         assert result.text =='{"hypothesis": "test"}'
+
+    @pytest.mark.asyncio
+    @patch("auto_scientist.models.google_client.types")
+    @patch("auto_scientist.models.google_client.genai")
+    async def test_response_schema_with_web_search_coexist(self, mock_genai, mock_types):
+        mock_response = MagicMock(text='{"hypothesis": "test"}')
+        mock_genai.Client.return_value.aio.models.generate_content = AsyncMock(
+            return_value=mock_response
+        )
+
+        await query_google(
+            "gemini-2.5-pro", "plan something",
+            web_search=True,
+            response_schema=ScientistPlanOutput,
+        )
+
+        # Verify GenerateContentConfig was called with both tools and response_schema
+        config_call = mock_types.GenerateContentConfig.call_args
+        config_kwargs = config_call.kwargs
+        assert "tools" in config_kwargs
+        assert "response_schema" in config_kwargs
+        assert config_kwargs["response_mime_type"] == "application/json"
 
     @pytest.mark.asyncio
     @patch("auto_scientist.models.google_client.genai")

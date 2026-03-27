@@ -1,5 +1,7 @@
 """Tests for per-agent model and reasoning configuration."""
 
+import logging
+
 import pytest
 
 from auto_scientist.model_config import (
@@ -10,10 +12,16 @@ from auto_scientist.model_config import (
 
 
 class TestReasoningConfig:
-    def test_defaults_to_default(self):
+    def test_defaults_to_off(self):
         rc = ReasoningConfig()
-        assert rc.level == "default"
+        assert rc.level == "off"
         assert rc.budget is None
+
+    def test_legacy_default_migrates_to_off(self, caplog):
+        with caplog.at_level(logging.WARNING, logger="auto_scientist.model_config"):
+            rc = ReasoningConfig(level="default")
+        assert rc.level == "off"
+        assert any("deprecated" in r.message for r in caplog.records)
 
     def test_explicit_level(self):
         rc = ReasoningConfig(level="high")
@@ -33,7 +41,7 @@ class TestAgentModelConfig:
     def test_defaults_provider_to_anthropic(self):
         cfg = AgentModelConfig(model="claude-sonnet-4-6")
         assert cfg.provider == "anthropic"
-        assert cfg.reasoning.level == "default"
+        assert cfg.reasoning.level == "off"
 
     def test_openai_provider(self):
         cfg = AgentModelConfig(provider="openai", model="o4-mini")
@@ -97,29 +105,41 @@ class TestBuiltinPresets:
     def test_default_preset(self):
         mc = ModelConfig.builtin_preset("default")
         assert mc.defaults.model == "claude-sonnet-4-6"
+        assert mc.defaults.reasoning.level == "medium"
         assert mc.resolve("analyst").model == "claude-sonnet-4-6"
+        assert mc.resolve("analyst").reasoning.level == "medium"
         assert mc.resolve("scientist").model == "claude-opus-4-6"
+        assert mc.resolve("scientist").reasoning.level == "medium"
         assert mc.resolve("coder").model == "claude-sonnet-4-6"
         assert mc.resolve("ingestor").model == "claude-sonnet-4-6"
         assert mc.resolve("report").model == "claude-sonnet-4-6"
         assert mc.summarizer is not None
         assert mc.summarizer.provider == "openai"
         assert mc.summarizer.model == "gpt-5.4-nano"
+        assert mc.summarizer.reasoning.level == "off"
 
     def test_fast_preset(self):
         mc = ModelConfig.builtin_preset("fast")
         assert mc.defaults.model == "claude-haiku-4-5-20251001"
+        assert mc.defaults.reasoning.level == "off"
         assert mc.summarizer is not None
         assert mc.summarizer.provider == "openai"
         assert mc.summarizer.model == "gpt-5.4-nano"
-        assert mc.summarizer.reasoning.level == "default"
+        assert mc.summarizer.reasoning.level == "off"
 
-    def test_fast_preset_all_agents_use_haiku_with_default_reasoning(self):
+    def test_fast_preset_all_agents_use_haiku_with_off_reasoning(self):
         mc = ModelConfig.builtin_preset("fast")
         for agent in ["analyst", "scientist", "coder", "ingestor", "report"]:
             cfg = mc.resolve(agent)
             assert cfg.model == "claude-haiku-4-5-20251001"
-            assert cfg.reasoning.level == "default"
+            assert cfg.reasoning.level == "off"
+
+    def test_medium_is_alias_for_default(self):
+        default = ModelConfig.builtin_preset("default")
+        medium = ModelConfig.builtin_preset("medium")
+        assert default.defaults.model == medium.defaults.model
+        assert default.defaults.reasoning.level == medium.defaults.reasoning.level
+        assert default.resolve("scientist").model == medium.resolve("scientist").model
 
     def test_nonexistent_preset_raises(self):
         with pytest.raises(ValueError, match="Unknown preset"):

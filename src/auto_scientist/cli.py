@@ -108,7 +108,7 @@ def cli():
     type=click.Path(exists=True),
     help="Path to models.toml config file",
 )
-@click.option("--preset", default=None, help="Named preset: default, fast")
+@click.option("--preset", default=None, help="Named preset: default (medium), fast, high, max")
 @click.option("--no-summaries", is_flag=True, help="Disable periodic agent summaries")
 @click.option("--schedule", default=None, help="Time window for execution (e.g., '22:00-06:00')")
 @click.option("--interactive", is_flag=True, help="Enable interactive mode")
@@ -197,7 +197,7 @@ def run(
     type=click.Path(exists=True),
     help="Path to models.toml config file (overrides saved config)",
 )
-@click.option("--preset", default=None, help="Named preset: default, fast")
+@click.option("--preset", default=None, help="Named preset: default (medium), fast, high, max")
 @click.option("--no-summaries", is_flag=True, help="Disable periodic agent summaries")
 @click.option(
     "-v", "--verbose", is_flag=True,

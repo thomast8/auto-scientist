@@ -1,0 +1,501 @@
+specimen_id,collector_name,visual_description,instrument_notes
+0,Dr. S. Nakamura,"metallic luster, elongated orthorhombic crystals",
+1,A. Petrov,"yellow-brown, sub-adamantine, blocky",
+2,A. Petrov,"opaque, grey-silver, bladed habit",
+3,A. Petrov,"translucent, amber, cubic habit","high humidity during measurement, may affect readings"
+4,Dr. L. Chen,"opaque, dark green, tabular habit",
+5,Prof. M. Okonkwo,"opaque, grey-silver, bladed habit",
+6,Dr. L. Chen,"steel grey, fibrous, prismatic",
+7,Prof. M. Okonkwo,"steel grey, fibrous, prismatic",
+8,A. Petrov,"translucent, pale blue, prismatic habit",
+9,Dr. L. Chen,"transparent, violet fluorescence, cubic habit",
+10,Prof. M. Okonkwo,"transparent, violet fluorescence, cubic habit",
+11,Prof. M. Okonkwo,"opaque, grey-silver, bladed habit",
+12,Dr. L. Chen,"transparent, violet fluorescence, cubic habit",
+13,Prof. M. Okonkwo,"metallic luster, elongated orthorhombic crystals",
+14,A. Petrov,"adamantine luster, small cubes, UV-reactive","high humidity during measurement, may affect readings"
+15,Dr. L. Chen,"deep green, sub-vitreous, platy",
+16,Dr. L. Chen,"adamantine luster, small cubes, UV-reactive",
+17,Prof. M. Okonkwo,"opaque, dark green, tabular habit",
+18,Dr. S. Nakamura,"metallic luster, elongated orthorhombic crystals","high humidity during measurement, may affect readings"
+19,Dr. S. Nakamura,"opaque, deep red, cubic habit",
+20,A. Petrov,"opaque, grey-silver, bladed habit",sample surface polished before reflectance measurement
+21,Prof. M. Okonkwo,"metallic luster, red-black cubes",
+22,Dr. S. Nakamura,"steel grey, fibrous, prismatic",
+23,Dr. L. Chen,"steel grey, fibrous, prismatic",
+24,A. Petrov,"steel grey, fibrous, prismatic",
+25,A. Petrov,"translucent, pale blue, prismatic habit",
+26,Dr. K. Vasquez,"dark crimson, sub-metallic, granular",
+27,Dr. K. Vasquez,"opaque, dark green, tabular habit",
+28,Dr. S. Nakamura,"blue-green tint, vitreous, columnar",sample surface polished before reflectance measurement
+29,Dr. L. Chen,"metallic luster, red-black cubes",
+30,A. Petrov,"resinous luster, warm-toned cubes",
+31,Dr. K. Vasquez,"steel grey, fibrous, prismatic",
+32,Prof. M. Okonkwo,"waxy luster, flat hexagonal plates",
+33,Dr. S. Nakamura,"dark crimson, sub-metallic, granular",
+34,Dr. L. Chen,"dark crimson, sub-metallic, granular",
+35,Dr. L. Chen,"blue-green tint, vitreous, columnar",
+36,Dr. K. Vasquez,"waxy luster, flat hexagonal plates",
+37,Dr. S. Nakamura,"dark crimson, sub-metallic, granular",
+38,Dr. K. Vasquez,"glassy luster, elongated hexagonal crystals",
+39,A. Petrov,"transparent, violet fluorescence, cubic habit",
+40,Dr. L. Chen,"clear with purple glow under UV, isometric",
+41,Dr. L. Chen,"metallic luster, elongated orthorhombic crystals",
+42,Prof. M. Okonkwo,"adamantine luster, small cubes, UV-reactive",
+43,Dr. K. Vasquez,"translucent, pale blue, prismatic habit",
+44,A. Petrov,"opaque, grey-silver, bladed habit",
+45,Dr. S. Nakamura,"opaque, grey-silver, bladed habit",
+46,A. Petrov,"adamantine luster, small cubes, UV-reactive",
+47,Dr. K. Vasquez,"glassy luster, elongated hexagonal crystals",
+48,A. Petrov,"yellow-brown, sub-adamantine, blocky",
+49,Prof. M. Okonkwo,"opaque, dark green, tabular habit",
+50,Dr. L. Chen,"deep green, sub-vitreous, platy",
+51,Dr. S. Nakamura,"waxy luster, flat hexagonal plates",
+52,Dr. S. Nakamura,"metallic luster, elongated orthorhombic crystals",
+53,Dr. S. Nakamura,"dark crimson, sub-metallic, granular",
+54,Dr. S. Nakamura,"dark crimson, sub-metallic, granular",
+55,Prof. M. Okonkwo,"metallic luster, elongated orthorhombic crystals",
+56,Dr. L. Chen,"opaque, deep red, cubic habit",
+57,Prof. M. Okonkwo,"clear with purple glow under UV, isometric",
+58,Dr. K. Vasquez,"opaque, dark green, tabular habit",
+59,Prof. M. Okonkwo,"waxy luster, flat hexagonal plates",
+60,A. Petrov,"resinous luster, warm-toned cubes",
+61,A. Petrov,"resinous luster, warm-toned cubes",
+62,Prof. M. Okonkwo,"transparent, violet fluorescence, cubic habit",
+63,Dr. L. Chen,"metallic luster, elongated orthorhombic crystals",
+64,A. Petrov,"metallic luster, red-black cubes",
+65,A. Petrov,"dark crimson, sub-metallic, granular",
+66,Prof. M. Okonkwo,"transparent, violet fluorescence, cubic habit",
+67,Dr. S. Nakamura,"glassy luster, elongated hexagonal crystals",sample surface polished before reflectance measurement
+68,Dr. K. Vasquez,"blue-green tint, vitreous, columnar",
+69,A. Petrov,"opaque, deep red, cubic habit",
+70,Dr. S. Nakamura,"translucent, pale blue, prismatic habit",
+71,A. Petrov,"adamantine luster, small cubes, UV-reactive",
+72,A. Petrov,"steel grey, fibrous, prismatic",
+73,Dr. L. Chen,"deep green, sub-vitreous, platy",recalibrated conductivity probe before measurement
+74,Dr. K. Vasquez,"opaque, dark green, tabular habit",
+75,Prof. M. Okonkwo,"opaque, dark green, tabular habit",
+76,Dr. K. Vasquez,"waxy luster, flat hexagonal plates",
+77,Dr. L. Chen,"yellow-brown, sub-adamantine, blocky",
+78,Dr. L. Chen,"adamantine luster, small cubes, UV-reactive",
+79,Dr. K. Vasquez,"steel grey, fibrous, prismatic",
+80,Dr. K. Vasquez,"yellow-brown, sub-adamantine, blocky",
+81,A. Petrov,"metallic luster, red-black cubes",
+82,Dr. K. Vasquez,"metallic luster, elongated orthorhombic crystals",
+83,Dr. L. Chen,"translucent, pale blue, prismatic habit","high humidity during measurement, may affect readings"
+84,Dr. K. Vasquez,"glassy luster, elongated hexagonal crystals",
+85,Dr. K. Vasquez,"waxy luster, flat hexagonal plates",
+86,Prof. M. Okonkwo,"yellow-brown, sub-adamantine, blocky",
+87,Dr. L. Chen,"resinous luster, warm-toned cubes","high humidity during measurement, may affect readings"
+88,Dr. L. Chen,"translucent, pale blue, prismatic habit",
+89,Dr. S. Nakamura,"dark crimson, sub-metallic, granular",
+90,Dr. L. Chen,"waxy luster, flat hexagonal plates",
+91,Prof. M. Okonkwo,"opaque, deep red, cubic habit",
+92,A. Petrov,"metallic luster, red-black cubes",
+93,Dr. S. Nakamura,"metallic luster, red-black cubes",
+94,Prof. M. Okonkwo,"opaque, dark green, tabular habit",
+95,Dr. L. Chen,"translucent, amber, cubic habit",
+96,Dr. K. Vasquez,"translucent, amber, cubic habit",
+97,Prof. M. Okonkwo,"opaque, dark green, tabular habit",
+98,Dr. K. Vasquez,"blue-green tint, vitreous, columnar",
+99,Dr. L. Chen,"metallic luster, elongated orthorhombic crystals",
+100,Dr. K. Vasquez,"opaque, grey-silver, bladed habit",
+101,Dr. K. Vasquez,"yellow-brown, sub-adamantine, blocky",
+102,Dr. L. Chen,"waxy luster, flat hexagonal plates",
+103,Dr. S. Nakamura,"metallic luster, elongated orthorhombic crystals",
+104,Dr. L. Chen,"steel grey, fibrous, prismatic",
+105,Dr. K. Vasquez,"metallic luster, red-black cubes",
+106,Prof. M. Okonkwo,"opaque, deep red, cubic habit",
+107,Dr. S. Nakamura,"blue-green tint, vitreous, columnar",
+108,Dr. L. Chen,"glassy luster, elongated hexagonal crystals",
+109,Prof. M. Okonkwo,"opaque, grey-silver, bladed habit",recalibrated conductivity probe before measurement
+110,Dr. K. Vasquez,"transparent, violet fluorescence, cubic habit",
+111,Dr. S. Nakamura,"translucent, pale blue, prismatic habit",
+112,Dr. S. Nakamura,"waxy luster, flat hexagonal plates",
+113,A. Petrov,"opaque, deep red, cubic habit",
+114,Prof. M. Okonkwo,"deep green, sub-vitreous, platy",
+115,Dr. L. Chen,"metallic luster, elongated orthorhombic crystals",
+116,Dr. L. Chen,"metallic luster, elongated orthorhombic crystals",
+117,Dr. S. Nakamura,"resinous luster, warm-toned cubes",
+118,Dr. S. Nakamura,"transparent, violet fluorescence, cubic habit",
+119,Dr. S. Nakamura,"transparent, violet fluorescence, cubic habit",
+120,Prof. M. Okonkwo,"yellow-brown, sub-adamantine, blocky",
+121,A. Petrov,"yellow-brown, sub-adamantine, blocky",
+122,Prof. M. Okonkwo,"opaque, dark green, tabular habit",
+123,Prof. M. Okonkwo,"dark crimson, sub-metallic, granular",
+124,Dr. L. Chen,"blue-green tint, vitreous, columnar",
+125,A. Petrov,"metallic luster, red-black cubes",
+126,Prof. M. Okonkwo,"translucent, pale blue, prismatic habit",
+127,Prof. M. Okonkwo,"opaque, dark green, tabular habit",
+128,Dr. K. Vasquez,"blue-green tint, vitreous, columnar",
+129,Prof. M. Okonkwo,"yellow-brown, sub-adamantine, blocky",
+130,Dr. K. Vasquez,"blue-green tint, vitreous, columnar",
+131,Dr. K. Vasquez,"metallic luster, elongated orthorhombic crystals",
+132,Dr. L. Chen,"dark crimson, sub-metallic, granular",
+133,Dr. K. Vasquez,"waxy luster, flat hexagonal plates",
+134,Dr. L. Chen,"resinous luster, warm-toned cubes",
+135,Dr. L. Chen,"translucent, pale blue, prismatic habit",
+136,Dr. S. Nakamura,"metallic luster, elongated orthorhombic crystals",
+137,A. Petrov,"resinous luster, warm-toned cubes",
+138,A. Petrov,"opaque, grey-silver, bladed habit",
+139,Dr. K. Vasquez,"waxy luster, flat hexagonal plates",
+140,Dr. S. Nakamura,"resinous luster, warm-toned cubes",
+141,Dr. S. Nakamura,"dark crimson, sub-metallic, granular",
+142,Dr. L. Chen,"steel grey, fibrous, prismatic",
+143,Prof. M. Okonkwo,"metallic luster, red-black cubes",
+144,A. Petrov,"metallic luster, red-black cubes",
+145,Dr. L. Chen,"deep green, sub-vitreous, platy",
+146,A. Petrov,"glassy luster, elongated hexagonal crystals",
+147,Prof. M. Okonkwo,"metallic luster, red-black cubes",
+148,Dr. K. Vasquez,"dark crimson, sub-metallic, granular",
+149,A. Petrov,"glassy luster, elongated hexagonal crystals",
+150,Dr. K. Vasquez,"metallic luster, elongated orthorhombic crystals",
+151,A. Petrov,"metallic luster, elongated orthorhombic crystals",
+152,A. Petrov,"waxy luster, flat hexagonal plates",
+153,A. Petrov,"opaque, deep red, cubic habit",
+154,A. Petrov,"opaque, dark green, tabular habit",
+155,Dr. L. Chen,"clear with purple glow under UV, isometric",
+156,A. Petrov,"opaque, dark green, tabular habit",
+157,Dr. S. Nakamura,"dark crimson, sub-metallic, granular",
+158,Dr. K. Vasquez,"transparent, violet fluorescence, cubic habit",
+159,Dr. L. Chen,"metallic luster, elongated orthorhombic crystals",
+160,A. Petrov,"glassy luster, elongated hexagonal crystals",
+161,Dr. L. Chen,"opaque, grey-silver, bladed habit",
+162,Dr. K. Vasquez,"glassy luster, elongated hexagonal crystals",
+163,Dr. K. Vasquez,"waxy luster, flat hexagonal plates",
+164,Dr. L. Chen,"translucent, amber, cubic habit",
+165,A. Petrov,"transparent, violet fluorescence, cubic habit",
+166,Dr. K. Vasquez,"opaque, grey-silver, bladed habit",
+167,Dr. S. Nakamura,"steel grey, fibrous, prismatic",
+168,Prof. M. Okonkwo,"waxy luster, flat hexagonal plates",
+169,Dr. L. Chen,"steel grey, fibrous, prismatic",
+170,Dr. K. Vasquez,"waxy luster, flat hexagonal plates","high humidity during measurement, may affect readings"
+171,A. Petrov,"resinous luster, warm-toned cubes",
+172,Dr. L. Chen,"opaque, dark green, tabular habit",
+173,Dr. L. Chen,"metallic luster, elongated orthorhombic crystals",
+174,Dr. K. Vasquez,"translucent, pale blue, prismatic habit",
+175,Prof. M. Okonkwo,"waxy luster, flat hexagonal plates",
+176,Dr. L. Chen,"clear with purple glow under UV, isometric",
+177,A. Petrov,"steel grey, fibrous, prismatic",
+178,Prof. M. Okonkwo,"steel grey, fibrous, prismatic",
+179,Dr. S. Nakamura,"metallic luster, red-black cubes","high humidity during measurement, may affect readings"
+180,A. Petrov,"steel grey, fibrous, prismatic",
+181,Dr. S. Nakamura,"metallic luster, elongated orthorhombic crystals","high humidity during measurement, may affect readings"
+182,Dr. L. Chen,"opaque, deep red, cubic habit",
+183,Dr. S. Nakamura,"waxy luster, flat hexagonal plates",
+184,Dr. L. Chen,"metallic luster, elongated orthorhombic crystals",
+185,A. Petrov,"yellow-brown, sub-adamantine, blocky",sample surface polished before reflectance measurement
+186,A. Petrov,"yellow-brown, sub-adamantine, blocky",
+187,Dr. K. Vasquez,"opaque, dark green, tabular habit",
+188,Dr. K. Vasquez,"metallic luster, red-black cubes",
+189,Dr. K. Vasquez,"blue-green tint, vitreous, columnar",
+190,Prof. M. Okonkwo,"steel grey, fibrous, prismatic",recalibrated conductivity probe before measurement
+191,A. Petrov,"opaque, dark green, tabular habit",
+192,Dr. K. Vasquez,"deep green, sub-vitreous, platy",
+193,A. Petrov,"opaque, grey-silver, bladed habit",
+194,Dr. L. Chen,"glassy luster, elongated hexagonal crystals",
+195,Dr. L. Chen,"blue-green tint, vitreous, columnar",
+196,Prof. M. Okonkwo,"resinous luster, warm-toned cubes",
+197,Dr. K. Vasquez,"steel grey, fibrous, prismatic",
+198,A. Petrov,"opaque, dark green, tabular habit",
+199,A. Petrov,"blue-green tint, vitreous, columnar",
+200,Dr. K. Vasquez,"steel grey, fibrous, prismatic",fluorescence detector offset +12nm on this batch
+201,Dr. K. Vasquez,"steel grey, fibrous, prismatic",fluorescence detector offset +12nm on this batch
+202,Dr. S. Nakamura,"translucent, amber, cubic habit",fluorescence detector offset +12nm on this batch
+203,Dr. S. Nakamura,"deep green, sub-vitreous, platy",fluorescence detector offset +12nm on this batch
+204,A. Petrov,"waxy luster, flat hexagonal plates",fluorescence detector offset +12nm on this batch
+205,Dr. L. Chen,"glassy luster, elongated hexagonal crystals",fluorescence detector offset +12nm on this batch
+206,Prof. M. Okonkwo,"glassy luster, elongated hexagonal crystals",fluorescence detector offset +12nm on this batch
+207,Prof. M. Okonkwo,"yellow-brown, sub-adamantine, blocky",fluorescence detector offset +12nm on this batch
+208,A. Petrov,"waxy luster, flat hexagonal plates",fluorescence detector offset +12nm on this batch
+209,A. Petrov,"adamantine luster, small cubes, UV-reactive",fluorescence detector offset +12nm on this batch
+210,Prof. M. Okonkwo,"transparent, violet fluorescence, cubic habit",fluorescence detector offset +12nm on this batch
+211,Prof. M. Okonkwo,"metallic luster, red-black cubes",fluorescence detector offset +12nm on this batch
+212,Dr. S. Nakamura,"deep green, sub-vitreous, platy",fluorescence detector offset +12nm on this batch
+213,Prof. M. Okonkwo,"steel grey, fibrous, prismatic",fluorescence detector offset +12nm on this batch
+214,A. Petrov,"translucent, amber, cubic habit",fluorescence detector offset +12nm on this batch
+215,Dr. L. Chen,"dark crimson, sub-metallic, granular",fluorescence detector offset +12nm on this batch
+216,Dr. S. Nakamura,"deep green, sub-vitreous, platy",fluorescence detector offset +12nm on this batch
+217,Prof. M. Okonkwo,"waxy luster, flat hexagonal plates",fluorescence detector offset +12nm on this batch
+218,A. Petrov,"opaque, grey-silver, bladed habit",fluorescence detector offset +12nm on this batch
+219,Dr. K. Vasquez,"metallic luster, red-black cubes",fluorescence detector offset +12nm on this batch
+220,Dr. S. Nakamura,"opaque, dark green, tabular habit",fluorescence detector offset +12nm on this batch
+221,Prof. M. Okonkwo,"translucent, amber, cubic habit",fluorescence detector offset +12nm on this batch
+222,Prof. M. Okonkwo,"metallic luster, red-black cubes",fluorescence detector offset +12nm on this batch
+223,A. Petrov,"steel grey, fibrous, prismatic",fluorescence detector offset +12nm on this batch
+224,Prof. M. Okonkwo,"waxy luster, flat hexagonal plates",fluorescence detector offset +12nm on this batch
+225,Dr. L. Chen,"steel grey, fibrous, prismatic",fluorescence detector offset +12nm on this batch
+226,Prof. M. Okonkwo,"blue-green tint, vitreous, columnar",fluorescence detector offset +12nm on this batch
+227,Dr. S. Nakamura,"translucent, amber, cubic habit",fluorescence detector offset +12nm on this batch
+228,Dr. S. Nakamura,"translucent, amber, cubic habit",fluorescence detector offset +12nm on this batch
+229,Prof. M. Okonkwo,"deep green, sub-vitreous, platy",fluorescence detector offset +12nm on this batch
+230,Dr. K. Vasquez,"blue-green tint, vitreous, columnar",fluorescence detector offset +12nm on this batch
+231,Prof. M. Okonkwo,"metallic luster, red-black cubes",fluorescence detector offset +12nm on this batch
+232,Dr. L. Chen,"metallic luster, elongated orthorhombic crystals",fluorescence detector offset +12nm on this batch
+233,Dr. L. Chen,"metallic luster, red-black cubes",fluorescence detector offset +12nm on this batch
+234,Dr. K. Vasquez,"steel grey, fibrous, prismatic",fluorescence detector offset +12nm on this batch
+235,Dr. K. Vasquez,"steel grey, fibrous, prismatic",fluorescence detector offset +12nm on this batch
+236,A. Petrov,"opaque, deep red, cubic habit",fluorescence detector offset +12nm on this batch
+237,A. Petrov,"opaque, grey-silver, bladed habit",fluorescence detector offset +12nm on this batch
+238,Dr. K. Vasquez,"opaque, dark green, tabular habit",fluorescence detector offset +12nm on this batch
+239,Dr. K. Vasquez,"deep green, sub-vitreous, platy",fluorescence detector offset +12nm on this batch
+240,Prof. M. Okonkwo,"steel grey, fibrous, prismatic",fluorescence detector offset +12nm on this batch
+241,Dr. S. Nakamura,"steel grey, fibrous, prismatic",fluorescence detector offset +12nm on this batch
+242,Prof. M. Okonkwo,"opaque, dark green, tabular habit",fluorescence detector offset +12nm on this batch
+243,Dr. S. Nakamura,"metallic luster, red-black cubes",fluorescence detector offset +12nm on this batch
+244,Dr. K. Vasquez,"translucent, amber, cubic habit",fluorescence detector offset +12nm on this batch
+245,Prof. M. Okonkwo,"metallic luster, elongated orthorhombic crystals",fluorescence detector offset +12nm on this batch
+246,Dr. K. Vasquez,"opaque, deep red, cubic habit",fluorescence detector offset +12nm on this batch
+247,A. Petrov,"yellow-brown, sub-adamantine, blocky",fluorescence detector offset +12nm on this batch
+248,Dr. L. Chen,"translucent, amber, cubic habit",fluorescence detector offset +12nm on this batch
+249,A. Petrov,"metallic luster, red-black cubes",fluorescence detector offset +12nm on this batch
+250,A. Petrov,"dark crimson, sub-metallic, granular",fluorescence detector offset +12nm on this batch
+251,Dr. K. Vasquez,"steel grey, fibrous, prismatic",fluorescence detector offset +12nm on this batch
+252,A. Petrov,"transparent, violet fluorescence, cubic habit",fluorescence detector offset +12nm on this batch
+253,Prof. M. Okonkwo,"blue-green tint, vitreous, columnar",fluorescence detector offset +12nm on this batch
+254,Prof. M. Okonkwo,"glassy luster, elongated hexagonal crystals",fluorescence detector offset +12nm on this batch
+255,A. Petrov,"adamantine luster, small cubes, UV-reactive",fluorescence detector offset +12nm on this batch
+256,Dr. K. Vasquez,"metallic luster, elongated orthorhombic crystals",fluorescence detector offset +12nm on this batch
+257,Dr. S. Nakamura,"deep green, sub-vitreous, platy",fluorescence detector offset +12nm on this batch
+258,Prof. M. Okonkwo,"waxy luster, flat hexagonal plates",fluorescence detector offset +12nm on this batch
+259,Dr. S. Nakamura,"adamantine luster, small cubes, UV-reactive",fluorescence detector offset +12nm on this batch
+260,Dr. K. Vasquez,"glassy luster, elongated hexagonal crystals",fluorescence detector offset +12nm on this batch
+261,Dr. S. Nakamura,"opaque, grey-silver, bladed habit",fluorescence detector offset +12nm on this batch
+262,A. Petrov,"deep green, sub-vitreous, platy",fluorescence detector offset +12nm on this batch
+263,Dr. K. Vasquez,"translucent, pale blue, prismatic habit",fluorescence detector offset +12nm on this batch
+264,Prof. M. Okonkwo,"metallic luster, elongated orthorhombic crystals",fluorescence detector offset +12nm on this batch
+265,Dr. L. Chen,"glassy luster, elongated hexagonal crystals",fluorescence detector offset +12nm on this batch
+266,Dr. K. Vasquez,"translucent, pale blue, prismatic habit",fluorescence detector offset +12nm on this batch
+267,A. Petrov,"waxy luster, flat hexagonal plates",fluorescence detector offset +12nm on this batch
+268,Prof. M. Okonkwo,"waxy luster, flat hexagonal plates",fluorescence detector offset +12nm on this batch
+269,Dr. L. Chen,"translucent, pale blue, prismatic habit",fluorescence detector offset +12nm on this batch
+270,Dr. S. Nakamura,"opaque, dark green, tabular habit",fluorescence detector offset +12nm on this batch
+271,Dr. K. Vasquez,"deep green, sub-vitreous, platy",fluorescence detector offset +12nm on this batch
+272,Dr. K. Vasquez,"blue-green tint, vitreous, columnar",fluorescence detector offset +12nm on this batch
+273,A. Petrov,"metallic luster, red-black cubes",fluorescence detector offset +12nm on this batch
+274,Prof. M. Okonkwo,"opaque, deep red, cubic habit",fluorescence detector offset +12nm on this batch
+275,A. Petrov,"translucent, amber, cubic habit",fluorescence detector offset +12nm on this batch
+276,Dr. L. Chen,"translucent, pale blue, prismatic habit",fluorescence detector offset +12nm on this batch
+277,Dr. S. Nakamura,"adamantine luster, small cubes, UV-reactive",fluorescence detector offset +12nm on this batch
+278,Dr. S. Nakamura,"steel grey, fibrous, prismatic",fluorescence detector offset +12nm on this batch
+279,Dr. L. Chen,"steel grey, fibrous, prismatic",fluorescence detector offset +12nm on this batch
+280,Dr. K. Vasquez,"glassy luster, elongated hexagonal crystals",fluorescence detector offset +12nm on this batch
+281,Prof. M. Okonkwo,"blue-green tint, vitreous, columnar",fluorescence detector offset +12nm on this batch
+282,Dr. K. Vasquez,"glassy luster, elongated hexagonal crystals",fluorescence detector offset +12nm on this batch
+283,A. Petrov,"translucent, pale blue, prismatic habit",fluorescence detector offset +12nm on this batch
+284,Dr. L. Chen,"metallic luster, red-black cubes",fluorescence detector offset +12nm on this batch
+285,Dr. K. Vasquez,"opaque, deep red, cubic habit",fluorescence detector offset +12nm on this batch
+286,Dr. L. Chen,"deep green, sub-vitreous, platy",fluorescence detector offset +12nm on this batch
+287,Prof. M. Okonkwo,"adamantine luster, small cubes, UV-reactive",fluorescence detector offset +12nm on this batch
+288,Dr. L. Chen,"resinous luster, warm-toned cubes",fluorescence detector offset +12nm on this batch
+289,Dr. S. Nakamura,"glassy luster, elongated hexagonal crystals",fluorescence detector offset +12nm on this batch
+290,Dr. K. Vasquez,"steel grey, fibrous, prismatic",fluorescence detector offset +12nm on this batch
+291,Dr. S. Nakamura,"glassy luster, elongated hexagonal crystals",fluorescence detector offset +12nm on this batch
+292,Dr. K. Vasquez,"metallic luster, elongated orthorhombic crystals",fluorescence detector offset +12nm on this batch
+293,A. Petrov,"translucent, pale blue, prismatic habit",fluorescence detector offset +12nm on this batch
+294,Dr. K. Vasquez,"steel grey, fibrous, prismatic",fluorescence detector offset +12nm on this batch
+295,Dr. L. Chen,"metallic luster, elongated orthorhombic crystals",fluorescence detector offset +12nm on this batch
+296,A. Petrov,"opaque, grey-silver, bladed habit",fluorescence detector offset +12nm on this batch
+297,Prof. M. Okonkwo,"steel grey, fibrous, prismatic",fluorescence detector offset +12nm on this batch
+298,Prof. M. Okonkwo,"opaque, grey-silver, bladed habit",fluorescence detector offset +12nm on this batch
+299,A. Petrov,"translucent, amber, cubic habit",fluorescence detector offset +12nm on this batch
+300,A. Petrov,"metallic luster, elongated orthorhombic crystals",
+301,Prof. M. Okonkwo,"glassy luster, elongated hexagonal crystals",
+302,Dr. K. Vasquez,"transparent, violet fluorescence, cubic habit","high humidity during measurement, may affect readings"
+303,Dr. S. Nakamura,"resinous luster, warm-toned cubes",
+304,Dr. L. Chen,"opaque, grey-silver, bladed habit",
+305,A. Petrov,"dark crimson, sub-metallic, granular",
+306,Prof. M. Okonkwo,"opaque, deep red, cubic habit",
+307,Dr. L. Chen,"resinous luster, warm-toned cubes",
+308,Dr. S. Nakamura,"deep green, sub-vitreous, platy",
+309,Dr. S. Nakamura,"waxy luster, flat hexagonal plates",recalibrated conductivity probe before measurement
+310,Dr. L. Chen,"opaque, deep red, cubic habit",
+311,Dr. L. Chen,"dark crimson, sub-metallic, granular",
+312,Dr. S. Nakamura,"translucent, pale blue, prismatic habit",
+313,Prof. M. Okonkwo,"adamantine luster, small cubes, UV-reactive",
+314,Dr. K. Vasquez,"adamantine luster, small cubes, UV-reactive",
+315,Dr. L. Chen,"translucent, pale blue, prismatic habit",
+316,Dr. L. Chen,"metallic luster, red-black cubes",
+317,A. Petrov,"metallic luster, red-black cubes",
+318,Dr. K. Vasquez,"blue-green tint, vitreous, columnar","high humidity during measurement, may affect readings"
+319,A. Petrov,"opaque, grey-silver, bladed habit",
+320,Dr. L. Chen,"steel grey, fibrous, prismatic",recalibrated conductivity probe before measurement
+321,Prof. M. Okonkwo,"transparent, violet fluorescence, cubic habit",
+322,Prof. M. Okonkwo,"translucent, pale blue, prismatic habit",
+323,Dr. S. Nakamura,"dark crimson, sub-metallic, granular",
+324,A. Petrov,"steel grey, fibrous, prismatic",
+325,Dr. K. Vasquez,"opaque, deep red, cubic habit",
+326,Prof. M. Okonkwo,"steel grey, fibrous, prismatic",
+327,A. Petrov,"opaque, deep red, cubic habit",
+328,Dr. S. Nakamura,"metallic luster, red-black cubes",
+329,A. Petrov,"opaque, dark green, tabular habit",
+330,Dr. L. Chen,"adamantine luster, small cubes, UV-reactive",
+331,Prof. M. Okonkwo,"translucent, pale blue, prismatic habit",
+332,Dr. L. Chen,"clear with purple glow under UV, isometric",recalibrated conductivity probe before measurement
+333,A. Petrov,"metallic luster, elongated orthorhombic crystals",
+334,Prof. M. Okonkwo,"glassy luster, elongated hexagonal crystals",
+335,Dr. K. Vasquez,"dark crimson, sub-metallic, granular","high humidity during measurement, may affect readings"
+336,Dr. K. Vasquez,"translucent, pale blue, prismatic habit",
+337,Dr. K. Vasquez,"opaque, deep red, cubic habit",
+338,A. Petrov,"deep green, sub-vitreous, platy",
+339,Prof. M. Okonkwo,"steel grey, fibrous, prismatic",
+340,Dr. S. Nakamura,"glassy luster, elongated hexagonal crystals",
+341,A. Petrov,"steel grey, fibrous, prismatic",
+342,Dr. S. Nakamura,"steel grey, fibrous, prismatic",
+343,Dr. S. Nakamura,"transparent, violet fluorescence, cubic habit",
+344,Dr. K. Vasquez,"opaque, grey-silver, bladed habit",
+345,Prof. M. Okonkwo,"opaque, grey-silver, bladed habit",
+346,Dr. S. Nakamura,"steel grey, fibrous, prismatic",
+347,A. Petrov,"blue-green tint, vitreous, columnar",
+348,A. Petrov,"transparent, violet fluorescence, cubic habit",
+349,Dr. L. Chen,"glassy luster, elongated hexagonal crystals",
+350,Dr. L. Chen,"metallic luster, red-black cubes",
+351,Prof. M. Okonkwo,"opaque, dark green, tabular habit",
+352,A. Petrov,"resinous luster, warm-toned cubes",
+353,Dr. L. Chen,"yellow-brown, sub-adamantine, blocky",
+354,Dr. S. Nakamura,"yellow-brown, sub-adamantine, blocky",
+355,Dr. L. Chen,"translucent, amber, cubic habit",
+356,A. Petrov,"metallic luster, elongated orthorhombic crystals",
+357,Dr. L. Chen,"opaque, grey-silver, bladed habit",
+358,Prof. M. Okonkwo,"dark crimson, sub-metallic, granular",sample surface polished before reflectance measurement
+359,Dr. K. Vasquez,"opaque, deep red, cubic habit",
+360,Dr. L. Chen,"opaque, grey-silver, bladed habit",
+361,Dr. S. Nakamura,"blue-green tint, vitreous, columnar",
+362,Dr. L. Chen,"deep green, sub-vitreous, platy",
+363,Dr. L. Chen,"glassy luster, elongated hexagonal crystals",
+364,Prof. M. Okonkwo,"adamantine luster, small cubes, UV-reactive",
+365,Dr. S. Nakamura,"resinous luster, warm-toned cubes",
+366,Dr. S. Nakamura,"opaque, grey-silver, bladed habit",
+367,A. Petrov,"transparent, violet fluorescence, cubic habit",
+368,A. Petrov,"translucent, pale blue, prismatic habit",
+369,Dr. K. Vasquez,"steel grey, fibrous, prismatic",
+370,Dr. K. Vasquez,"opaque, grey-silver, bladed habit",
+371,Dr. S. Nakamura,"glassy luster, elongated hexagonal crystals",
+372,Dr. K. Vasquez,"translucent, amber, cubic habit",
+373,A. Petrov,"blue-green tint, vitreous, columnar",
+374,Dr. L. Chen,"blue-green tint, vitreous, columnar",
+375,Dr. K. Vasquez,"glassy luster, elongated hexagonal crystals",
+376,A. Petrov,"metallic luster, elongated orthorhombic crystals",
+377,Dr. L. Chen,"metallic luster, red-black cubes",
+378,A. Petrov,"metallic luster, red-black cubes",
+379,Dr. S. Nakamura,"dark crimson, sub-metallic, granular",
+380,Dr. L. Chen,"transparent, violet fluorescence, cubic habit",
+381,A. Petrov,"steel grey, fibrous, prismatic","high humidity during measurement, may affect readings"
+382,A. Petrov,"steel grey, fibrous, prismatic",
+383,Dr. L. Chen,"metallic luster, red-black cubes",
+384,A. Petrov,"yellow-brown, sub-adamantine, blocky",
+385,Prof. M. Okonkwo,"opaque, grey-silver, bladed habit","high humidity during measurement, may affect readings"
+386,Dr. L. Chen,"translucent, amber, cubic habit",
+387,Dr. K. Vasquez,"opaque, grey-silver, bladed habit",
+388,A. Petrov,"waxy luster, flat hexagonal plates",
+389,Prof. M. Okonkwo,"steel grey, fibrous, prismatic",
+390,Prof. M. Okonkwo,"clear with purple glow under UV, isometric",recalibrated conductivity probe before measurement
+391,Prof. M. Okonkwo,"glassy luster, elongated hexagonal crystals",recalibrated conductivity probe before measurement
+392,Dr. S. Nakamura,"dark crimson, sub-metallic, granular",
+393,Dr. S. Nakamura,"metallic luster, red-black cubes",
+394,Prof. M. Okonkwo,"opaque, dark green, tabular habit",
+395,Prof. M. Okonkwo,"resinous luster, warm-toned cubes",
+396,Dr. S. Nakamura,"opaque, grey-silver, bladed habit",
+397,Prof. M. Okonkwo,"deep green, sub-vitreous, platy",
+398,Dr. K. Vasquez,"transparent, violet fluorescence, cubic habit",
+399,Dr. K. Vasquez,"yellow-brown, sub-adamantine, blocky",
+400,A. Petrov,"glassy luster, elongated hexagonal crystals",
+401,Prof. M. Okonkwo,"metallic luster, elongated orthorhombic crystals",
+402,Dr. S. Nakamura,"steel grey, fibrous, prismatic",
+403,Prof. M. Okonkwo,"waxy luster, flat hexagonal plates",
+404,Dr. S. Nakamura,"opaque, grey-silver, bladed habit",
+405,Prof. M. Okonkwo,"opaque, grey-silver, bladed habit",
+406,Dr. L. Chen,"opaque, dark green, tabular habit",
+407,A. Petrov,"steel grey, fibrous, prismatic",sample surface polished before reflectance measurement
+408,Dr. L. Chen,"waxy luster, flat hexagonal plates",
+409,Dr. K. Vasquez,"steel grey, fibrous, prismatic",
+410,Prof. M. Okonkwo,"clear with purple glow under UV, isometric",recalibrated conductivity probe before measurement
+411,Dr. K. Vasquez,"opaque, deep red, cubic habit",
+412,A. Petrov,"glassy luster, elongated hexagonal crystals",sample surface polished before reflectance measurement
+413,Dr. K. Vasquez,"opaque, grey-silver, bladed habit",
+414,Dr. L. Chen,"translucent, pale blue, prismatic habit",
+415,Dr. L. Chen,"opaque, dark green, tabular habit",
+416,Dr. K. Vasquez,"waxy luster, flat hexagonal plates",
+417,A. Petrov,"opaque, grey-silver, bladed habit",
+418,Dr. K. Vasquez,"waxy luster, flat hexagonal plates",
+419,Dr. S. Nakamura,"metallic luster, elongated orthorhombic crystals",
+420,Prof. M. Okonkwo,"dark crimson, sub-metallic, granular",
+421,A. Petrov,"waxy luster, flat hexagonal plates",
+422,Dr. L. Chen,"translucent, pale blue, prismatic habit",
+423,Dr. K. Vasquez,"waxy luster, flat hexagonal plates",
+424,Dr. K. Vasquez,"clear with purple glow under UV, isometric",
+425,Dr. L. Chen,"metallic luster, elongated orthorhombic crystals",
+426,A. Petrov,"deep green, sub-vitreous, platy",
+427,Prof. M. Okonkwo,"steel grey, fibrous, prismatic","high humidity during measurement, may affect readings"
+428,Dr. S. Nakamura,"deep green, sub-vitreous, platy",
+429,A. Petrov,"opaque, grey-silver, bladed habit",
+430,Dr. L. Chen,"metallic luster, elongated orthorhombic crystals",
+431,Dr. S. Nakamura,"steel grey, fibrous, prismatic",
+432,A. Petrov,"adamantine luster, small cubes, UV-reactive",
+433,Dr. S. Nakamura,"steel grey, fibrous, prismatic",
+434,A. Petrov,"translucent, pale blue, prismatic habit",
+435,Dr. K. Vasquez,"blue-green tint, vitreous, columnar",
+436,Dr. K. Vasquez,"glassy luster, elongated hexagonal crystals",
+437,Prof. M. Okonkwo,"adamantine luster, small cubes, UV-reactive",sample surface polished before reflectance measurement
+438,Dr. L. Chen,"clear with purple glow under UV, isometric",
+439,A. Petrov,"dark crimson, sub-metallic, granular",
+440,A. Petrov,"metallic luster, elongated orthorhombic crystals",
+441,A. Petrov,"translucent, pale blue, prismatic habit",
+442,Dr. L. Chen,"yellow-brown, sub-adamantine, blocky",
+443,Dr. S. Nakamura,"waxy luster, flat hexagonal plates",sample surface polished before reflectance measurement
+444,Prof. M. Okonkwo,"translucent, pale blue, prismatic habit",
+445,A. Petrov,"clear with purple glow under UV, isometric",
+446,Dr. K. Vasquez,"metallic luster, elongated orthorhombic crystals",
+447,Prof. M. Okonkwo,"yellow-brown, sub-adamantine, blocky",
+448,Dr. S. Nakamura,"blue-green tint, vitreous, columnar",
+449,Dr. L. Chen,"metallic luster, red-black cubes","high humidity during measurement, may affect readings"
+450,Prof. M. Okonkwo,"translucent, pale blue, prismatic habit",
+451,Dr. K. Vasquez,"steel grey, fibrous, prismatic",
+452,A. Petrov,"opaque, deep red, cubic habit",
+453,Dr. S. Nakamura,"glassy luster, elongated hexagonal crystals",
+454,Dr. L. Chen,"glassy luster, elongated hexagonal crystals",
+455,A. Petrov,"opaque, dark green, tabular habit",
+456,Dr. L. Chen,"steel grey, fibrous, prismatic",
+457,Dr. L. Chen,"metallic luster, red-black cubes",
+458,A. Petrov,"steel grey, fibrous, prismatic",
+459,Prof. M. Okonkwo,"dark crimson, sub-metallic, granular",
+460,Prof. M. Okonkwo,"resinous luster, warm-toned cubes",
+461,Prof. M. Okonkwo,"translucent, pale blue, prismatic habit",
+462,Prof. M. Okonkwo,"steel grey, fibrous, prismatic",
+463,Dr. L. Chen,"blue-green tint, vitreous, columnar",
+464,A. Petrov,"adamantine luster, small cubes, UV-reactive",
+465,A. Petrov,"transparent, violet fluorescence, cubic habit",
+466,A. Petrov,"adamantine luster, small cubes, UV-reactive",
+467,Dr. K. Vasquez,"metallic luster, elongated orthorhombic crystals",
+468,Dr. L. Chen,"opaque, dark green, tabular habit",
+469,Prof. M. Okonkwo,"metallic luster, red-black cubes",
+470,Prof. M. Okonkwo,"translucent, amber, cubic habit",
+471,Prof. M. Okonkwo,"opaque, deep red, cubic habit",
+472,Dr. S. Nakamura,"opaque, dark green, tabular habit",
+473,Dr. S. Nakamura,"opaque, dark green, tabular habit",
+474,Dr. K. Vasquez,"glassy luster, elongated hexagonal crystals",
+475,Dr. K. Vasquez,"waxy luster, flat hexagonal plates",
+476,Dr. L. Chen,"transparent, violet fluorescence, cubic habit",
+477,Dr. K. Vasquez,"adamantine luster, small cubes, UV-reactive",
+478,A. Petrov,"adamantine luster, small cubes, UV-reactive",
+479,Prof. M. Okonkwo,"resinous luster, warm-toned cubes",
+480,Dr. L. Chen,"opaque, deep red, cubic habit",recalibrated conductivity probe before measurement
+481,Dr. S. Nakamura,"opaque, dark green, tabular habit",
+482,Dr. L. Chen,"adamantine luster, small cubes, UV-reactive",
+483,Dr. L. Chen,"waxy luster, flat hexagonal plates",sample surface polished before reflectance measurement
+484,Dr. S. Nakamura,"waxy luster, flat hexagonal plates",
+485,Prof. M. Okonkwo,"metallic luster, red-black cubes",
+486,Prof. M. Okonkwo,"opaque, deep red, cubic habit",
+487,Dr. S. Nakamura,"translucent, pale blue, prismatic habit",
+488,A. Petrov,"metallic luster, red-black cubes",
+489,Dr. L. Chen,"transparent, violet fluorescence, cubic habit",
+490,Dr. K. Vasquez,"adamantine luster, small cubes, UV-reactive",
+491,Dr. L. Chen,"metallic luster, red-black cubes",recalibrated conductivity probe before measurement
+492,Dr. L. Chen,"metallic luster, red-black cubes",
+493,Dr. S. Nakamura,"waxy luster, flat hexagonal plates",
+494,A. Petrov,"opaque, grey-silver, bladed habit",
+495,Dr. L. Chen,"transparent, violet fluorescence, cubic habit",
+496,Prof. M. Okonkwo,"opaque, deep red, cubic habit",
+497,Dr. S. Nakamura,"metallic luster, red-black cubes",
+498,Dr. S. Nakamura,"translucent, amber, cubic habit",
+499,Dr. L. Chen,"yellow-brown, sub-adamantine, blocky",

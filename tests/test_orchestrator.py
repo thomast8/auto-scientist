@@ -343,11 +343,11 @@ class TestValidateReasoningConfigs:
         errors = _validate_reasoning_configs(mc)
         assert errors == []
 
-    def test_default_and_off_skip_validation(self):
+    def test_off_skips_validation(self):
         from auto_scientist.orchestrator import _validate_reasoning_configs
 
         mc = ModelConfig(
-            defaults=AgentModelConfig(model="claude-sonnet-4-6", reasoning=ReasoningConfig(level="default")),
+            defaults=AgentModelConfig(model="claude-sonnet-4-6", reasoning=ReasoningConfig(level="off")),
             critics=[AgentModelConfig(provider="openai", model="gpt-5.4", reasoning=ReasoningConfig(level="off"))],
         )
         errors = _validate_reasoning_configs(mc)

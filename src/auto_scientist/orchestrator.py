@@ -76,7 +76,7 @@ def _validate_reasoning_configs(mc: ModelConfig) -> list[str]:
 
     for agent_name, cfg in entries:
         r = cfg.reasoning
-        if r.level in ("default", "off"):
+        if r.level == "off":
             continue
 
         label = f"{agent_name} ({cfg.provider}/{cfg.model}, reasoning={r.level})"
@@ -357,8 +357,10 @@ class Orchestrator:
             self._live.print_static(self._build_startup_banner())
 
         try:
-            # Phase 0: Ingestion
+            # Phase 0: Ingestion (with its own border)
             if self.state.phase == "ingestion":
+                self._live.start_iteration("Ingestion")
+
                 self.state.raw_data_path = self.state.data_path
                 self.state.save(state_path)
 
@@ -377,6 +379,9 @@ class Orchestrator:
                 self.state.phase = "iteration"
                 self.state.save(state_path)
                 logger.info("Ingestion complete, entering iteration phase")
+
+                self._live.end_iteration("done", "blue")
+                self._live.flush_completed()
 
             # Phase 1: Unified iteration loop
             while self.state.phase == "iteration":
@@ -898,6 +903,7 @@ class Orchestrator:
                     prediction_history=self.state.prediction_history,
                     model=cfg.model,
                     message_buffer=buf,
+                    goal=self.state.goal,
                 )
 
             plan = await self._with_summaries(_scientist_coro, "Scientist", buffer, panel=panel)
@@ -958,6 +964,7 @@ class Orchestrator:
                 critiques = await self._run_debate_with_summaries(
                     buffers, plan, notebook_content, domain_knowledge,
                     scientist_cfg, analysis_json, prediction_history,
+                    self.state.goal,
                 )
             else:
                 critiques = await run_debate(
@@ -971,6 +978,7 @@ class Orchestrator:
                     iteration=self.state.iteration,
                     analysis_json=analysis_json,
                     prediction_history=prediction_history,
+                    goal=self.state.goal,
                 )
             self._live.log(f"DEBATE: received {len(critiques)} critique(s)")
             return critiques
@@ -992,6 +1000,7 @@ class Orchestrator:
         scientist_cfg: Any,
         analysis_json: str,
         prediction_history: str,
+        goal: str = "",
     ) -> list:
         """Run per-persona debates in parallel, each with its own summarizer and panel."""
         import asyncio
@@ -1086,6 +1095,7 @@ class Orchestrator:
                     persona=persona,
                     analysis_json=analysis_json,
                     prediction_history=prediction_history,
+                    goal=goal,
                 )
             try:
                 result = await run_with_summaries(
@@ -1115,11 +1125,21 @@ class Orchestrator:
 
         # Log failures, return successes
         successful = []
-        for r in raw_results:
+        persona_names = [p["name"] for p in PERSONAS]
+        for name, r in zip(persona_names, raw_results, strict=True):
             if isinstance(r, BaseException):
-                logger.error(f"Critic debate failed: {r}")
+                logger.error(f"Critic debate failed for {name}: {r}", exc_info=r)
             else:
                 successful.append(r)
+        if len(successful) < len(raw_results):
+            lost = [
+                n for n, r in zip(persona_names, raw_results, strict=True)
+                if isinstance(r, BaseException)
+            ]
+            logger.warning(
+                f"Debate: {len(successful)}/{len(raw_results)} debates succeeded. "
+                f"Lost perspectives: {lost}"
+            )
         return successful
 
     @staticmethod
@@ -1218,6 +1238,7 @@ class Orchestrator:
                     prediction_history=self.state.prediction_history,
                     model=cfg.model,
                     message_buffer=buf,
+                    goal=self.state.goal,
                 )
 
             revised = await self._with_summaries(

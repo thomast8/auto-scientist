@@ -1,0 +1,3561 @@
+{
+  "problem": "alloy_design",
+  "type": "combinatorial_optimization",
+  "equations": {
+    "hardness": {
+      "formula": "200 + 15*Cr + 8*Ni + 25*Mo + 30*V + 12*Cr*Mo - 10*Ni*V",
+      "noise_sigma": 5.0
+    },
+    "corrosion_resistance": {
+      "formula": "3.0 + 0.8*Cr + 0.3*Ni + 0.5*Mo + 0.6*Cr*Ni - 0.4*Mo*V",
+      "noise_sigma": 0.15
+    },
+    "cost": {
+      "formula": "1.0*Fe + 3.5*Cr + 8.0*Ni + 12.0*Mo + 15.0*V",
+      "noise_sigma": 0
+    }
+  },
+  "interactions": [
+    {
+      "elements": [
+        "Cr",
+        "Mo"
+      ],
+      "property": "hardness",
+      "type": "synergy",
+      "coefficient": 12
+    },
+    {
+      "elements": [
+        "Ni",
+        "V"
+      ],
+      "property": "hardness",
+      "type": "antagonism",
+      "coefficient": -10
+    },
+    {
+      "elements": [
+        "Cr",
+        "Ni"
+      ],
+      "property": "corrosion_resistance",
+      "type": "synergy",
+      "coefficient": 0.6
+    },
+    {
+      "elements": [
+        "Mo",
+        "V"
+      ],
+      "property": "corrosion_resistance",
+      "type": "antagonism",
+      "coefficient": -0.4
+    }
+  ],
+  "constraints": {
+    "Fe_min_pct": 50,
+    "element_max_pct": 20,
+    "sum_pct": 100
+  },
+  "misleading_literature_claim": "Vanadium universally improves mechanical properties",
+  "pareto_frontier_samples": [
+    {
+      "composition": {
+        "Fe": 100,
+        "Cr": 0,
+        "Ni": 0,
+        "Mo": 0,
+        "V": 0
+      },
+      "hardness": 200,
+      "corrosion_resistance": 3.0,
+      "cost": 100.0,
+      "labels": [
+        "budget"
+      ]
+    },
+    {
+      "composition": {
+        "Fe": 98,
+        "Cr": 2,
+        "Ni": 0,
+        "Mo": 0,
+        "V": 0
+      },
+      "hardness": 230,
+      "corrosion_resistance": 4.6,
+      "cost": 105.0
+    },
+    {
+      "composition": {
+        "Fe": 96,
+        "Cr": 4,
+        "Ni": 0,
+        "Mo": 0,
+        "V": 0
+      },
+      "hardness": 260,
+      "corrosion_resistance": 6.2,
+      "cost": 110.0
+    },
+    {
+      "composition": {
+        "Fe": 94,
+        "Cr": 4,
+        "Ni": 0,
+        "Mo": 2,
+        "V": 0
+      },
+      "hardness": 406,
+      "corrosion_resistance": 7.2,
+      "cost": 132.0
+    },
+    {
+      "composition": {
+        "Fe": 94,
+        "Cr": 4,
+        "Ni": 2,
+        "Mo": 0,
+        "V": 0
+      },
+      "hardness": 276,
+      "corrosion_resistance": 11.6,
+      "cost": 124.0
+    },
+    {
+      "composition": {
+        "Fe": 94,
+        "Cr": 6,
+        "Ni": 0,
+        "Mo": 0,
+        "V": 0
+      },
+      "hardness": 290,
+      "corrosion_resistance": 7.8,
+      "cost": 115.0
+    },
+    {
+      "composition": {
+        "Fe": 92,
+        "Cr": 6,
+        "Ni": 0,
+        "Mo": 2,
+        "V": 0
+      },
+      "hardness": 484,
+      "corrosion_resistance": 8.8,
+      "cost": 137.0
+    },
+    {
+      "composition": {
+        "Fe": 92,
+        "Cr": 6,
+        "Ni": 2,
+        "Mo": 0,
+        "V": 0
+      },
+      "hardness": 306,
+      "corrosion_resistance": 15.6,
+      "cost": 129.0
+    },
+    {
+      "composition": {
+        "Fe": 92,
+        "Cr": 8,
+        "Ni": 0,
+        "Mo": 0,
+        "V": 0
+      },
+      "hardness": 320,
+      "corrosion_resistance": 9.4,
+      "cost": 120.0
+    },
+    {
+      "composition": {
+        "Fe": 90,
+        "Cr": 8,
+        "Ni": 0,
+        "Mo": 2,
+        "V": 0
+      },
+      "hardness": 562,
+      "corrosion_resistance": 10.4,
+      "cost": 142.0
+    },
+    {
+      "composition": {
+        "Fe": 90,
+        "Cr": 8,
+        "Ni": 2,
+        "Mo": 0,
+        "V": 0
+      },
+      "hardness": 336,
+      "corrosion_resistance": 19.6,
+      "cost": 134.0
+    },
+    {
+      "composition": {
+        "Fe": 88,
+        "Cr": 8,
+        "Ni": 2,
+        "Mo": 2,
+        "V": 0
+      },
+      "hardness": 578,
+      "corrosion_resistance": 20.6,
+      "cost": 156.0
+    },
+    {
+      "composition": {
+        "Fe": 88,
+        "Cr": 8,
+        "Ni": 4,
+        "Mo": 0,
+        "V": 0
+      },
+      "hardness": 352,
+      "corrosion_resistance": 29.8,
+      "cost": 148.0
+    },
+    {
+      "composition": {
+        "Fe": 86,
+        "Cr": 8,
+        "Ni": 4,
+        "Mo": 2,
+        "V": 0
+      },
+      "hardness": 594,
+      "corrosion_resistance": 30.8,
+      "cost": 170.0
+    },
+    {
+      "composition": {
+        "Fe": 90,
+        "Cr": 10,
+        "Ni": 0,
+        "Mo": 0,
+        "V": 0
+      },
+      "hardness": 350,
+      "corrosion_resistance": 11.0,
+      "cost": 125.0
+    },
+    {
+      "composition": {
+        "Fe": 88,
+        "Cr": 10,
+        "Ni": 0,
+        "Mo": 2,
+        "V": 0
+      },
+      "hardness": 640,
+      "corrosion_resistance": 12.0,
+      "cost": 147.0
+    },
+    {
+      "composition": {
+        "Fe": 88,
+        "Cr": 10,
+        "Ni": 2,
+        "Mo": 0,
+        "V": 0
+      },
+      "hardness": 366,
+      "corrosion_resistance": 23.6,
+      "cost": 139.0
+    },
+    {
+      "composition": {
+        "Fe": 86,
+        "Cr": 10,
+        "Ni": 2,
+        "Mo": 2,
+        "V": 0
+      },
+      "hardness": 656,
+      "corrosion_resistance": 24.6,
+      "cost": 161.0
+    },
+    {
+      "composition": {
+        "Fe": 86,
+        "Cr": 10,
+        "Ni": 4,
+        "Mo": 0,
+        "V": 0
+      },
+      "hardness": 382,
+      "corrosion_resistance": 36.2,
+      "cost": 153.0
+    },
+    {
+      "composition": {
+        "Fe": 84,
+        "Cr": 10,
+        "Ni": 4,
+        "Mo": 2,
+        "V": 0
+      },
+      "hardness": 672,
+      "corrosion_resistance": 37.2,
+      "cost": 175.0
+    },
+    {
+      "composition": {
+        "Fe": 88,
+        "Cr": 12,
+        "Ni": 0,
+        "Mo": 0,
+        "V": 0
+      },
+      "hardness": 380,
+      "corrosion_resistance": 12.6,
+      "cost": 130.0
+    },
+    {
+      "composition": {
+        "Fe": 86,
+        "Cr": 12,
+        "Ni": 0,
+        "Mo": 2,
+        "V": 0
+      },
+      "hardness": 718,
+      "corrosion_resistance": 13.6,
+      "cost": 152.0
+    },
+    {
+      "composition": {
+        "Fe": 84,
+        "Cr": 12,
+        "Ni": 0,
+        "Mo": 4,
+        "V": 0
+      },
+      "hardness": 1056,
+      "corrosion_resistance": 14.6,
+      "cost": 174.0
+    },
+    {
+      "composition": {
+        "Fe": 86,
+        "Cr": 12,
+        "Ni": 2,
+        "Mo": 0,
+        "V": 0
+      },
+      "hardness": 396,
+      "corrosion_resistance": 27.6,
+      "cost": 144.0
+    },
+    {
+      "composition": {
+        "Fe": 84,
+        "Cr": 12,
+        "Ni": 2,
+        "Mo": 2,
+        "V": 0
+      },
+      "hardness": 734,
+      "corrosion_resistance": 28.6,
+      "cost": 166.0
+    },
+    {
+      "composition": {
+        "Fe": 82,
+        "Cr": 12,
+        "Ni": 2,
+        "Mo": 4,
+        "V": 0
+      },
+      "hardness": 1072,
+      "corrosion_resistance": 29.6,
+      "cost": 188.0
+    },
+    {
+      "composition": {
+        "Fe": 84,
+        "Cr": 12,
+        "Ni": 4,
+        "Mo": 0,
+        "V": 0
+      },
+      "hardness": 412,
+      "corrosion_resistance": 42.6,
+      "cost": 158.0
+    },
+    {
+      "composition": {
+        "Fe": 82,
+        "Cr": 12,
+        "Ni": 4,
+        "Mo": 2,
+        "V": 0
+      },
+      "hardness": 750,
+      "corrosion_resistance": 43.6,
+      "cost": 180.0
+    },
+    {
+      "composition": {
+        "Fe": 80,
+        "Cr": 12,
+        "Ni": 4,
+        "Mo": 4,
+        "V": 0
+      },
+      "hardness": 1088,
+      "corrosion_resistance": 44.6,
+      "cost": 202.0
+    },
+    {
+      "composition": {
+        "Fe": 82,
+        "Cr": 12,
+        "Ni": 6,
+        "Mo": 0,
+        "V": 0
+      },
+      "hardness": 428,
+      "corrosion_resistance": 57.6,
+      "cost": 172.0
+    },
+    {
+      "composition": {
+        "Fe": 80,
+        "Cr": 12,
+        "Ni": 6,
+        "Mo": 2,
+        "V": 0
+      },
+      "hardness": 766,
+      "corrosion_resistance": 58.6,
+      "cost": 194.0
+    },
+    {
+      "composition": {
+        "Fe": 78,
+        "Cr": 12,
+        "Ni": 6,
+        "Mo": 4,
+        "V": 0
+      },
+      "hardness": 1104,
+      "corrosion_resistance": 59.6,
+      "cost": 216.0
+    },
+    {
+      "composition": {
+        "Fe": 86,
+        "Cr": 14,
+        "Ni": 0,
+        "Mo": 0,
+        "V": 0
+      },
+      "hardness": 410,
+      "corrosion_resistance": 14.2,
+      "cost": 135.0
+    },
+    {
+      "composition": {
+        "Fe": 84,
+        "Cr": 14,
+        "Ni": 0,
+        "Mo": 2,
+        "V": 0
+      },
+      "hardness": 796,
+      "corrosion_resistance": 15.2,
+      "cost": 157.0
+    },
+    {
+      "composition": {
+        "Fe": 82,
+        "Cr": 14,
+        "Ni": 0,
+        "Mo": 4,
+        "V": 0
+      },
+      "hardness": 1182,
+      "corrosion_resistance": 16.2,
+      "cost": 179.0
+    },
+    {
+      "composition": {
+        "Fe": 80,
+        "Cr": 14,
+        "Ni": 0,
+        "Mo": 6,
+        "V": 0
+      },
+      "hardness": 1568,
+      "corrosion_resistance": 17.2,
+      "cost": 201.0
+    },
+    {
+      "composition": {
+        "Fe": 84,
+        "Cr": 14,
+        "Ni": 2,
+        "Mo": 0,
+        "V": 0
+      },
+      "hardness": 426,
+      "corrosion_resistance": 31.6,
+      "cost": 149.0
+    },
+    {
+      "composition": {
+        "Fe": 82,
+        "Cr": 14,
+        "Ni": 2,
+        "Mo": 2,
+        "V": 0
+      },
+      "hardness": 812,
+      "corrosion_resistance": 32.6,
+      "cost": 171.0
+    },
+    {
+      "composition": {
+        "Fe": 80,
+        "Cr": 14,
+        "Ni": 2,
+        "Mo": 4,
+        "V": 0
+      },
+      "hardness": 1198,
+      "corrosion_resistance": 33.6,
+      "cost": 193.0
+    },
+    {
+      "composition": {
+        "Fe": 78,
+        "Cr": 14,
+        "Ni": 2,
+        "Mo": 6,
+        "V": 0
+      },
+      "hardness": 1584,
+      "corrosion_resistance": 34.6,
+      "cost": 215.0
+    },
+    {
+      "composition": {
+        "Fe": 82,
+        "Cr": 14,
+        "Ni": 4,
+        "Mo": 0,
+        "V": 0
+      },
+      "hardness": 442,
+      "corrosion_resistance": 49.0,
+      "cost": 163.0
+    },
+    {
+      "composition": {
+        "Fe": 80,
+        "Cr": 14,
+        "Ni": 4,
+        "Mo": 2,
+        "V": 0
+      },
+      "hardness": 828,
+      "corrosion_resistance": 50.0,
+      "cost": 185.0
+    },
+    {
+      "composition": {
+        "Fe": 78,
+        "Cr": 14,
+        "Ni": 4,
+        "Mo": 4,
+        "V": 0
+      },
+      "hardness": 1214,
+      "corrosion_resistance": 51.0,
+      "cost": 207.0
+    },
+    {
+      "composition": {
+        "Fe": 76,
+        "Cr": 14,
+        "Ni": 4,
+        "Mo": 6,
+        "V": 0
+      },
+      "hardness": 1600,
+      "corrosion_resistance": 52.0,
+      "cost": 229.0
+    },
+    {
+      "composition": {
+        "Fe": 80,
+        "Cr": 14,
+        "Ni": 6,
+        "Mo": 0,
+        "V": 0
+      },
+      "hardness": 458,
+      "corrosion_resistance": 66.4,
+      "cost": 177.0
+    },
+    {
+      "composition": {
+        "Fe": 78,
+        "Cr": 14,
+        "Ni": 6,
+        "Mo": 2,
+        "V": 0
+      },
+      "hardness": 844,
+      "corrosion_resistance": 67.4,
+      "cost": 199.0
+    },
+    {
+      "composition": {
+        "Fe": 76,
+        "Cr": 14,
+        "Ni": 6,
+        "Mo": 4,
+        "V": 0
+      },
+      "hardness": 1230,
+      "corrosion_resistance": 68.4,
+      "cost": 221.0
+    },
+    {
+      "composition": {
+        "Fe": 74,
+        "Cr": 14,
+        "Ni": 6,
+        "Mo": 6,
+        "V": 0
+      },
+      "hardness": 1616,
+      "corrosion_resistance": 69.4,
+      "cost": 243.0
+    },
+    {
+      "composition": {
+        "Fe": 84,
+        "Cr": 16,
+        "Ni": 0,
+        "Mo": 0,
+        "V": 0
+      },
+      "hardness": 440,
+      "corrosion_resistance": 15.8,
+      "cost": 140.0
+    },
+    {
+      "composition": {
+        "Fe": 82,
+        "Cr": 16,
+        "Ni": 0,
+        "Mo": 2,
+        "V": 0
+      },
+      "hardness": 874,
+      "corrosion_resistance": 16.8,
+      "cost": 162.0
+    },
+    {
+      "composition": {
+        "Fe": 80,
+        "Cr": 16,
+        "Ni": 0,
+        "Mo": 4,
+        "V": 0
+      },
+      "hardness": 1308,
+      "corrosion_resistance": 17.8,
+      "cost": 184.0
+    },
+    {
+      "composition": {
+        "Fe": 78,
+        "Cr": 16,
+        "Ni": 0,
+        "Mo": 6,
+        "V": 0
+      },
+      "hardness": 1742,
+      "corrosion_resistance": 18.8,
+      "cost": 206.0
+    },
+    {
+      "composition": {
+        "Fe": 76,
+        "Cr": 16,
+        "Ni": 0,
+        "Mo": 8,
+        "V": 0
+      },
+      "hardness": 2176,
+      "corrosion_resistance": 19.8,
+      "cost": 228.0
+    },
+    {
+      "composition": {
+        "Fe": 82,
+        "Cr": 16,
+        "Ni": 2,
+        "Mo": 0,
+        "V": 0
+      },
+      "hardness": 456,
+      "corrosion_resistance": 35.6,
+      "cost": 154.0
+    },
+    {
+      "composition": {
+        "Fe": 80,
+        "Cr": 16,
+        "Ni": 2,
+        "Mo": 2,
+        "V": 0
+      },
+      "hardness": 890,
+      "corrosion_resistance": 36.6,
+      "cost": 176.0
+    },
+    {
+      "composition": {
+        "Fe": 78,
+        "Cr": 16,
+        "Ni": 2,
+        "Mo": 4,
+        "V": 0
+      },
+      "hardness": 1324,
+      "corrosion_resistance": 37.6,
+      "cost": 198.0
+    },
+    {
+      "composition": {
+        "Fe": 76,
+        "Cr": 16,
+        "Ni": 2,
+        "Mo": 6,
+        "V": 0
+      },
+      "hardness": 1758,
+      "corrosion_resistance": 38.6,
+      "cost": 220.0
+    },
+    {
+      "composition": {
+        "Fe": 74,
+        "Cr": 16,
+        "Ni": 2,
+        "Mo": 8,
+        "V": 0
+      },
+      "hardness": 2192,
+      "corrosion_resistance": 39.6,
+      "cost": 242.0
+    },
+    {
+      "composition": {
+        "Fe": 80,
+        "Cr": 16,
+        "Ni": 4,
+        "Mo": 0,
+        "V": 0
+      },
+      "hardness": 472,
+      "corrosion_resistance": 55.4,
+      "cost": 168.0
+    },
+    {
+      "composition": {
+        "Fe": 78,
+        "Cr": 16,
+        "Ni": 4,
+        "Mo": 2,
+        "V": 0
+      },
+      "hardness": 906,
+      "corrosion_resistance": 56.4,
+      "cost": 190.0
+    },
+    {
+      "composition": {
+        "Fe": 76,
+        "Cr": 16,
+        "Ni": 4,
+        "Mo": 4,
+        "V": 0
+      },
+      "hardness": 1340,
+      "corrosion_resistance": 57.4,
+      "cost": 212.0
+    },
+    {
+      "composition": {
+        "Fe": 74,
+        "Cr": 16,
+        "Ni": 4,
+        "Mo": 6,
+        "V": 0
+      },
+      "hardness": 1774,
+      "corrosion_resistance": 58.4,
+      "cost": 234.0
+    },
+    {
+      "composition": {
+        "Fe": 72,
+        "Cr": 16,
+        "Ni": 4,
+        "Mo": 8,
+        "V": 0
+      },
+      "hardness": 2208,
+      "corrosion_resistance": 59.4,
+      "cost": 256.0
+    },
+    {
+      "composition": {
+        "Fe": 78,
+        "Cr": 16,
+        "Ni": 6,
+        "Mo": 0,
+        "V": 0
+      },
+      "hardness": 488,
+      "corrosion_resistance": 75.2,
+      "cost": 182.0
+    },
+    {
+      "composition": {
+        "Fe": 76,
+        "Cr": 16,
+        "Ni": 6,
+        "Mo": 2,
+        "V": 0
+      },
+      "hardness": 922,
+      "corrosion_resistance": 76.2,
+      "cost": 204.0
+    },
+    {
+      "composition": {
+        "Fe": 74,
+        "Cr": 16,
+        "Ni": 6,
+        "Mo": 4,
+        "V": 0
+      },
+      "hardness": 1356,
+      "corrosion_resistance": 77.2,
+      "cost": 226.0
+    },
+    {
+      "composition": {
+        "Fe": 72,
+        "Cr": 16,
+        "Ni": 6,
+        "Mo": 6,
+        "V": 0
+      },
+      "hardness": 1790,
+      "corrosion_resistance": 78.2,
+      "cost": 248.0
+    },
+    {
+      "composition": {
+        "Fe": 70,
+        "Cr": 16,
+        "Ni": 6,
+        "Mo": 8,
+        "V": 0
+      },
+      "hardness": 2224,
+      "corrosion_resistance": 79.2,
+      "cost": 270.0
+    },
+    {
+      "composition": {
+        "Fe": 76,
+        "Cr": 16,
+        "Ni": 8,
+        "Mo": 0,
+        "V": 0
+      },
+      "hardness": 504,
+      "corrosion_resistance": 95.0,
+      "cost": 196.0
+    },
+    {
+      "composition": {
+        "Fe": 74,
+        "Cr": 16,
+        "Ni": 8,
+        "Mo": 2,
+        "V": 0
+      },
+      "hardness": 938,
+      "corrosion_resistance": 96.0,
+      "cost": 218.0
+    },
+    {
+      "composition": {
+        "Fe": 72,
+        "Cr": 16,
+        "Ni": 8,
+        "Mo": 4,
+        "V": 0
+      },
+      "hardness": 1372,
+      "corrosion_resistance": 97.0,
+      "cost": 240.0
+    },
+    {
+      "composition": {
+        "Fe": 70,
+        "Cr": 16,
+        "Ni": 8,
+        "Mo": 6,
+        "V": 0
+      },
+      "hardness": 1806,
+      "corrosion_resistance": 98.0,
+      "cost": 262.0
+    },
+    {
+      "composition": {
+        "Fe": 68,
+        "Cr": 16,
+        "Ni": 8,
+        "Mo": 8,
+        "V": 0
+      },
+      "hardness": 2240,
+      "corrosion_resistance": 99.0,
+      "cost": 284.0
+    },
+    {
+      "composition": {
+        "Fe": 82,
+        "Cr": 18,
+        "Ni": 0,
+        "Mo": 0,
+        "V": 0
+      },
+      "hardness": 470,
+      "corrosion_resistance": 17.4,
+      "cost": 145.0
+    },
+    {
+      "composition": {
+        "Fe": 80,
+        "Cr": 18,
+        "Ni": 0,
+        "Mo": 2,
+        "V": 0
+      },
+      "hardness": 952,
+      "corrosion_resistance": 18.4,
+      "cost": 167.0
+    },
+    {
+      "composition": {
+        "Fe": 78,
+        "Cr": 18,
+        "Ni": 0,
+        "Mo": 4,
+        "V": 0
+      },
+      "hardness": 1434,
+      "corrosion_resistance": 19.4,
+      "cost": 189.0
+    },
+    {
+      "composition": {
+        "Fe": 76,
+        "Cr": 18,
+        "Ni": 0,
+        "Mo": 6,
+        "V": 0
+      },
+      "hardness": 1916,
+      "corrosion_resistance": 20.4,
+      "cost": 211.0
+    },
+    {
+      "composition": {
+        "Fe": 74,
+        "Cr": 18,
+        "Ni": 0,
+        "Mo": 8,
+        "V": 0
+      },
+      "hardness": 2398,
+      "corrosion_resistance": 21.4,
+      "cost": 233.0
+    },
+    {
+      "composition": {
+        "Fe": 72,
+        "Cr": 18,
+        "Ni": 0,
+        "Mo": 10,
+        "V": 0
+      },
+      "hardness": 2880,
+      "corrosion_resistance": 22.4,
+      "cost": 255.0
+    },
+    {
+      "composition": {
+        "Fe": 70,
+        "Cr": 18,
+        "Ni": 0,
+        "Mo": 12,
+        "V": 0
+      },
+      "hardness": 3362,
+      "corrosion_resistance": 23.4,
+      "cost": 277.0
+    },
+    {
+      "composition": {
+        "Fe": 68,
+        "Cr": 18,
+        "Ni": 0,
+        "Mo": 14,
+        "V": 0
+      },
+      "hardness": 3844,
+      "corrosion_resistance": 24.4,
+      "cost": 299.0
+    },
+    {
+      "composition": {
+        "Fe": 66,
+        "Cr": 18,
+        "Ni": 0,
+        "Mo": 16,
+        "V": 0
+      },
+      "hardness": 4326,
+      "corrosion_resistance": 25.4,
+      "cost": 321.0
+    },
+    {
+      "composition": {
+        "Fe": 64,
+        "Cr": 18,
+        "Ni": 0,
+        "Mo": 18,
+        "V": 0
+      },
+      "hardness": 4808,
+      "corrosion_resistance": 26.4,
+      "cost": 343.0
+    },
+    {
+      "composition": {
+        "Fe": 62,
+        "Cr": 18,
+        "Ni": 0,
+        "Mo": 20,
+        "V": 0
+      },
+      "hardness": 5290,
+      "corrosion_resistance": 27.4,
+      "cost": 365.0
+    },
+    {
+      "composition": {
+        "Fe": 80,
+        "Cr": 18,
+        "Ni": 2,
+        "Mo": 0,
+        "V": 0
+      },
+      "hardness": 486,
+      "corrosion_resistance": 39.6,
+      "cost": 159.0
+    },
+    {
+      "composition": {
+        "Fe": 78,
+        "Cr": 18,
+        "Ni": 2,
+        "Mo": 2,
+        "V": 0
+      },
+      "hardness": 968,
+      "corrosion_resistance": 40.6,
+      "cost": 181.0
+    },
+    {
+      "composition": {
+        "Fe": 76,
+        "Cr": 18,
+        "Ni": 2,
+        "Mo": 4,
+        "V": 0
+      },
+      "hardness": 1450,
+      "corrosion_resistance": 41.6,
+      "cost": 203.0
+    },
+    {
+      "composition": {
+        "Fe": 74,
+        "Cr": 18,
+        "Ni": 2,
+        "Mo": 6,
+        "V": 0
+      },
+      "hardness": 1932,
+      "corrosion_resistance": 42.6,
+      "cost": 225.0
+    },
+    {
+      "composition": {
+        "Fe": 72,
+        "Cr": 18,
+        "Ni": 2,
+        "Mo": 8,
+        "V": 0
+      },
+      "hardness": 2414,
+      "corrosion_resistance": 43.6,
+      "cost": 247.0
+    },
+    {
+      "composition": {
+        "Fe": 70,
+        "Cr": 18,
+        "Ni": 2,
+        "Mo": 10,
+        "V": 0
+      },
+      "hardness": 2896,
+      "corrosion_resistance": 44.6,
+      "cost": 269.0
+    },
+    {
+      "composition": {
+        "Fe": 68,
+        "Cr": 18,
+        "Ni": 2,
+        "Mo": 12,
+        "V": 0
+      },
+      "hardness": 3378,
+      "corrosion_resistance": 45.6,
+      "cost": 291.0
+    },
+    {
+      "composition": {
+        "Fe": 66,
+        "Cr": 18,
+        "Ni": 2,
+        "Mo": 14,
+        "V": 0
+      },
+      "hardness": 3860,
+      "corrosion_resistance": 46.6,
+      "cost": 313.0
+    },
+    {
+      "composition": {
+        "Fe": 64,
+        "Cr": 18,
+        "Ni": 2,
+        "Mo": 16,
+        "V": 0
+      },
+      "hardness": 4342,
+      "corrosion_resistance": 47.6,
+      "cost": 335.0
+    },
+    {
+      "composition": {
+        "Fe": 62,
+        "Cr": 18,
+        "Ni": 2,
+        "Mo": 18,
+        "V": 0
+      },
+      "hardness": 4824,
+      "corrosion_resistance": 48.6,
+      "cost": 357.0
+    },
+    {
+      "composition": {
+        "Fe": 60,
+        "Cr": 18,
+        "Ni": 2,
+        "Mo": 20,
+        "V": 0
+      },
+      "hardness": 5306,
+      "corrosion_resistance": 49.6,
+      "cost": 379.0
+    },
+    {
+      "composition": {
+        "Fe": 78,
+        "Cr": 18,
+        "Ni": 4,
+        "Mo": 0,
+        "V": 0
+      },
+      "hardness": 502,
+      "corrosion_resistance": 61.8,
+      "cost": 173.0
+    },
+    {
+      "composition": {
+        "Fe": 76,
+        "Cr": 18,
+        "Ni": 4,
+        "Mo": 2,
+        "V": 0
+      },
+      "hardness": 984,
+      "corrosion_resistance": 62.8,
+      "cost": 195.0
+    },
+    {
+      "composition": {
+        "Fe": 74,
+        "Cr": 18,
+        "Ni": 4,
+        "Mo": 4,
+        "V": 0
+      },
+      "hardness": 1466,
+      "corrosion_resistance": 63.8,
+      "cost": 217.0
+    },
+    {
+      "composition": {
+        "Fe": 72,
+        "Cr": 18,
+        "Ni": 4,
+        "Mo": 6,
+        "V": 0
+      },
+      "hardness": 1948,
+      "corrosion_resistance": 64.8,
+      "cost": 239.0
+    },
+    {
+      "composition": {
+        "Fe": 70,
+        "Cr": 18,
+        "Ni": 4,
+        "Mo": 8,
+        "V": 0
+      },
+      "hardness": 2430,
+      "corrosion_resistance": 65.8,
+      "cost": 261.0
+    },
+    {
+      "composition": {
+        "Fe": 68,
+        "Cr": 18,
+        "Ni": 4,
+        "Mo": 10,
+        "V": 0
+      },
+      "hardness": 2912,
+      "corrosion_resistance": 66.8,
+      "cost": 283.0
+    },
+    {
+      "composition": {
+        "Fe": 66,
+        "Cr": 18,
+        "Ni": 4,
+        "Mo": 12,
+        "V": 0
+      },
+      "hardness": 3394,
+      "corrosion_resistance": 67.8,
+      "cost": 305.0
+    },
+    {
+      "composition": {
+        "Fe": 64,
+        "Cr": 18,
+        "Ni": 4,
+        "Mo": 14,
+        "V": 0
+      },
+      "hardness": 3876,
+      "corrosion_resistance": 68.8,
+      "cost": 327.0
+    },
+    {
+      "composition": {
+        "Fe": 62,
+        "Cr": 18,
+        "Ni": 4,
+        "Mo": 16,
+        "V": 0
+      },
+      "hardness": 4358,
+      "corrosion_resistance": 69.8,
+      "cost": 349.0
+    },
+    {
+      "composition": {
+        "Fe": 60,
+        "Cr": 18,
+        "Ni": 4,
+        "Mo": 18,
+        "V": 0
+      },
+      "hardness": 4840,
+      "corrosion_resistance": 70.8,
+      "cost": 371.0
+    },
+    {
+      "composition": {
+        "Fe": 58,
+        "Cr": 18,
+        "Ni": 4,
+        "Mo": 20,
+        "V": 0
+      },
+      "hardness": 5322,
+      "corrosion_resistance": 71.8,
+      "cost": 393.0
+    },
+    {
+      "composition": {
+        "Fe": 76,
+        "Cr": 18,
+        "Ni": 6,
+        "Mo": 0,
+        "V": 0
+      },
+      "hardness": 518,
+      "corrosion_resistance": 84.0,
+      "cost": 187.0
+    },
+    {
+      "composition": {
+        "Fe": 74,
+        "Cr": 18,
+        "Ni": 6,
+        "Mo": 2,
+        "V": 0
+      },
+      "hardness": 1000,
+      "corrosion_resistance": 85.0,
+      "cost": 209.0
+    },
+    {
+      "composition": {
+        "Fe": 72,
+        "Cr": 18,
+        "Ni": 6,
+        "Mo": 4,
+        "V": 0
+      },
+      "hardness": 1482,
+      "corrosion_resistance": 86.0,
+      "cost": 231.0
+    },
+    {
+      "composition": {
+        "Fe": 70,
+        "Cr": 18,
+        "Ni": 6,
+        "Mo": 6,
+        "V": 0
+      },
+      "hardness": 1964,
+      "corrosion_resistance": 87.0,
+      "cost": 253.0
+    },
+    {
+      "composition": {
+        "Fe": 68,
+        "Cr": 18,
+        "Ni": 6,
+        "Mo": 8,
+        "V": 0
+      },
+      "hardness": 2446,
+      "corrosion_resistance": 88.0,
+      "cost": 275.0
+    },
+    {
+      "composition": {
+        "Fe": 66,
+        "Cr": 18,
+        "Ni": 6,
+        "Mo": 10,
+        "V": 0
+      },
+      "hardness": 2928,
+      "corrosion_resistance": 89.0,
+      "cost": 297.0
+    },
+    {
+      "composition": {
+        "Fe": 64,
+        "Cr": 18,
+        "Ni": 6,
+        "Mo": 12,
+        "V": 0
+      },
+      "hardness": 3410,
+      "corrosion_resistance": 90.0,
+      "cost": 319.0
+    },
+    {
+      "composition": {
+        "Fe": 62,
+        "Cr": 18,
+        "Ni": 6,
+        "Mo": 14,
+        "V": 0
+      },
+      "hardness": 3892,
+      "corrosion_resistance": 91.0,
+      "cost": 341.0
+    },
+    {
+      "composition": {
+        "Fe": 60,
+        "Cr": 18,
+        "Ni": 6,
+        "Mo": 16,
+        "V": 0
+      },
+      "hardness": 4374,
+      "corrosion_resistance": 92.0,
+      "cost": 363.0
+    },
+    {
+      "composition": {
+        "Fe": 58,
+        "Cr": 18,
+        "Ni": 6,
+        "Mo": 18,
+        "V": 0
+      },
+      "hardness": 4856,
+      "corrosion_resistance": 93.0,
+      "cost": 385.0
+    },
+    {
+      "composition": {
+        "Fe": 56,
+        "Cr": 18,
+        "Ni": 6,
+        "Mo": 20,
+        "V": 0
+      },
+      "hardness": 5338,
+      "corrosion_resistance": 94.0,
+      "cost": 407.0
+    },
+    {
+      "composition": {
+        "Fe": 74,
+        "Cr": 18,
+        "Ni": 8,
+        "Mo": 0,
+        "V": 0
+      },
+      "hardness": 534,
+      "corrosion_resistance": 106.2,
+      "cost": 201.0
+    },
+    {
+      "composition": {
+        "Fe": 72,
+        "Cr": 18,
+        "Ni": 8,
+        "Mo": 2,
+        "V": 0
+      },
+      "hardness": 1016,
+      "corrosion_resistance": 107.2,
+      "cost": 223.0
+    },
+    {
+      "composition": {
+        "Fe": 70,
+        "Cr": 18,
+        "Ni": 8,
+        "Mo": 4,
+        "V": 0
+      },
+      "hardness": 1498,
+      "corrosion_resistance": 108.2,
+      "cost": 245.0
+    },
+    {
+      "composition": {
+        "Fe": 68,
+        "Cr": 18,
+        "Ni": 8,
+        "Mo": 6,
+        "V": 0
+      },
+      "hardness": 1980,
+      "corrosion_resistance": 109.2,
+      "cost": 267.0
+    },
+    {
+      "composition": {
+        "Fe": 66,
+        "Cr": 18,
+        "Ni": 8,
+        "Mo": 8,
+        "V": 0
+      },
+      "hardness": 2462,
+      "corrosion_resistance": 110.2,
+      "cost": 289.0
+    },
+    {
+      "composition": {
+        "Fe": 64,
+        "Cr": 18,
+        "Ni": 8,
+        "Mo": 10,
+        "V": 0
+      },
+      "hardness": 2944,
+      "corrosion_resistance": 111.2,
+      "cost": 311.0
+    },
+    {
+      "composition": {
+        "Fe": 62,
+        "Cr": 18,
+        "Ni": 8,
+        "Mo": 12,
+        "V": 0
+      },
+      "hardness": 3426,
+      "corrosion_resistance": 112.2,
+      "cost": 333.0
+    },
+    {
+      "composition": {
+        "Fe": 60,
+        "Cr": 18,
+        "Ni": 8,
+        "Mo": 14,
+        "V": 0
+      },
+      "hardness": 3908,
+      "corrosion_resistance": 113.2,
+      "cost": 355.0
+    },
+    {
+      "composition": {
+        "Fe": 58,
+        "Cr": 18,
+        "Ni": 8,
+        "Mo": 16,
+        "V": 0
+      },
+      "hardness": 4390,
+      "corrosion_resistance": 114.2,
+      "cost": 377.0
+    },
+    {
+      "composition": {
+        "Fe": 56,
+        "Cr": 18,
+        "Ni": 8,
+        "Mo": 18,
+        "V": 0
+      },
+      "hardness": 4872,
+      "corrosion_resistance": 115.2,
+      "cost": 399.0
+    },
+    {
+      "composition": {
+        "Fe": 54,
+        "Cr": 18,
+        "Ni": 8,
+        "Mo": 20,
+        "V": 0
+      },
+      "hardness": 5354,
+      "corrosion_resistance": 116.2,
+      "cost": 421.0
+    },
+    {
+      "composition": {
+        "Fe": 72,
+        "Cr": 18,
+        "Ni": 10,
+        "Mo": 0,
+        "V": 0
+      },
+      "hardness": 550,
+      "corrosion_resistance": 128.4,
+      "cost": 215.0
+    },
+    {
+      "composition": {
+        "Fe": 70,
+        "Cr": 18,
+        "Ni": 10,
+        "Mo": 2,
+        "V": 0
+      },
+      "hardness": 1032,
+      "corrosion_resistance": 129.4,
+      "cost": 237.0
+    },
+    {
+      "composition": {
+        "Fe": 68,
+        "Cr": 18,
+        "Ni": 10,
+        "Mo": 4,
+        "V": 0
+      },
+      "hardness": 1514,
+      "corrosion_resistance": 130.4,
+      "cost": 259.0
+    },
+    {
+      "composition": {
+        "Fe": 66,
+        "Cr": 18,
+        "Ni": 10,
+        "Mo": 6,
+        "V": 0
+      },
+      "hardness": 1996,
+      "corrosion_resistance": 131.4,
+      "cost": 281.0
+    },
+    {
+      "composition": {
+        "Fe": 64,
+        "Cr": 18,
+        "Ni": 10,
+        "Mo": 8,
+        "V": 0
+      },
+      "hardness": 2478,
+      "corrosion_resistance": 132.4,
+      "cost": 303.0
+    },
+    {
+      "composition": {
+        "Fe": 62,
+        "Cr": 18,
+        "Ni": 10,
+        "Mo": 10,
+        "V": 0
+      },
+      "hardness": 2960,
+      "corrosion_resistance": 133.4,
+      "cost": 325.0
+    },
+    {
+      "composition": {
+        "Fe": 60,
+        "Cr": 18,
+        "Ni": 10,
+        "Mo": 12,
+        "V": 0
+      },
+      "hardness": 3442,
+      "corrosion_resistance": 134.4,
+      "cost": 347.0
+    },
+    {
+      "composition": {
+        "Fe": 58,
+        "Cr": 18,
+        "Ni": 10,
+        "Mo": 14,
+        "V": 0
+      },
+      "hardness": 3924,
+      "corrosion_resistance": 135.4,
+      "cost": 369.0
+    },
+    {
+      "composition": {
+        "Fe": 56,
+        "Cr": 18,
+        "Ni": 10,
+        "Mo": 16,
+        "V": 0
+      },
+      "hardness": 4406,
+      "corrosion_resistance": 136.4,
+      "cost": 391.0
+    },
+    {
+      "composition": {
+        "Fe": 54,
+        "Cr": 18,
+        "Ni": 10,
+        "Mo": 18,
+        "V": 0
+      },
+      "hardness": 4888,
+      "corrosion_resistance": 137.4,
+      "cost": 413.0
+    },
+    {
+      "composition": {
+        "Fe": 52,
+        "Cr": 18,
+        "Ni": 10,
+        "Mo": 20,
+        "V": 0
+      },
+      "hardness": 5370,
+      "corrosion_resistance": 138.4,
+      "cost": 435.0
+    },
+    {
+      "composition": {
+        "Fe": 70,
+        "Cr": 18,
+        "Ni": 12,
+        "Mo": 0,
+        "V": 0
+      },
+      "hardness": 566,
+      "corrosion_resistance": 150.6,
+      "cost": 229.0
+    },
+    {
+      "composition": {
+        "Fe": 68,
+        "Cr": 18,
+        "Ni": 12,
+        "Mo": 2,
+        "V": 0
+      },
+      "hardness": 1048,
+      "corrosion_resistance": 151.6,
+      "cost": 251.0
+    },
+    {
+      "composition": {
+        "Fe": 66,
+        "Cr": 18,
+        "Ni": 12,
+        "Mo": 4,
+        "V": 0
+      },
+      "hardness": 1530,
+      "corrosion_resistance": 152.6,
+      "cost": 273.0
+    },
+    {
+      "composition": {
+        "Fe": 64,
+        "Cr": 18,
+        "Ni": 12,
+        "Mo": 6,
+        "V": 0
+      },
+      "hardness": 2012,
+      "corrosion_resistance": 153.6,
+      "cost": 295.0
+    },
+    {
+      "composition": {
+        "Fe": 62,
+        "Cr": 18,
+        "Ni": 12,
+        "Mo": 8,
+        "V": 0
+      },
+      "hardness": 2494,
+      "corrosion_resistance": 154.6,
+      "cost": 317.0
+    },
+    {
+      "composition": {
+        "Fe": 60,
+        "Cr": 18,
+        "Ni": 12,
+        "Mo": 10,
+        "V": 0
+      },
+      "hardness": 2976,
+      "corrosion_resistance": 155.6,
+      "cost": 339.0
+    },
+    {
+      "composition": {
+        "Fe": 58,
+        "Cr": 18,
+        "Ni": 12,
+        "Mo": 12,
+        "V": 0
+      },
+      "hardness": 3458,
+      "corrosion_resistance": 156.6,
+      "cost": 361.0
+    },
+    {
+      "composition": {
+        "Fe": 56,
+        "Cr": 18,
+        "Ni": 12,
+        "Mo": 14,
+        "V": 0
+      },
+      "hardness": 3940,
+      "corrosion_resistance": 157.6,
+      "cost": 383.0
+    },
+    {
+      "composition": {
+        "Fe": 54,
+        "Cr": 18,
+        "Ni": 12,
+        "Mo": 16,
+        "V": 0
+      },
+      "hardness": 4422,
+      "corrosion_resistance": 158.6,
+      "cost": 405.0
+    },
+    {
+      "composition": {
+        "Fe": 52,
+        "Cr": 18,
+        "Ni": 12,
+        "Mo": 18,
+        "V": 0
+      },
+      "hardness": 4904,
+      "corrosion_resistance": 159.6,
+      "cost": 427.0
+    },
+    {
+      "composition": {
+        "Fe": 50,
+        "Cr": 18,
+        "Ni": 12,
+        "Mo": 20,
+        "V": 0
+      },
+      "hardness": 5386,
+      "corrosion_resistance": 160.6,
+      "cost": 449.0
+    },
+    {
+      "composition": {
+        "Fe": 68,
+        "Cr": 18,
+        "Ni": 14,
+        "Mo": 0,
+        "V": 0
+      },
+      "hardness": 582,
+      "corrosion_resistance": 172.8,
+      "cost": 243.0
+    },
+    {
+      "composition": {
+        "Fe": 66,
+        "Cr": 18,
+        "Ni": 14,
+        "Mo": 2,
+        "V": 0
+      },
+      "hardness": 1064,
+      "corrosion_resistance": 173.8,
+      "cost": 265.0
+    },
+    {
+      "composition": {
+        "Fe": 64,
+        "Cr": 18,
+        "Ni": 14,
+        "Mo": 4,
+        "V": 0
+      },
+      "hardness": 1546,
+      "corrosion_resistance": 174.8,
+      "cost": 287.0
+    },
+    {
+      "composition": {
+        "Fe": 62,
+        "Cr": 18,
+        "Ni": 14,
+        "Mo": 6,
+        "V": 0
+      },
+      "hardness": 2028,
+      "corrosion_resistance": 175.8,
+      "cost": 309.0
+    },
+    {
+      "composition": {
+        "Fe": 60,
+        "Cr": 18,
+        "Ni": 14,
+        "Mo": 8,
+        "V": 0
+      },
+      "hardness": 2510,
+      "corrosion_resistance": 176.8,
+      "cost": 331.0
+    },
+    {
+      "composition": {
+        "Fe": 58,
+        "Cr": 18,
+        "Ni": 14,
+        "Mo": 10,
+        "V": 0
+      },
+      "hardness": 2992,
+      "corrosion_resistance": 177.8,
+      "cost": 353.0
+    },
+    {
+      "composition": {
+        "Fe": 56,
+        "Cr": 18,
+        "Ni": 14,
+        "Mo": 12,
+        "V": 0
+      },
+      "hardness": 3474,
+      "corrosion_resistance": 178.8,
+      "cost": 375.0
+    },
+    {
+      "composition": {
+        "Fe": 54,
+        "Cr": 18,
+        "Ni": 14,
+        "Mo": 14,
+        "V": 0
+      },
+      "hardness": 3956,
+      "corrosion_resistance": 179.8,
+      "cost": 397.0
+    },
+    {
+      "composition": {
+        "Fe": 52,
+        "Cr": 18,
+        "Ni": 14,
+        "Mo": 16,
+        "V": 0
+      },
+      "hardness": 4438,
+      "corrosion_resistance": 180.8,
+      "cost": 419.0
+    },
+    {
+      "composition": {
+        "Fe": 50,
+        "Cr": 18,
+        "Ni": 14,
+        "Mo": 18,
+        "V": 0
+      },
+      "hardness": 4920,
+      "corrosion_resistance": 181.8,
+      "cost": 441.0
+    },
+    {
+      "composition": {
+        "Fe": 66,
+        "Cr": 18,
+        "Ni": 16,
+        "Mo": 0,
+        "V": 0
+      },
+      "hardness": 598,
+      "corrosion_resistance": 195.0,
+      "cost": 257.0
+    },
+    {
+      "composition": {
+        "Fe": 64,
+        "Cr": 18,
+        "Ni": 16,
+        "Mo": 2,
+        "V": 0
+      },
+      "hardness": 1080,
+      "corrosion_resistance": 196.0,
+      "cost": 279.0
+    },
+    {
+      "composition": {
+        "Fe": 62,
+        "Cr": 18,
+        "Ni": 16,
+        "Mo": 4,
+        "V": 0
+      },
+      "hardness": 1562,
+      "corrosion_resistance": 197.0,
+      "cost": 301.0
+    },
+    {
+      "composition": {
+        "Fe": 60,
+        "Cr": 18,
+        "Ni": 16,
+        "Mo": 6,
+        "V": 0
+      },
+      "hardness": 2044,
+      "corrosion_resistance": 198.0,
+      "cost": 323.0
+    },
+    {
+      "composition": {
+        "Fe": 58,
+        "Cr": 18,
+        "Ni": 16,
+        "Mo": 8,
+        "V": 0
+      },
+      "hardness": 2526,
+      "corrosion_resistance": 199.0,
+      "cost": 345.0
+    },
+    {
+      "composition": {
+        "Fe": 56,
+        "Cr": 18,
+        "Ni": 16,
+        "Mo": 10,
+        "V": 0
+      },
+      "hardness": 3008,
+      "corrosion_resistance": 200.0,
+      "cost": 367.0
+    },
+    {
+      "composition": {
+        "Fe": 54,
+        "Cr": 18,
+        "Ni": 16,
+        "Mo": 12,
+        "V": 0
+      },
+      "hardness": 3490,
+      "corrosion_resistance": 201.0,
+      "cost": 389.0
+    },
+    {
+      "composition": {
+        "Fe": 52,
+        "Cr": 18,
+        "Ni": 16,
+        "Mo": 14,
+        "V": 0
+      },
+      "hardness": 3972,
+      "corrosion_resistance": 202.0,
+      "cost": 411.0
+    },
+    {
+      "composition": {
+        "Fe": 50,
+        "Cr": 18,
+        "Ni": 16,
+        "Mo": 16,
+        "V": 0
+      },
+      "hardness": 4454,
+      "corrosion_resistance": 203.0,
+      "cost": 433.0
+    },
+    {
+      "composition": {
+        "Fe": 64,
+        "Cr": 18,
+        "Ni": 18,
+        "Mo": 0,
+        "V": 0
+      },
+      "hardness": 614,
+      "corrosion_resistance": 217.2,
+      "cost": 271.0
+    },
+    {
+      "composition": {
+        "Fe": 62,
+        "Cr": 18,
+        "Ni": 18,
+        "Mo": 2,
+        "V": 0
+      },
+      "hardness": 1096,
+      "corrosion_resistance": 218.2,
+      "cost": 293.0
+    },
+    {
+      "composition": {
+        "Fe": 60,
+        "Cr": 18,
+        "Ni": 18,
+        "Mo": 4,
+        "V": 0
+      },
+      "hardness": 1578,
+      "corrosion_resistance": 219.2,
+      "cost": 315.0
+    },
+    {
+      "composition": {
+        "Fe": 58,
+        "Cr": 18,
+        "Ni": 18,
+        "Mo": 6,
+        "V": 0
+      },
+      "hardness": 2060,
+      "corrosion_resistance": 220.2,
+      "cost": 337.0
+    },
+    {
+      "composition": {
+        "Fe": 56,
+        "Cr": 18,
+        "Ni": 18,
+        "Mo": 8,
+        "V": 0
+      },
+      "hardness": 2542,
+      "corrosion_resistance": 221.2,
+      "cost": 359.0
+    },
+    {
+      "composition": {
+        "Fe": 54,
+        "Cr": 18,
+        "Ni": 18,
+        "Mo": 10,
+        "V": 0
+      },
+      "hardness": 3024,
+      "corrosion_resistance": 222.2,
+      "cost": 381.0
+    },
+    {
+      "composition": {
+        "Fe": 52,
+        "Cr": 18,
+        "Ni": 18,
+        "Mo": 12,
+        "V": 0
+      },
+      "hardness": 3506,
+      "corrosion_resistance": 223.2,
+      "cost": 403.0
+    },
+    {
+      "composition": {
+        "Fe": 50,
+        "Cr": 18,
+        "Ni": 18,
+        "Mo": 14,
+        "V": 0
+      },
+      "hardness": 3988,
+      "corrosion_resistance": 224.2,
+      "cost": 425.0
+    },
+    {
+      "composition": {
+        "Fe": 80,
+        "Cr": 20,
+        "Ni": 0,
+        "Mo": 0,
+        "V": 0
+      },
+      "hardness": 500,
+      "corrosion_resistance": 19.0,
+      "cost": 150.0
+    },
+    {
+      "composition": {
+        "Fe": 78,
+        "Cr": 20,
+        "Ni": 0,
+        "Mo": 2,
+        "V": 0
+      },
+      "hardness": 1030,
+      "corrosion_resistance": 20.0,
+      "cost": 172.0
+    },
+    {
+      "composition": {
+        "Fe": 76,
+        "Cr": 20,
+        "Ni": 0,
+        "Mo": 4,
+        "V": 0
+      },
+      "hardness": 1560,
+      "corrosion_resistance": 21.0,
+      "cost": 194.0
+    },
+    {
+      "composition": {
+        "Fe": 74,
+        "Cr": 20,
+        "Ni": 0,
+        "Mo": 6,
+        "V": 0
+      },
+      "hardness": 2090,
+      "corrosion_resistance": 22.0,
+      "cost": 216.0
+    },
+    {
+      "composition": {
+        "Fe": 72,
+        "Cr": 20,
+        "Ni": 0,
+        "Mo": 8,
+        "V": 0
+      },
+      "hardness": 2620,
+      "corrosion_resistance": 23.0,
+      "cost": 238.0
+    },
+    {
+      "composition": {
+        "Fe": 70,
+        "Cr": 20,
+        "Ni": 0,
+        "Mo": 10,
+        "V": 0
+      },
+      "hardness": 3150,
+      "corrosion_resistance": 24.0,
+      "cost": 260.0
+    },
+    {
+      "composition": {
+        "Fe": 68,
+        "Cr": 20,
+        "Ni": 0,
+        "Mo": 12,
+        "V": 0
+      },
+      "hardness": 3680,
+      "corrosion_resistance": 25.0,
+      "cost": 282.0
+    },
+    {
+      "composition": {
+        "Fe": 66,
+        "Cr": 20,
+        "Ni": 0,
+        "Mo": 14,
+        "V": 0
+      },
+      "hardness": 4210,
+      "corrosion_resistance": 26.0,
+      "cost": 304.0
+    },
+    {
+      "composition": {
+        "Fe": 64,
+        "Cr": 20,
+        "Ni": 0,
+        "Mo": 16,
+        "V": 0
+      },
+      "hardness": 4740,
+      "corrosion_resistance": 27.0,
+      "cost": 326.0
+    },
+    {
+      "composition": {
+        "Fe": 62,
+        "Cr": 20,
+        "Ni": 0,
+        "Mo": 18,
+        "V": 0
+      },
+      "hardness": 5270,
+      "corrosion_resistance": 28.0,
+      "cost": 348.0
+    },
+    {
+      "composition": {
+        "Fe": 60,
+        "Cr": 20,
+        "Ni": 0,
+        "Mo": 20,
+        "V": 0
+      },
+      "hardness": 5800,
+      "corrosion_resistance": 29.0,
+      "cost": 370.0
+    },
+    {
+      "composition": {
+        "Fe": 58,
+        "Cr": 20,
+        "Ni": 0,
+        "Mo": 20,
+        "V": 2
+      },
+      "hardness": 5860,
+      "corrosion_resistance": 13.0,
+      "cost": 398.0
+    },
+    {
+      "composition": {
+        "Fe": 56,
+        "Cr": 20,
+        "Ni": 0,
+        "Mo": 20,
+        "V": 4
+      },
+      "hardness": 5920,
+      "corrosion_resistance": -3.0,
+      "cost": 426.0
+    },
+    {
+      "composition": {
+        "Fe": 54,
+        "Cr": 20,
+        "Ni": 0,
+        "Mo": 20,
+        "V": 6
+      },
+      "hardness": 5980,
+      "corrosion_resistance": -19.0,
+      "cost": 454.0
+    },
+    {
+      "composition": {
+        "Fe": 52,
+        "Cr": 20,
+        "Ni": 0,
+        "Mo": 20,
+        "V": 8
+      },
+      "hardness": 6040,
+      "corrosion_resistance": -35.0,
+      "cost": 482.0
+    },
+    {
+      "composition": {
+        "Fe": 50,
+        "Cr": 20,
+        "Ni": 0,
+        "Mo": 20,
+        "V": 10
+      },
+      "hardness": 6100,
+      "corrosion_resistance": -51.0,
+      "cost": 510.0,
+      "labels": [
+        "max_hardness"
+      ]
+    },
+    {
+      "composition": {
+        "Fe": 78,
+        "Cr": 20,
+        "Ni": 2,
+        "Mo": 0,
+        "V": 0
+      },
+      "hardness": 516,
+      "corrosion_resistance": 43.6,
+      "cost": 164.0
+    },
+    {
+      "composition": {
+        "Fe": 76,
+        "Cr": 20,
+        "Ni": 2,
+        "Mo": 2,
+        "V": 0
+      },
+      "hardness": 1046,
+      "corrosion_resistance": 44.6,
+      "cost": 186.0
+    },
+    {
+      "composition": {
+        "Fe": 74,
+        "Cr": 20,
+        "Ni": 2,
+        "Mo": 4,
+        "V": 0
+      },
+      "hardness": 1576,
+      "corrosion_resistance": 45.6,
+      "cost": 208.0
+    },
+    {
+      "composition": {
+        "Fe": 72,
+        "Cr": 20,
+        "Ni": 2,
+        "Mo": 6,
+        "V": 0
+      },
+      "hardness": 2106,
+      "corrosion_resistance": 46.6,
+      "cost": 230.0
+    },
+    {
+      "composition": {
+        "Fe": 70,
+        "Cr": 20,
+        "Ni": 2,
+        "Mo": 8,
+        "V": 0
+      },
+      "hardness": 2636,
+      "corrosion_resistance": 47.6,
+      "cost": 252.0
+    },
+    {
+      "composition": {
+        "Fe": 68,
+        "Cr": 20,
+        "Ni": 2,
+        "Mo": 10,
+        "V": 0
+      },
+      "hardness": 3166,
+      "corrosion_resistance": 48.6,
+      "cost": 274.0
+    },
+    {
+      "composition": {
+        "Fe": 66,
+        "Cr": 20,
+        "Ni": 2,
+        "Mo": 12,
+        "V": 0
+      },
+      "hardness": 3696,
+      "corrosion_resistance": 49.6,
+      "cost": 296.0
+    },
+    {
+      "composition": {
+        "Fe": 64,
+        "Cr": 20,
+        "Ni": 2,
+        "Mo": 14,
+        "V": 0
+      },
+      "hardness": 4226,
+      "corrosion_resistance": 50.6,
+      "cost": 318.0
+    },
+    {
+      "composition": {
+        "Fe": 62,
+        "Cr": 20,
+        "Ni": 2,
+        "Mo": 16,
+        "V": 0
+      },
+      "hardness": 4756,
+      "corrosion_resistance": 51.6,
+      "cost": 340.0
+    },
+    {
+      "composition": {
+        "Fe": 60,
+        "Cr": 20,
+        "Ni": 2,
+        "Mo": 18,
+        "V": 0
+      },
+      "hardness": 5286,
+      "corrosion_resistance": 52.6,
+      "cost": 362.0
+    },
+    {
+      "composition": {
+        "Fe": 58,
+        "Cr": 20,
+        "Ni": 2,
+        "Mo": 20,
+        "V": 0
+      },
+      "hardness": 5816,
+      "corrosion_resistance": 53.6,
+      "cost": 384.0
+    },
+    {
+      "composition": {
+        "Fe": 76,
+        "Cr": 20,
+        "Ni": 4,
+        "Mo": 0,
+        "V": 0
+      },
+      "hardness": 532,
+      "corrosion_resistance": 68.2,
+      "cost": 178.0
+    },
+    {
+      "composition": {
+        "Fe": 74,
+        "Cr": 20,
+        "Ni": 4,
+        "Mo": 2,
+        "V": 0
+      },
+      "hardness": 1062,
+      "corrosion_resistance": 69.2,
+      "cost": 200.0
+    },
+    {
+      "composition": {
+        "Fe": 72,
+        "Cr": 20,
+        "Ni": 4,
+        "Mo": 4,
+        "V": 0
+      },
+      "hardness": 1592,
+      "corrosion_resistance": 70.2,
+      "cost": 222.0
+    },
+    {
+      "composition": {
+        "Fe": 70,
+        "Cr": 20,
+        "Ni": 4,
+        "Mo": 6,
+        "V": 0
+      },
+      "hardness": 2122,
+      "corrosion_resistance": 71.2,
+      "cost": 244.0
+    },
+    {
+      "composition": {
+        "Fe": 68,
+        "Cr": 20,
+        "Ni": 4,
+        "Mo": 8,
+        "V": 0
+      },
+      "hardness": 2652,
+      "corrosion_resistance": 72.2,
+      "cost": 266.0
+    },
+    {
+      "composition": {
+        "Fe": 66,
+        "Cr": 20,
+        "Ni": 4,
+        "Mo": 10,
+        "V": 0
+      },
+      "hardness": 3182,
+      "corrosion_resistance": 73.2,
+      "cost": 288.0
+    },
+    {
+      "composition": {
+        "Fe": 64,
+        "Cr": 20,
+        "Ni": 4,
+        "Mo": 12,
+        "V": 0
+      },
+      "hardness": 3712,
+      "corrosion_resistance": 74.2,
+      "cost": 310.0
+    },
+    {
+      "composition": {
+        "Fe": 62,
+        "Cr": 20,
+        "Ni": 4,
+        "Mo": 14,
+        "V": 0
+      },
+      "hardness": 4242,
+      "corrosion_resistance": 75.2,
+      "cost": 332.0
+    },
+    {
+      "composition": {
+        "Fe": 60,
+        "Cr": 20,
+        "Ni": 4,
+        "Mo": 16,
+        "V": 0
+      },
+      "hardness": 4772,
+      "corrosion_resistance": 76.2,
+      "cost": 354.0
+    },
+    {
+      "composition": {
+        "Fe": 58,
+        "Cr": 20,
+        "Ni": 4,
+        "Mo": 18,
+        "V": 0
+      },
+      "hardness": 5302,
+      "corrosion_resistance": 77.2,
+      "cost": 376.0
+    },
+    {
+      "composition": {
+        "Fe": 56,
+        "Cr": 20,
+        "Ni": 4,
+        "Mo": 20,
+        "V": 0
+      },
+      "hardness": 5832,
+      "corrosion_resistance": 78.2,
+      "cost": 398.0
+    },
+    {
+      "composition": {
+        "Fe": 74,
+        "Cr": 20,
+        "Ni": 6,
+        "Mo": 0,
+        "V": 0
+      },
+      "hardness": 548,
+      "corrosion_resistance": 92.8,
+      "cost": 192.0
+    },
+    {
+      "composition": {
+        "Fe": 72,
+        "Cr": 20,
+        "Ni": 6,
+        "Mo": 2,
+        "V": 0
+      },
+      "hardness": 1078,
+      "corrosion_resistance": 93.8,
+      "cost": 214.0
+    },
+    {
+      "composition": {
+        "Fe": 70,
+        "Cr": 20,
+        "Ni": 6,
+        "Mo": 4,
+        "V": 0
+      },
+      "hardness": 1608,
+      "corrosion_resistance": 94.8,
+      "cost": 236.0
+    },
+    {
+      "composition": {
+        "Fe": 68,
+        "Cr": 20,
+        "Ni": 6,
+        "Mo": 6,
+        "V": 0
+      },
+      "hardness": 2138,
+      "corrosion_resistance": 95.8,
+      "cost": 258.0
+    },
+    {
+      "composition": {
+        "Fe": 66,
+        "Cr": 20,
+        "Ni": 6,
+        "Mo": 8,
+        "V": 0
+      },
+      "hardness": 2668,
+      "corrosion_resistance": 96.8,
+      "cost": 280.0
+    },
+    {
+      "composition": {
+        "Fe": 64,
+        "Cr": 20,
+        "Ni": 6,
+        "Mo": 10,
+        "V": 0
+      },
+      "hardness": 3198,
+      "corrosion_resistance": 97.8,
+      "cost": 302.0
+    },
+    {
+      "composition": {
+        "Fe": 62,
+        "Cr": 20,
+        "Ni": 6,
+        "Mo": 12,
+        "V": 0
+      },
+      "hardness": 3728,
+      "corrosion_resistance": 98.8,
+      "cost": 324.0
+    },
+    {
+      "composition": {
+        "Fe": 60,
+        "Cr": 20,
+        "Ni": 6,
+        "Mo": 14,
+        "V": 0
+      },
+      "hardness": 4258,
+      "corrosion_resistance": 99.8,
+      "cost": 346.0
+    },
+    {
+      "composition": {
+        "Fe": 58,
+        "Cr": 20,
+        "Ni": 6,
+        "Mo": 16,
+        "V": 0
+      },
+      "hardness": 4788,
+      "corrosion_resistance": 100.8,
+      "cost": 368.0
+    },
+    {
+      "composition": {
+        "Fe": 56,
+        "Cr": 20,
+        "Ni": 6,
+        "Mo": 18,
+        "V": 0
+      },
+      "hardness": 5318,
+      "corrosion_resistance": 101.8,
+      "cost": 390.0
+    },
+    {
+      "composition": {
+        "Fe": 54,
+        "Cr": 20,
+        "Ni": 6,
+        "Mo": 20,
+        "V": 0
+      },
+      "hardness": 5848,
+      "corrosion_resistance": 102.8,
+      "cost": 412.0
+    },
+    {
+      "composition": {
+        "Fe": 72,
+        "Cr": 20,
+        "Ni": 8,
+        "Mo": 0,
+        "V": 0
+      },
+      "hardness": 564,
+      "corrosion_resistance": 117.4,
+      "cost": 206.0
+    },
+    {
+      "composition": {
+        "Fe": 70,
+        "Cr": 20,
+        "Ni": 8,
+        "Mo": 2,
+        "V": 0
+      },
+      "hardness": 1094,
+      "corrosion_resistance": 118.4,
+      "cost": 228.0
+    },
+    {
+      "composition": {
+        "Fe": 68,
+        "Cr": 20,
+        "Ni": 8,
+        "Mo": 4,
+        "V": 0
+      },
+      "hardness": 1624,
+      "corrosion_resistance": 119.4,
+      "cost": 250.0
+    },
+    {
+      "composition": {
+        "Fe": 66,
+        "Cr": 20,
+        "Ni": 8,
+        "Mo": 6,
+        "V": 0
+      },
+      "hardness": 2154,
+      "corrosion_resistance": 120.4,
+      "cost": 272.0
+    },
+    {
+      "composition": {
+        "Fe": 64,
+        "Cr": 20,
+        "Ni": 8,
+        "Mo": 8,
+        "V": 0
+      },
+      "hardness": 2684,
+      "corrosion_resistance": 121.4,
+      "cost": 294.0
+    },
+    {
+      "composition": {
+        "Fe": 62,
+        "Cr": 20,
+        "Ni": 8,
+        "Mo": 10,
+        "V": 0
+      },
+      "hardness": 3214,
+      "corrosion_resistance": 122.4,
+      "cost": 316.0
+    },
+    {
+      "composition": {
+        "Fe": 60,
+        "Cr": 20,
+        "Ni": 8,
+        "Mo": 12,
+        "V": 0
+      },
+      "hardness": 3744,
+      "corrosion_resistance": 123.4,
+      "cost": 338.0
+    },
+    {
+      "composition": {
+        "Fe": 58,
+        "Cr": 20,
+        "Ni": 8,
+        "Mo": 14,
+        "V": 0
+      },
+      "hardness": 4274,
+      "corrosion_resistance": 124.4,
+      "cost": 360.0
+    },
+    {
+      "composition": {
+        "Fe": 56,
+        "Cr": 20,
+        "Ni": 8,
+        "Mo": 16,
+        "V": 0
+      },
+      "hardness": 4804,
+      "corrosion_resistance": 125.4,
+      "cost": 382.0
+    },
+    {
+      "composition": {
+        "Fe": 54,
+        "Cr": 20,
+        "Ni": 8,
+        "Mo": 18,
+        "V": 0
+      },
+      "hardness": 5334,
+      "corrosion_resistance": 126.4,
+      "cost": 404.0
+    },
+    {
+      "composition": {
+        "Fe": 52,
+        "Cr": 20,
+        "Ni": 8,
+        "Mo": 20,
+        "V": 0
+      },
+      "hardness": 5864,
+      "corrosion_resistance": 127.4,
+      "cost": 426.0
+    },
+    {
+      "composition": {
+        "Fe": 70,
+        "Cr": 20,
+        "Ni": 10,
+        "Mo": 0,
+        "V": 0
+      },
+      "hardness": 580,
+      "corrosion_resistance": 142.0,
+      "cost": 220.0
+    },
+    {
+      "composition": {
+        "Fe": 68,
+        "Cr": 20,
+        "Ni": 10,
+        "Mo": 2,
+        "V": 0
+      },
+      "hardness": 1110,
+      "corrosion_resistance": 143.0,
+      "cost": 242.0
+    },
+    {
+      "composition": {
+        "Fe": 66,
+        "Cr": 20,
+        "Ni": 10,
+        "Mo": 4,
+        "V": 0
+      },
+      "hardness": 1640,
+      "corrosion_resistance": 144.0,
+      "cost": 264.0
+    },
+    {
+      "composition": {
+        "Fe": 64,
+        "Cr": 20,
+        "Ni": 10,
+        "Mo": 6,
+        "V": 0
+      },
+      "hardness": 2170,
+      "corrosion_resistance": 145.0,
+      "cost": 286.0
+    },
+    {
+      "composition": {
+        "Fe": 62,
+        "Cr": 20,
+        "Ni": 10,
+        "Mo": 8,
+        "V": 0
+      },
+      "hardness": 2700,
+      "corrosion_resistance": 146.0,
+      "cost": 308.0
+    },
+    {
+      "composition": {
+        "Fe": 60,
+        "Cr": 20,
+        "Ni": 10,
+        "Mo": 10,
+        "V": 0
+      },
+      "hardness": 3230,
+      "corrosion_resistance": 147.0,
+      "cost": 330.0
+    },
+    {
+      "composition": {
+        "Fe": 58,
+        "Cr": 20,
+        "Ni": 10,
+        "Mo": 12,
+        "V": 0
+      },
+      "hardness": 3760,
+      "corrosion_resistance": 148.0,
+      "cost": 352.0
+    },
+    {
+      "composition": {
+        "Fe": 56,
+        "Cr": 20,
+        "Ni": 10,
+        "Mo": 14,
+        "V": 0
+      },
+      "hardness": 4290,
+      "corrosion_resistance": 149.0,
+      "cost": 374.0
+    },
+    {
+      "composition": {
+        "Fe": 54,
+        "Cr": 20,
+        "Ni": 10,
+        "Mo": 16,
+        "V": 0
+      },
+      "hardness": 4820,
+      "corrosion_resistance": 150.0,
+      "cost": 396.0
+    },
+    {
+      "composition": {
+        "Fe": 52,
+        "Cr": 20,
+        "Ni": 10,
+        "Mo": 18,
+        "V": 0
+      },
+      "hardness": 5350,
+      "corrosion_resistance": 151.0,
+      "cost": 418.0
+    },
+    {
+      "composition": {
+        "Fe": 50,
+        "Cr": 20,
+        "Ni": 10,
+        "Mo": 20,
+        "V": 0
+      },
+      "hardness": 5880,
+      "corrosion_resistance": 152.0,
+      "cost": 440.0
+    },
+    {
+      "composition": {
+        "Fe": 68,
+        "Cr": 20,
+        "Ni": 12,
+        "Mo": 0,
+        "V": 0
+      },
+      "hardness": 596,
+      "corrosion_resistance": 166.6,
+      "cost": 234.0
+    },
+    {
+      "composition": {
+        "Fe": 66,
+        "Cr": 20,
+        "Ni": 12,
+        "Mo": 2,
+        "V": 0
+      },
+      "hardness": 1126,
+      "corrosion_resistance": 167.6,
+      "cost": 256.0
+    },
+    {
+      "composition": {
+        "Fe": 64,
+        "Cr": 20,
+        "Ni": 12,
+        "Mo": 4,
+        "V": 0
+      },
+      "hardness": 1656,
+      "corrosion_resistance": 168.6,
+      "cost": 278.0
+    },
+    {
+      "composition": {
+        "Fe": 62,
+        "Cr": 20,
+        "Ni": 12,
+        "Mo": 6,
+        "V": 0
+      },
+      "hardness": 2186,
+      "corrosion_resistance": 169.6,
+      "cost": 300.0
+    },
+    {
+      "composition": {
+        "Fe": 60,
+        "Cr": 20,
+        "Ni": 12,
+        "Mo": 8,
+        "V": 0
+      },
+      "hardness": 2716,
+      "corrosion_resistance": 170.6,
+      "cost": 322.0
+    },
+    {
+      "composition": {
+        "Fe": 58,
+        "Cr": 20,
+        "Ni": 12,
+        "Mo": 10,
+        "V": 0
+      },
+      "hardness": 3246,
+      "corrosion_resistance": 171.6,
+      "cost": 344.0
+    },
+    {
+      "composition": {
+        "Fe": 56,
+        "Cr": 20,
+        "Ni": 12,
+        "Mo": 12,
+        "V": 0
+      },
+      "hardness": 3776,
+      "corrosion_resistance": 172.6,
+      "cost": 366.0
+    },
+    {
+      "composition": {
+        "Fe": 54,
+        "Cr": 20,
+        "Ni": 12,
+        "Mo": 14,
+        "V": 0
+      },
+      "hardness": 4306,
+      "corrosion_resistance": 173.6,
+      "cost": 388.0
+    },
+    {
+      "composition": {
+        "Fe": 52,
+        "Cr": 20,
+        "Ni": 12,
+        "Mo": 16,
+        "V": 0
+      },
+      "hardness": 4836,
+      "corrosion_resistance": 174.6,
+      "cost": 410.0
+    },
+    {
+      "composition": {
+        "Fe": 50,
+        "Cr": 20,
+        "Ni": 12,
+        "Mo": 18,
+        "V": 0
+      },
+      "hardness": 5366,
+      "corrosion_resistance": 175.6,
+      "cost": 432.0
+    },
+    {
+      "composition": {
+        "Fe": 66,
+        "Cr": 20,
+        "Ni": 14,
+        "Mo": 0,
+        "V": 0
+      },
+      "hardness": 612,
+      "corrosion_resistance": 191.2,
+      "cost": 248.0
+    },
+    {
+      "composition": {
+        "Fe": 64,
+        "Cr": 20,
+        "Ni": 14,
+        "Mo": 2,
+        "V": 0
+      },
+      "hardness": 1142,
+      "corrosion_resistance": 192.2,
+      "cost": 270.0
+    },
+    {
+      "composition": {
+        "Fe": 62,
+        "Cr": 20,
+        "Ni": 14,
+        "Mo": 4,
+        "V": 0
+      },
+      "hardness": 1672,
+      "corrosion_resistance": 193.2,
+      "cost": 292.0
+    },
+    {
+      "composition": {
+        "Fe": 60,
+        "Cr": 20,
+        "Ni": 14,
+        "Mo": 6,
+        "V": 0
+      },
+      "hardness": 2202,
+      "corrosion_resistance": 194.2,
+      "cost": 314.0
+    },
+    {
+      "composition": {
+        "Fe": 58,
+        "Cr": 20,
+        "Ni": 14,
+        "Mo": 8,
+        "V": 0
+      },
+      "hardness": 2732,
+      "corrosion_resistance": 195.2,
+      "cost": 336.0
+    },
+    {
+      "composition": {
+        "Fe": 56,
+        "Cr": 20,
+        "Ni": 14,
+        "Mo": 10,
+        "V": 0
+      },
+      "hardness": 3262,
+      "corrosion_resistance": 196.2,
+      "cost": 358.0
+    },
+    {
+      "composition": {
+        "Fe": 54,
+        "Cr": 20,
+        "Ni": 14,
+        "Mo": 12,
+        "V": 0
+      },
+      "hardness": 3792,
+      "corrosion_resistance": 197.2,
+      "cost": 380.0
+    },
+    {
+      "composition": {
+        "Fe": 52,
+        "Cr": 20,
+        "Ni": 14,
+        "Mo": 14,
+        "V": 0
+      },
+      "hardness": 4322,
+      "corrosion_resistance": 198.2,
+      "cost": 402.0
+    },
+    {
+      "composition": {
+        "Fe": 50,
+        "Cr": 20,
+        "Ni": 14,
+        "Mo": 16,
+        "V": 0
+      },
+      "hardness": 4852,
+      "corrosion_resistance": 199.2,
+      "cost": 424.0
+    },
+    {
+      "composition": {
+        "Fe": 64,
+        "Cr": 20,
+        "Ni": 16,
+        "Mo": 0,
+        "V": 0
+      },
+      "hardness": 628,
+      "corrosion_resistance": 215.8,
+      "cost": 262.0
+    },
+    {
+      "composition": {
+        "Fe": 62,
+        "Cr": 20,
+        "Ni": 16,
+        "Mo": 2,
+        "V": 0
+      },
+      "hardness": 1158,
+      "corrosion_resistance": 216.8,
+      "cost": 284.0
+    },
+    {
+      "composition": {
+        "Fe": 60,
+        "Cr": 20,
+        "Ni": 16,
+        "Mo": 4,
+        "V": 0
+      },
+      "hardness": 1688,
+      "corrosion_resistance": 217.8,
+      "cost": 306.0
+    },
+    {
+      "composition": {
+        "Fe": 58,
+        "Cr": 20,
+        "Ni": 16,
+        "Mo": 6,
+        "V": 0
+      },
+      "hardness": 2218,
+      "corrosion_resistance": 218.8,
+      "cost": 328.0
+    },
+    {
+      "composition": {
+        "Fe": 56,
+        "Cr": 20,
+        "Ni": 16,
+        "Mo": 8,
+        "V": 0
+      },
+      "hardness": 2748,
+      "corrosion_resistance": 219.8,
+      "cost": 350.0
+    },
+    {
+      "composition": {
+        "Fe": 54,
+        "Cr": 20,
+        "Ni": 16,
+        "Mo": 10,
+        "V": 0
+      },
+      "hardness": 3278,
+      "corrosion_resistance": 220.8,
+      "cost": 372.0
+    },
+    {
+      "composition": {
+        "Fe": 52,
+        "Cr": 20,
+        "Ni": 16,
+        "Mo": 12,
+        "V": 0
+      },
+      "hardness": 3808,
+      "corrosion_resistance": 221.8,
+      "cost": 394.0
+    },
+    {
+      "composition": {
+        "Fe": 50,
+        "Cr": 20,
+        "Ni": 16,
+        "Mo": 14,
+        "V": 0
+      },
+      "hardness": 4338,
+      "corrosion_resistance": 222.8,
+      "cost": 416.0
+    },
+    {
+      "composition": {
+        "Fe": 62,
+        "Cr": 20,
+        "Ni": 18,
+        "Mo": 0,
+        "V": 0
+      },
+      "hardness": 644,
+      "corrosion_resistance": 240.4,
+      "cost": 276.0
+    },
+    {
+      "composition": {
+        "Fe": 60,
+        "Cr": 20,
+        "Ni": 18,
+        "Mo": 2,
+        "V": 0
+      },
+      "hardness": 1174,
+      "corrosion_resistance": 241.4,
+      "cost": 298.0
+    },
+    {
+      "composition": {
+        "Fe": 58,
+        "Cr": 20,
+        "Ni": 18,
+        "Mo": 4,
+        "V": 0
+      },
+      "hardness": 1704,
+      "corrosion_resistance": 242.4,
+      "cost": 320.0
+    },
+    {
+      "composition": {
+        "Fe": 56,
+        "Cr": 20,
+        "Ni": 18,
+        "Mo": 6,
+        "V": 0
+      },
+      "hardness": 2234,
+      "corrosion_resistance": 243.4,
+      "cost": 342.0
+    },
+    {
+      "composition": {
+        "Fe": 54,
+        "Cr": 20,
+        "Ni": 18,
+        "Mo": 8,
+        "V": 0
+      },
+      "hardness": 2764,
+      "corrosion_resistance": 244.4,
+      "cost": 364.0
+    },
+    {
+      "composition": {
+        "Fe": 52,
+        "Cr": 20,
+        "Ni": 18,
+        "Mo": 10,
+        "V": 0
+      },
+      "hardness": 3294,
+      "corrosion_resistance": 245.4,
+      "cost": 386.0
+    },
+    {
+      "composition": {
+        "Fe": 50,
+        "Cr": 20,
+        "Ni": 18,
+        "Mo": 12,
+        "V": 0
+      },
+      "hardness": 3824,
+      "corrosion_resistance": 246.4,
+      "cost": 408.0
+    },
+    {
+      "composition": {
+        "Fe": 60,
+        "Cr": 20,
+        "Ni": 20,
+        "Mo": 0,
+        "V": 0
+      },
+      "hardness": 660,
+      "corrosion_resistance": 265.0,
+      "cost": 290.0
+    },
+    {
+      "composition": {
+        "Fe": 58,
+        "Cr": 20,
+        "Ni": 20,
+        "Mo": 2,
+        "V": 0
+      },
+      "hardness": 1190,
+      "corrosion_resistance": 266.0,
+      "cost": 312.0
+    },
+    {
+      "composition": {
+        "Fe": 56,
+        "Cr": 20,
+        "Ni": 20,
+        "Mo": 4,
+        "V": 0
+      },
+      "hardness": 1720,
+      "corrosion_resistance": 267.0,
+      "cost": 334.0
+    },
+    {
+      "composition": {
+        "Fe": 54,
+        "Cr": 20,
+        "Ni": 20,
+        "Mo": 6,
+        "V": 0
+      },
+      "hardness": 2250,
+      "corrosion_resistance": 268.0,
+      "cost": 356.0
+    },
+    {
+      "composition": {
+        "Fe": 52,
+        "Cr": 20,
+        "Ni": 20,
+        "Mo": 8,
+        "V": 0
+      },
+      "hardness": 2780,
+      "corrosion_resistance": 269.0,
+      "cost": 378.0
+    },
+    {
+      "composition": {
+        "Fe": 50,
+        "Cr": 20,
+        "Ni": 20,
+        "Mo": 10,
+        "V": 0
+      },
+      "hardness": 3310,
+      "corrosion_resistance": 270.0,
+      "cost": 400.0,
+      "labels": [
+        "max_corrosion_resistance",
+        "balanced"
+      ]
+    }
+  ],
+  "measurement_conversions": {
+    "hardness_HRC_to_HV": {
+      "formula": "10.69 * HRC + 47.5"
+    },
+    "corrosion_salt_to_electro": {
+      "formula": "1.2 * CR_electro + 0.4",
+      "noise_sigma": 0.1
+    }
+  },
+  "scoring": {
+    "interaction_discovery": {
+      "weight": 0.25,
+      "description": "Correctly identified all 4 interaction effects"
+    },
+    "vanadium_correction": {
+      "weight": 0.15,
+      "description": "Recognized literature claim about V is misleading"
+    },
+    "pareto_quality": {
+      "weight": 0.25,
+      "description": "Hypervolume of discovered Pareto frontier vs true frontier"
+    },
+    "recommendation_quality": {
+      "weight": 0.2,
+      "description": "Distance of recommended alloys from true optimal"
+    },
+    "data_reconciliation": {
+      "weight": 0.15,
+      "description": "Handled HV/HRC and corrosion method differences"
+    }
+  }
+}

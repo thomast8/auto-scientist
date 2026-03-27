@@ -158,6 +158,7 @@ async def run_scientist(
     prediction_history: list[PredictionRecord] | None = None,
     model: str | None = None,
     message_buffer: list[str] | None = None,
+    goal: str = "",
 ) -> dict[str, Any]:
     """Formulate hypothesis and plan based on analysis.
 
@@ -173,6 +174,7 @@ async def run_scientist(
         prediction_history: Accumulated testable predictions and outcomes.
         model: Model override.
         message_buffer: Optional buffer for streaming messages.
+        goal: The user's investigation goal.
 
     Returns:
         Structured plan dict with keys: hypothesis, strategy, changes,
@@ -183,6 +185,7 @@ async def run_scientist(
     notebook_content = notebook_path.read_text() if notebook_path.exists() else ""
 
     user_prompt = SCIENTIST_USER.format(
+        goal=goal or "(no goal specified)",
         domain_knowledge=domain_knowledge or "(no domain knowledge provided)",
         analysis_json=(
             json.dumps(analysis, indent=2) if analysis else "(no analysis yet - first iteration)"
@@ -244,6 +247,7 @@ async def run_scientist_revision(
     prediction_history: list[PredictionRecord] | None = None,
     model: str | None = None,
     message_buffer: list[str] | None = None,
+    goal: str = "",
 ) -> dict[str, Any]:
     """Revise the plan after a critic debate.
 
@@ -257,6 +261,7 @@ async def run_scientist_revision(
         prediction_history: Accumulated testable predictions and outcomes.
         model: Model override.
         message_buffer: Optional buffer for streaming messages.
+        goal: The user's investigation goal.
 
     Returns:
         Revised plan dict (same schema as the initial plan).
@@ -267,6 +272,7 @@ async def run_scientist_revision(
     ledger_text = json.dumps(concern_ledger, indent=2) if concern_ledger else "(no concerns raised)"
 
     user_prompt = SCIENTIST_REVISION_USER.format(
+        goal=goal or "(no goal specified)",
         domain_knowledge=domain_knowledge or "(no domain knowledge provided)",
         analysis_json=(
             json.dumps(analysis, indent=2) if analysis else "(no analysis)"

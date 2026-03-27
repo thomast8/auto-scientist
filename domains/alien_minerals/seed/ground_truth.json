@@ -1,0 +1,112 @@
+{
+  "problem": "alien_minerals",
+  "type": "rule_induction",
+  "rules": {
+    "tree": [
+      {
+        "condition": "crystal_symmetry == hexagonal AND conductivity > 4.5",
+        "class": "Aetherite"
+      },
+      {
+        "condition": "crystal_symmetry == hexagonal AND conductivity <= 4.5",
+        "class": "Borealis"
+      },
+      {
+        "condition": "crystal_symmetry == cubic AND magnetic_susceptibility > 0.3 AND fluorescence_wavelength < 450",
+        "class": "Cryolux"
+      },
+      {
+        "condition": "crystal_symmetry == cubic AND magnetic_susceptibility > 0.3 AND fluorescence_wavelength >= 450",
+        "class": "Dravite"
+      },
+      {
+        "condition": "crystal_symmetry == cubic AND magnetic_susceptibility <= 0.3",
+        "class": "Erythian"
+      },
+      {
+        "condition": "crystal_symmetry == orthorhombic",
+        "class": "Fenrite"
+      }
+    ]
+  },
+  "properties": {
+    "discriminative": [
+      "crystal_symmetry",
+      "conductivity",
+      "magnetic_susceptibility",
+      "fluorescence_wavelength"
+    ],
+    "redundant": {
+      "color_spectrum_peak": {
+        "correlates_with": "crystal_symmetry",
+        "r": 0.8
+      },
+      "refractive_index": {
+        "correlates_with": "conductivity",
+        "r": 0.7
+      }
+    },
+    "irrelevant": [
+      "hardness",
+      "density",
+      "thermal_expansion",
+      "solubility"
+    ]
+  },
+  "mislabeled_specimen_ids": [
+    27,
+    57,
+    80,
+    83,
+    133,
+    150,
+    201,
+    216,
+    233,
+    250,
+    259,
+    265,
+    267,
+    268,
+    275,
+    295,
+    343,
+    359,
+    370,
+    394,
+    425,
+    451,
+    479,
+    486,
+    492
+  ],
+  "fluorescence_offset": {
+    "affected_specimens": [
+      200,
+      300
+    ],
+    "offset_nm": 12
+  },
+  "scoring": {
+    "rule_accuracy": {
+      "weight": 0.3,
+      "description": "Discovered rules match true rules"
+    },
+    "feature_selection": {
+      "weight": 0.2,
+      "description": "Correctly identified 4 discriminative, 2 redundant, 4 irrelevant"
+    },
+    "interaction_detection": {
+      "weight": 0.2,
+      "description": "Found nested Cryolux/Dravite fluorescence split"
+    },
+    "noise_handling": {
+      "weight": 0.15,
+      "description": "Flagged mislabeled specimens"
+    },
+    "calibration_detection": {
+      "weight": 0.15,
+      "description": "Noticed fluorescence offset in specimens 200-300"
+    }
+  }
+}
