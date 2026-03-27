@@ -182,7 +182,7 @@ class LaunchApp(App[ExperimentConfig | None]):
     #domain-select {
         width: 1fr;
     }
-    #browse-btn {
+    #browse-btn, #browse-output-btn {
         width: auto;
         min-width: 10;
         margin-left: 1;
@@ -288,13 +288,14 @@ class LaunchApp(App[ExperimentConfig | None]):
                     classes="short-input",
                 )
 
-            # Output dir
+            # Output dir with Browse button
             with Horizontal(classes="form-row"):
                 yield Label("Output dir:", classes="form-label")
                 yield Input(
                     value="experiments",
                     id="output-dir-input",
                 )
+                yield Button("Browse", id="browse-output-btn")
 
             # Checkboxes
             with Horizontal(classes="checkbox-row"):
@@ -328,13 +329,21 @@ class LaunchApp(App[ExperimentConfig | None]):
 
     @on(Button.Pressed, "#browse-btn")
     def _on_browse(self, event: Button.Pressed) -> None:
-        """Open the file browser modal."""
-        self.push_screen(BrowseScreen("."), self._on_browse_result)
+        """Open the file browser modal for data path."""
+        self.push_screen(BrowseScreen("."), self._on_browse_data_result)
 
-    def _on_browse_result(self, result: str | None) -> None:
-        """Handle the result from the file browser."""
+    def _on_browse_data_result(self, result: str | None) -> None:
         if result is not None:
             self.query_one("#data-input", Input).value = result
+
+    @on(Button.Pressed, "#browse-output-btn")
+    def _on_browse_output(self, event: Button.Pressed) -> None:
+        """Open the file browser modal for output directory."""
+        self.push_screen(BrowseScreen("."), self._on_browse_output_result)
+
+    def _on_browse_output_result(self, result: str | None) -> None:
+        if result is not None:
+            self.query_one("#output-dir-input", Input).value = result
 
     @on(Select.Changed, "#domain-select")
     def _on_domain_changed(self, event: Select.Changed) -> None:
