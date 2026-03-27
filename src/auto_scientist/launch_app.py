@@ -80,6 +80,11 @@ MODELS_BY_PROVIDER: dict[str, list[tuple[str, str]]] = {
     ],
 }
 
+# Flat list of all models across all providers
+ALL_MODELS: list[tuple[str, str]] = [
+    item for models in MODELS_BY_PROVIDER.values() for item in models
+]
+
 # Sentinel for "no domain selected" in the domain picker
 _CUSTOM = "__custom__"
 
@@ -465,8 +470,11 @@ class LaunchApp(App[ExperimentConfig | None]):
                             disabled=sdk_locked,
                         )
                         yield provider_sel
+                        initial_models = (
+                            MODELS_BY_PROVIDER["anthropic"] if sdk_locked else ALL_MODELS
+                        )
                         yield Select(
-                            MODELS_BY_PROVIDER["anthropic"],
+                            initial_models,
                             allow_blank=True,
                             id=f"model-{agent}-name",
                             classes="model-name",
@@ -490,7 +498,7 @@ class LaunchApp(App[ExperimentConfig | None]):
                             classes="model-provider",
                         )
                         yield Select(
-                            MODELS_BY_PROVIDER["anthropic"],
+                            ALL_MODELS,
                             allow_blank=True,
                             id=f"model-critic-{i}-name",
                             classes="model-name",
@@ -510,9 +518,47 @@ class LaunchApp(App[ExperimentConfig | None]):
     def on_mount(self) -> None:
         if self._prefill:
             self._apply_config(self._prefill)
+        else:
+            # Populate model fields from the default preset
+            default_cfg = ExperimentConfig(data=".", goal=".")
+            self._apply_model_defaults(default_cfg)
+
+    def _apply_model_defaults(self, cfg: ExperimentConfig) -> None:
+        """Populate only the model/reasoning fields from the resolved preset."""
+        from auto_scientist.model_config import ModelConfig
+
+        mc = ModelConfig.from_experiment_config(cfg)
+
+        for agent in _AGENT_FIELDS:
+            agent_cfg = mc.resolve(agent) if agent != "summarizer" else mc.summarizer
+            if agent_cfg is None:
+                continue
+            self._set_agent_model(f"model-{agent}", agent_cfg)
+
+        for i in range(_NUM_CRITIC_SLOTS):
+            if i < len(mc.critics):
+                self._set_agent_model(f"model-critic-{i}", mc.critics[i])
+
+    def _set_agent_model(self, prefix: str, cfg: AgentModelConfig) -> None:
+        """Set provider, model, and reasoning for one agent row."""
+        provider_sel = self.query_one(f"#{prefix}-provider", Select)
+        provider_sel.value = cfg.provider
+
+        model_sel = self.query_one(f"#{prefix}-name", Select)
+        options = MODELS_BY_PROVIDER.get(cfg.provider, [])
+        # Only reset options if the provider changed
+        current_options = [(label, val) for label, val in options]
+        model_sel.set_options(current_options)
+        # Use call_after_refresh to ensure options are loaded before setting value
+        self.call_after_refresh(setattr, model_sel, "value", cfg.model)
+
+        reasoning_sel = self.query_one(f"#{prefix}-reasoning", Select)
+        reasoning_sel.value = cfg.reasoning.level
 
     def _apply_config(self, cfg: ExperimentConfig) -> None:
         """Fill the form from an ExperimentConfig."""
+        from auto_scientist.model_config import ModelConfig
+
         self.query_one("#data-input", Input).value = cfg.data
         self.query_one("#goal-input", TextArea).text = cfg.goal
         self.query_one("#preset-select", Select).value = cfg.preset
@@ -520,34 +566,20 @@ class LaunchApp(App[ExperimentConfig | None]):
         self.query_one("#debate-rounds-input", Input).value = str(cfg.debate_rounds)
         self.query_one("#output-dir-input", Input).value = cfg.output_dir
 
-        # Fill per-agent model overrides
-        if cfg.models:
-            for agent in _AGENT_FIELDS:
-                agent_cfg = getattr(cfg.models, agent, None)
-                if agent_cfg is None:
-                    continue
-                provider_sel = self.query_one(f"#model-{agent}-provider", Select)
-                provider_sel.value = agent_cfg.provider
-                # Update model dropdown to match provider, then set value
-                model_sel = self.query_one(f"#model-{agent}-name", Select)
-                model_sel.set_options(
-                    MODELS_BY_PROVIDER.get(agent_cfg.provider, [])
-                )
-                model_sel.value = agent_cfg.model
-                reasoning_sel = self.query_one(f"#model-{agent}-reasoning", Select)
-                reasoning_sel.value = agent_cfg.reasoning.level
+        # Resolve the full model config (preset + any overrides)
+        mc = ModelConfig.from_experiment_config(cfg)
 
-            # Fill critic overrides
-            for i, critic_cfg in enumerate(cfg.models.critics[:_NUM_CRITIC_SLOTS]):
-                provider_sel = self.query_one(f"#model-critic-{i}-provider", Select)
-                provider_sel.value = critic_cfg.provider
-                model_sel = self.query_one(f"#model-critic-{i}-name", Select)
-                model_sel.set_options(
-                    MODELS_BY_PROVIDER.get(critic_cfg.provider, [])
-                )
-                model_sel.value = critic_cfg.model
-                reasoning_sel = self.query_one(f"#model-critic-{i}-reasoning", Select)
-                reasoning_sel.value = critic_cfg.reasoning.level
+        # Fill per-agent model fields from resolved config
+        for agent in _AGENT_FIELDS:
+            agent_cfg = mc.resolve(agent) if agent != "summarizer" else mc.summarizer
+            if agent_cfg is None:
+                continue
+            self._set_agent_model(f"model-{agent}", agent_cfg)
+
+        # Fill critic fields from resolved config
+        for i in range(_NUM_CRITIC_SLOTS):
+            if i < len(mc.critics):
+                self._set_agent_model(f"model-critic-{i}", mc.critics[i])
 
     @on(Button.Pressed, "#browse-btn")
     def _on_browse(self, event: Button.Pressed) -> None:
@@ -557,6 +589,14 @@ class LaunchApp(App[ExperimentConfig | None]):
     def _on_browse_data_result(self, result: str | None) -> None:
         if result is not None:
             self.query_one("#data-input", Input).value = result
+
+    @on(Select.Changed, "#preset-select")
+    def _on_preset_changed(self, event: Select.Changed) -> None:
+        """When the preset changes, refresh model fields to show preset defaults."""
+        if not isinstance(event.value, str):
+            return
+        cfg = ExperimentConfig(data=".", goal=".", preset=event.value)
+        self._apply_model_defaults(cfg)
 
     @on(Button.Pressed, "#browse-output-btn")
     def _on_browse_output(self, event: Button.Pressed) -> None:
@@ -598,9 +638,10 @@ class LaunchApp(App[ExperimentConfig | None]):
         if not sel_id.startswith("model-") or not sel_id.endswith("-provider"):
             return
         agent = sel_id.removeprefix("model-").removesuffix("-provider")
-        provider = event.value if isinstance(event.value, str) else "anthropic"
+        provider = event.value if isinstance(event.value, str) else None
+        models = MODELS_BY_PROVIDER.get(provider, ALL_MODELS) if provider else ALL_MODELS
         model_sel = self.query_one(f"#model-{agent}-name", Select)
-        model_sel.set_options(MODELS_BY_PROVIDER.get(provider, []))
+        model_sel.set_options(models)
 
     def _show_error(self, msg: str) -> None:
         """Display an error message, escaping any Rich markup characters."""

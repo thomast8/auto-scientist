@@ -757,8 +757,15 @@ class Orchestrator:
         usage = getattr(collect_text_from_query, "last_usage", {})
         if not usage:
             return
+        # Claude Code SDK splits input tokens across cache buckets:
+        # input_tokens (non-cached) + cache_creation + cache_read = total input
+        in_tok = (
+            usage.get("input_tokens", 0)
+            + usage.get("cache_creation_input_tokens", 0)
+            + usage.get("cache_read_input_tokens", 0)
+        )
         panel.set_stats(
-            input_tokens=usage.get("input_tokens", 0),
+            input_tokens=in_tok,
             output_tokens=usage.get("output_tokens", 0),
             num_turns=usage.get("num_turns", 0),
         )
