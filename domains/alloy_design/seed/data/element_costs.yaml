@@ -1,0 +1,15 @@
+Cr:
+  price_usd_per_kg: 3.5
+  source: London Metal Exchange, 2024-Q3
+Fe:
+  price_usd_per_kg: 1.0
+  source: London Metal Exchange, 2024-Q3
+Mo:
+  price_usd_per_kg: 12.0
+  source: London Metal Exchange, 2024-Q3
+Ni:
+  price_usd_per_kg: 8.0
+  source: London Metal Exchange, 2024-Q3
+V:
+  price_usd_per_kg: 15.0
+  source: London Metal Exchange, 2024-Q3
