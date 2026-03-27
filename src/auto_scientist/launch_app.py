@@ -79,7 +79,7 @@ class BrowseScreen(ModalScreen[str | None]):
     #browse-container {
         width: 80%;
         height: 80%;
-        border: round $accent;
+        border: round grey;
         background: $surface;
         padding: 1;
     }
@@ -172,7 +172,7 @@ class LaunchApp(App[ExperimentConfig | None]):
     }
     #form-container {
         max-width: 100;
-        border: round $accent;
+        border: round grey;
         padding: 1 2;
     }
     #banner {
@@ -274,14 +274,18 @@ class LaunchApp(App[ExperimentConfig | None]):
         self._yaml_path: Path | None = None
 
     BANNER = (
-        "[bold]Auto-Scientist[/bold] - Autonomous scientific investigation\n"
+        "[bold]Auto-Scientist[/bold]\n"
+        "Autonomous scientific investigation framework\n"
         "\n"
-        "Pick a domain or set a custom dataset and goal. The system will\n"
-        "iteratively hypothesize, experiment, and refine until it converges.\n"
+        "Given a dataset and a research goal, the system runs an iterative\n"
+        "loop of analysis, hypothesis generation, debate, and experimentation\n"
+        "until it converges on an answer. Each iteration produces a self-\n"
+        "contained Python script that runs the experiment and logs results.\n"
         "\n"
-        "[dim]Ctrl+R[/dim] run  "
-        "[dim]Ctrl+S[/dim] save config  "
-        "[dim]Ctrl+Q[/dim] quit"
+        "Select a built-in domain below or choose Custom to provide your\n"
+        "own dataset and goal. Adjust pipeline settings as needed.\n"
+        "\n"
+        "[dim]Ctrl+R  run    Ctrl+S  save config    Ctrl+Q  quit[/dim]"
     )
 
     def compose(self) -> ComposeResult:
