@@ -18,6 +18,8 @@ import json
 import logging
 from typing import Any
 
+from pydantic import BaseModel
+
 from auto_scientist.agent_result import AgentResult
 from auto_scientist.agents.debate_models import (
     CRITIC_OUTPUT_SCHEMA,
@@ -55,22 +57,27 @@ MAX_RETRIES = 1  # 1 retry = 2 total attempts
 async def _query_critic(
     config: AgentModelConfig,
     prompt: str,
+    *,
+    response_schema: type[BaseModel] | None = None,
 ) -> AgentResult:
     """Dispatch a prompt to the appropriate provider with web search enabled."""
     if config.provider == "openai":
         return await query_openai(
             config.model, prompt,
             web_search=True, reasoning=config.reasoning,
+            response_schema=response_schema,
         )
     elif config.provider == "google":
         return await query_google(
             config.model, prompt,
             web_search=True, reasoning=config.reasoning,
+            response_schema=response_schema,
         )
     elif config.provider == "anthropic":
         return await query_anthropic(
             config.model, prompt,
             web_search=True, reasoning=config.reasoning,
+            response_schema=response_schema,
         )
     else:
         raise ValueError(f"Unknown critic provider: {config.provider!r}")
@@ -98,7 +105,9 @@ async def _query_critic_structured(
     for attempt in range(MAX_RETRIES + 1):
         effective_prompt = prompt + correction_hint
         try:
-            result = await _query_critic(config, effective_prompt)
+            result = await _query_critic(
+                config, effective_prompt, response_schema=CriticOutput,
+            )
         except Exception as e:
             if attempt < MAX_RETRIES:
                 logger.warning(f"{label} error ({e}), retrying (attempt {attempt + 1})")
@@ -151,7 +160,9 @@ async def _query_scientist_structured(
         effective_prompt = prompt + correction_hint
         full_prompt = f"{system_prompt}\n\n{effective_prompt}"
         try:
-            result = await _query_critic(config, full_prompt)
+            result = await _query_critic(
+                config, full_prompt, response_schema=ScientistDefense,
+            )
         except Exception as e:
             if attempt < MAX_RETRIES:
                 logger.warning(f"{label} error ({e}), retrying (attempt {attempt + 1})")

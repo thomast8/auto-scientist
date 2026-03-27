@@ -212,8 +212,9 @@ class TestReportPrompt:
 
 class TestReportMessageBuffer:
     @pytest.mark.asyncio
+    @patch("auto_scientist.agents.report.validate_report_structure", return_value=[])
     @patch("auto_scientist.agents.report.safe_query")
-    async def test_populates_message_buffer(self, mock_query, tmp_path):
+    async def test_populates_message_buffer(self, mock_query, _mock_validate, tmp_path):
         assistant_msg = MagicMock(spec=AssistantMessage)
         text_block = MagicMock(spec=TextBlock)
         # Must be >= MIN_REPORT_LENGTH (100) to avoid retry
@@ -289,3 +290,133 @@ class TestReportRetry:
             state=state, notebook_path=notebook_path, output_dir=tmp_path,
         )
         assert result == ""
+
+
+# A report that passes length check but is missing required sections
+_INCOMPLETE_REPORT = """\
+# Investigation Report
+
+## Executive Summary
+This is a summary of the investigation with enough content to pass the length check.
+
+## Results
+R² = 0.964 which is pretty good. We tested several approaches and found that
+polynomial regression with degree 4 works best for this dataset.
+"""
+
+# A complete report with all sections
+_COMPLETE_REPORT = """\
+## Executive Summary
+Summary content here with enough text.
+
+## Problem Statement and Data
+We studied the dataset.
+
+## Methodology
+Iterative autonomous loop.
+
+## Journey
+v01 linear, v02 polynomial.
+
+## Best Approach
+Degree-4 polynomial.
+
+## Results
+Test R² = 0.964.
+
+## Key Scientific Insights
+Nonlinear relationship.
+
+## Limitations
+Fails for x > 100.
+
+## Recommended Future Work
+Try GP regression.
+
+## Version Comparison Table
+| Version | Status | Key Change | Key Metric | Prediction Outcome |
+|---------|--------|------------|------------|-------------------|
+| v01 | baseline | Linear | R²=0.72 | N/A |
+"""
+
+
+class TestReportStructuralValidation:
+    @pytest.mark.asyncio
+    @patch("auto_scientist.agents.report.safe_query")
+    async def test_incomplete_report_triggers_retry(self, mock_query, tmp_path):
+        """Report missing sections triggers session resume retry."""
+        call_count = 0
+
+        async def fake_query(**kwargs):
+            nonlocal call_count
+            call_count += 1
+
+            assistant_msg = MagicMock(spec=AssistantMessage)
+            text_block = MagicMock(spec=TextBlock)
+            if call_count == 1:
+                text_block.text = _INCOMPLETE_REPORT
+            else:
+                text_block.text = _COMPLETE_REPORT
+                # Second call should use session resume
+                options = kwargs.get("options")
+                assert options is not None
+                assert options.resume is not None
+            assistant_msg.content = [text_block]
+
+            result_msg = MagicMock(spec=ResultMessage)
+            result_msg.session_id = "report-session-456"
+            yield assistant_msg
+            yield result_msg
+
+        mock_query.side_effect = fake_query
+
+        state = ExperimentState(domain="test", goal="test goal")
+        notebook_path = tmp_path / "lab_notebook.xml"
+        notebook_path.write_text("# Notebook")
+
+        result = await run_report(
+            state=state, notebook_path=notebook_path, output_dir=tmp_path,
+        )
+        assert call_count == 2
+        assert "Executive Summary" in result
+
+    @pytest.mark.asyncio
+    @patch("auto_scientist.agents.report.safe_query")
+    async def test_correction_prompt_lists_issues(self, mock_query, tmp_path):
+        """Correction prompt should list the structural issues found."""
+        call_count = 0
+        captured_prompts: list[str] = []
+
+        async def fake_query(**kwargs):
+            nonlocal call_count
+            call_count += 1
+            captured_prompts.append(kwargs.get("prompt", ""))
+
+            assistant_msg = MagicMock(spec=AssistantMessage)
+            text_block = MagicMock(spec=TextBlock)
+            if call_count == 1:
+                text_block.text = _INCOMPLETE_REPORT
+            else:
+                text_block.text = _COMPLETE_REPORT
+            assistant_msg.content = [text_block]
+
+            result_msg = MagicMock(spec=ResultMessage)
+            result_msg.session_id = "report-session-789"
+            yield assistant_msg
+            yield result_msg
+
+        mock_query.side_effect = fake_query
+
+        state = ExperimentState(domain="test", goal="test goal")
+        notebook_path = tmp_path / "lab_notebook.xml"
+        notebook_path.write_text("# Notebook")
+
+        await run_report(
+            state=state, notebook_path=notebook_path, output_dir=tmp_path,
+        )
+
+        # Second prompt should contain the correction with missing sections
+        assert len(captured_prompts) == 2
+        correction = captured_prompts[1]
+        assert "<validation_error>" in correction
+        assert "Missing section" in correction

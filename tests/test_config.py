@@ -1,5 +1,7 @@
 """Tests for domain configuration schema."""
 
+import logging
+
 import pytest
 from pydantic import ValidationError
 
@@ -70,3 +72,28 @@ class TestDomainConfigSerialization:
     def test_no_experiment_dependencies_field(self):
         """experiment_dependencies removed; scripts declare deps via PEP 723 inline metadata."""
         assert "experiment_dependencies" not in DomainConfig.model_fields
+
+
+class TestDataPathsCoercion:
+    def test_dict_data_paths_coerced_to_list(self):
+        dc = DomainConfig(
+            name="t", description="d",
+            data_paths={"file1": "a.csv", "file2": "b.csv"},
+        )
+        assert dc.data_paths == ["a.csv", "b.csv"]
+
+    def test_dict_data_paths_logs_deprecation_warning(self, caplog):
+        with caplog.at_level(logging.WARNING, logger="auto_scientist.config"):
+            DomainConfig(
+                name="t", description="d",
+                data_paths={"file1": "a.csv"},
+            )
+        assert any("deprecat" in msg.lower() for msg in caplog.messages)
+
+    def test_list_data_paths_no_warning(self, caplog):
+        with caplog.at_level(logging.WARNING, logger="auto_scientist.config"):
+            DomainConfig(
+                name="t", description="d",
+                data_paths=["a.csv"],
+            )
+        assert not any("deprecat" in msg.lower() for msg in caplog.messages)

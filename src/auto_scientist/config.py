@@ -1,6 +1,10 @@
 """Domain configuration schema."""
 
+import logging
+
 from pydantic import BaseModel, Field, field_validator
+
+logger = logging.getLogger(__name__)
 
 
 class DomainConfig(BaseModel):
@@ -20,6 +24,10 @@ class DomainConfig(BaseModel):
     @classmethod
     def coerce_data_paths(cls, v: object) -> list[str]:
         if isinstance(v, dict):
+            logger.warning(
+                "Deprecated: data_paths received as dict, coercing to list. "
+                "Ensure the ingestor writes data_paths as a JSON list."
+            )
             return list(v.values())
         return v
 

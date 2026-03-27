@@ -1,9 +1,11 @@
 """Tests for the Ingestor agent module."""
 
 import asyncio
+import json
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
+from claude_code_sdk import ResultMessage
 
 from auto_scientist.agents.ingestor import run_ingestor
 
@@ -72,12 +74,18 @@ class TestRunIngestorConfigPath:
         data_dir.mkdir()
         (data_dir / "output.csv").write_text("a,b\n1,2\n")
 
+        config_path = output_dir / "domain_config.json"
+        config_path.write_text(json.dumps({
+            "name": "test", "description": "d",
+            "data_paths": ["data/output.csv"],
+            "run_command": "uv run {script_path}",
+        }))
+
         mock_query.return_value = AsyncMock(
             __aiter__=lambda self: self,
             __anext__=AsyncMock(side_effect=StopAsyncIteration),
         )
 
-        config_path = output_dir / "domain_config.json"
         await run_ingestor(
             raw_data, output_dir, "test goal",
             config_path=config_path,
@@ -96,12 +104,18 @@ class TestRunIngestorConfigPath:
         data_dir.mkdir()
         (data_dir / "output.csv").write_text("a,b\n1,2\n")
 
+        config_path = output_dir / "domain_config.json"
+        config_path.write_text(json.dumps({
+            "name": "test", "description": "d",
+            "data_paths": ["data/output.csv"],
+            "run_command": "uv run {script_path}",
+        }))
+
         mock_query.return_value = AsyncMock(
             __aiter__=lambda self: self,
             __anext__=AsyncMock(side_effect=StopAsyncIteration),
         )
 
-        config_path = output_dir / "domain_config.json"
         await run_ingestor(
             raw_data, output_dir, "test goal",
             config_path=config_path,
@@ -348,3 +362,116 @@ class TestIngestorRetry:
 
         with pytest.raises(FileNotFoundError, match="did not produce any data files"):
             await run_ingestor(raw_data, output_dir, "test goal")
+
+
+def _make_result_msg(session_id: str = "test-session-123") -> MagicMock:
+    """Create a mock ResultMessage with session_id."""
+    msg = MagicMock(spec=ResultMessage)
+    msg.session_id = session_id
+    msg.usage = {}
+    msg.num_turns = 1
+    return msg
+
+
+class TestIngestorConfigValidation:
+    """Verify domain_config.json validation after SDK session completes."""
+
+    @pytest.mark.asyncio
+    @patch("auto_scientist.agents.ingestor.safe_query")
+    async def test_valid_config_returns_normally(self, mock_query, tmp_path):
+        """When domain_config.json is valid, ingestor returns normally."""
+        raw_data = tmp_path / "data.csv"
+        raw_data.write_text("a,b\n1,2\n")
+        output_dir = tmp_path / "experiments"
+        output_dir.mkdir()
+        data_dir = output_dir / "data"
+        data_dir.mkdir()
+        (data_dir / "output.csv").write_text("a,b\n1,2\n")
+
+        config_path = output_dir / "domain_config.json"
+        config_path.write_text(json.dumps({
+            "name": "test",
+            "description": "Test domain",
+            "data_paths": ["data/output.csv"],
+            "run_command": "uv run {script_path}",
+        }))
+
+        async def fake_query(**kwargs):
+            yield _make_result_msg()
+
+        mock_query.side_effect = fake_query
+
+        result = await run_ingestor(
+            raw_data, output_dir, "test goal", config_path=config_path,
+        )
+        assert result == data_dir
+
+    @pytest.mark.asyncio
+    @patch("auto_scientist.agents.ingestor.safe_query")
+    async def test_invalid_config_triggers_session_resume(self, mock_query, tmp_path):
+        """When domain_config.json has dict data_paths, ingestor resumes session to fix."""
+        raw_data = tmp_path / "data.csv"
+        raw_data.write_text("a,b\n1,2\n")
+        output_dir = tmp_path / "experiments"
+        output_dir.mkdir()
+        data_dir = output_dir / "data"
+        data_dir.mkdir()
+        (data_dir / "output.csv").write_text("a,b\n1,2\n")
+
+        config_path = output_dir / "domain_config.json"
+        # First write: invalid (dict instead of list)
+        config_path.write_text(json.dumps({
+            "name": "test",
+            "description": "Test domain",
+            "data_paths": {"file1": "data/output.csv"},
+            "run_command": "uv run {script_path}",
+        }))
+
+        call_count = 0
+
+        async def fake_query(**kwargs):
+            nonlocal call_count
+            call_count += 1
+            if call_count == 2:
+                # On resume, write valid config
+                config_path.write_text(json.dumps({
+                    "name": "test",
+                    "description": "Test domain",
+                    "data_paths": ["data/output.csv"],
+                    "run_command": "uv run {script_path}",
+                }))
+                # Verify session resume was used
+                options = kwargs.get("options")
+                assert options is not None
+                assert options.resume == "test-session-123"
+            yield _make_result_msg()
+
+        mock_query.side_effect = fake_query
+
+        result = await run_ingestor(
+            raw_data, output_dir, "test goal", config_path=config_path,
+        )
+        assert result == data_dir
+        assert call_count == 2
+
+    @pytest.mark.asyncio
+    @patch("auto_scientist.agents.ingestor.safe_query")
+    async def test_no_config_path_skips_validation(self, mock_query, tmp_path):
+        """When config_path is None, skip config validation entirely."""
+        raw_data = tmp_path / "data.csv"
+        raw_data.write_text("a,b\n1,2\n")
+        output_dir = tmp_path / "experiments"
+        output_dir.mkdir()
+        data_dir = output_dir / "data"
+        data_dir.mkdir()
+        (data_dir / "output.csv").write_text("a,b\n1,2\n")
+
+        async def fake_query(**kwargs):
+            yield _make_result_msg()
+
+        mock_query.side_effect = fake_query
+
+        result = await run_ingestor(raw_data, output_dir, "test goal")
+        assert result == data_dir
+        # Only one call (no retry)
+        assert mock_query.call_count == 1

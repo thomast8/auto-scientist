@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import logging
 from collections.abc import Callable
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Any
 
 from openai import AsyncOpenAI
 from pydantic import BaseModel
@@ -16,6 +16,25 @@ if TYPE_CHECKING:
     from auto_scientist.model_config import ReasoningConfig
 
 logger = logging.getLogger(__name__)
+
+
+def _make_strict_schema(schema: dict[str, Any]) -> dict[str, Any]:
+    """Add additionalProperties: false to all object types in a JSON schema.
+
+    OpenAI's structured output (both Chat Completions and Responses API)
+    requires this for strict mode compliance.
+    """
+    if isinstance(schema, dict):
+        result = {}
+        for key, value in schema.items():
+            result[key] = _make_strict_schema(value)
+        if result.get("type") == "object" and "additionalProperties" not in result:
+            result["additionalProperties"] = False
+        return result
+    if isinstance(schema, list):
+        return [_make_strict_schema(item) for item in schema]
+    return schema
+
 
 OPENAI_EFFORT_MAP: dict[str, str] = {
     "minimal": "low",
@@ -83,6 +102,16 @@ async def query_openai(
         }
         if effort:
             resp_kwargs["reasoning"] = {"effort": effort}
+        if response_schema is not None:
+            resp_kwargs["text"] = {
+                "format": {
+                    "type": "json_schema",
+                    "name": "response",
+                    "schema": _make_strict_schema(
+                        response_schema.model_json_schema()
+                    ),
+                },
+            }
 
         if on_token is not None:
             parts: list[str] = []
@@ -128,7 +157,9 @@ async def query_openai(
             "type": "json_schema",
             "json_schema": {
                 "name": "response",
-                "schema": response_schema.model_json_schema(),
+                "schema": _make_strict_schema(
+                    response_schema.model_json_schema()
+                ),
             },
         }
 

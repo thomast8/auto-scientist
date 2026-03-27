@@ -85,7 +85,10 @@ async def query_anthropic(
             "description": "Submit your structured response.",
             "input_schema": schema,
         })
-        kwargs["tool_choice"] = {"type": "tool", "name": "submit_response"}
+        # Only force tool_choice when web_search is not enabled;
+        # when both are active, let the model choose freely between tools
+        if not web_search:
+            kwargs["tool_choice"] = {"type": "tool", "name": "submit_response"}
 
     if reasoning is not None and reasoning.level != "off":
         budget = reasoning.budget or ANTHROPIC_BUDGET_DEFAULTS.get(reasoning.level)
@@ -112,22 +115,29 @@ async def query_anthropic(
     in_tok = getattr(usage, "input_tokens", 0) or 0
     out_tok = getattr(usage, "output_tokens", 0) or 0
 
-    # When using structured output via tool_use, extract the tool input
+    # When using structured output via tool_use, extract the submit_response tool input
     if response_schema is not None:
         for block in response.content:
-            if getattr(block, "type", None) == "tool_use":
+            if (
+                getattr(block, "type", None) == "tool_use"
+                and getattr(block, "name", None) == "submit_response"
+            ):
                 result = json.dumps(block.input)
                 logger.debug(f"Anthropic response (structured): {len(result)} chars")
                 return AgentResult(text=result, input_tokens=in_tok, output_tokens=out_tok)
-        # Structured output requested but no tool_use block found
-        block_types = [getattr(b, "type", type(b).__name__) for b in response.content]
+        # Structured output requested but no submit_response block found
+        block_info = [
+            f"{getattr(b, 'type', type(b).__name__)}({getattr(b, 'name', '')})"
+            for b in response.content
+        ]
         logger.error(
-            f"Anthropic response contained no tool_use block despite response_schema="
-            f"{response_schema.__name__}. Content block types: {block_types}"
+            f"Anthropic response contained no submit_response tool_use block "
+            f"despite response_schema={response_schema.__name__}. "
+            f"Content blocks: {block_info}"
         )
         raise RuntimeError(
-            f"Anthropic structured output failed: no tool_use block in response "
-            f"for schema {response_schema.__name__}"
+            f"Anthropic structured output failed: model did not call "
+            f"submit_response tool for schema {response_schema.__name__}"
         )
 
     # Extract text blocks (skip tool_use/web_search result blocks)

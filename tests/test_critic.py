@@ -699,6 +699,45 @@ class TestPersonas:
         assert get_model_index_for_debate(2, 0, 3) == 2
 
 
+class TestResponseSchemaPassthrough:
+    """Verify response_schema is passed through _query_critic to providers."""
+
+    @pytest.mark.asyncio
+    async def test_critic_passes_response_schema_to_provider(self, plan):
+        """Critic structured query passes response_schema=CriticOutput to provider."""
+        critic = AgentModelConfig(provider="openai", model="gpt-4o")
+        with patch(
+            OPENAI_PATH,
+            new_callable=AsyncMock,
+            return_value=_CR(),
+        ) as mock_openai:
+            await run_single_critic_debate(
+                config=critic, plan=plan, notebook_content="",
+                max_rounds=1,
+            )
+
+        assert mock_openai.call_args.kwargs.get("response_schema") is CriticOutput
+
+    @pytest.mark.asyncio
+    async def test_scientist_defense_passes_response_schema(self, plan):
+        """Scientist defense passes response_schema=ScientistDefense to provider."""
+        critic = AgentModelConfig(provider="openai", model="gpt-4o")
+        with (
+            patch(OPENAI_PATH, new_callable=AsyncMock, return_value=_CR()),
+            patch(
+                ANTHROPIC_PATH,
+                new_callable=AsyncMock,
+                return_value=_DR(),
+            ) as mock_anthropic,
+        ):
+            await run_single_critic_debate(
+                config=critic, plan=plan, notebook_content="",
+                max_rounds=2,
+            )
+
+        assert mock_anthropic.call_args.kwargs.get("response_schema") is ScientistDefense
+
+
 class TestGoalInPrompts:
     """Verify that the goal placeholder is present and populated in critic/debate prompts."""
 
