@@ -54,6 +54,63 @@ class TestExperimentConfigPresetValidation:
             ExperimentConfig(data="data.csv", goal="test", preset="turbo")
 
 
+class TestExperimentConfigBounds:
+    def test_max_iterations_must_be_positive(self):
+        with pytest.raises(ValidationError):
+            ExperimentConfig(data="data.csv", goal="test", max_iterations=0)
+
+    def test_max_iterations_negative_raises(self):
+        with pytest.raises(ValidationError):
+            ExperimentConfig(data="data.csv", goal="test", max_iterations=-1)
+
+    def test_debate_rounds_negative_raises(self):
+        with pytest.raises(ValidationError):
+            ExperimentConfig(data="data.csv", goal="test", debate_rounds=-1)
+
+    def test_debate_rounds_zero_allowed(self):
+        cfg = ExperimentConfig(data="data.csv", goal="test", debate_rounds=0)
+        assert cfg.debate_rounds == 0
+
+    def test_empty_data_raises(self):
+        with pytest.raises(ValidationError):
+            ExperimentConfig(data="", goal="test")
+
+    def test_empty_goal_raises(self):
+        with pytest.raises(ValidationError):
+            ExperimentConfig(data="data.csv", goal="")
+
+    def test_validate_assignment_catches_bad_preset(self):
+        cfg = ExperimentConfig(data="data.csv", goal="test")
+        with pytest.raises(ValidationError):
+            cfg.preset = "turbo"
+
+
+class TestFromYamlErrors:
+    def test_empty_yaml_file(self, tmp_path):
+        yaml_file = tmp_path / "empty.yaml"
+        yaml_file.write_text("")
+        with pytest.raises(ValueError, match="Empty config"):
+            ExperimentConfig.from_yaml(yaml_file)
+
+    def test_non_dict_yaml(self, tmp_path):
+        yaml_file = tmp_path / "list.yaml"
+        yaml_file.write_text("- item1\n- item2\n")
+        with pytest.raises(ValueError, match="Expected a YAML mapping"):
+            ExperimentConfig.from_yaml(yaml_file)
+
+    def test_malformed_yaml(self, tmp_path):
+        yaml_file = tmp_path / "bad.yaml"
+        yaml_file.write_text("data: [\n")
+        with pytest.raises(ValueError, match="Invalid YAML"):
+            ExperimentConfig.from_yaml(yaml_file)
+
+    def test_invalid_schema_yaml(self, tmp_path):
+        yaml_file = tmp_path / "bad_schema.yaml"
+        yaml_file.write_text(yaml.dump({"data": "x", "goal": "y", "unknown_field": "z"}))
+        with pytest.raises(ValueError, match="Invalid experiment config"):
+            ExperimentConfig.from_yaml(yaml_file)
+
+
 class TestExperimentConfigModels:
     def test_models_with_agent_override(self):
         cfg = ExperimentConfig(

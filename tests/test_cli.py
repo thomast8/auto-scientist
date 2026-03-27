@@ -448,7 +448,7 @@ class TestBareCommand:
         result = runner.invoke(cli, [])
 
         assert result.exit_code == 0
-        mock_launch_cls.assert_called_once()
+        mock_launch_cls.assert_called_once_with(prefill=None)
         mock_app.run.assert_called_once()
 
     @patch("auto_scientist.cli.PipelineApp")

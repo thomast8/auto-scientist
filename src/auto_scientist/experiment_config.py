@@ -7,13 +7,17 @@ and optional per-agent model overrides. Replaces long multiline CLI commands.
 from pathlib import Path
 
 import yaml
-from pydantic import BaseModel, ConfigDict, field_validator
+from pydantic import BaseModel, ConfigDict, Field, ValidationError, field_validator
 
 from auto_scientist.model_config import BUILTIN_PRESETS, AgentModelConfig
 
 
 class ExperimentModelsConfig(BaseModel):
-    """Per-agent model overrides layered on top of a preset."""
+    """Per-agent model overrides layered on top of a preset.
+
+    When critics is non-empty, it replaces the entire preset critics list
+    (not appended to it).
+    """
 
     model_config = ConfigDict(extra="forbid")
 
@@ -29,16 +33,16 @@ class ExperimentModelsConfig(BaseModel):
 class ExperimentConfig(BaseModel):
     """Unified experiment configuration loaded from YAML."""
 
-    model_config = ConfigDict(extra="forbid")
+    model_config = ConfigDict(extra="forbid", validate_assignment=True)
 
     # Required
-    data: str
-    goal: str
+    data: str = Field(min_length=1)
+    goal: str = Field(min_length=1)
 
     # Optional with defaults
-    max_iterations: int = 20
+    max_iterations: int = Field(default=20, ge=1)
     preset: str = "default"
-    debate_rounds: int = 1
+    debate_rounds: int = Field(default=1, ge=0)
     output_dir: str = "experiments"
     schedule: str | None = None
     interactive: bool = False
@@ -75,9 +79,23 @@ class ExperimentConfig(BaseModel):
     @classmethod
     def from_yaml(cls, path: Path) -> "ExperimentConfig":
         """Load an ExperimentConfig from a YAML file."""
-        with open(path) as f:
-            raw = yaml.safe_load(f)
-        return cls.model_validate(raw)
+        try:
+            with open(path) as f:
+                raw = yaml.safe_load(f)
+        except yaml.YAMLError as e:
+            raise ValueError(f"Invalid YAML in {path}: {e}") from e
+
+        if raw is None:
+            raise ValueError(f"Empty config file: {path}")
+        if not isinstance(raw, dict):
+            raise ValueError(
+                f"Expected a YAML mapping in {path}, got {type(raw).__name__}"
+            )
+
+        try:
+            return cls.model_validate(raw)
+        except ValidationError as e:
+            raise ValueError(f"Invalid experiment config in {path}:\n{e}") from e
 
     def to_yaml(self, path: Path) -> None:
         """Write this config to a YAML file, omitting None and default values."""

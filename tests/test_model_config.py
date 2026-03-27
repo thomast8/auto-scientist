@@ -244,6 +244,15 @@ model = "claude-opus-4-6"
         assert cfg.model == "claude-opus-4-6"
 
 
+class TestAgentFieldSync:
+    def test_experiment_models_fields_match_model_config_agent_fields(self):
+        """ExperimentModelsConfig fields should stay in sync with ModelConfig._AGENT_FIELDS."""
+        from auto_scientist.experiment_config import ExperimentModelsConfig
+
+        emc_fields = set(ExperimentModelsConfig.model_fields) - {"critics"}
+        assert emc_fields == ModelConfig._AGENT_FIELDS
+
+
 class TestFromExperimentConfig:
     def test_preset_only(self):
         from auto_scientist.experiment_config import ExperimentConfig

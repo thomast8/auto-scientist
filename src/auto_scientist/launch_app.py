@@ -180,6 +180,8 @@ class LaunchApp(App[ExperimentConfig | None]):
 
     def _build_config(self) -> ExperimentConfig | None:
         """Collect form values and build an ExperimentConfig, or None on validation error."""
+        from pydantic import ValidationError
+
         data = self.query_one("#data-input", Input).value.strip()
         goal = self.query_one("#goal-input", TextArea).text.strip()
 
@@ -191,21 +193,25 @@ class LaunchApp(App[ExperimentConfig | None]):
 
         self.query_one("#error-display", Static).update("")
 
-        return ExperimentConfig(
-            data=data,
-            goal=goal,
-            preset=str(self.query_one("#preset-select", Select).value),
-            max_iterations=int(
-                self.query_one("#max-iterations-input", Input).value or "20"
-            ),
-            debate_rounds=int(
-                self.query_one("#debate-rounds-input", Input).value or "1"
-            ),
-            output_dir=self.query_one("#output-dir-input", Input).value
-            or "experiments",
-            interactive=self.query_one("#interactive-checkbox", Checkbox).value,
-            verbose=self.query_one("#verbose-checkbox", Checkbox).value,
-        )
+        try:
+            return ExperimentConfig(
+                data=data,
+                goal=goal,
+                preset=str(self.query_one("#preset-select", Select).value),
+                max_iterations=int(
+                    self.query_one("#max-iterations-input", Input).value or "20"
+                ),
+                debate_rounds=int(
+                    self.query_one("#debate-rounds-input", Input).value or "1"
+                ),
+                output_dir=self.query_one("#output-dir-input", Input).value
+                or "experiments",
+                interactive=self.query_one("#interactive-checkbox", Checkbox).value,
+                verbose=self.query_one("#verbose-checkbox", Checkbox).value,
+            )
+        except (ValidationError, ValueError) as e:
+            self.query_one("#error-display", Static).update(str(e))
+            return None
 
     @on(Button.Pressed, "#run-button")
     def _on_run(self, event: Button.Pressed) -> None:
@@ -220,18 +226,18 @@ class LaunchApp(App[ExperimentConfig | None]):
         if config is None:
             return
 
-        if self._save_path:
-            config.to_yaml(self._save_path)
-            self.query_one("#error-display", Static).update(
-                f"Config saved to {self._save_path}"
-            )
-        else:
-            # Default save location
-            save_path = Path("experiment.yaml")
+        save_path = self._save_path or Path("experiment.yaml")
+        try:
             config.to_yaml(save_path)
+        except OSError as e:
             self.query_one("#error-display", Static).update(
-                f"Config saved to {save_path}"
+                f"Failed to save config: {e}"
             )
+            return
+
+        self.query_one("#error-display", Static).update(
+            f"Config saved to {save_path}"
+        )
 
     def action_quit(self) -> None:
         self.exit(None)
