@@ -170,15 +170,22 @@ class LaunchApp(App[ExperimentConfig | None]):
     Screen {
         align: center middle;
     }
-    #form-container {
+    #outer {
         max-width: 100;
-        border: round grey;
+        height: auto;
+    }
+    #banner-container {
+        height: auto;
+        border: solid grey;
         padding: 1 2;
     }
     #banner {
         height: auto;
         color: $text-muted;
-        margin-bottom: 1;
+    }
+    #form-container {
+        border: solid grey;
+        padding: 1 2;
     }
     .form-row {
         height: auto;
@@ -289,84 +296,87 @@ class LaunchApp(App[ExperimentConfig | None]):
     )
 
     def compose(self) -> ComposeResult:
-        with VerticalScroll(id="form-container"):
-            yield Static(self.BANNER, id="banner", markup=True)
+        with VerticalScroll(id="outer"):
+            with Vertical(id="banner-container") as banner:
+                banner.border_title = "Auto-Scientist"
+                yield Static(self.BANNER, id="banner", markup=True)
 
-            # Domain picker (only if domains are available)
-            if self._domain_options:
+            with Vertical(id="form-container"):
+                # Domain picker (only if domains are available)
+                if self._domain_options:
+                    with Horizontal(classes="form-row"):
+                        yield Label("Domain:", classes="form-label")
+                        domain_choices = [
+                            ("Custom", _CUSTOM),
+                            *self._domain_options,
+                        ]
+                        yield Select(
+                            domain_choices,
+                            value=_CUSTOM,
+                            allow_blank=False,
+                            id="domain-select",
+                        )
+
+                yield Rule()
+
+                # Data path with Browse button
                 with Horizontal(classes="form-row"):
-                    yield Label("Domain:", classes="form-label")
-                    domain_choices = [
-                        ("Custom", _CUSTOM),
-                        *self._domain_options,
-                    ]
+                    yield Label("Data path:", classes="form-label")
+                    yield Input(
+                        placeholder="path/to/dataset.csv or directory",
+                        id="data-input",
+                    )
+                    yield Button("Browse", id="browse-btn")
+
+                # Goal
+                with Horizontal(classes="form-row"):
+                    yield Label("Goal:", classes="form-label")
+                    yield TextArea(id="goal-input")
+
+                yield Rule()
+
+                # Preset
+                with Horizontal(classes="form-row"):
+                    yield Label("Preset:", classes="form-label")
                     yield Select(
-                        domain_choices,
-                        value=_CUSTOM,
+                        PRESET_OPTIONS,
+                        value="default",
                         allow_blank=False,
-                        id="domain-select",
+                        id="preset-select",
+                        classes="short-input",
                     )
 
-            yield Rule()
+                # Iterations
+                with Horizontal(classes="form-row"):
+                    yield Label("Iterations:", classes="form-label")
+                    yield Input(
+                        value="20",
+                        type="integer",
+                        id="max-iterations-input",
+                        classes="short-input",
+                    )
 
-            # Data path with Browse button
-            with Horizontal(classes="form-row"):
-                yield Label("Data path:", classes="form-label")
-                yield Input(
-                    placeholder="path/to/dataset.csv or directory",
-                    id="data-input",
-                )
-                yield Button("Browse", id="browse-btn")
+                # Debate
+                with Horizontal(classes="form-row"):
+                    yield Label("Debate:", classes="form-label")
+                    yield Input(
+                        value="1",
+                        type="integer",
+                        id="debate-rounds-input",
+                        classes="short-input",
+                    )
 
-            # Goal
-            with Horizontal(classes="form-row"):
-                yield Label("Goal:", classes="form-label")
-                yield TextArea(id="goal-input")
+                # Output dir with Browse button
+                with Horizontal(classes="form-row"):
+                    yield Label("Output:", classes="form-label")
+                    yield Input(
+                        value="experiments",
+                        id="output-dir-input",
+                    )
+                    yield Button("Browse", id="browse-output-btn")
 
-            yield Rule()
-
-            # Preset
-            with Horizontal(classes="form-row"):
-                yield Label("Preset:", classes="form-label")
-                yield Select(
-                    PRESET_OPTIONS,
-                    value="default",
-                    allow_blank=False,
-                    id="preset-select",
-                    classes="short-input",
-                )
-
-            # Iterations
-            with Horizontal(classes="form-row"):
-                yield Label("Iterations:", classes="form-label")
-                yield Input(
-                    value="20",
-                    type="integer",
-                    id="max-iterations-input",
-                    classes="short-input",
-                )
-
-            # Debate
-            with Horizontal(classes="form-row"):
-                yield Label("Debate:", classes="form-label")
-                yield Input(
-                    value="1",
-                    type="integer",
-                    id="debate-rounds-input",
-                    classes="short-input",
-                )
-
-            # Output dir with Browse button
-            with Horizontal(classes="form-row"):
-                yield Label("Output:", classes="form-label")
-                yield Input(
-                    value="experiments",
-                    id="output-dir-input",
-                )
-                yield Button("Browse", id="browse-output-btn")
-
-            # Error display
-            yield Static("", id="error-display")
+                # Error display
+                yield Static("", id="error-display")
 
         yield Footer()
 
