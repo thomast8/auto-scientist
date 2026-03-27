@@ -533,7 +533,7 @@ class IterationContainer(Vertical):
     DEFAULT_CSS = """
     IterationContainer {
         height: auto;
-        border: solid $accent;
+        border: solid grey;
         transition: border 300ms in_out_cubic;
     }
     """
