@@ -23,7 +23,8 @@ from textual.widgets import (
     TextArea,
 )
 
-from auto_scientist.experiment_config import ExperimentConfig
+from auto_scientist.experiment_config import ExperimentConfig, ExperimentModelsConfig
+from auto_scientist.model_config import AgentModelConfig
 
 PRESET_OPTIONS = [
     ("default (medium)", "default"),
@@ -31,6 +32,53 @@ PRESET_OPTIONS = [
     ("high", "high"),
     ("max", "max"),
 ]
+
+PROVIDER_OPTIONS = [
+    ("anthropic", "anthropic"),
+    ("openai", "openai"),
+    ("google", "google"),
+]
+
+REASONING_OPTIONS = [
+    ("off", "off"),
+    ("minimal", "minimal"),
+    ("low", "low"),
+    ("medium", "medium"),
+    ("high", "high"),
+    ("max", "max"),
+]
+
+# Agents that can be overridden, in display order
+_AGENT_FIELDS = ["ingestor", "analyst", "scientist", "coder", "report", "summarizer"]
+
+# SDK agents are locked to anthropic provider
+_SDK_AGENTS = {"ingestor", "analyst", "scientist", "coder", "report"}
+
+_NUM_CRITIC_SLOTS = 3
+
+# Known models per provider (most capable first)
+MODELS_BY_PROVIDER: dict[str, list[tuple[str, str]]] = {
+    "anthropic": [
+        ("claude-opus-4-6", "claude-opus-4-6"),
+        ("claude-sonnet-4-6", "claude-sonnet-4-6"),
+        ("claude-haiku-4-5", "claude-haiku-4-5-20251001"),
+    ],
+    "openai": [
+        ("gpt-5.4", "gpt-5.4"),
+        ("gpt-5.4-mini", "gpt-5.4-mini"),
+        ("gpt-5.4-nano", "gpt-5.4-nano"),
+        ("gpt-4.1", "gpt-4.1"),
+        ("o3", "o3"),
+        ("o4-mini", "o4-mini"),
+    ],
+    "google": [
+        ("gemini-3.1-pro-preview", "gemini-3.1-pro-preview"),
+        ("gemini-3-flash-preview", "gemini-3-flash-preview"),
+        ("gemini-3.1-flash-lite-preview", "gemini-3.1-flash-lite-preview"),
+        ("gemini-2.5-pro", "gemini-2.5-pro"),
+        ("gemini-2.5-flash", "gemini-2.5-flash"),
+    ],
+}
 
 # Sentinel for "no domain selected" in the domain picker
 _CUSTOM = "__custom__"
@@ -235,6 +283,28 @@ class LaunchApp(App[ExperimentConfig | None]):
     Select:focus SelectCurrent {
         border: none;
     }
+    .model-row {
+        height: auto;
+        margin-bottom: 0;
+    }
+    .model-label {
+        width: 14;
+        padding: 0 1 0 0;
+        text-align: right;
+    }
+    .model-provider {
+        width: 16;
+    }
+    .model-name {
+        width: 36;
+    }
+    .model-reasoning {
+        width: 14;
+    }
+    SelectOverlay {
+        width: auto;
+        min-width: 16;
+    }
     #browse-btn, #browse-output-btn {
         width: auto;
         min-width: 8;
@@ -372,6 +442,66 @@ class LaunchApp(App[ExperimentConfig | None]):
                     )
                     yield Button("Browse", id="browse-output-btn")
 
+                yield Rule()
+
+                # Per-agent model overrides header
+                with Horizontal(classes="model-row"):
+                    yield Label("", classes="model-label")
+                    yield Static("[dim]Provider[/dim]", classes="model-provider", markup=True)
+                    yield Static("[dim]Model[/dim]", classes="model-name", markup=True)
+                    yield Static("[dim]Reasoning[/dim]", classes="model-reasoning", markup=True)
+
+                for agent in _AGENT_FIELDS:
+                    display = agent.title()
+                    sdk_locked = agent in _SDK_AGENTS
+                    with Horizontal(classes="model-row"):
+                        yield Label(f"{display}:", classes="model-label")
+                        provider_sel = Select(
+                            PROVIDER_OPTIONS,
+                            value="anthropic",
+                            allow_blank=not sdk_locked,
+                            id=f"model-{agent}-provider",
+                            classes="model-provider",
+                            disabled=sdk_locked,
+                        )
+                        yield provider_sel
+                        yield Select(
+                            MODELS_BY_PROVIDER["anthropic"],
+                            allow_blank=True,
+                            id=f"model-{agent}-name",
+                            classes="model-name",
+                        )
+                        yield Select(
+                            REASONING_OPTIONS,
+                            allow_blank=True,
+                            id=f"model-{agent}-reasoning",
+                            classes="model-reasoning",
+                        )
+
+                # Critic rows (2 slots, any provider)
+                for i in range(_NUM_CRITIC_SLOTS):
+                    label = f"Critic {i + 1}:"
+                    with Horizontal(classes="model-row"):
+                        yield Label(label, classes="model-label")
+                        yield Select(
+                            PROVIDER_OPTIONS,
+                            allow_blank=True,
+                            id=f"model-critic-{i}-provider",
+                            classes="model-provider",
+                        )
+                        yield Select(
+                            MODELS_BY_PROVIDER["anthropic"],
+                            allow_blank=True,
+                            id=f"model-critic-{i}-name",
+                            classes="model-name",
+                        )
+                        yield Select(
+                            REASONING_OPTIONS,
+                            allow_blank=True,
+                            id=f"model-critic-{i}-reasoning",
+                            classes="model-reasoning",
+                        )
+
                 # Error display
                 yield Static("", id="error-display")
 
@@ -389,6 +519,35 @@ class LaunchApp(App[ExperimentConfig | None]):
         self.query_one("#max-iterations-input", Input).value = str(cfg.max_iterations)
         self.query_one("#debate-rounds-input", Input).value = str(cfg.debate_rounds)
         self.query_one("#output-dir-input", Input).value = cfg.output_dir
+
+        # Fill per-agent model overrides
+        if cfg.models:
+            for agent in _AGENT_FIELDS:
+                agent_cfg = getattr(cfg.models, agent, None)
+                if agent_cfg is None:
+                    continue
+                provider_sel = self.query_one(f"#model-{agent}-provider", Select)
+                provider_sel.value = agent_cfg.provider
+                # Update model dropdown to match provider, then set value
+                model_sel = self.query_one(f"#model-{agent}-name", Select)
+                model_sel.set_options(
+                    MODELS_BY_PROVIDER.get(agent_cfg.provider, [])
+                )
+                model_sel.value = agent_cfg.model
+                reasoning_sel = self.query_one(f"#model-{agent}-reasoning", Select)
+                reasoning_sel.value = agent_cfg.reasoning.level
+
+            # Fill critic overrides
+            for i, critic_cfg in enumerate(cfg.models.critics[:_NUM_CRITIC_SLOTS]):
+                provider_sel = self.query_one(f"#model-critic-{i}-provider", Select)
+                provider_sel.value = critic_cfg.provider
+                model_sel = self.query_one(f"#model-critic-{i}-name", Select)
+                model_sel.set_options(
+                    MODELS_BY_PROVIDER.get(critic_cfg.provider, [])
+                )
+                model_sel.value = critic_cfg.model
+                reasoning_sel = self.query_one(f"#model-critic-{i}-reasoning", Select)
+                reasoning_sel.value = critic_cfg.reasoning.level
 
     @on(Button.Pressed, "#browse-btn")
     def _on_browse(self, event: Button.Pressed) -> None:
@@ -432,6 +591,22 @@ class LaunchApp(App[ExperimentConfig | None]):
         cfg.output_dir = f"experiments/{yaml_path.parent.name}"
         self._apply_config(cfg)
 
+    @on(Select.Changed)
+    def _on_provider_changed(self, event: Select.Changed) -> None:
+        """When a provider dropdown changes, update the corresponding model dropdown."""
+        sel_id = event.select.id or ""
+        if not sel_id.startswith("model-") or not sel_id.endswith("-provider"):
+            return
+        agent = sel_id.removeprefix("model-").removesuffix("-provider")
+        provider = event.value if isinstance(event.value, str) else "anthropic"
+        model_sel = self.query_one(f"#model-{agent}-name", Select)
+        model_sel.set_options(MODELS_BY_PROVIDER.get(provider, []))
+
+    def _show_error(self, msg: str) -> None:
+        """Display an error message, escaping any Rich markup characters."""
+        safe = msg.replace("[", "\\[")
+        self.query_one("#error-display", Static).update(safe)
+
     def _build_config(self) -> ExperimentConfig | None:
         """Collect form values and build an ExperimentConfig, or None on validation error."""
         from pydantic import ValidationError
@@ -440,12 +615,52 @@ class LaunchApp(App[ExperimentConfig | None]):
         goal = self.query_one("#goal-input", TextArea).text.strip()
 
         if not data or not goal:
-            self.query_one("#error-display", Static).update(
-                "Data path and goal are required."
-            )
+            self._show_error("Data path and goal are required.")
             return None
 
-        self.query_one("#error-display", Static).update("")
+        self._show_error("")
+
+        # Collect per-agent model overrides
+        models_dict: dict[str, AgentModelConfig] = {}
+        for agent in _AGENT_FIELDS:
+            model_val = self.query_one(f"#model-{agent}-name", Select).value
+            if not isinstance(model_val, str):
+                continue
+            model_name = model_val
+            provider_val = self.query_one(f"#model-{agent}-provider", Select).value
+            reasoning_val = self.query_one(f"#model-{agent}-reasoning", Select).value
+            provider = provider_val if isinstance(provider_val, str) else "anthropic"
+            reasoning = reasoning_val if isinstance(reasoning_val, str) else "off"
+            try:
+                models_dict[agent] = AgentModelConfig(
+                    provider=provider, model=model_name, reasoning=reasoning,
+                )
+            except (ValidationError, ValueError) as e:
+                self._show_error(f"Invalid model config for {agent}: {e}")
+                return None
+
+        # Collect critic overrides
+        critics_list: list[AgentModelConfig] = []
+        for i in range(_NUM_CRITIC_SLOTS):
+            model_val = self.query_one(f"#model-critic-{i}-name", Select).value
+            if not isinstance(model_val, str):
+                continue
+            provider_val = self.query_one(f"#model-critic-{i}-provider", Select).value
+            reasoning_val = self.query_one(f"#model-critic-{i}-reasoning", Select).value
+            provider = provider_val if isinstance(provider_val, str) else "anthropic"
+            reasoning = reasoning_val if isinstance(reasoning_val, str) else "off"
+            try:
+                critics_list.append(AgentModelConfig(
+                    provider=provider, model=model_val, reasoning=reasoning,
+                ))
+            except (ValidationError, ValueError) as e:
+                self._show_error(f"Invalid model config for critic {i + 1}: {e}")
+                return None
+
+        has_overrides = bool(models_dict) or bool(critics_list)
+        models = ExperimentModelsConfig(
+            **models_dict, critics=critics_list,
+        ) if has_overrides else None
 
         try:
             return ExperimentConfig(
@@ -460,16 +675,56 @@ class LaunchApp(App[ExperimentConfig | None]):
                 ),
                 output_dir=self.query_one("#output-dir-input", Input).value
                 or "experiments",
+                models=models,
             )
         except (ValidationError, ValueError) as e:
-            self.query_one("#error-display", Static).update(str(e))
+            self._show_error(str(e))
             return None
+
+    def _validate_models(self, config: ExperimentConfig) -> list[str]:
+        """Run provider auth, model name, and reasoning validation."""
+        from auto_scientist.model_config import ModelConfig
+        from auto_scientist.orchestrator import (
+            _check_provider_auth,
+            _validate_model_names,
+            _validate_reasoning_configs,
+        )
+
+        mc = ModelConfig.from_experiment_config(config)
+        errors: list[str] = []
+
+        # Check API keys for required providers
+        providers: set[str] = {"anthropic"}
+        if mc.summarizer:
+            providers.add(mc.summarizer.provider)
+        for critic in mc.critics:
+            providers.add(critic.provider)
+        for provider in sorted(providers):
+            err = _check_provider_auth(provider)
+            if err:
+                errors.append(err)
+
+        # Check model names exist
+        errors.extend(_validate_model_names(mc))
+
+        # Check reasoning configs are valid for provider/model
+        errors.extend(_validate_reasoning_configs(mc))
+
+        return errors
 
     def action_run(self) -> None:
         config = self._build_config()
-        if config is not None:
-            self.result_config = config
-            self.exit(config)
+        if config is None:
+            return
+
+        # Validate models, reasoning, and API keys before launching
+        errors = self._validate_models(config)
+        if errors:
+            self._show_error("\n".join(errors))
+            return
+
+        self.result_config = config
+        self.exit(config)
 
     def action_save(self) -> None:
         config = self._build_config()
@@ -480,14 +735,10 @@ class LaunchApp(App[ExperimentConfig | None]):
         try:
             config.to_yaml(save_path)
         except OSError as e:
-            self.query_one("#error-display", Static).update(
-                f"Failed to save config: {e}"
-            )
+            self._show_error(f"Failed to save config: {e}")
             return
 
-        self.query_one("#error-display", Static).update(
-            f"Config saved to {save_path}"
-        )
+        self._show_error(f"Config saved to {save_path}")
 
     def action_quit(self) -> None:
         self.exit(None)

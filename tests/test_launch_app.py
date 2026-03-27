@@ -1,5 +1,7 @@
 """Tests for the TUI launch form."""
 
+from unittest.mock import patch
+
 import yaml
 
 from auto_scientist.experiment_config import ExperimentConfig
@@ -36,7 +38,8 @@ class TestLaunchAppConstruction:
 
 
 class TestLaunchAppRun:
-    async def test_ctrl_r_stores_config(self):
+    @patch.object(LaunchApp, "_validate_models", return_value=[])
+    async def test_ctrl_r_stores_config(self, _mock_validate):
         app = LaunchApp()
         async with app.run_test(size=(120, 50)) as pilot:
             from textual.widgets import Input, TextArea
