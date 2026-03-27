@@ -549,7 +549,7 @@ class LaunchApp(App[ExperimentConfig | None]):
                             classes="model-reasoning",
                         )
 
-                # Critic rows (2 slots, any provider)
+                # Critic rows (any provider)
                 for i in range(_NUM_CRITIC_SLOTS):
                     label = f"Critic {i + 1}:"
                     with Horizontal(classes="model-row"):
@@ -574,7 +574,7 @@ class LaunchApp(App[ExperimentConfig | None]):
                         )
 
                 # Error display
-                yield Static("", id="error-display")
+                yield Static("", id="error-display", markup=False)
 
         yield Footer()
 
@@ -679,11 +679,13 @@ class LaunchApp(App[ExperimentConfig | None]):
 
         yaml_path = Path(str(event.value))
         if not yaml_path.exists():
+            self._show_error(f"Domain config not found: {yaml_path}")
             return
 
         try:
             cfg = ExperimentConfig.from_yaml(yaml_path)
-        except ValueError:
+        except (ValueError, OSError) as e:
+            self._show_error(f"Failed to load {yaml_path}: {e}")
             return
 
         self._yaml_path = yaml_path
@@ -707,9 +709,9 @@ class LaunchApp(App[ExperimentConfig | None]):
         model_sel.set_options(models)
 
     def _show_error(self, msg: str) -> None:
-        """Display an error message, escaping any Rich markup characters."""
-        safe = msg.replace("[", "\\[")
-        self.query_one("#error-display", Static).update(safe)
+        """Display an error message in the error display area."""
+        display = self.query_one("#error-display", Static)
+        display.update(msg)
 
     def _build_config(self) -> ExperimentConfig | None:
         """Collect form values and build an ExperimentConfig, or None on validation error."""
@@ -822,7 +824,11 @@ class LaunchApp(App[ExperimentConfig | None]):
             return
 
         # Validate models, reasoning, and API keys before launching
-        errors = self._validate_models(config)
+        try:
+            errors = self._validate_models(config)
+        except Exception as e:
+            self._show_error(f"Validation failed: {e}")
+            return
         if errors:
             self._show_error("\n".join(errors))
             return
@@ -842,7 +848,8 @@ class LaunchApp(App[ExperimentConfig | None]):
             self._show_error(f"Failed to save config: {e}")
             return
 
-        self._show_error(f"Config saved to {save_path}")
+        self._show_error("")
+        self.notify(f"Config saved to {save_path}")
 
     def action_quit(self) -> None:
         self.exit(None)

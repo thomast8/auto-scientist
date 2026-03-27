@@ -970,7 +970,7 @@ class PipelineApp(App):
 
             if event.state == WorkerState.ERROR:
                 error = event.worker.error
-                error_msg = str(error) if error else "Unknown error"
+                error_msg = f"{type(error).__name__}: {error}" if error else "Unknown error"
                 self.notify(
                     "Pipeline failed! See error below.",
                     severity="error",
