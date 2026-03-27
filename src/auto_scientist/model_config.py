@@ -146,7 +146,7 @@ class ModelConfig(BaseModel):
         return self.defaults
 
     @classmethod
-    def from_experiment_config(cls, exp_config: "ExperimentConfig") -> "ModelConfig":
+    def from_experiment_config(cls, exp_config: ExperimentConfig) -> ModelConfig:
         """Build a ModelConfig from an ExperimentConfig.
 
         Loads the preset, then layers per-agent model overrides from the
@@ -169,21 +169,21 @@ class ModelConfig(BaseModel):
         return mc
 
     @classmethod
-    def builtin_preset(cls, name: str) -> "ModelConfig":
+    def builtin_preset(cls, name: str) -> ModelConfig:
         """Return a built-in preset by name."""
         if name not in BUILTIN_PRESETS:
             raise ValueError(f"Unknown preset: {name!r}. Available: {list(BUILTIN_PRESETS)}")
         return cls._from_dict(BUILTIN_PRESETS[name])
 
     @classmethod
-    def from_toml(cls, path: Path) -> "ModelConfig":
+    def from_toml(cls, path: Path) -> ModelConfig:
         """Load config from a TOML file."""
         with open(path, "rb") as f:
             raw = tomllib.load(f)
         return cls._from_dict(raw)
 
     @classmethod
-    def _from_dict(cls, raw: dict) -> "ModelConfig":
+    def _from_dict(cls, raw: dict) -> ModelConfig:
         """Build a ModelConfig from a raw dict (from TOML or preset)."""
         kwargs: dict = {}
         kwargs["defaults"] = AgentModelConfig.model_validate(raw["defaults"])

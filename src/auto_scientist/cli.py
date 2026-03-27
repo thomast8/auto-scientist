@@ -9,6 +9,7 @@ load_dotenv()
 
 from auto_scientist.console import PipelineApp, console
 from auto_scientist.experiment_config import ExperimentConfig
+from auto_scientist.launch_app import LaunchApp
 from auto_scientist.model_config import ModelConfig
 from auto_scientist.orchestrator import Orchestrator
 from auto_scientist.state import ExperimentState
@@ -98,9 +99,53 @@ def _resolve_model_config(
     return model_config
 
 
-@click.group()
-def cli():
+@click.group(invoke_without_command=True)
+@click.pass_context
+def cli(ctx: click.Context):
     """Auto-Scientist: Autonomous scientific investigation framework."""
+    if ctx.invoked_subcommand is not None:
+        return
+
+    # Bare `auto-scientist` with no subcommand: launch the TUI form
+    app = LaunchApp()
+    result = app.run()
+
+    if result is None or app.result_config is None:
+        return
+
+    exp_config = app.result_config
+    data_path = Path(exp_config.data)
+    model_config = ModelConfig.from_experiment_config(exp_config)
+
+    resolved_output = _next_output_dir(Path(exp_config.output_dir))
+    if resolved_output != Path(exp_config.output_dir):
+        console.print(
+            f"Previous run detected in {exp_config.output_dir}/. "
+            f"Using {resolved_output}/ instead.",
+            style="yellow",
+        )
+
+    state = ExperimentState(
+        domain="auto",
+        goal=exp_config.goal,
+        phase="ingestion",
+        schedule=exp_config.schedule,
+        data_path=str(data_path.resolve()),
+    )
+
+    orchestrator = Orchestrator(
+        state=state,
+        data_path=data_path,
+        output_dir=resolved_output,
+        max_iterations=exp_config.max_iterations,
+        model_config=model_config,
+        interactive=exp_config.interactive,
+        debate_rounds=exp_config.debate_rounds,
+        stream=exp_config.stream,
+        verbose=exp_config.verbose,
+    )
+
+    _run_orchestrator(orchestrator)
 
 
 @cli.command()

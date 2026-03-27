@@ -1,16 +1,15 @@
 """Tests for the TUI launch form."""
 
 import yaml
-import pytest
 
-from auto_scientist.launch_app import LaunchApp
 from auto_scientist.experiment_config import ExperimentConfig
+from auto_scientist.launch_app import LaunchApp
 
 
 class TestLaunchAppConstruction:
     async def test_app_has_expected_widgets(self):
         app = LaunchApp()
-        async with app.run_test() as pilot:
+        async with app.run_test() as _pilot:
             # Verify key widgets exist
             assert app.query_one("#data-input") is not None
             assert app.query_one("#goal-input") is not None
@@ -29,8 +28,8 @@ class TestLaunchAppConstruction:
             preset="fast",
         )
         app = LaunchApp(prefill=cfg)
-        async with app.run_test() as pilot:
-            from textual.widgets import Input, TextArea, Select
+        async with app.run_test() as _pilot:
+            from textual.widgets import Input, Select, TextArea
 
             assert app.query_one("#data-input", Input).value == "/path/to/data.csv"
             assert app.query_one("#goal-input", TextArea).text == "Test goal text"

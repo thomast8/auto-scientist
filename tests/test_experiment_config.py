@@ -1,7 +1,10 @@
 """Tests for the unified YAML experiment configuration."""
 
+from pathlib import Path
+
 import pytest
 import yaml
+from pydantic import ValidationError
 
 from auto_scientist.experiment_config import ExperimentConfig
 
@@ -13,11 +16,11 @@ class TestExperimentConfigRequired:
         assert cfg.goal == "Find patterns"
 
     def test_missing_data_raises(self):
-        with pytest.raises(Exception):
+        with pytest.raises(ValidationError):
             ExperimentConfig(goal="Find patterns")
 
     def test_missing_goal_raises(self):
-        with pytest.raises(Exception):
+        with pytest.raises(ValidationError):
             ExperimentConfig(data="data.csv")
 
 
@@ -36,7 +39,7 @@ class TestExperimentConfigDefaults:
         assert cfg.models is None
 
     def test_extra_fields_forbidden(self):
-        with pytest.raises(Exception):
+        with pytest.raises(ValidationError):
             ExperimentConfig(data="data.csv", goal="test", unknown_field="bad")
 
 
@@ -47,7 +50,7 @@ class TestExperimentConfigPresetValidation:
         assert cfg.preset == preset
 
     def test_invalid_preset_raises(self):
-        with pytest.raises(Exception):
+        with pytest.raises(ValidationError):
             ExperimentConfig(data="data.csv", goal="test", preset="turbo")
 
 
@@ -181,8 +184,6 @@ class TestToYaml:
         assert len(loaded.models.critics) == 1
         assert loaded.models.critics[0].model == "gpt-5.4"
 
-
-from pathlib import Path
 
 # Root of the project (tests/ is one level down from repo root)
 PROJECT_ROOT = Path(__file__).parent.parent

@@ -5,12 +5,11 @@ and optional per-agent model overrides. Replaces long multiline CLI commands.
 """
 
 from pathlib import Path
-from typing import Literal
 
 import yaml
 from pydantic import BaseModel, ConfigDict, field_validator
 
-from auto_scientist.model_config import AgentModelConfig, BUILTIN_PRESETS
+from auto_scientist.model_config import BUILTIN_PRESETS, AgentModelConfig
 
 
 class ExperimentModelsConfig(BaseModel):

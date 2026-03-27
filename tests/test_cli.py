@@ -1,11 +1,12 @@
 """Tests for the CLI entry point."""
 
-from unittest.mock import patch
+from unittest.mock import MagicMock, patch
 
 import yaml
 from click.testing import CliRunner
 
 from auto_scientist.cli import _next_output_dir, cli
+from auto_scientist.experiment_config import ExperimentConfig
 from auto_scientist.model_config import ModelConfig
 from auto_scientist.state import ExperimentState
 
@@ -432,3 +433,58 @@ class TestYamlConfig:
         assert result.exit_code == 0, result.output
         mc = mock_orch.call_args.kwargs["model_config"]
         assert mc.defaults.model == "claude-opus-4-6"
+
+
+class TestBareCommand:
+    @patch("auto_scientist.cli.LaunchApp")
+    def test_bare_command_launches_tui(self, mock_launch_cls):
+        """Bare `auto-scientist` (no subcommand) should launch LaunchApp."""
+        mock_app = MagicMock()
+        mock_app.run.return_value = None
+        mock_app.result_config = None
+        mock_launch_cls.return_value = mock_app
+
+        runner = CliRunner()
+        result = runner.invoke(cli, [])
+
+        assert result.exit_code == 0
+        mock_launch_cls.assert_called_once()
+        mock_app.run.assert_called_once()
+
+    @patch("auto_scientist.cli.PipelineApp")
+    @patch("auto_scientist.cli.Orchestrator")
+    @patch("auto_scientist.cli.LaunchApp")
+    def test_bare_command_runs_experiment_on_config(
+        self, mock_launch_cls, mock_orch, mock_pipeline_cls, tmp_path
+    ):
+        """When LaunchApp returns a config, the experiment should run."""
+        data_file = tmp_path / "data.csv"
+        data_file.write_text("a,b\n1,2\n")
+
+        cfg = ExperimentConfig(data=str(data_file), goal="tui goal")
+        mock_app = MagicMock()
+        mock_app.run.return_value = cfg
+        mock_app.result_config = cfg
+        mock_launch_cls.return_value = mock_app
+
+        runner = CliRunner()
+        result = runner.invoke(cli, [])
+
+        assert result.exit_code == 0, result.output
+        mock_orch.assert_called_once()
+        assert mock_orch.call_args.kwargs["state"].goal == "tui goal"
+
+    @patch("auto_scientist.cli.PipelineApp")
+    @patch("auto_scientist.cli.Orchestrator")
+    def test_subcommand_still_works(self, mock_orch, mock_app_cls, tmp_path):
+        """Explicit `run` subcommand should bypass the TUI."""
+        data_file = tmp_path / "data.csv"
+        data_file.write_text("a,b\n1,2\n")
+
+        runner = CliRunner()
+        result = runner.invoke(cli, [
+            "run", "--data", str(data_file), "--goal", "direct run",
+        ])
+
+        assert result.exit_code == 0
+        assert mock_orch.call_args.kwargs["state"].goal == "direct run"
