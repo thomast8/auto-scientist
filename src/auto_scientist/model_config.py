@@ -4,10 +4,15 @@ Supports TOML config files, built-in presets, and a unified reasoning
 abstraction that maps to Anthropic/OpenAI/Google native APIs.
 """
 
+from __future__ import annotations
+
 import logging
 import tomllib
 from pathlib import Path
-from typing import ClassVar, Literal
+from typing import TYPE_CHECKING, ClassVar, Literal
+
+if TYPE_CHECKING:
+    from auto_scientist.experiment_config import ExperimentConfig
 
 from pydantic import BaseModel, field_validator
 
@@ -139,6 +144,29 @@ class ModelConfig(BaseModel):
         if override is not None:
             return override
         return self.defaults
+
+    @classmethod
+    def from_experiment_config(cls, exp_config: "ExperimentConfig") -> "ModelConfig":
+        """Build a ModelConfig from an ExperimentConfig.
+
+        Loads the preset, then layers per-agent model overrides from the
+        YAML models block on top. summaries=False always nullifies the summarizer.
+        """
+        mc = cls.builtin_preset(exp_config.preset)
+
+        if exp_config.models is not None:
+            overrides = exp_config.models
+            for field in cls._AGENT_FIELDS:
+                agent_override = getattr(overrides, field, None)
+                if agent_override is not None:
+                    setattr(mc, field, agent_override)
+            if overrides.critics:
+                mc.critics = list(overrides.critics)
+
+        if not exp_config.summaries:
+            mc.summarizer = None
+
+        return mc
 
     @classmethod
     def builtin_preset(cls, name: str) -> "ModelConfig":

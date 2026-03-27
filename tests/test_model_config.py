@@ -242,3 +242,72 @@ model = "claude-opus-4-6"
         # Scientist has override
         cfg = mc.resolve("scientist")
         assert cfg.model == "claude-opus-4-6"
+
+
+class TestFromExperimentConfig:
+    def test_preset_only(self):
+        from auto_scientist.experiment_config import ExperimentConfig
+
+        exp = ExperimentConfig(data="data.csv", goal="test", preset="fast")
+        mc = ModelConfig.from_experiment_config(exp)
+        assert mc.defaults.model == "claude-haiku-4-5-20251001"
+
+    def test_preset_with_agent_override(self):
+        from auto_scientist.experiment_config import ExperimentConfig
+
+        exp = ExperimentConfig(
+            data="data.csv",
+            goal="test",
+            preset="fast",
+            models={
+                "scientist": {"model": "claude-opus-4-6", "reasoning": "high"},
+            },
+        )
+        mc = ModelConfig.from_experiment_config(exp)
+        # Scientist overridden
+        assert mc.scientist.model == "claude-opus-4-6"
+        assert mc.scientist.reasoning.level == "high"
+        # Other agents still use fast preset defaults
+        assert mc.defaults.model == "claude-haiku-4-5-20251001"
+
+    def test_summaries_false_wins(self):
+        from auto_scientist.experiment_config import ExperimentConfig
+
+        exp = ExperimentConfig(
+            data="data.csv",
+            goal="test",
+            summaries=False,
+            models={
+                "summarizer": {"provider": "openai", "model": "gpt-5.4-nano"},
+            },
+        )
+        mc = ModelConfig.from_experiment_config(exp)
+        assert mc.summarizer is None
+
+    def test_critics_override_replaces_preset(self):
+        from auto_scientist.experiment_config import ExperimentConfig
+
+        exp = ExperimentConfig(
+            data="data.csv",
+            goal="test",
+            preset="default",
+            models={
+                "critics": [
+                    {"provider": "openai", "model": "gpt-5.4", "reasoning": "high"},
+                ],
+            },
+        )
+        mc = ModelConfig.from_experiment_config(exp)
+        # YAML critics replace preset critics entirely
+        assert len(mc.critics) == 1
+        assert mc.critics[0].model == "gpt-5.4"
+        assert mc.critics[0].reasoning.level == "high"
+
+    def test_no_models_uses_preset_as_is(self):
+        from auto_scientist.experiment_config import ExperimentConfig
+
+        exp = ExperimentConfig(data="data.csv", goal="test", preset="high")
+        mc = ModelConfig.from_experiment_config(exp)
+        assert mc.resolve("scientist").model == "claude-opus-4-6"
+        assert mc.resolve("scientist").reasoning.level == "high"
+        assert len(mc.critics) == 2
