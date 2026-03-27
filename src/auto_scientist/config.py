@@ -16,6 +16,13 @@ class DomainConfig(BaseModel):
     run_command: str = "uv run {script_path}"
     run_cwd: str = "."
 
+    @field_validator("data_paths", mode="before")
+    @classmethod
+    def coerce_data_paths(cls, v: object) -> list[str]:
+        if isinstance(v, dict):
+            return list(v.values())
+        return v
+
     @field_validator("run_command")
     @classmethod
     def run_command_must_contain_placeholder(cls, v: str) -> str:

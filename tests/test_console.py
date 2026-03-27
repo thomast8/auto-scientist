@@ -274,12 +274,16 @@ class TestAgentPanelIdempotency:
 class TestIterationContainer:
     def test_construction(self):
         container = IterationContainer(iter_title="Iteration 0")
+        assert container._iter_title == "Iteration 0"
         assert container.border_title == "Iteration 0"
+        assert container._in_progress is True
 
     def test_set_result(self):
         container = IterationContainer(iter_title="Iteration 1")
         container.set_result("completed (85)", "green")
         assert container.border_subtitle == "completed (85)"
+        assert container._in_progress is False
+        assert container.border_title == "Iteration 1"
 
 
 # ---------------------------------------------------------------------------
@@ -517,7 +521,7 @@ class TestPipelineLiveHeadless:
         assert live._current_iteration is None
         live.start_iteration(1)
         assert live._current_iteration is not None
-        assert live._current_iteration.border_title == "Iteration 1"
+        assert live._current_iteration._iter_title == "Iteration 1"
         live.stop()
 
 
@@ -566,7 +570,7 @@ class TestPipelineApp:
         live.start()
         live.start_iteration(0)
         assert live._current_iteration is not None
-        assert live._current_iteration.border_title == "Iteration 0"
+        assert live._current_iteration._iter_title == "Iteration 0"
         live.stop()
 
     @pytest.mark.asyncio

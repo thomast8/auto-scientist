@@ -333,7 +333,6 @@ class AgentPanel(Widget):
         if summary.startswith("[done] "):
             summary = summary[len("[done] "):]
         collapsible.title = f"[{self.panel_style}]{summary}[/]"
-        self.border_title = f"{self._panel_name}: {summary}"
         self.border_subtitle = self._build_footer()
         # Show the CollapsibleTitle now that we have content to toggle
         try:
@@ -529,6 +528,8 @@ class MetricsBar(Widget):
 class IterationContainer(Vertical):
     """Bordered container grouping panels for one iteration."""
 
+    SPINNER_CHARS = "⠋⠙⠹⠸⠼⠴⠦⠧⠇⠏"
+
     DEFAULT_CSS = """
     IterationContainer {
         height: auto;
@@ -539,10 +540,26 @@ class IterationContainer(Vertical):
 
     def __init__(self, iter_title: str) -> None:
         super().__init__()
+        self._iter_title = iter_title
         self.border_title = iter_title
+        self._in_progress = True
+        self._spinner_index = 0
+
+    def on_mount(self) -> None:
+        self._spinner_timer = self.set_interval(1 / 10, self._tick_spinner)
+
+    def _tick_spinner(self) -> None:
+        if not self._in_progress:
+            self._spinner_timer.stop()
+            return
+        char = self.SPINNER_CHARS[self._spinner_index % len(self.SPINNER_CHARS)]
+        self.border_title = f"{char} {self._iter_title}"
+        self._spinner_index += 1
 
     def set_result(self, text: str, style: str) -> None:
         """Set the iteration result as border subtitle."""
+        self._in_progress = False
+        self.border_title = self._iter_title
         self.border_subtitle = text
         valid = {
             "red", "green", "yellow", "blue", "cyan", "magenta", "white",
@@ -709,7 +726,7 @@ class PipelineCommandProvider(Provider):
 
         # Dynamic: go to iteration N
         for container in app.query(IterationContainer):
-            title = container.border_title or "?"
+            title = getattr(container, "_iter_title", container.border_title) or "?"
             commands.append((
                 f"Go to {title}",
                 partial(app._scroll_to_widget, container),
@@ -824,7 +841,7 @@ class PipelineLive:
             label = subtitle
             if self._current_iteration is not None:
                 label = (
-                    f"{self._current_iteration.border_title}: {subtitle}"
+                    f"{self._current_iteration._iter_title}: {subtitle}"
                 )
             self._file_console.print(f"--- {label} ---")
 
