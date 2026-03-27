@@ -70,7 +70,7 @@ async def query_google(
 
     # Build thinking config
     thinking_config = None
-    if reasoning is not None and reasoning.level not in ("default", "off"):
+    if reasoning is not None and reasoning.level != "off":
         if _is_gemini_25(model):
             budget = reasoning.budget or GOOGLE_BUDGET_DEFAULTS.get(reasoning.level)
             if budget is None:

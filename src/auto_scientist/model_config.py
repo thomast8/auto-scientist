@@ -5,6 +5,7 @@ abstraction that maps to Anthropic/OpenAI/Google native APIs.
 """
 
 import tomllib
+import warnings
 from pathlib import Path
 from typing import ClassVar, Literal
 
@@ -14,8 +15,21 @@ from pydantic import BaseModel, field_validator
 class ReasoningConfig(BaseModel):
     """Unified reasoning config that maps to any provider's native API."""
 
-    level: Literal["default", "off", "minimal", "low", "medium", "high", "max"] = "default"
+    level: Literal["off", "minimal", "low", "medium", "high", "max"] = "off"
     budget: int | None = None
+
+    @field_validator("level", mode="before")
+    @classmethod
+    def _migrate_default_level(cls, v):
+        """Accept legacy 'default' and migrate to 'off'."""
+        if v == "default":
+            warnings.warn(
+                "ReasoningConfig level='default' is deprecated, use 'off' instead",
+                DeprecationWarning,
+                stacklevel=2,
+            )
+            return "off"
+        return v
 
 
 class AgentModelConfig(BaseModel):
@@ -36,28 +50,27 @@ class AgentModelConfig(BaseModel):
 
 BUILTIN_PRESETS: dict[str, dict] = {
     "default": {
-        "defaults": {"model": "claude-sonnet-4-6"},
-        "scientist": {"model": "claude-opus-4-6"},
-        "summarizer": {"provider": "openai", "model": "gpt-5.4-nano"},
-        "critics": [
-            {"provider": "google", "model": "gemini-3.1-pro-preview"},
-            {"provider": "openai", "model": "gpt-5.4"},
-        ],
-    },
-    "medium": {
         "defaults": {"model": "claude-sonnet-4-6", "reasoning": "medium"},
         "scientist": {"model": "claude-opus-4-6", "reasoning": "medium"},
-        "summarizer": {"provider": "openai", "model": "gpt-5.4-nano"},
+        "summarizer": {"provider": "openai", "model": "gpt-5.4-nano", "reasoning": "off"},
         "critics": [
             # Gemini 3 Pro only supports LOW and HIGH thinkingLevel (MEDIUM is Flash-only)
             {"provider": "google", "model": "gemini-3.1-pro-preview", "reasoning": "low"},
             {"provider": "openai", "model": "gpt-5.4", "reasoning": "medium"},
         ],
     },
+    "fast": {
+        "defaults": {"model": "claude-haiku-4-5-20251001", "reasoning": "off"},
+        "summarizer": {"provider": "openai", "model": "gpt-5.4-nano", "reasoning": "off"},
+        "critics": [
+            {"provider": "google", "model": "gemini-3.1-flash-lite-preview", "reasoning": "off"},
+            {"provider": "openai", "model": "gpt-5.4-nano", "reasoning": "off"},
+        ],
+    },
     "high": {
         "defaults": {"model": "claude-sonnet-4-6", "reasoning": "high"},
         "scientist": {"model": "claude-opus-4-6", "reasoning": "high"},
-        "summarizer": {"provider": "openai", "model": "gpt-5.4-nano"},
+        "summarizer": {"provider": "openai", "model": "gpt-5.4-nano", "reasoning": "off"},
         "critics": [
             {"provider": "google", "model": "gemini-3.1-pro-preview", "reasoning": "high"},
             {"provider": "openai", "model": "gpt-5.4", "reasoning": "high"},
@@ -67,21 +80,14 @@ BUILTIN_PRESETS: dict[str, dict] = {
         "defaults": {"model": "claude-opus-4-6", "reasoning": "max"},
         "analyst": {"model": "claude-opus-4-6", "reasoning": "max"},
         "scientist": {"model": "claude-opus-4-6", "reasoning": "max"},
-        "summarizer": {"provider": "openai", "model": "gpt-5.4-mini"},
+        "summarizer": {"provider": "openai", "model": "gpt-5.4-mini", "reasoning": "off"},
         "critics": [
             {"provider": "google", "model": "gemini-3.1-pro-preview", "reasoning": "max"},
             {"provider": "openai", "model": "gpt-5.4", "reasoning": "max"},
         ],
     },
-    "fast": {
-        "defaults": {"model": "claude-haiku-4-5-20251001"},
-        "summarizer": {"provider": "openai", "model": "gpt-5.4-nano"},
-        "critics": [
-            {"provider": "google", "model": "gemini-3.1-flash-lite-preview"},
-            {"provider": "openai", "model": "gpt-5.4-nano"},
-        ],
-    },
 }
+BUILTIN_PRESETS["medium"] = BUILTIN_PRESETS["default"]
 
 
 CC_EFFORT_MAP: dict[str, str] = {
@@ -96,7 +102,7 @@ CC_EFFORT_MAP: dict[str, str] = {
 def reasoning_to_cc_extra_args(reasoning: ReasoningConfig) -> dict[str, str | None]:
     """Convert a ReasoningConfig to Claude Code CLI extra_args.
 
-    Returns empty dict for 'default' and 'off' (let CC decide / no thinking).
+    Returns empty dict for 'off' (no thinking).
     """
     effort = CC_EFFORT_MAP.get(reasoning.level)
     if effort:

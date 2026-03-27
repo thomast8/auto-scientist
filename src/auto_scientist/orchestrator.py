@@ -76,7 +76,7 @@ def _validate_reasoning_configs(mc: ModelConfig) -> list[str]:
 
     for agent_name, cfg in entries:
         r = cfg.reasoning
-        if r.level in ("default", "off"):
+        if r.level == "off":
             continue
 
         label = f"{agent_name} ({cfg.provider}/{cfg.model}, reasoning={r.level})"

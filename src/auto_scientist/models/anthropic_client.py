@@ -87,7 +87,7 @@ async def query_anthropic(
         })
         kwargs["tool_choice"] = {"type": "tool", "name": "submit_response"}
 
-    if reasoning is not None and reasoning.level not in ("default", "off"):
+    if reasoning is not None and reasoning.level != "off":
         budget = reasoning.budget or ANTHROPIC_BUDGET_DEFAULTS.get(reasoning.level)
         if budget is None:
             valid = ", ".join(ANTHROPIC_BUDGET_DEFAULTS.keys())

@@ -55,7 +55,7 @@ async def query_openai(
 
     # Resolve reasoning effort
     effort: str | None = None
-    if reasoning is not None and reasoning.level not in ("default", "off"):
+    if reasoning is not None and reasoning.level != "off":
         effort = OPENAI_EFFORT_MAP.get(reasoning.level)
         if effort is None:
             valid = ", ".join(OPENAI_EFFORT_MAP.keys())
