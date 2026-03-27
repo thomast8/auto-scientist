@@ -37,6 +37,15 @@ PRESET_OPTIONS = [
 _CUSTOM = "__custom__"
 
 
+DOMAIN_DIFFICULTY: dict[str, str] = {
+    "toy_function": "easy",
+    "alien_minerals": "medium",
+    "alloy_design": "medium",
+    "water_treatment": "hard",
+    "spo2": "hard",
+}
+
+
 def _discover_domains() -> list[tuple[str, str]]:
     """Find domains that have experiment.yaml files, return (label, path) pairs."""
     domains_dir = Path("domains")
@@ -46,7 +55,9 @@ def _discover_domains() -> list[tuple[str, str]]:
     for candidate in sorted(domains_dir.iterdir()):
         yaml_path = candidate / "experiment.yaml"
         if yaml_path.is_file() and candidate.name != "example_template":
-            label = candidate.name.replace("_", " ").title()
+            name = candidate.name.replace("_", " ").title()
+            difficulty = DOMAIN_DIFFICULTY.get(candidate.name, "")
+            label = f"{name} ({difficulty})" if difficulty else name
             results.append((label, str(yaml_path)))
     return results
 
