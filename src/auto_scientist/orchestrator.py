@@ -380,7 +380,7 @@ class Orchestrator:
                 self.state.save(state_path)
                 logger.info("Ingestion complete, entering iteration phase")
 
-                self._live.end_iteration("done", "blue")
+                self._live.end_iteration("done", "green")
                 self._live.flush_completed()
 
             # Phase 1: Unified iteration loop
@@ -432,7 +432,7 @@ class Orchestrator:
                 self.state.phase = "stopped"
                 self.state.save(state_path)
 
-                self._live.end_iteration("done", "blue")
+                self._live.end_iteration("done", "green")
                 self._live.flush_completed()
 
             logger.info("Run finished successfully")

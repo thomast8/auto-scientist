@@ -559,9 +559,7 @@ class IterationContainer(Vertical):
         self._in_progress = False
         self.border_title = self._iter_title
         self.border_subtitle = text
-        valid = {
-            "red", "green", "yellow", "blue", "cyan", "magenta", "white",
-        }
+        valid = {"red", "green", "yellow"}
         if style in valid:
             self.styles.border = ("solid", style)
 
