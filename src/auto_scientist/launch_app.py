@@ -281,8 +281,7 @@ class LaunchApp(App[ExperimentConfig | None]):
         self._yaml_path: Path | None = None
 
     BANNER = (
-        "[bold]Auto-Scientist[/bold]\n"
-        "Autonomous scientific investigation framework\n"
+        "Autonomous scientific investigation framework.\n"
         "\n"
         "Given a dataset and a research goal, the system runs an iterative\n"
         "loop of analysis, hypothesis generation, debate, and experimentation\n"
@@ -290,9 +289,7 @@ class LaunchApp(App[ExperimentConfig | None]):
         "contained Python script that runs the experiment and logs results.\n"
         "\n"
         "Select a built-in domain below or choose Custom to provide your\n"
-        "own dataset and goal. Adjust pipeline settings as needed.\n"
-        "\n"
-        "[dim]Ctrl+R  run    Ctrl+S  save config    Ctrl+Q  quit[/dim]"
+        "own dataset and goal. Adjust pipeline settings as needed."
     )
 
     def compose(self) -> ComposeResult:
