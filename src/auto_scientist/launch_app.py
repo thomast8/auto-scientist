@@ -79,8 +79,7 @@ class BrowseScreen(ModalScreen[str | None]):
     #browse-container {
         width: 80%;
         height: 80%;
-        border: round cyan;
-        border-title-color: cyan;
+        border: round $accent;
         background: $surface;
         padding: 1;
     }
@@ -173,9 +172,13 @@ class LaunchApp(App[ExperimentConfig | None]):
     }
     #form-container {
         max-width: 100;
-        border: round cyan;
-        border-title-color: cyan;
+        border: round $accent;
         padding: 1 2;
+    }
+    #banner {
+        height: auto;
+        color: $text-muted;
+        margin-bottom: 1;
     }
     .form-row {
         height: auto;
@@ -185,7 +188,6 @@ class LaunchApp(App[ExperimentConfig | None]):
         width: 14;
         padding: 0 1 0 0;
         text-align: right;
-        color: cyan;
         text-style: bold;
     }
     #goal-input {
@@ -271,9 +273,20 @@ class LaunchApp(App[ExperimentConfig | None]):
         # Track the YAML path for domain-relative data resolution
         self._yaml_path: Path | None = None
 
+    BANNER = (
+        "[bold]Auto-Scientist[/bold] - Autonomous scientific investigation\n"
+        "\n"
+        "Pick a domain or set a custom dataset and goal. The system will\n"
+        "iteratively hypothesize, experiment, and refine until it converges.\n"
+        "\n"
+        "[dim]Ctrl+R[/dim] run  "
+        "[dim]Ctrl+S[/dim] save config  "
+        "[dim]Ctrl+Q[/dim] quit"
+    )
+
     def compose(self) -> ComposeResult:
-        with VerticalScroll(id="form-container") as container:
-            container.border_title = "Auto-Scientist"
+        with VerticalScroll(id="form-container"):
+            yield Static(self.BANNER, id="banner", markup=True)
 
             # Domain picker (only if domains are available)
             if self._domain_options:

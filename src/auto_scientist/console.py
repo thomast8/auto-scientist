@@ -45,18 +45,16 @@ from rich.text import Text
 from textual.app import App, ComposeResult
 from textual.binding import Binding
 from textual.command import Hit, Hits, Provider
-from textual.containers import Center, Vertical, VerticalScroll
+from textual.containers import Vertical, VerticalScroll
 from textual._context import NoActiveAppError
 from textual.css.query import NoMatches
 from textual.screen import ModalScreen
 from textual.widget import Widget
 from textual.widgets import (
-    Button,
     Collapsible,
     Footer,
     Header,
     Label,
-    LoadingIndicator,
     RichLog,
     Static,
 )
@@ -645,7 +643,7 @@ class QuitConfirmScreen(ModalScreen[bool]):
     QuitConfirmScreen > Vertical {
         width: 50;
         height: auto;
-        border: solid $error;
+        border: round $error;
         background: $surface;
         padding: 1 2;
     }
@@ -654,8 +652,10 @@ class QuitConfirmScreen(ModalScreen[bool]):
         text-align: center;
         margin-bottom: 1;
     }
-    QuitConfirmScreen > Vertical > Center {
-        height: auto;
+    QuitConfirmScreen > Vertical > Static {
+        width: 100%;
+        text-align: center;
+        color: $text-muted;
     }
     """
 
@@ -668,12 +668,7 @@ class QuitConfirmScreen(ModalScreen[bool]):
     def compose(self) -> ComposeResult:
         with Vertical():
             yield Label("Pipeline is still running. Quit anyway?")
-            with Center():
-                yield Button("Yes", variant="error", id="yes-btn")
-                yield Button("No", variant="primary", id="no-btn")
-
-    def on_button_pressed(self, event: Button.Pressed) -> None:
-        self.dismiss(event.button.id == "yes-btn")
+            yield Static("y/n")
 
     def action_yes(self) -> None:
         self.dismiss(True)
