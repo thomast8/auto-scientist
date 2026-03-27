@@ -108,6 +108,12 @@ code, which is an implementation detail handled by the Coder.
 
 6. Use web search to verify scientific claims, look up relevant methods, and
    check whether the proposed approach is sound.
+
+7. The investigation goal is provided in the context. Evaluate whether the
+   scientist's plan actually serves this goal. Challenge plans that drift
+   from the stated objective (e.g., fitting a predictive model when the goal
+   asks for causal discovery, or building a black-box classifier when the
+   goal asks for interpretable rules).
 </instructions>
 
 <scope_boundary>
@@ -148,6 +154,7 @@ Schema:
 
 CRITIC_USER = """\
 <context>
+<goal>{goal}</goal>
 <domain_knowledge>{domain_knowledge}</domain_knowledge>
 <notebook>{notebook_content}</notebook>
 <analysis>{analysis_json}</analysis>
@@ -219,6 +226,7 @@ Schema:
 
 SCIENTIST_DEBATE_USER = """\
 <context>
+<goal>{goal}</goal>
 <domain_knowledge>{domain_knowledge}</domain_knowledge>
 <notebook>{notebook_content}</notebook>
 <analysis>{analysis_json}</analysis>

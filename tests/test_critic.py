@@ -697,3 +697,23 @@ class TestPersonas:
         assert get_model_index_for_debate(0, 0, 3) == 0
         assert get_model_index_for_debate(1, 0, 3) == 1
         assert get_model_index_for_debate(2, 0, 3) == 2
+
+
+class TestGoalInPrompts:
+    """Verify that the goal placeholder is present and populated in critic/debate prompts."""
+
+    def test_goal_in_critic_prompt(self):
+        prompt = _build_critic_prompt(
+            {"hypothesis": "test"}, "", "",
+            goal="discover causal relationships",
+        )
+        assert "discover causal relationships" in prompt
+        assert "<goal>" in prompt
+
+    def test_goal_in_scientist_debate_prompt(self):
+        prompt = _build_scientist_debate_user_prompt(
+            {"hypothesis": "test"}, "", "",
+            goal="optimize alloy compositions",
+        )
+        assert "optimize alloy compositions" in prompt
+        assert "<goal>" in prompt

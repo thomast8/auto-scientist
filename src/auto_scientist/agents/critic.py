@@ -192,6 +192,7 @@ async def run_single_critic_debate(
     persona: dict[str, str] | None = None,
     analysis_json: str = "",
     prediction_history: str = "",
+    goal: str = "",
 ) -> DebateResult:
     """Run a multi-round debate between one critic (with persona) and the scientist.
 
@@ -216,6 +217,7 @@ async def run_single_critic_debate(
         persona_text=persona_text,
         analysis_json=analysis_json,
         prediction_history=prediction_history,
+        goal=goal,
     )
     critic_output, critic_result = await _query_critic_structured(
         config, critic_prompt,
@@ -245,6 +247,7 @@ async def run_single_critic_debate(
                 critic_persona=persona_name,
                 analysis_json=analysis_json,
                 prediction_history=prediction_history,
+                goal=goal,
             )
             scientist_defense, sci_result = await _query_scientist_structured(
                 scientist_config, scientist_user_prompt, scientist_system,
@@ -269,6 +272,7 @@ async def run_single_critic_debate(
                 persona_text=persona_text,
                 analysis_json=analysis_json,
                 prediction_history=prediction_history,
+                goal=goal,
             )
             critic_output, critic_result = await _query_critic_structured(
                 config, critic_prompt,
@@ -310,6 +314,7 @@ async def run_debate(
     iteration: int = 0,
     analysis_json: str = "",
     prediction_history: str = "",
+    goal: str = "",
 ) -> list[DebateResult]:
     """Run parallel debates, one per persona, with rotating model assignment.
 
@@ -364,6 +369,7 @@ async def run_debate(
                 persona=persona,
                 analysis_json=analysis_json,
                 prediction_history=prediction_history,
+                goal=goal,
             )
         )
 
@@ -401,6 +407,7 @@ def _build_critic_prompt(
     persona_text: str = "",
     analysis_json: str = "",
     prediction_history: str = "",
+    goal: str = "",
 ) -> str:
     """Build the prompt sent to critic models.
 
@@ -420,6 +427,7 @@ def _build_critic_prompt(
     )
 
     user = CRITIC_USER.format(
+        goal=goal or "(no goal specified)",
         domain_knowledge=domain_knowledge or "(none provided)",
         notebook_content=notebook_content or "(empty)",
         analysis_json=analysis_json or "(no analysis yet)",
@@ -438,9 +446,11 @@ def _build_scientist_debate_user_prompt(
     critic_persona: str = "",
     analysis_json: str = "",
     prediction_history: str = "",
+    goal: str = "",
 ) -> str:
     """Build the user prompt for the Scientist responding to a critique during debate."""
     return SCIENTIST_DEBATE_USER.format(
+        goal=goal or "(no goal specified)",
         domain_knowledge=domain_knowledge or "(none provided)",
         notebook_content=notebook_content or "(empty)",
         analysis_json=analysis_json or "(no analysis yet)",
