@@ -1125,11 +1125,21 @@ class Orchestrator:
 
         # Log failures, return successes
         successful = []
-        for r in raw_results:
+        persona_names = [p["name"] for p in PERSONAS]
+        for name, r in zip(persona_names, raw_results, strict=True):
             if isinstance(r, BaseException):
-                logger.error(f"Critic debate failed: {r}")
+                logger.error(f"Critic debate failed for {name}: {r}", exc_info=r)
             else:
                 successful.append(r)
+        if len(successful) < len(raw_results):
+            lost = [
+                n for n, r in zip(persona_names, raw_results, strict=True)
+                if isinstance(r, BaseException)
+            ]
+            logger.warning(
+                f"Debate: {len(successful)}/{len(raw_results)} debates succeeded. "
+                f"Lost perspectives: {lost}"
+            )
         return successful
 
     @staticmethod

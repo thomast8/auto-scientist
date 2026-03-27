@@ -47,7 +47,7 @@ Your report is the final deliverable. No further agents run after you.
       (all versions, not just the best):
       | Version | Status | Key Change | Key Metric | Prediction Outcome |
 
-4. Writing standards:
+5. Writing standards:
    - Reference specific numbers from the results (e.g., "RMSE decreased from
      12.3 to 8.7" rather than "RMSE improved significantly")
    - State limitations with their practical impact (e.g., "fails on inputs

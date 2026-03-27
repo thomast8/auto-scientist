@@ -114,6 +114,11 @@ async def query_openai(
             }
 
         if on_token is not None:
+            if response_schema is not None:
+                raise ValueError(
+                    "Streaming (on_token) and response_schema cannot be used together "
+                    "in the Responses API path."
+                )
             parts: list[str] = []
             async for event in await client.responses.create(**resp_kwargs, stream=True):
                 if event.type == "response.output_text.delta":
@@ -170,6 +175,11 @@ async def query_openai(
         chat_kwargs["max_tokens"] = max_tokens
 
     if on_token is not None:
+        if response_schema is not None:
+            raise ValueError(
+                "Streaming (on_token) and response_schema cannot be used together "
+                "in the Chat Completions path."
+            )
         parts = []
         async for chunk in await client.chat.completions.create(**chat_kwargs, stream=True):
             delta = chunk.choices[0].delta.content

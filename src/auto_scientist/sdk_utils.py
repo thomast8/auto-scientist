@@ -181,8 +181,8 @@ async def collect_text_from_query(
     Prefers ResultMessage.result; falls back to concatenated AssistantMessage
     TextBlocks. Raises RuntimeError if no text is produced.
 
-    Token usage from ResultMessage.usage is stored on the module-level
-    `last_usage` dict for the caller to read after the call completes.
+    Token usage from ResultMessage.usage is stored on the function-level
+    `last_usage` attribute for the caller to read after the call completes.
 
     This extracts the common pattern shared by Analyst, Scientist, and
     Scientist Revision agents.

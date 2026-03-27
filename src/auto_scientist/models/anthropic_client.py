@@ -101,6 +101,11 @@ async def query_anthropic(
         kwargs["max_tokens"] = max(kwargs["max_tokens"], budget + 4096)
 
     if on_token is not None:
+        if response_schema is not None:
+            raise ValueError(
+                "Streaming (on_token) and response_schema cannot be used together. "
+                "Structured output requires the non-streaming path."
+            )
         parts: list[str] = []
         async with client.messages.stream(**kwargs) as stream:
             async for text in stream.text_stream:
@@ -125,6 +130,8 @@ async def query_anthropic(
                 result = json.dumps(block.input)
                 logger.debug(f"Anthropic response (structured): {len(result)} chars")
                 return AgentResult(text=result, input_tokens=in_tok, output_tokens=out_tok)
+            elif getattr(block, "type", None) == "tool_use":
+                logger.debug(f"Skipping non-submit tool_use block: {getattr(block, 'name', '?')}")
         # Structured output requested but no submit_response block found
         block_info = [
             f"{getattr(b, 'type', type(b).__name__)}({getattr(b, 'name', '')})"

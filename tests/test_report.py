@@ -48,8 +48,9 @@ class TestRunReport:
         assert "# Final Report" in result
 
     @pytest.mark.asyncio
+    @patch("auto_scientist.agents.report.validate_report_structure", return_value=[])
     @patch("auto_scientist.agents.report.safe_query")
-    async def test_strips_preamble_before_first_heading(self, mock_query, tmp_path):
+    async def test_strips_preamble_before_first_heading(self, mock_query, _mock_validate, tmp_path):
         """Conversational preamble before the first markdown heading is stripped."""
         from claude_code_sdk import AssistantMessage, ResultMessage, TextBlock
 
@@ -60,7 +61,9 @@ class TestRunReport:
 
         report_msg = MagicMock(spec=AssistantMessage)
         report_block = MagicMock(spec=TextBlock)
-        report_block.text = "# Final Report\n\nContent here."
+        # Must exceed MIN_REPORT_LENGTH (100 chars)
+        long_content = "Detailed findings about the investigation. " * 3
+        report_block.text = f"# Final Report\n\n{long_content}"
         report_msg.content = [report_block]
 
         result_msg = MagicMock(spec=ResultMessage)
@@ -85,8 +88,8 @@ class TestRunReport:
 
     @pytest.mark.asyncio
     @patch("auto_scientist.agents.report.safe_query")
-    async def test_returns_empty_string_when_no_text(self, mock_query, tmp_path):
-        """If the agent produces no text blocks, return empty string."""
+    async def test_raises_when_no_text(self, mock_query, tmp_path):
+        """If the agent produces no text blocks, raise RuntimeError."""
         from claude_code_sdk import ResultMessage
 
         result_msg = MagicMock(spec=ResultMessage)
@@ -99,10 +102,10 @@ class TestRunReport:
         state = ExperimentState(domain="test", goal="test goal")
         notebook_path = tmp_path / "lab_notebook.xml"
 
-        result = await run_report(
-            state=state, notebook_path=notebook_path, output_dir=tmp_path,
-        )
-        assert result == ""
+        with pytest.raises(RuntimeError, match="no output"):
+            await run_report(
+                state=state, notebook_path=notebook_path, output_dir=tmp_path,
+            )
 
     @pytest.mark.asyncio
     @patch("auto_scientist.agents.report.safe_query")
@@ -127,7 +130,8 @@ class TestRunReport:
         notebook_path = tmp_path / "lab_notebook.xml"
         notebook_path.write_text("# Notebook")
 
-        await run_report(state=state, notebook_path=notebook_path, output_dir=tmp_path)
+        with pytest.raises(RuntimeError):
+            await run_report(state=state, notebook_path=notebook_path, output_dir=tmp_path)
 
         prompt = captured_prompt["prompt"]
         assert "spo2" in prompt
@@ -153,7 +157,8 @@ class TestRunReport:
         notebook_path = tmp_path / "lab_notebook.xml"
         notebook_path.write_text("# Notebook")
 
-        await run_report(state=state, notebook_path=notebook_path, output_dir=tmp_path)
+        with pytest.raises(RuntimeError):
+            await run_report(state=state, notebook_path=notebook_path, output_dir=tmp_path)
 
         opts = captured_opts["options"]
         assert "Write" not in opts.allowed_tools
@@ -179,7 +184,8 @@ class TestRunReport:
         state = ExperimentState(domain="test", goal="test goal")
         notebook_path = tmp_path / "nonexistent_notebook.md"
 
-        await run_report(state=state, notebook_path=notebook_path, output_dir=tmp_path)
+        with pytest.raises(RuntimeError):
+            await run_report(state=state, notebook_path=notebook_path, output_dir=tmp_path)
         assert "(no notebook)" in captured_prompt["prompt"]
 
 
@@ -203,7 +209,8 @@ class TestReportPrompt:
         notebook_path = tmp_path / "lab_notebook.xml"
         notebook_path.write_text("# Notebook")
 
-        await run_report(state=state, notebook_path=notebook_path, output_dir=tmp_path)
+        with pytest.raises(RuntimeError):
+            await run_report(state=state, notebook_path=notebook_path, output_dir=tmp_path)
 
         prompt = captured_prompt["prompt"]
         # Should NOT instruct the agent to write a file
@@ -276,8 +283,8 @@ class TestReportRetry:
 
     @pytest.mark.asyncio
     @patch("auto_scientist.agents.report.safe_query")
-    async def test_exhausts_retries_returns_empty(self, mock_query, tmp_path):
-        """All attempts return empty, should return empty string."""
+    async def test_exhausts_retries_raises(self, mock_query, tmp_path):
+        """All attempts return empty, should raise RuntimeError."""
         async def fake_query(**kwargs):
             yield MagicMock(spec=ResultMessage)
 
@@ -286,10 +293,10 @@ class TestReportRetry:
         state = ExperimentState(domain="test", goal="test goal")
         notebook_path = tmp_path / "lab_notebook.xml"
 
-        result = await run_report(
-            state=state, notebook_path=notebook_path, output_dir=tmp_path,
-        )
-        assert result == ""
+        with pytest.raises(RuntimeError, match="no output"):
+            await run_report(
+                state=state, notebook_path=notebook_path, output_dir=tmp_path,
+            )
 
 
 # A report that passes length check but is missing required sections

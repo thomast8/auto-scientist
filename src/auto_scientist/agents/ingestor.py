@@ -81,7 +81,7 @@ async def run_ingestor(
     )
 
     correction_hint = ""
-    last_error: Exception | None = None
+    last_sdk_error: Exception | None = None
     session_id: str | None = None
 
     for attempt in range(MAX_ATTEMPTS):
@@ -101,7 +101,7 @@ async def run_ingestor(
                         elif isinstance(block, TextBlock):
                             print(f"  [ingestor] {block.text[:200]}")
         except Exception as e:
-            last_error = e
+            last_sdk_error = e
             if attempt == MAX_ATTEMPTS - 1:
                 raise
             logger.warning(f"Ingestor attempt {attempt + 1}: SDK error ({e}), retrying")
@@ -112,9 +112,10 @@ async def run_ingestor(
         output_files = [f for f in data_files if f.name != "ingest.py"]
         if not output_files:
             if attempt == MAX_ATTEMPTS - 1:
-                raise FileNotFoundError(
-                    f"Ingestor agent did not produce any data files in {data_dir}"
-                )
+                msg = f"Ingestor agent did not produce any data files in {data_dir}"
+                if last_sdk_error:
+                    msg += f" (prior SDK error: {last_sdk_error})"
+                raise FileNotFoundError(msg)
             correction_hint = (
                 "\n\n<validation_error>\n"
                 f"No data files were produced in {data_dir}. "

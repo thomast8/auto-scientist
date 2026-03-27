@@ -344,6 +344,7 @@ async def run_debate(
         iteration: Current iteration number (for model rotation).
         analysis_json: Serialized analysis JSON from the Analyst.
         prediction_history: Formatted prediction history string.
+        goal: Investigation goal string passed through to prompt builders.
 
     Returns:
         List of DebateResult, one per persona (always 3 unless no critics).

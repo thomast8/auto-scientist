@@ -4,12 +4,14 @@ Supports TOML config files, built-in presets, and a unified reasoning
 abstraction that maps to Anthropic/OpenAI/Google native APIs.
 """
 
+import logging
 import tomllib
-import warnings
 from pathlib import Path
 from typing import ClassVar, Literal
 
 from pydantic import BaseModel, field_validator
+
+logger = logging.getLogger(__name__)
 
 
 class ReasoningConfig(BaseModel):
@@ -23,10 +25,8 @@ class ReasoningConfig(BaseModel):
     def _migrate_default_level(cls, v):
         """Accept legacy 'default' and migrate to 'off'."""
         if v == "default":
-            warnings.warn(
-                "ReasoningConfig level='default' is deprecated, use 'off' instead",
-                DeprecationWarning,
-                stacklevel=2,
+            logger.warning(
+                "ReasoningConfig level='default' is deprecated, use 'off' instead"
             )
             return "off"
         return v
@@ -54,7 +54,7 @@ BUILTIN_PRESETS: dict[str, dict] = {
         "scientist": {"model": "claude-opus-4-6", "reasoning": "medium"},
         "summarizer": {"provider": "openai", "model": "gpt-5.4-nano", "reasoning": "off"},
         "critics": [
-            # Gemini 3 Pro only supports LOW and HIGH thinkingLevel (MEDIUM is Flash-only)
+            # Gemini 3 Pro: only LOW and HIGH thinkingLevel (MEDIUM is Flash-only, 2026-03)
             {"provider": "google", "model": "gemini-3.1-pro-preview", "reasoning": "low"},
             {"provider": "openai", "model": "gpt-5.4", "reasoning": "medium"},
         ],

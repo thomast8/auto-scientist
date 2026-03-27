@@ -1,6 +1,6 @@
 """Tests for per-agent model and reasoning configuration."""
 
-import warnings
+import logging
 
 import pytest
 
@@ -17,14 +17,11 @@ class TestReasoningConfig:
         assert rc.level == "off"
         assert rc.budget is None
 
-    def test_legacy_default_migrates_to_off(self):
-        with warnings.catch_warnings(record=True) as w:
-            warnings.simplefilter("always")
+    def test_legacy_default_migrates_to_off(self, caplog):
+        with caplog.at_level(logging.WARNING, logger="auto_scientist.model_config"):
             rc = ReasoningConfig(level="default")
-            assert rc.level == "off"
-            assert len(w) == 1
-            assert issubclass(w[0].category, DeprecationWarning)
-            assert "deprecated" in str(w[0].message)
+        assert rc.level == "off"
+        assert any("deprecated" in r.message for r in caplog.records)
 
     def test_explicit_level(self):
         rc = ReasoningConfig(level="high")

@@ -1,6 +1,6 @@
 """Report agent: Phase 3 final summary generation.
 
-Generates a comprehensive report covering the best model, the journey from
+Generates a comprehensive report covering the best approach, the journey from
 first to final version, key insights, and recommendations for future work.
 
 Returns the report content as a string; the orchestrator handles file writing.
@@ -147,14 +147,22 @@ async def run_report(
                 )
             continue
 
-    # Return whatever we have, even if incomplete
-    if full_text:
-        remaining = validate_report_structure(full_text)
-        if remaining:
-            logger.warning(
-                f"Returning incomplete report after {MAX_ATTEMPTS} attempts. "
-                f"Remaining issues: {remaining}"
-            )
-    else:
-        logger.warning("Report generation produced no output after all attempts")
+    # Return whatever we have, with a visible warning if incomplete
+    if not full_text:
+        raise RuntimeError(
+            f"Report generation produced no output after {MAX_ATTEMPTS} attempts"
+        )
+
+    remaining = validate_report_structure(full_text)
+    if remaining:
+        logger.warning(
+            f"Returning incomplete report after {MAX_ATTEMPTS} attempts. "
+            f"Remaining issues: {remaining}"
+        )
+        warning_header = (
+            "> **WARNING: This report is incomplete.** "
+            f"Missing sections: {', '.join(remaining)}\n\n"
+        )
+        full_text = warning_header + full_text
+
     return full_text
