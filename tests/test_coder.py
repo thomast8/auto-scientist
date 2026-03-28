@@ -251,7 +251,7 @@ class TestCoderMessageBuffer:
     @pytest.mark.asyncio
     @patch("auto_scientist.agents.coder.query")
     async def test_populates_message_buffer_with_text(self, mock_query, tmp_path):
-        from claude_code_sdk import AssistantMessage, ResultMessage, TextBlock
+        from claude_code_sdk import ResultMessage
 
         assistant_msg = MagicMock(spec=AssistantMessage)
         text_block = MagicMock(spec=TextBlock)
@@ -281,7 +281,7 @@ class TestCoderMessageBuffer:
     @pytest.mark.asyncio
     @patch("auto_scientist.agents.coder.query")
     async def test_populates_message_buffer_with_tool_use(self, mock_query, tmp_path):
-        from claude_code_sdk import AssistantMessage, ResultMessage, ToolUseBlock
+        from claude_code_sdk import ResultMessage
 
         tool_block = MagicMock(spec=ToolUseBlock)
         tool_block.name = "Write"

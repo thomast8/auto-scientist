@@ -104,6 +104,11 @@ def rewind_run(run_dir: Path, target_iteration: int) -> ExperimentState:
     finished iteration target_iteration - 1 and is about to start
     target_iteration.
 
+    When target_iteration equals state.iteration (extend mode), all
+    iterations are preserved and only report-phase artifacts are removed.
+    The report-phase analyst buffer is kept since it contains useful
+    prediction resolution context.
+
     Returns the rewound ExperimentState.
     """
     state_path = run_dir / "state.json"
@@ -117,15 +122,16 @@ def rewind_run(run_dir: Path, target_iteration: int) -> ExperimentState:
         )
     if target_iteration < 0:
         raise ValueError(f"target_iteration must be >= 0, got {target_iteration}")
-    if target_iteration >= state.iteration:
+    if target_iteration > state.iteration:
         raise ValueError(
-            f"target_iteration ({target_iteration}) must be < "
+            f"target_iteration ({target_iteration}) must be <= "
             f"current iteration ({state.iteration})"
         )
 
     # --- Detect old output dir for path rewriting ---
     old_base = _detect_old_output_dir(state)
     new_base = str(run_dir.resolve())
+    original_iteration = state.iteration
 
     # --- Trim state fields ---
     state.phase = "iteration"
@@ -162,6 +168,10 @@ def rewind_run(run_dir: Path, target_iteration: int) -> ExperimentState:
             shutil.rmtree(child)
 
     # --- Delete buffers at or beyond target ---
+    # In extend mode (target == original iteration), keep the analyst buffer
+    # at target_iteration: it was produced by _resolve_final_predictions during
+    # the report phase and contains useful prediction resolution context.
+    extending = target_iteration == original_iteration
     buffers_dir = run_dir / "buffers"
     if buffers_dir.is_dir():
         for buf_file in sorted(buffers_dir.iterdir()):
@@ -171,7 +181,15 @@ def rewind_run(run_dir: Path, target_iteration: int) -> ExperimentState:
                 buf_file.unlink()
                 continue
             m = _BUFFER_ITER_RE.search(name)
-            if m and int(m.group(1)) >= target_iteration:
+            if not m:
+                continue
+            buf_iter = int(m.group(1))
+            if buf_iter > target_iteration:
+                buf_file.unlink()
+            elif buf_iter == target_iteration:
+                # In extend mode, keep the report-phase analyst buffer
+                if extending and name.startswith("analyst_"):
+                    continue
                 buf_file.unlink()
 
     # --- Delete final-run artifacts ---

@@ -43,7 +43,7 @@ class ExperimentConfig(BaseModel):
     max_iterations: int = Field(default=20, ge=1)
     preset: str = "default"
     debate_rounds: int = Field(default=1, ge=0)
-    output_dir: str = "experiments"
+    output_dir: str = "experiments/runs"
     schedule: str | None = None
     interactive: bool = False
     stream: bool = True

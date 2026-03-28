@@ -15,9 +15,13 @@ if "claude_code_sdk" not in sys.modules:
     mock_sdk.ClaudeCodeOptions = MagicMock
     mock_sdk.ClaudeSDKClient = MagicMock
     mock_sdk.Message = type("Message", (), {})
-    mock_sdk.PermissionResultAllow = type("PermissionResultAllow", (), {"__init__": lambda self: None})
+    mock_sdk.PermissionResultAllow = type(
+        "PermissionResultAllow", (), {"__init__": lambda self: None}
+    )
     mock_sdk.PermissionResultDeny = type(
-        "PermissionResultDeny", (), {"__init__": lambda self, message="": setattr(self, "message", message) or None}
+        "PermissionResultDeny",
+        (),
+        {"__init__": lambda self, message="": setattr(self, "message", message) or None},
     )
     mock_sdk.ResultMessage = type("ResultMessage", (), {})
     mock_sdk.TextBlock = type("TextBlock", (), {})

@@ -34,7 +34,11 @@ class TestSummarizeAgentOutput:
         mock_query.return_value = "Processing files"
         await summarize_agent_output("Ingestor", "raw output", "gpt-4o-mini")
         prompt_arg = mock_query.call_args[0][1]
-        assert "Ingestor" in prompt_arg or "files" in prompt_arg.lower() or "transform" in prompt_arg.lower()
+        assert (
+            "Ingestor" in prompt_arg
+            or "files" in prompt_arg.lower()
+            or "transform" in prompt_arg.lower()
+        )
 
     @pytest.mark.asyncio
     @patch("auto_scientist.summarizer._query_summary", new_callable=AsyncMock)
@@ -184,7 +188,11 @@ class TestRunWithSummaries:
                 await asyncio.sleep(0.2)
             return "done"
 
-        with patch("auto_scientist.summarizer.summarize_agent_output", new_callable=AsyncMock, return_value="progress"):
+        with patch(
+            "auto_scientist.summarizer.summarize_agent_output",
+            new_callable=AsyncMock,
+            return_value="progress",
+        ):
             result = await run_with_summaries(
                 slow_coro, "Analyst", "gpt-4o-mini", buf, interval=0.2,
                 summary_collector=collector,
@@ -204,7 +212,11 @@ class TestRunWithSummaries:
             await asyncio.sleep(0.3)
             return 42
 
-        with patch("auto_scientist.summarizer.summarize_agent_output", new_callable=AsyncMock, return_value="summary"):
+        with patch(
+            "auto_scientist.summarizer.summarize_agent_output",
+            new_callable=AsyncMock,
+            return_value="summary",
+        ):
             result = await run_with_summaries(
                 slow_coro, "Coder", "gpt-4o-mini", buf, interval=0.1,
                 summary_collector=collector,
@@ -223,7 +235,11 @@ class TestRunWithSummaries:
             return "done"
 
         with (
-            patch("auto_scientist.summarizer.summarize_agent_output", new_callable=AsyncMock, return_value="summary") as mock_summarize,
+            patch(
+                "auto_scientist.summarizer.summarize_agent_output",
+                new_callable=AsyncMock,
+                return_value="summary",
+            ) as mock_summarize,
         ):
             await run_with_summaries(
                 empty_coro, "Analyst", "gpt-4o-mini", buf, interval=0.1,
@@ -255,7 +271,11 @@ class TestRunWithSummaries:
             return "done"
 
         with (
-            patch("auto_scientist.summarizer.summarize_agent_output", new_callable=AsyncMock, side_effect=count_summarize),
+            patch(
+                "auto_scientist.summarizer.summarize_agent_output",
+                new_callable=AsyncMock,
+                side_effect=count_summarize,
+            ),
         ):
             await run_with_summaries(
                 staged_coro, "Analyst", "gpt-4o-mini", buf, interval=0.1,
@@ -272,12 +292,16 @@ class TestRunWithSummaries:
             raise ValueError("boom")
 
         with (
-            patch("auto_scientist.summarizer.summarize_agent_output", new_callable=AsyncMock, return_value="summary"),
+            patch(
+                "auto_scientist.summarizer.summarize_agent_output",
+                new_callable=AsyncMock,
+                return_value="summary",
+            ),
+            pytest.raises(ValueError, match="boom"),
         ):
-            with pytest.raises(ValueError, match="boom"):
-                await run_with_summaries(
-                    failing_coro, "Coder", "gpt-4o-mini", buf, interval=100,
-                )
+            await run_with_summaries(
+                failing_coro, "Coder", "gpt-4o-mini", buf, interval=100,
+            )
 
     @pytest.mark.asyncio
     async def test_summary_failure_does_not_crash(self):
@@ -289,7 +313,11 @@ class TestRunWithSummaries:
             return "result"
 
         with (
-            patch("auto_scientist.summarizer.summarize_agent_output", new_callable=AsyncMock, side_effect=RuntimeError("API down")),
+            patch(
+                "auto_scientist.summarizer.summarize_agent_output",
+                new_callable=AsyncMock,
+                side_effect=RuntimeError("API down"),
+            ),
         ):
             result = await run_with_summaries(
                 coro, "Analyst", "gpt-4o-mini", buf, interval=100,
@@ -315,7 +343,11 @@ class TestRunWithSummaries:
             return "done"
 
         with (
-            patch("auto_scientist.summarizer.summarize_agent_output", new_callable=AsyncMock, side_effect=track_summarize),
+            patch(
+                "auto_scientist.summarizer.summarize_agent_output",
+                new_callable=AsyncMock,
+                side_effect=track_summarize,
+            ),
         ):
             await run_with_summaries(
                 long_coro, "Coder", "gpt-4o-mini", buf, interval=0.1,
@@ -351,7 +383,11 @@ class TestRunWithSummaries:
             return "done"
 
         with (
-            patch("auto_scientist.summarizer.summarize_agent_output", new_callable=AsyncMock, side_effect=count_summarize),
+            patch(
+                "auto_scientist.summarizer.summarize_agent_output",
+                new_callable=AsyncMock,
+                side_effect=count_summarize,
+            ),
         ):
             await run_with_summaries(
                 staged_coro, "Coder", "gpt-4o-mini", buf, interval=0.1,

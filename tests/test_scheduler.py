@@ -5,7 +5,12 @@ from unittest.mock import AsyncMock, patch
 
 import pytest
 
-from auto_scientist.scheduler import is_within_window, parse_schedule, seconds_until_window, wait_for_window
+from auto_scientist.scheduler import (
+    is_within_window,
+    parse_schedule,
+    seconds_until_window,
+    wait_for_window,
+)
 
 
 class TestParseSchedule:

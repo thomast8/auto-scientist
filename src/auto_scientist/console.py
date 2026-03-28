@@ -20,6 +20,28 @@ import time
 from functools import partial
 from pathlib import Path
 
+from rich.console import Console, RenderableType
+from rich.text import Text
+from textual._context import NoActiveAppError
+from textual.app import App, ComposeResult
+from textual.binding import Binding
+from textual.command import Hit, Hits, Provider
+from textual.containers import Vertical, VerticalScroll
+from textual.css.query import NoMatches
+from textual.message import Message
+from textual.screen import ModalScreen
+from textual.widget import Widget
+from textual.widgets import (
+    Collapsible,
+    Footer,
+    Header,
+    Label,
+    RichLog,
+    Static,
+)
+from textual.widgets._collapsible import CollapsibleTitle
+from textual.worker import Worker, WorkerState
+
 logger = logging.getLogger(__name__)
 
 _PREFS_PATH = Path.home() / ".config" / "auto-scientist" / "preferences.json"
@@ -42,28 +64,6 @@ def _save_prefs(prefs: dict) -> None:
         tmp.replace(_PREFS_PATH)
     except OSError as e:
         logger.debug(f"Could not save preferences: {e}")
-
-from rich.console import Console, RenderableType
-from rich.text import Text
-from textual._context import NoActiveAppError
-from textual.app import App, ComposeResult
-from textual.binding import Binding
-from textual.command import Hit, Hits, Provider
-from textual.containers import Vertical, VerticalScroll
-from textual.css.query import NoMatches
-from textual.message import Message
-from textual.screen import ModalScreen
-from textual.widget import Widget
-from textual.widgets import (
-    Collapsible,
-    Footer,
-    Header,
-    Label,
-    RichLog,
-    Static,
-)
-from textual.widgets._collapsible import CollapsibleTitle
-from textual.worker import Worker, WorkerState
 
 # Module-level console for one-time prints (startup banner in headless mode, etc.)
 console = Console()
@@ -1225,7 +1225,9 @@ class PipelineApp(App):
         for container in containers:
             if container._in_progress or not container._panels:
                 continue
-            if collapsing and not container._is_collapsed or not collapsing and container._is_collapsed:
+            if (collapsing and not container._is_collapsed) or (
+                not collapsing and container._is_collapsed
+            ):
                 container.toggle_iteration()
 
         if was_near_bottom:

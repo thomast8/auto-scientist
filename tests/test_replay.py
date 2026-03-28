@@ -273,9 +273,9 @@ class TestRewindRun:
 
 
 class TestRewindValidation:
-    def test_rejects_iteration_at_or_beyond_current(self, run_dir):
-        with pytest.raises(ValueError, match="must be <"):
-            rewind_run(run_dir, 3)
+    def test_rejects_iteration_beyond_current(self, run_dir):
+        with pytest.raises(ValueError, match="must be <="):
+            rewind_run(run_dir, 4)
 
     def test_rejects_negative_iteration(self, run_dir):
         with pytest.raises(ValueError, match="must be >= 0"):
@@ -314,6 +314,42 @@ class TestRewindToZero:
         records = load_manifest(run_dir / MANIFEST_FILENAME)
         assert len(records) == 1
         assert records[0].iteration == "ingestion"
+
+
+class TestExtendRun:
+    def test_extend_preserves_all_versions(self, run_dir):
+        """Rewinding to current iteration = extend (keep everything, reset phase)."""
+        state = rewind_run(run_dir, 3)
+        assert state.phase == "iteration"
+        assert state.iteration == 3
+        assert len(state.versions) == 3
+        assert (run_dir / "v00").exists()
+        assert (run_dir / "v01").exists()
+        assert (run_dir / "v02").exists()
+
+    def test_extend_removes_report_artifacts(self, run_dir):
+        rewind_run(run_dir, 3)
+        assert not (run_dir / "report.md").exists()
+        assert not (run_dir / "exegesis.md").exists()
+
+    def test_extend_preserves_predictions(self, run_dir):
+        state = rewind_run(run_dir, 3)
+        assert len(state.prediction_history) == 3
+
+    def test_extend_preserves_report_phase_analyst_buffer(self, run_dir):
+        """The analyst buffer at target_iteration was from _resolve_final_predictions."""
+        buffers = run_dir / "buffers"
+        (buffers / "analyst_03.txt").write_text("report-phase analyst")
+        rewind_run(run_dir, 3)
+        assert (buffers / "analyst_03.txt").exists()
+        assert (buffers / "analyst_03.txt").read_text() == "report-phase analyst"
+
+    def test_extend_deletes_non_analyst_buffers_at_target(self, run_dir):
+        """Non-analyst buffers at target iteration should still be deleted."""
+        buffers = run_dir / "buffers"
+        (buffers / "scientist_03.txt").write_text("should be deleted")
+        rewind_run(run_dir, 3)
+        assert not (buffers / "scientist_03.txt").exists()
 
 
 class TestRewindWithoutManifest:

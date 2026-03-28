@@ -33,7 +33,9 @@ class TestReasoningConfig:
         assert rc.budget == 8192
 
     def test_invalid_level_raises(self):
-        with pytest.raises(Exception):
+        from pydantic import ValidationError
+
+        with pytest.raises(ValidationError):
             ReasoningConfig(level="turbo")
 
 

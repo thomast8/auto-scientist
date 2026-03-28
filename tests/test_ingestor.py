@@ -30,7 +30,10 @@ class TestRunIngestorToolSelection:
         data_dir.mkdir()
         (data_dir / "output.csv").write_text("a,b\n1,2\n")
 
-        mock_query.return_value = AsyncMock(__aiter__=lambda self: self, __anext__=AsyncMock(side_effect=StopAsyncIteration))
+        mock_query.return_value = AsyncMock(
+            __aiter__=lambda self: self,
+            __anext__=AsyncMock(side_effect=StopAsyncIteration),
+        )
 
         await run_ingestor(raw_data, output_dir, "test goal", interactive=True)
 
@@ -50,7 +53,10 @@ class TestRunIngestorToolSelection:
         data_dir.mkdir()
         (data_dir / "output.csv").write_text("a,b\n1,2\n")
 
-        mock_query.return_value = AsyncMock(__aiter__=lambda self: self, __anext__=AsyncMock(side_effect=StopAsyncIteration))
+        mock_query.return_value = AsyncMock(
+            __aiter__=lambda self: self,
+            __anext__=AsyncMock(side_effect=StopAsyncIteration),
+        )
 
         await run_ingestor(raw_data, output_dir, "test goal", interactive=False)
 
@@ -138,7 +144,10 @@ class TestRunIngestorValidation:
         output_dir = tmp_path / "experiments"
         output_dir.mkdir()
 
-        mock_query.return_value = AsyncMock(__aiter__=lambda self: self, __anext__=AsyncMock(side_effect=StopAsyncIteration))
+        mock_query.return_value = AsyncMock(
+            __aiter__=lambda self: self,
+            __anext__=AsyncMock(side_effect=StopAsyncIteration),
+        )
 
         with pytest.raises(FileNotFoundError, match="did not produce any data files"):
             await run_ingestor(raw_data, output_dir, "test goal")

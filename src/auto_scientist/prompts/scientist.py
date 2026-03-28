@@ -192,16 +192,19 @@ and regularization.",
   "testable_predictions": [
     {{
       "prediction": "Soil-weather interaction terms will reduce high-rainfall RMSE by >30%",
-      "diagnostic": "Compare residual MAE for rainfall>80th percentile before and after adding interactions",
+      "diagnostic": "Compare residual MAE for rainfall>80th percentile \
+before and after adding interactions",
       "if_confirmed": "Interactions capture cross-factor effects; refine with feature selection",
-      "if_refuted": "Non-linearity is within-variable, not cross-variable; try polynomial weather features alone",
+      "if_refuted": "Non-linearity is within-variable, not cross-variable; \
+try polynomial weather features alone",
       "follows_from": null
     }},
     {{
       "prediction": "L2 regularization will reduce train-test gap below 5%",
       "diagnostic": "Compare train vs test RMSE gap with and without regularization",
       "if_confirmed": "Overfitting is controlled; proceed to feature engineering",
-      "if_refuted": "Overfitting has a different source; investigate data leakage or feature correlation",
+      "if_refuted": "Overfitting has a different source; \
+investigate data leakage or feature correlation",
       "follows_from": null
     }}
   ]
@@ -266,8 +269,10 @@ shift to cell-transmission simulation.",
     {{
       "prediction": "Cell-transmission model will achieve queue R-squared above 0.5",
       "diagnostic": "Compare queue predictions vs observed queue lengths across all intersections",
-      "if_confirmed": "Network-level modeling captures congestion propagation; calibrate per-intersection",
-      "if_refuted": "Queue dynamics depend on factors beyond topology (signal timing, pedestrians); add those inputs",
+      "if_confirmed": "Network-level modeling captures congestion propagation; \
+calibrate per-intersection",
+      "if_refuted": "Queue dynamics depend on factors beyond topology \
+(signal timing, pedestrians); add those inputs",
       "follows_from": null
     }}
   ]
@@ -437,7 +442,8 @@ hypothesis: polynomial fit. Testing degrees 2-6 with CV.",
     {{
       "prediction": "Cross-validated polynomial (degree 2-6) will achieve test R-squared above 0.9",
       "diagnostic": "Report 5-fold CV mean test R-squared for each degree",
-      "if_confirmed": "Polynomial captures the underlying function; check residuals for systematic patterns",
+      "if_confirmed": "Polynomial captures the underlying function; \
+check residuals for systematic patterns",
       "if_refuted": "Relationship is not polynomial; try splines or Fourier basis functions",
       "follows_from": null
     }}

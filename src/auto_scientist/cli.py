@@ -5,14 +5,14 @@ from pathlib import Path
 import click
 from dotenv import load_dotenv
 
-load_dotenv()
-
 from auto_scientist.console import PipelineApp, console
 from auto_scientist.experiment_config import ExperimentConfig
 from auto_scientist.launch_app import LaunchApp
 from auto_scientist.model_config import ModelConfig
 from auto_scientist.orchestrator import Orchestrator
 from auto_scientist.state import ExperimentState
+
+load_dotenv()
 
 
 def _run_orchestrator(orchestrator: Orchestrator) -> None:
@@ -200,9 +200,9 @@ def cli(ctx: click.Context, config_path: str | None):
 )
 @click.option(
     "--output-dir",
-    default="experiments",
+    default="experiments/runs",
     type=click.Path(),
-    help="Output directory for experiments",
+    help="Output directory for experiment runs",
 )
 @click.option(
     "--no-stream",
@@ -268,10 +268,7 @@ def run(
             exp_config.goal = goal
 
         # CLI --data resolves from CWD; YAML data resolves from YAML dir
-        if data_cli_override:
-            data_path = Path(data)
-        else:
-            data_path = exp_config.resolve_data_path(yaml_dir)
+        data_path = Path(data) if data_cli_override else exp_config.resolve_data_path(yaml_dir)
 
         _run_from_experiment_config(exp_config, data_path)
         return
@@ -450,7 +447,7 @@ def replay(
 
     # Determine output directory
     if output_dir is None:
-        output_path = _next_output_dir(Path("experiments") / src.name)
+        output_path = _next_output_dir(Path("experiments/runs") / src.name)
     else:
         output_path = _next_output_dir(Path(output_dir))
 

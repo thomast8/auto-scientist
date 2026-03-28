@@ -124,7 +124,8 @@ async def _query_critic_structured(
                 logger.warning(f"{label} validation failed, retrying: {e}")
             else:
                 logger.error(
-                    f"{label} validation failed after retries, preserving raw text as synthetic concern"
+                    f"{label} validation failed after retries, "
+                    "preserving raw text as synthetic concern"
                 )
                 if message_buffer is not None:
                     message_buffer.append(
@@ -144,7 +145,7 @@ async def _query_critic_structured(
                 )
                 return fallback, result
 
-    raise RuntimeError(f"Unreachable: critic structured query loop exited without return")
+    raise RuntimeError("Unreachable: critic structured query loop exited without return")
 
 
 async def _query_scientist_structured(
@@ -196,7 +197,7 @@ async def _query_scientist_structured(
                 )
                 return fallback, result
 
-    raise RuntimeError(f"Unreachable: scientist defense query loop exited without return")
+    raise RuntimeError("Unreachable: scientist defense query loop exited without return")
 
 
 # ---------------------------------------------------------------------------

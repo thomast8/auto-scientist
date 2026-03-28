@@ -399,7 +399,10 @@ class Orchestrator:
             while self.state.phase == "iteration":
                 if self.state.iteration >= self.max_iterations:
                     self._live.add_rule(
-                        Rule(f"Reached max iterations ({self.max_iterations}). Stopping.", style="yellow")
+                        Rule(
+                            f"Reached max iterations ({self.max_iterations}). Stopping.",
+                            style="yellow",
+                        )
                     )
                     self._live.flush_completed()
                     self.state.phase = "report"
@@ -407,7 +410,10 @@ class Orchestrator:
 
                 if self.state.should_stop_on_failures(self.max_consecutive_failures):
                     self._live.add_rule(
-                        Rule(f"Hit {self.max_consecutive_failures} consecutive failures. Stopping.", style="red")
+                        Rule(
+                            f"Hit {self.max_consecutive_failures} consecutive failures. Stopping.",
+                            style="red",
+                        )
                     )
                     self._live.flush_completed()
                     self.state.phase = "report"
@@ -472,7 +478,9 @@ class Orchestrator:
         config_path = self.output_dir / "domain_config.json"
 
         cfg = self.model_config.resolve("ingestor")
-        panel = AgentPanel(name="Ingestor", model=cfg.model, style=AGENT_STYLES.get("Ingestor", "bright_red"))
+        panel = AgentPanel(
+            name="Ingestor", model=cfg.model, style=AGENT_STYLES.get("Ingestor", "bright_red")
+        )
         self._live.add_panel(panel)
         self._live.update_status(phase="INGESTION")
 
@@ -587,7 +595,9 @@ class Orchestrator:
                 f"status=failed (coder produced no script)"
             )
             iter_summary = await self._generate_iteration_summary()
-            self._save_iteration_manifest(self.state.iteration, "failed (no script)", "red", iter_summary)
+            self._save_iteration_manifest(
+                self.state.iteration, "failed (no script)", "red", iter_summary
+            )
             self._live.end_iteration("failed (no script)", "red", iter_summary)
             self._live.flush_completed()
             self.state.iteration += 1
@@ -631,7 +641,9 @@ class Orchestrator:
         # Iteration border color: green=completed, red=failed
         status_style = "red" if version_entry.status != "completed" else "green"
         iter_summary = await self._generate_iteration_summary()
-        self._save_iteration_manifest(self.state.iteration, version_entry.status, status_style, iter_summary)
+        self._save_iteration_manifest(
+            self.state.iteration, version_entry.status, status_style, iter_summary
+        )
         self._live.end_iteration(version_entry.status, status_style, iter_summary)
         self._live.flush_completed()
 
@@ -673,7 +685,10 @@ class Orchestrator:
             label = f"Critic {i + 1}" if len(mc.critics) > 1 else "Critic"
             table.add_row(
                 Text(label, style="yellow"),
-                Text(f"{critic.provider}:{critic.model}  [{critic.reasoning.level}]", style="yellow"),
+                Text(
+                    f"{critic.provider}:{critic.model}  [{critic.reasoning.level}]",
+                    style="yellow",
+                ),
             )
 
         # Coder + Report go after critics
@@ -898,7 +913,9 @@ class Orchestrator:
         domain_knowledge = self.state.domain_knowledge
         cfg = self.model_config.resolve("analyst")
 
-        panel = AgentPanel(name="Analyst", model=cfg.model, style=AGENT_STYLES.get("Analyst", "green"))
+        panel = AgentPanel(
+            name="Analyst", model=cfg.model, style=AGENT_STYLES.get("Analyst", "green")
+        )
         self._live.add_panel(panel)
         self._live.update_status(phase="ANALYZE")
 
@@ -951,7 +968,9 @@ class Orchestrator:
 
         cfg = self.model_config.resolve("analyst")
 
-        panel = AgentPanel(name="Analyst", model=cfg.model, style=AGENT_STYLES.get("Analyst", "green"))
+        panel = AgentPanel(
+            name="Analyst", model=cfg.model, style=AGENT_STYLES.get("Analyst", "green")
+        )
         self._live.add_panel(panel)
         self._live.update_status(phase="ANALYZE")
 
@@ -992,7 +1011,9 @@ class Orchestrator:
 
         cfg = self.model_config.resolve("scientist")
 
-        panel = AgentPanel(name="Scientist", model=cfg.model, style=AGENT_STYLES.get("Scientist", "cyan"))
+        panel = AgentPanel(
+            name="Scientist", model=cfg.model, style=AGENT_STYLES.get("Scientist", "cyan")
+        )
         self._live.add_panel(panel)
         self._live.update_status(phase="PLAN")
 
@@ -1023,7 +1044,8 @@ class Orchestrator:
                 f"should_stop={plan.get('should_stop', False)}"
             )
             self._collapse(
-                panel, f"strategy={plan.get('strategy', '?')}, changes={len(plan.get('changes', []))}"
+                panel,
+                f"strategy={plan.get('strategy', '?')}, changes={len(plan.get('changes', []))}",
             )
             return plan
         except Exception as e:
@@ -1128,7 +1150,9 @@ class Orchestrator:
             )
             config = self.model_config.critics[model_idx]
             label = f"{config.provider}:{config.model}"
-            panel = AgentPanel(name=f"Critic/{name}", model=label, style=AGENT_STYLES.get("Critic", "yellow"))
+            panel = AgentPanel(
+                name=f"Critic/{name}", model=label, style=AGENT_STYLES.get("Critic", "yellow")
+            )
             panels[name] = panel
             collectors[name] = []
             self._live.add_panel(panel)
@@ -1325,7 +1349,9 @@ class Orchestrator:
 
         cfg = self.model_config.resolve("scientist")
 
-        panel = AgentPanel(name="Revision", model=cfg.model, style=AGENT_STYLES.get("Scientist", "cyan"))
+        panel = AgentPanel(
+            name="Revision", model=cfg.model, style=AGENT_STYLES.get("Scientist", "cyan")
+        )
         self._live.add_panel(panel)
         self._live.update_status(phase="REVISE")
 
@@ -1412,7 +1438,9 @@ class Orchestrator:
         else:
             data_files_listing = ""
 
-        panel = AgentPanel(name="Coder", model=cfg.model, style=AGENT_STYLES.get("Coder", "magenta1"))
+        panel = AgentPanel(
+            name="Coder", model=cfg.model, style=AGENT_STYLES.get("Coder", "magenta1")
+        )
         self._live.add_panel(panel)
         self._live.update_status(phase="IMPLEMENT")
 
@@ -1461,11 +1489,15 @@ class Orchestrator:
         stored = []
         for i, pred in enumerate(predictions, 1):
             if not isinstance(pred, dict):
-                logger.warning(f"Prediction {i}: expected dict, got {type(pred).__name__}; skipping")
+                logger.warning(
+                    f"Prediction {i}: expected dict, got {type(pred).__name__}; skipping"
+                )
                 continue
             text = pred.get("prediction", "")
             if not text or not isinstance(text, str) or not text.strip():
-                logger.warning(f"Prediction {i}: empty or invalid prediction text; skipping")
+                logger.warning(
+                    f"Prediction {i}: empty or invalid prediction text; skipping"
+                )
                 continue
             pred_id = f"{self.state.iteration}.{i}"
             record = PredictionRecord(
@@ -1516,7 +1548,9 @@ class Orchestrator:
 
         for outcome in outcomes:
             if not isinstance(outcome, dict):
-                logger.warning(f"Prediction outcome: expected dict, got {type(outcome).__name__}; skipping")
+                logger.warning(
+                    f"Prediction outcome: expected dict, got {type(outcome).__name__}; skipping"
+                )
                 continue
 
             # Primary: match by pred_id
@@ -1533,7 +1567,9 @@ class Orchestrator:
             outcome_text = outcome.get("prediction", "")
             outcome_text = outcome_text.lower().strip() if isinstance(outcome_text, str) else ""
             if len(outcome_text) < 10:
-                logger.warning(f"Prediction outcome text too short for text matching: '{outcome_text}'")
+                logger.warning(
+                    f"Prediction outcome text too short for text matching: '{outcome_text}'"
+                )
                 continue
 
             best_match = None
@@ -1548,12 +1584,15 @@ class Orchestrator:
             if best_match:
                 if _resolve(best_match, outcome):
                     logger.info(
-                        f"Prediction {best_match.pred_id}: resolved by text fallback as '{best_match.outcome}'"
+                        f"Prediction {best_match.pred_id}: "
+                        f"resolved by text fallback as '{best_match.outcome}'"
                     )
                     pending.remove(best_match)
                     pending_by_id.pop(best_match.pred_id, None)
             else:
-                logger.warning(f"Prediction outcome unmatched: pred_id='{oid}', text='{outcome_text[:80]}'...")
+                logger.warning(
+                    f"Prediction outcome unmatched: pred_id='{oid}', text='{outcome_text[:80]}'..."
+                )
 
     async def _resolve_final_predictions(self) -> None:
         """Run the Analyst on the last version to resolve pending predictions."""
