@@ -14,7 +14,7 @@ from typing import TYPE_CHECKING, ClassVar, Literal
 if TYPE_CHECKING:
     from auto_scientist.experiment_config import ExperimentConfig
 
-from pydantic import BaseModel, field_validator
+from pydantic import BaseModel, ConfigDict, Field, field_validator
 
 logger = logging.getLogger(__name__)
 
@@ -41,7 +41,7 @@ class AgentModelConfig(BaseModel):
     """Configuration for a single agent's model and reasoning."""
 
     provider: Literal["anthropic", "openai", "google"] = "anthropic"
-    model: str
+    model: str = Field(min_length=1)
     reasoning: ReasoningConfig = ReasoningConfig()
 
     @field_validator("reasoning", mode="before")
@@ -117,6 +117,8 @@ def reasoning_to_cc_extra_args(reasoning: ReasoningConfig) -> dict[str, str | No
 
 class ModelConfig(BaseModel):
     """Top-level model configuration loaded from TOML or presets."""
+
+    model_config = ConfigDict(validate_assignment=True)
 
     defaults: AgentModelConfig
     analyst: AgentModelConfig | None = None

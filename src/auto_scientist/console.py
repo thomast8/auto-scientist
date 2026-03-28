@@ -13,11 +13,14 @@ Provides:
 
 import asyncio
 import json
+import logging
 import subprocess
 import threading
 import time
 from functools import partial
 from pathlib import Path
+
+logger = logging.getLogger(__name__)
 
 _PREFS_PATH = Path.home() / ".config" / "auto-scientist" / "preferences.json"
 
@@ -37,8 +40,8 @@ def _save_prefs(prefs: dict) -> None:
         tmp = _PREFS_PATH.with_suffix(".tmp")
         tmp.write_text(json.dumps(prefs, indent=2))
         tmp.replace(_PREFS_PATH)
-    except OSError:
-        pass  # Non-critical: preferences are best-effort
+    except OSError as e:
+        logger.debug(f"Could not save preferences: {e}")
 
 from rich.console import Console, RenderableType
 from rich.text import Text

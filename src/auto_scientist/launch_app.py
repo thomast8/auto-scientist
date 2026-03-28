@@ -828,7 +828,7 @@ class LaunchApp(App[ExperimentConfig | None]):
         # Validate models, reasoning, and API keys before launching
         try:
             errors = self._validate_models(config)
-        except Exception as e:
+        except (ValueError, OSError, ImportError) as e:
             self._show_error(f"Validation failed: {e}")
             return
         if errors:

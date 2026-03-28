@@ -93,6 +93,7 @@ async def _query_critic_structured(
     prompt: str,
     *,
     label: str = "",
+    message_buffer: list[str] | None = None,
 ) -> tuple[CriticOutput, AgentResult]:
     """Query a critic and validate the response as structured CriticOutput.
 
@@ -125,6 +126,11 @@ async def _query_critic_structured(
                 logger.error(
                     f"{label} validation failed after retries, preserving raw text as synthetic concern"
                 )
+                if message_buffer is not None:
+                    message_buffer.append(
+                        f"[WARNING] {label}: critic output could not be parsed after retries. "
+                        "Using synthetic fallback; review raw transcript for actual content."
+                    )
                 raw = (result.text or "(empty response)")[:500]
                 fallback = CriticOutput(
                     concerns=[Concern(
@@ -147,6 +153,7 @@ async def _query_scientist_structured(
     system_prompt: str,
     *,
     label: str = "",
+    message_buffer: list[str] | None = None,
 ) -> tuple[ScientistDefense, AgentResult]:
     """Query the scientist (direct API) and validate as structured ScientistDefense.
 
@@ -178,6 +185,11 @@ async def _query_scientist_structured(
                 logger.warning(f"{label} validation failed, retrying: {e}")
             else:
                 logger.error(f"{label} defense validation failed after retries, using raw text")
+                if message_buffer is not None:
+                    message_buffer.append(
+                        f"[WARNING] {label}: scientist defense could not be parsed after retries. "
+                        "Using raw text as fallback."
+                    )
                 fallback = ScientistDefense(
                     responses=[],
                     additional_points=result.text or "(empty response)",
@@ -233,6 +245,7 @@ async def run_single_critic_debate(
     critic_output, critic_result = await _query_critic_structured(
         config, critic_prompt,
         label=f"Critic ({persona_name}, {label}) round 1",
+        message_buffer=message_buffer,
     )
     total_in += critic_result.input_tokens
     total_out += critic_result.output_tokens
@@ -263,6 +276,7 @@ async def run_single_critic_debate(
             scientist_defense, sci_result = await _query_scientist_structured(
                 scientist_config, scientist_user_prompt, scientist_system,
                 label=f"Scientist ({persona_name}) round {round_num}",
+                message_buffer=message_buffer,
             )
             total_in += sci_result.input_tokens
             total_out += sci_result.output_tokens
@@ -288,6 +302,7 @@ async def run_single_critic_debate(
             critic_output, critic_result = await _query_critic_structured(
                 config, critic_prompt,
                 label=f"Critic ({persona_name}, {label}) round {round_num + 1}",
+                message_buffer=message_buffer,
             )
             total_in += critic_result.input_tokens
             total_out += critic_result.output_tokens
