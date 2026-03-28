@@ -51,10 +51,13 @@ REASONING_OPTIONS = [
 ]
 
 # Agents that can be overridden, in display order
-_AGENT_FIELDS = ["ingestor", "analyst", "scientist", "coder", "report", "summarizer"]
+_AGENT_FIELDS = ["ingestor", "analyst", "scientist", "coder", "report"]
 
 # SDK agents are locked to anthropic provider
 _SDK_AGENTS = {"ingestor", "analyst", "scientist", "coder", "report"}
+
+# Non-SDK agents rendered after critics
+_TRAILING_AGENTS = ["summarizer"]
 
 _NUM_CRITIC_SLOTS = 4
 
@@ -577,6 +580,30 @@ class LaunchApp(App[ExperimentConfig | None]):
                             classes="model-reasoning",
                         )
 
+                # Non-SDK agents after critics
+                for agent in _TRAILING_AGENTS:
+                    display = agent.title()
+                    with Horizontal(classes="model-row"):
+                        yield Label(f"{display}:", classes="model-label")
+                        yield Select(
+                            PROVIDER_OPTIONS,
+                            allow_blank=True,
+                            id=f"model-{agent}-provider",
+                            classes="model-provider",
+                        )
+                        yield Select(
+                            ALL_MODELS,
+                            allow_blank=True,
+                            id=f"model-{agent}-name",
+                            classes="model-name",
+                        )
+                        yield Select(
+                            REASONING_OPTIONS,
+                            allow_blank=True,
+                            id=f"model-{agent}-reasoning",
+                            classes="model-reasoning",
+                        )
+
                 # Error display
                 yield Static("", id="error-display", markup=False)
 
@@ -604,7 +631,7 @@ class LaunchApp(App[ExperimentConfig | None]):
         mc = ModelConfig.from_experiment_config(cfg)
 
         for agent in _AGENT_FIELDS:
-            agent_cfg = mc.resolve(agent) if agent != "summarizer" else mc.summarizer
+            agent_cfg = mc.resolve(agent)
             if agent_cfg is None:
                 continue
             self._set_agent_model(f"model-{agent}", agent_cfg)
@@ -612,6 +639,12 @@ class LaunchApp(App[ExperimentConfig | None]):
         for i in range(_NUM_CRITIC_SLOTS):
             if i < len(mc.critics):
                 self._set_agent_model(f"model-critic-{i}", mc.critics[i])
+
+        for agent in _TRAILING_AGENTS:
+            resolved = mc.summarizer if agent == "summarizer" else mc.resolve(agent)
+            if resolved is None:
+                continue
+            self._set_agent_model(f"model-{agent}", resolved)
 
     def _set_agent_model(self, prefix: str, cfg: AgentModelConfig) -> None:
         """Set provider, model, and reasoning for one agent row."""
@@ -645,7 +678,7 @@ class LaunchApp(App[ExperimentConfig | None]):
 
         # Fill per-agent model fields from resolved config
         for agent in _AGENT_FIELDS:
-            agent_cfg = mc.resolve(agent) if agent != "summarizer" else mc.summarizer
+            agent_cfg = mc.resolve(agent)
             if agent_cfg is None:
                 continue
             self._set_agent_model(f"model-{agent}", agent_cfg)
@@ -654,6 +687,13 @@ class LaunchApp(App[ExperimentConfig | None]):
         for i in range(_NUM_CRITIC_SLOTS):
             if i < len(mc.critics):
                 self._set_agent_model(f"model-critic-{i}", mc.critics[i])
+
+        # Fill trailing agent fields (e.g. summarizer)
+        for agent in _TRAILING_AGENTS:
+            resolved = mc.summarizer if agent == "summarizer" else mc.resolve(agent)
+            if resolved is None:
+                continue
+            self._set_agent_model(f"model-{agent}", resolved)
 
     @on(Button.Pressed, "#browse-btn")
     def _on_browse(self, event: Button.Pressed) -> None:
@@ -748,7 +788,7 @@ class LaunchApp(App[ExperimentConfig | None]):
 
         # Collect per-agent model overrides
         models_dict: dict[str, AgentModelConfig] = {}
-        for agent in _AGENT_FIELDS:
+        for agent in [*_AGENT_FIELDS, *_TRAILING_AGENTS]:
             model_val = self.query_one(f"#model-{agent}-name", Select).value
             if not isinstance(model_val, str):
                 continue
