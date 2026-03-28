@@ -6,6 +6,7 @@ abstraction that maps to Anthropic/OpenAI/Google native APIs.
 
 from __future__ import annotations
 
+
 import logging
 import tomllib
 from pathlib import Path
@@ -15,6 +16,8 @@ if TYPE_CHECKING:
     from auto_scientist.experiment_config import ExperimentConfig
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator
+
+logger = logging.getLogger(__name__)
 
 logger = logging.getLogger(__name__)
 
