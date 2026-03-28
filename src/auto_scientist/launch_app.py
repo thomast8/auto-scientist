@@ -28,8 +28,9 @@ from auto_scientist.model_config import AgentModelConfig
 from auto_scientist.preferences import load_theme, save_theme
 
 PRESET_OPTIONS = [
-    ("default (medium)", "default"),
+    ("turbo", "turbo"),
     ("fast", "fast"),
+    ("default (medium)", "default"),
     ("high", "high"),
     ("max", "max"),
 ]
@@ -89,12 +90,12 @@ ALL_MODELS: list[tuple[str, str]] = [
 # Sentinel for "no domain selected" in the domain picker
 _CUSTOM = "__custom__"
 
-DOMAIN_DIFFICULTY: dict[str, tuple[str, int]] = {
-    "toy_function": ("easy", 0),
-    "alien_minerals": ("medium", 1),
-    "alloy_design": ("medium", 2),
-    "water_treatment": ("hard", 3),
-    "spo2": ("hard", 4),
+DOMAIN_DIFFICULTY: dict[str, tuple[str, int, str]] = {
+    "toy_function": ("easy", 0, "fast"),
+    "alien_minerals": ("medium", 1, "default"),
+    "alloy_design": ("medium", 2, "default"),
+    "water_treatment": ("hard", 3, "high"),
+    "spo2": ("hard", 4, "high"),
 }
 
 
@@ -682,7 +683,10 @@ class LaunchApp(App[ExperimentConfig | None]):
 
     @on(Select.Changed, "#domain-select")
     def _on_domain_changed(self, event: Select.Changed) -> None:
-        """When a domain is selected, load its experiment.yaml and fill the form."""
+        """When a domain is selected, load its experiment.yaml and fill the form.
+
+        Also sets the preset to a sensible default based on domain difficulty.
+        """
         if event.value == _CUSTOM:
             self._yaml_path = None
             return
@@ -697,6 +701,12 @@ class LaunchApp(App[ExperimentConfig | None]):
         except (ValueError, OSError) as e:
             self._show_error(f"Failed to load {yaml_path}: {e}")
             return
+
+        # Pick preset from difficulty mapping if the YAML uses the default preset
+        domain_name = yaml_path.parent.name
+        diff_info = DOMAIN_DIFFICULTY.get(domain_name)
+        if diff_info and cfg.preset == "default":
+            cfg.preset = diff_info[2]
 
         self._yaml_path = yaml_path
         # Resolve data path relative to the YAML file for display

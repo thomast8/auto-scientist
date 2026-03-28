@@ -118,21 +118,35 @@ class TestBuiltinPresets:
         assert mc.summarizer.model == "gpt-5.4-nano"
         assert mc.summarizer.reasoning.level == "off"
 
-    def test_fast_preset(self):
-        mc = ModelConfig.builtin_preset("fast")
+    def test_turbo_preset(self):
+        mc = ModelConfig.builtin_preset("turbo")
         assert mc.defaults.model == "claude-haiku-4-5-20251001"
         assert mc.defaults.reasoning.level == "off"
         assert mc.summarizer is not None
         assert mc.summarizer.provider == "openai"
         assert mc.summarizer.model == "gpt-5.4-nano"
         assert mc.summarizer.reasoning.level == "off"
+        assert len(mc.critics) == 2
+        for critic in mc.critics:
+            assert critic.provider == "google"
+            assert critic.model == "gemini-3-flash-preview"
+            assert critic.reasoning.level == "off"
 
-    def test_fast_preset_all_agents_use_haiku_with_off_reasoning(self):
-        mc = ModelConfig.builtin_preset("fast")
+    def test_turbo_preset_all_agents_use_haiku_with_off_reasoning(self):
+        mc = ModelConfig.builtin_preset("turbo")
         for agent in ["analyst", "scientist", "coder", "ingestor", "report"]:
             cfg = mc.resolve(agent)
             assert cfg.model == "claude-haiku-4-5-20251001"
             assert cfg.reasoning.level == "off"
+
+    def test_fast_preset(self):
+        mc = ModelConfig.builtin_preset("fast")
+        assert mc.defaults.model == "claude-haiku-4-5-20251001"
+        assert mc.defaults.reasoning.level == "low"
+        assert mc.resolve("scientist").model == "claude-sonnet-4-6"
+        assert mc.resolve("scientist").reasoning.level == "low"
+        assert mc.resolve("analyst").model == "claude-haiku-4-5-20251001"
+        assert mc.resolve("analyst").reasoning.level == "low"
 
     def test_medium_is_alias_for_default(self):
         default = ModelConfig.builtin_preset("default")
@@ -143,7 +157,7 @@ class TestBuiltinPresets:
 
     def test_nonexistent_preset_raises(self):
         with pytest.raises(ValueError, match="Unknown preset"):
-            ModelConfig.builtin_preset("turbo")
+            ModelConfig.builtin_preset("nonexistent")
 
     def test_default_preset_has_critics(self):
         mc = ModelConfig.builtin_preset("default")

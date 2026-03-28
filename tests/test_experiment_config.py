@@ -44,14 +44,14 @@ class TestExperimentConfigDefaults:
 
 
 class TestExperimentConfigPresetValidation:
-    @pytest.mark.parametrize("preset", ["fast", "default", "medium", "high", "max"])
+    @pytest.mark.parametrize("preset", ["turbo", "fast", "default", "medium", "high", "max"])
     def test_valid_presets(self, preset):
         cfg = ExperimentConfig(data="data.csv", goal="test", preset=preset)
         assert cfg.preset == preset
 
     def test_invalid_preset_raises(self):
         with pytest.raises(ValidationError):
-            ExperimentConfig(data="data.csv", goal="test", preset="turbo")
+            ExperimentConfig(data="data.csv", goal="test", preset="nonexistent")
 
 
 class TestExperimentConfigBounds:
@@ -82,7 +82,7 @@ class TestExperimentConfigBounds:
     def test_validate_assignment_catches_bad_preset(self):
         cfg = ExperimentConfig(data="data.csv", goal="test")
         with pytest.raises(ValidationError):
-            cfg.preset = "turbo"
+            cfg.preset = "nonexistent"
 
 
 class TestFromYamlErrors:
@@ -247,14 +247,17 @@ PROJECT_ROOT = Path(__file__).parent.parent
 
 
 class TestDomainExperimentYamls:
-    @pytest.mark.parametrize("domain", [
-        "toy_function",
-        "spo2",
-        "alien_minerals",
-        "alloy_design",
-        "water_treatment",
-        "example_template",
-    ])
+    @pytest.mark.parametrize(
+        "domain",
+        [
+            "toy_function",
+            "spo2",
+            "alien_minerals",
+            "alloy_design",
+            "water_treatment",
+            "example_template",
+        ],
+    )
     def test_domain_yaml_valid_schema(self, domain):
         yaml_path = PROJECT_ROOT / "domains" / domain / "experiment.yaml"
         assert yaml_path.exists(), f"Missing experiment.yaml for domain {domain}"
@@ -263,13 +266,16 @@ class TestDomainExperimentYamls:
         assert cfg.data
         assert cfg.goal
 
-    @pytest.mark.parametrize("domain", [
-        "toy_function",
-        "spo2",
-        "alien_minerals",
-        "alloy_design",
-        "water_treatment",
-    ])
+    @pytest.mark.parametrize(
+        "domain",
+        [
+            "toy_function",
+            "spo2",
+            "alien_minerals",
+            "alloy_design",
+            "water_treatment",
+        ],
+    )
     def test_domain_yaml_data_path_exists(self, domain):
         yaml_path = PROJECT_ROOT / "domains" / domain / "experiment.yaml"
         cfg = ExperimentConfig.from_yaml(yaml_path)

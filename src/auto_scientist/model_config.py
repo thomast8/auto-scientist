@@ -54,6 +54,26 @@ class AgentModelConfig(BaseModel):
 
 
 BUILTIN_PRESETS: dict[str, dict] = {
+    # Smoke tests, cheapest possible, quality not important
+    "turbo": {
+        "defaults": {"model": "claude-haiku-4-5-20251001", "reasoning": "off"},
+        "summarizer": {"provider": "openai", "model": "gpt-5.4-nano", "reasoning": "off"},
+        "critics": [
+            {"provider": "google", "model": "gemini-3-flash-preview", "reasoning": "off"},
+            {"provider": "google", "model": "gemini-3-flash-preview", "reasoning": "off"},
+        ],
+    },
+    # Quick but competent: scientist upgraded so plans are usable
+    "fast": {
+        "defaults": {"model": "claude-haiku-4-5-20251001", "reasoning": "low"},
+        "scientist": {"model": "claude-sonnet-4-6", "reasoning": "low"},
+        "summarizer": {"provider": "openai", "model": "gpt-5.4-nano", "reasoning": "off"},
+        "critics": [
+            {"provider": "openai", "model": "gpt-5.4-mini", "reasoning": "low"},
+            {"provider": "anthropic", "model": "claude-haiku-4-5-20251001", "reasoning": "off"},
+        ],
+    },
+    # Balanced quality/cost
     "default": {
         "defaults": {"model": "claude-sonnet-4-6", "reasoning": "medium"},
         "scientist": {"model": "claude-opus-4-6", "reasoning": "medium"},
@@ -63,16 +83,10 @@ BUILTIN_PRESETS: dict[str, dict] = {
             {"provider": "anthropic", "model": "claude-sonnet-4-6", "reasoning": "medium"},
         ],
     },
-    "fast": {
-        "defaults": {"model": "claude-haiku-4-5-20251001", "reasoning": "off"},
-        "summarizer": {"provider": "openai", "model": "gpt-5.4-nano", "reasoning": "off"},
-        "critics": [
-            {"provider": "openai", "model": "gpt-5.4-nano", "reasoning": "off"},
-            {"provider": "anthropic", "model": "claude-haiku-4-5-20251001", "reasoning": "off"},
-        ],
-    },
+    # High quality: analyst upgraded to Opus for deeper observations
     "high": {
         "defaults": {"model": "claude-sonnet-4-6", "reasoning": "high"},
+        "analyst": {"model": "claude-opus-4-6", "reasoning": "medium"},
         "scientist": {"model": "claude-opus-4-6", "reasoning": "high"},
         "summarizer": {"provider": "openai", "model": "gpt-5.4-nano", "reasoning": "off"},
         "critics": [
@@ -80,10 +94,13 @@ BUILTIN_PRESETS: dict[str, dict] = {
             {"provider": "anthropic", "model": "claude-sonnet-4-6", "reasoning": "high"},
         ],
     },
+    # Best quality, but coder/ingestor/report stay on Sonnet (they're high-volume)
     "max": {
-        "defaults": {"model": "claude-opus-4-6", "reasoning": "max"},
-        "analyst": {"model": "claude-opus-4-6", "reasoning": "max"},
+        "defaults": {"model": "claude-opus-4-6", "reasoning": "high"},
         "scientist": {"model": "claude-opus-4-6", "reasoning": "max"},
+        "coder": {"model": "claude-sonnet-4-6", "reasoning": "high"},
+        "ingestor": {"model": "claude-sonnet-4-6", "reasoning": "high"},
+        "report": {"model": "claude-sonnet-4-6", "reasoning": "high"},
         "summarizer": {"provider": "openai", "model": "gpt-5.4-mini", "reasoning": "off"},
         "critics": [
             {"provider": "openai", "model": "gpt-5.4", "reasoning": "max"},
