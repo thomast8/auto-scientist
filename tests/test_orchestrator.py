@@ -1856,11 +1856,16 @@ class TestRunFullOrchestration:
             phase="iteration",
             iteration=0,
         )
+        mc = ModelConfig(
+            defaults=AgentModelConfig(model="claude-sonnet-4-6"),
+            critics=[],
+        )
         o = Orchestrator(
             state=state,
             data_path=tmp_path,
             output_dir=tmp_path,
             max_iterations=1,
+            model_config=mc,
         )
         o.config = DomainConfig(name="t", description="d", data_paths=[])
         state.schedule = "00:00-23:59"
@@ -1896,11 +1901,16 @@ class TestRunIngestionFull:
             goal="g",
             phase="ingestion",
         )
+        mc = ModelConfig(
+            defaults=AgentModelConfig(model="claude-sonnet-4-6"),
+            critics=[],
+        )
         o = Orchestrator(
             state=state,
             data_path=tmp_path / "raw.csv",
             output_dir=tmp_path / "experiments",
             max_iterations=0,
+            model_config=mc,
         )
 
         canonical = tmp_path / "experiments" / "data"
@@ -1933,11 +1943,16 @@ class TestRunIngestionFull:
             goal="g",
             phase="ingestion",
         )
+        mc = ModelConfig(
+            defaults=AgentModelConfig(model="claude-sonnet-4-6"),
+            critics=[],
+        )
         o = Orchestrator(
             state=state,
             data_path=tmp_path / "raw.csv",
             output_dir=tmp_path / "experiments",
             max_iterations=0,
+            model_config=mc,
         )
 
         canonical = tmp_path / "experiments" / "data"

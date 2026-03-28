@@ -4,6 +4,19 @@ import sys
 from types import ModuleType
 from unittest.mock import MagicMock
 
+import pytest  # noqa: E402 - needed for autouse fixture below
+
+
+@pytest.fixture(autouse=True)
+def _block_summarizer_api(monkeypatch):
+    """Prevent real OpenAI API calls from the summarizer in all tests."""
+
+    async def _fake_query(*args, **kwargs):
+        return "mocked summary"
+
+    monkeypatch.setattr("auto_scientist.summarizer._query_summary", _fake_query)
+
+
 # claude_code_sdk may not be installed in CI/test environments.
 # Mock it at the sys.modules level so agent modules can be imported in tests.
 if "claude_code_sdk" not in sys.modules:
