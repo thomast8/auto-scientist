@@ -1,5 +1,8 @@
 """Tests for Textual console components: AgentPanel, MetricsBar, PipelineLive, PipelineApp."""
 
+import json
+from unittest.mock import patch
+
 import pytest
 from textual.app import App, ComposeResult
 from textual.widgets import Collapsible, RichLog
@@ -977,3 +980,20 @@ class TestThemeCycling:
             await pilot.press("ctrl+t")
             await pilot.pause()
             assert app.theme != initial_theme
+
+    @pytest.mark.asyncio
+    async def test_saved_theme_is_restored(self, tmp_path):
+        prefs_path = tmp_path / "preferences.json"
+        prefs_path.write_text(json.dumps({"theme": "atom-one-light"}))
+
+        class FakeOrch:
+            _live: PipelineLive | None = None
+
+            async def run(self):
+                pass
+
+        with patch("auto_scientist.preferences.PREFS_PATH", prefs_path):
+            app = PipelineApp(FakeOrch())
+            async with app.run_test() as pilot:
+                await pilot.pause()
+                assert app.theme == "atom-one-light"

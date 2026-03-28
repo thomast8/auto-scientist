@@ -25,6 +25,7 @@ from textual.widgets import (
 
 from auto_scientist.experiment_config import ExperimentConfig, ExperimentModelsConfig
 from auto_scientist.model_config import AgentModelConfig
+from auto_scientist.preferences import load_theme, save_theme
 
 PRESET_OPTIONS = [
     ("default (medium)", "default"),
@@ -581,12 +582,19 @@ class LaunchApp(App[ExperimentConfig | None]):
         yield Footer()
 
     def on_mount(self) -> None:
+        saved_theme = load_theme()
+        if saved_theme in self.available_themes:
+            self.theme = saved_theme
         if self._prefill:
             self._apply_config(self._prefill)
         else:
             # Populate model fields from the default preset
             default_cfg = ExperimentConfig(data=".", goal=".")
             self._apply_model_defaults(default_cfg)
+
+    def watch_theme(self, theme_name: str) -> None:
+        """Persist every theme change made through the launcher UI."""
+        save_theme(theme_name)
 
     def _apply_model_defaults(self, cfg: ExperimentConfig) -> None:
         """Populate only the model/reasoning fields from the resolved preset."""
