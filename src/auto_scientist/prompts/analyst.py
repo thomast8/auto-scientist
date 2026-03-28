@@ -114,6 +114,8 @@ Plots: spatial_heatmap.png, temporal_trend.png,
 pH mean 7.2, std 0.4. Turbidity mean 3.1 NTU. Coliform mean 45.
 Compared to previous: turbidity improved 4.5 to 3.1, coliform
 80 to 45. Spatial heatmap shows site #7 as coliform outlier.
+Per-site coliform: site #7 = 320 CFU (outlier), other sites
+average 32.5 CFU. Per-zone pH: upstream mean 7.5, downstream 6.9.
 </reasoning>
 <output>
 {{
@@ -123,7 +125,11 @@ Compared to previous: turbidity improved 4.5 to 3.1, coliform
     "turbidity_mean": 3.1,
     "turbidity_max": 6.8,
     "coliform_mean": 45,
-    "coliform_max": 320
+    "coliform_max": 320,
+    "coliform_mean_site7": 320,
+    "coliform_mean_other_sites": 32.5,
+    "pH_mean_upstream": 7.5,
+    "pH_mean_downstream": 6.9
   }},
   "improvements": [
     "turbidity decreased from 4.5 to 3.1 NTU (-31%)",
@@ -131,7 +137,7 @@ Compared to previous: turbidity improved 4.5 to 3.1, coliform
   ],
   "regressions": [],
   "observations": [
-    "spatial heatmap: site #7 outlier for coliform (320 CFU)",
+    "spatial heatmap: site #7 is a spatial outlier for coliform",
     "temporal trend: seasonal turbidity spike months 6-8",
     "boxplot: coliform right-skewed with long tail"
   ],
@@ -292,9 +298,15 @@ Produce a JSON object with these exact keys and types:
   }}
 }}
 
-key_metrics: all important numeric values, keyed by name.
+key_metrics: all important numeric values, keyed by name. When the data
+  involves distinct groups or categories, include per-group summary
+  statistics using the naming convention {{metric}}_{{stat}}_{{group}}
+  (e.g., conductivity_mean_Aetherite, mag_sus_std_Erythian). Per-group
+  breakdowns are structured data and belong here, not in observations.
 improvements/regressions: vs previous iteration, with numbers.
-observations: notable patterns from plots/results, factual.
+observations: notable patterns from plots/results, factual. Use for
+  qualitative descriptions (trends, shapes, distributions, spatial
+  patterns), not for numeric values that belong in key_metrics.
 prediction_outcomes: from script's HYPOTHESIS TESTS section. Each outcome is
   "confirmed", "refuted", or "inconclusive" with the specific evidence.
 
