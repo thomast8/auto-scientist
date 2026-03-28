@@ -199,12 +199,12 @@ class TestRunDebate:
 
     @pytest.mark.asyncio
     async def test_always_4_debates_with_2_critics(self, base_kwargs):
-        """Always runs 4 debates (one per persona), regardless of critic count."""
+        """On iteration 1+, runs 4 debates (one per persona), regardless of critic count."""
         with (
             patch(OPENAI_PATH, new_callable=AsyncMock, return_value=_CR()),
             patch(GOOGLE_PATH, new_callable=AsyncMock, return_value=_CR()),
         ):
-            results = await run_debate(**base_kwargs, max_rounds=1)
+            results = await run_debate(**base_kwargs, iteration=1, max_rounds=1)
 
         assert len(results) == 4
         persona_names = [r.persona for r in results]
@@ -227,6 +227,37 @@ class TestRunDebate:
             assert len(r.rounds) >= 1
             assert isinstance(r.rounds[0].critic_output, CriticOutput)
             assert len(r.raw_transcript) >= 1
+
+    @pytest.mark.asyncio
+    async def test_iteration_0_runs_only_subset_personas(self, base_kwargs):
+        """Iteration 0 runs only Methodologist and Falsification Expert."""
+        with (
+            patch(OPENAI_PATH, new_callable=AsyncMock, return_value=_CR()),
+            patch(GOOGLE_PATH, new_callable=AsyncMock, return_value=_CR()),
+        ):
+            results = await run_debate(**base_kwargs, iteration=0, max_rounds=1)
+
+        assert len(results) == 2
+        persona_names = {r.persona for r in results}
+        assert persona_names == {"Methodologist", "Falsification Expert"}
+
+    @pytest.mark.asyncio
+    async def test_iteration_1_runs_all_personas(self, base_kwargs):
+        """Iteration 1+ runs all four personas."""
+        with (
+            patch(OPENAI_PATH, new_callable=AsyncMock, return_value=_CR()),
+            patch(GOOGLE_PATH, new_callable=AsyncMock, return_value=_CR()),
+        ):
+            results = await run_debate(**base_kwargs, iteration=1, max_rounds=1)
+
+        assert len(results) == 4
+        persona_names = {r.persona for r in results}
+        assert persona_names == {
+            "Methodologist",
+            "Trajectory Critic",
+            "Falsification Expert",
+            "Evidence Auditor",
+        }
 
     @pytest.mark.asyncio
     async def test_persona_rotation_across_iterations(self, base_kwargs):
@@ -351,10 +382,11 @@ class TestRunDebate:
                 plan=plan,
                 notebook_content="",
                 max_rounds=1,
+                iteration=1,
             )
 
         assert len(result) == 4
-        # All 3 debates use the same model (only 1 critic configured)
+        # All 4 debates use the same model (only 1 critic configured)
         for r in result:
             assert r.critic_model == "anthropic:claude-sonnet-4-6"
 
@@ -406,7 +438,7 @@ class TestCriticRetry:
             patch(
                 OPENAI_PATH,
                 new_callable=AsyncMock,
-                # Methodologist: empty -> retry -> valid. Feasibility: valid.
+                # Trajectory Critic: empty -> retry -> valid. Evidence Auditor: valid.
                 side_effect=[AgentResult(text=""), valid, valid],
             ) as mock_openai,
             patch(GOOGLE_PATH, new_callable=AsyncMock, return_value=valid),
@@ -416,10 +448,11 @@ class TestCriticRetry:
                 plan=plan,
                 notebook_content="",
                 max_rounds=1,
+                iteration=1,
             )
 
         assert len(result) == 4
-        # OpenAI called: 2 for Methodologist (retry) + 1 for Feasibility
+        # OpenAI called: 2 for Trajectory Critic (retry) + 1 for Evidence Auditor
         assert mock_openai.call_count == 3
 
     @pytest.mark.asyncio
@@ -708,6 +741,12 @@ class TestPersonas:
         assert "Trajectory Critic" in names
         assert "Falsification Expert" in names
         assert "Evidence Auditor" in names
+
+    def test_iteration_0_personas_is_subset_of_persona_names(self):
+        from auto_scientist.prompts.critic import ITERATION_0_PERSONAS, PERSONAS
+
+        all_names = {p["name"] for p in PERSONAS}
+        assert all_names >= ITERATION_0_PERSONAS
 
     def test_trajectory_critic_has_instructions(self):
         from auto_scientist.prompts.critic import PERSONAS

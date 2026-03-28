@@ -19,10 +19,18 @@ def base_state():
 
 @pytest.fixture
 def orchestrator(base_state, tmp_path):
+    mc = ModelConfig(
+        defaults=AgentModelConfig(model="claude-sonnet-4-6"),
+        critics=[
+            AgentModelConfig(provider="openai", model="gpt-5.4"),
+            AgentModelConfig(provider="anthropic", model="claude-sonnet-4-6"),
+        ],
+    )
     o = Orchestrator(
         state=base_state,
         data_path=tmp_path / "data.csv",
         output_dir=tmp_path / "experiments",
+        model_config=mc,
     )
     # Set config directly for tests that need it
     o.config = DomainConfig(
@@ -626,7 +634,7 @@ class TestPhaseTransitions:
 
 
 class TestIteration0:
-    """Iteration 0 flow: analyst initial, scientist without versions, coder runs, debate skipped."""
+    """Iteration 0 flow: analyst initial, scientist, debate (subset personas), coder runs."""
 
     @pytest.mark.asyncio
     async def test_analyst_calls_initial_on_no_versions(self, orchestrator, tmp_path):
@@ -649,8 +657,8 @@ class TestIteration0:
         assert result == analysis
 
     @pytest.mark.asyncio
-    async def test_debate_skipped_on_iteration_0(self, orchestrator, tmp_path):
-        """Debate should be skipped when iteration is 0."""
+    async def test_debate_runs_on_iteration_0(self, orchestrator, tmp_path):
+        """Debate runs on iteration 0 with subset personas."""
         orchestrator.output_dir.mkdir(parents=True, exist_ok=True)
         orchestrator.state.phase = "iteration"
         orchestrator.state.iteration = 0
@@ -676,11 +684,13 @@ class TestIteration0:
                 orchestrator,
                 "_run_debate",
                 new_callable=AsyncMock,
+                return_value=None,
             ) as mock_debate,
             patch.object(
                 orchestrator,
                 "_run_scientist_revision",
                 new_callable=AsyncMock,
+                return_value=None,
             ) as mock_revision,
             patch.object(
                 orchestrator, "_run_coder", new_callable=AsyncMock, return_value=script_path
@@ -689,8 +699,8 @@ class TestIteration0:
         ):
             await orchestrator._run_iteration_body()
 
-        mock_debate.assert_not_called()
-        mock_revision.assert_not_called()
+        mock_debate.assert_called_once()
+        mock_revision.assert_called_once()
 
     @pytest.mark.asyncio
     async def test_iteration_starts_at_0(self, orchestrator, tmp_path):
@@ -922,6 +932,10 @@ class TestRunIteration:
             patch.object(
                 orchestrator, "_run_scientist_plan", new_callable=AsyncMock, return_value=plan
             ),
+            patch.object(orchestrator, "_run_debate", new_callable=AsyncMock, return_value=None),
+            patch.object(
+                orchestrator, "_run_scientist_revision", new_callable=AsyncMock, return_value=None
+            ),
             patch.object(
                 orchestrator, "_run_coder", new_callable=AsyncMock, return_value=script_path
             ),
@@ -976,6 +990,10 @@ class TestRunIteration:
             patch.object(
                 orchestrator, "_run_scientist_plan", new_callable=AsyncMock, return_value=plan
             ),
+            patch.object(orchestrator, "_run_debate", new_callable=AsyncMock, return_value=None),
+            patch.object(
+                orchestrator, "_run_scientist_revision", new_callable=AsyncMock, return_value=None
+            ),
             patch.object(
                 orchestrator, "_run_coder", new_callable=AsyncMock, return_value=script_path
             ),
@@ -1006,6 +1024,10 @@ class TestRunIteration:
                 "_run_scientist_plan",
                 new_callable=AsyncMock,
                 return_value=plan,
+            ),
+            patch.object(orchestrator, "_run_debate", new_callable=AsyncMock, return_value=None),
+            patch.object(
+                orchestrator, "_run_scientist_revision", new_callable=AsyncMock, return_value=None
             ),
             patch.object(
                 orchestrator,
@@ -1041,6 +1063,10 @@ class TestRunIteration:
             patch.object(orchestrator, "_run_analyst", new_callable=AsyncMock, return_value={}),
             patch.object(
                 orchestrator, "_run_scientist_plan", new_callable=AsyncMock, return_value=plan
+            ),
+            patch.object(orchestrator, "_run_debate", new_callable=AsyncMock, return_value=None),
+            patch.object(
+                orchestrator, "_run_scientist_revision", new_callable=AsyncMock, return_value=None
             ),
             patch.object(
                 orchestrator, "_run_coder", new_callable=AsyncMock, return_value=script_path
@@ -1238,6 +1264,7 @@ class TestRunDebateOrchestrator:
         )
 
         orchestrator.output_dir.mkdir(parents=True, exist_ok=True)
+        orchestrator.state.iteration = 1  # iteration 1+ runs all 4 personas
         orchestrator.model_config.critics = [AgentModelConfig(provider="openai", model="gpt-4o")]
         plan = {"hypothesis": "test"}
 
@@ -1270,7 +1297,7 @@ class TestRunDebateOrchestrator:
         ):
             result = await orchestrator._run_debate(plan, None)
 
-        # 4 debates (one per persona), all using the same single critic model
+        # iteration 1+: 4 debates (one per persona), all using the same single critic model
         assert len(result) == 4
         call_kwargs = mock_single.call_args.kwargs
         assert call_kwargs["config"].model == "gpt-4o"
@@ -1849,6 +1876,8 @@ class TestRunFullOrchestration:
             patch("auto_scientist.orchestrator.wait_for_window", new_callable=AsyncMock),
             patch.object(o, "_run_analyst", new_callable=AsyncMock, return_value={}),
             patch.object(o, "_run_scientist_plan", new_callable=AsyncMock, return_value=plan),
+            patch.object(o, "_run_debate", new_callable=AsyncMock, return_value=None),
+            patch.object(o, "_run_scientist_revision", new_callable=AsyncMock, return_value=None),
             patch.object(o, "_run_coder", new_callable=AsyncMock, return_value=script_path),
             patch.object(o, "_read_run_result", return_value=run_result),
             patch.object(o, "_run_report", new_callable=AsyncMock),
@@ -2029,6 +2058,8 @@ class TestSummaryIntegration:
                 new_callable=AsyncMock,
                 return_value=plan,
             ),
+            patch.object(o, "_run_debate", new_callable=AsyncMock, return_value=None),
+            patch.object(o, "_run_scientist_revision", new_callable=AsyncMock, return_value=None),
             patch(
                 "auto_scientist.agents.coder.run_coder",
                 new_callable=AsyncMock,
@@ -2074,6 +2105,10 @@ class TestSummaryIntegration:
             patch.object(
                 orchestrator, "_run_scientist_plan", new_callable=AsyncMock, return_value=plan
             ),
+            patch.object(orchestrator, "_run_debate", new_callable=AsyncMock, return_value=None),
+            patch.object(
+                orchestrator, "_run_scientist_revision", new_callable=AsyncMock, return_value=None
+            ),
             patch.object(
                 orchestrator, "_run_coder", new_callable=AsyncMock, return_value=script_path
             ),
@@ -2115,6 +2150,10 @@ class TestSummaryIntegration:
                 "auto_scientist.agents.scientist.run_scientist",
                 new_callable=AsyncMock,
                 return_value=plan,
+            ),
+            patch.object(orchestrator, "_run_debate", new_callable=AsyncMock, return_value=None),
+            patch.object(
+                orchestrator, "_run_scientist_revision", new_callable=AsyncMock, return_value=None
             ),
             patch(
                 "auto_scientist.agents.coder.run_coder",

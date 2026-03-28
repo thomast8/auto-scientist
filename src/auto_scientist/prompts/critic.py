@@ -230,6 +230,10 @@ PERSONAS: list[dict[str, str]] = [
     },
 ]
 
+ITERATION_0_PERSONAS: frozenset[str] = frozenset({"Methodologist", "Falsification Expert"})
+"""Personas that run on iteration 0 (exploration). Trajectory Critic and
+Evidence Auditor require prior iteration history to function."""
+
 
 def get_model_index_for_debate(
     persona_index: int,
@@ -310,14 +314,16 @@ Leave these for other agents:
 - Implementing any changes (Coder does this)
 
 In-scope critique:
-- "A smoothing spline with manual knots risks overfitting on 200 points"
-- "Cross-validation should use nested CV to prevent test-set leakage"
-- "A simpler polynomial already achieves R²=0.96; the added complexity
-  is unjustified"
+- "With only N data points per group, the observed difference may not be
+  reliable enough to draw conclusions"
+- "The plan assumes a monotonic relationship, but the analysis shows a
+  reversal at high values, which would violate this assumption"
+- "A simpler approach already explains the observed pattern comparably;
+  the added complexity is unjustified"
 
 Out-of-scope suggestions:
-- "Change line 35 to use np.polyfit instead" (code-level)
-- "Set the learning rate to 0.001" (hyperparameter tuning detail)
+- "Change line 35 to use a different function call" (code-level)
+- "Set a specific parameter to 0.5 instead of 1.0" (implementation detail)
 - "The Analyst should have reported..." (other agent's responsibilities)
 </scope_boundary>
 
