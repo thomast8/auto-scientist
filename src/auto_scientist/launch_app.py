@@ -284,11 +284,12 @@ class LaunchApp(App[ExperimentConfig | None]):
 
     CSS = """
     Screen {
-        align: center middle;
+        align-horizontal: center;
     }
     #outer {
         max-width: 100;
-        height: auto;
+        height: 1fr;
+        scrollbar-color: grey;
     }
     #banner-container {
         height: auto;
@@ -300,6 +301,7 @@ class LaunchApp(App[ExperimentConfig | None]):
         color: $text-muted;
     }
     #form-container {
+        height: auto;
         border: solid grey;
         padding: 1 2;
     }
