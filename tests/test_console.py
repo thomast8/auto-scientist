@@ -10,6 +10,7 @@ from auto_scientist.console import (
     AgentDetailScreen,
     AgentPanel,
     IterationContainer,
+    IterationToggle,
     MetricsBar,
     PipelineApp,
     PipelineLive,
@@ -271,19 +272,126 @@ class TestAgentPanelIdempotency:
 # ---------------------------------------------------------------------------
 
 
+class IterationTestApp(App):
+    """Test app hosting an IterationContainer with panels inside."""
+
+    def __init__(self, container: IterationContainer, panels: list[AgentPanel] | None = None) -> None:
+        super().__init__()
+        self._container = container
+        self._test_panels = panels or []
+
+    def compose(self) -> ComposeResult:
+        yield self._container
+
+    def on_mount(self) -> None:
+        for panel in self._test_panels:
+            self._container.mount(panel)
+            self._container.add_panel(panel)
+
+
 class TestIterationContainer:
     def test_construction(self):
         container = IterationContainer(iter_title="Iteration 0")
         assert container._iter_title == "Iteration 0"
         assert container.border_title == "Iteration 0"
         assert container._in_progress is True
+        assert container._panels == []
+        assert container._is_collapsed is False
 
     def test_set_result(self):
         container = IterationContainer(iter_title="Iteration 1")
         container.set_result("completed (85)", "green")
+        # No panels, so collapse_iteration is not called and subtitle is unchanged
         assert container.border_subtitle == "completed (85)"
         assert container._in_progress is False
         assert container.border_title == "Iteration 1"
+
+    def test_add_panel(self):
+        container = IterationContainer(iter_title="Iteration 0")
+        panel = AgentPanel(name="Analyst", model="m", style="green")
+        container.add_panel(panel)
+        assert len(container._panels) == 1
+        assert container._panels[0] is panel
+
+    @pytest.mark.asyncio
+    async def test_collapse_hides_panels(self):
+        container = IterationContainer(iter_title="Iteration 1")
+        p1 = AgentPanel(name="Analyst", model="m", style="green")
+        p2 = AgentPanel(name="Coder", model="m", style="magenta1")
+        p1.complete("Analysis done")
+        p1.set_stats(input_tokens=100, output_tokens=50, num_turns=2)
+        p2.complete("Code written")
+        p2.set_stats(input_tokens=200, output_tokens=100, num_turns=3)
+        async with IterationTestApp(container, [p1, p2]).run_test():
+            container.set_result("completed", "green")
+            assert container._is_collapsed is True
+            # Panels should be hidden
+            assert str(p1.styles.display) == "none"
+            assert str(p2.styles.display) == "none"
+            # Toggle widget should be mounted
+            toggles = list(container.query(IterationToggle))
+            assert len(toggles) == 1
+            assert "2 agents" in str(toggles[0].render())
+
+    @pytest.mark.asyncio
+    async def test_collapse_aggregates_metrics(self):
+        container = IterationContainer(iter_title="Iteration 1")
+        p1 = AgentPanel(name="Analyst", model="m", style="green")
+        p2 = AgentPanel(name="Coder", model="m", style="magenta1")
+        p1.complete("done")
+        p1.set_stats(input_tokens=1000, output_tokens=500, num_turns=2)
+        p2.complete("done")
+        p2.set_stats(input_tokens=2000, output_tokens=1000, num_turns=3)
+        async with IterationTestApp(container, [p1, p2]).run_test():
+            container.set_result("completed", "green")
+            subtitle = str(container.border_subtitle)
+            assert "3,000 in" in subtitle
+            assert "1,500 out" in subtitle
+            assert "5 turns" in subtitle
+
+    @pytest.mark.asyncio
+    async def test_collapse_with_summary_text(self):
+        container = IterationContainer(iter_title="Iteration 1")
+        p1 = AgentPanel(name="Analyst", model="m", style="green")
+        p1.complete("done")
+        async with IterationTestApp(container, [p1]).run_test():
+            container.set_result("completed", "green", "We explored the dataset.")
+            recaps = list(container.query(".iteration-recap"))
+            assert len(recaps) == 1
+            assert "explored" in str(recaps[0].render())
+
+    @pytest.mark.asyncio
+    async def test_toggle_iteration(self):
+        container = IterationContainer(iter_title="Iteration 1")
+        p1 = AgentPanel(name="Analyst", model="m", style="green")
+        p1.complete("done")
+        async with IterationTestApp(container, [p1]).run_test():
+            container.set_result("completed", "green")
+            assert container._is_collapsed is True
+            assert str(p1.styles.display) == "none"
+            # Expand
+            container.toggle_iteration()
+            assert container._is_collapsed is False
+            assert str(p1.styles.display) == "block"
+            # Collapse again
+            container.toggle_iteration()
+            assert container._is_collapsed is True
+            assert str(p1.styles.display) == "none"
+
+    @pytest.mark.asyncio
+    async def test_collapse_idempotent(self):
+        container = IterationContainer(iter_title="Iteration 1")
+        p1 = AgentPanel(name="Analyst", model="m", style="green")
+        p1.complete("done")
+        async with IterationTestApp(container, [p1]).run_test():
+            container.set_result("completed", "green", "Summary")
+            # Calling collapse again should be a no-op
+            container.collapse_iteration("Another summary")
+            # Should still only have one toggle and one recap
+            toggles = list(container.query(IterationToggle))
+            assert len(toggles) == 1
+            recaps = list(container.query(".iteration-recap"))
+            assert len(recaps) == 1
 
 
 # ---------------------------------------------------------------------------
@@ -522,6 +630,19 @@ class TestPipelineLiveHeadless:
         live.start_iteration(1)
         assert live._current_iteration is not None
         assert live._current_iteration._iter_title == "Iteration 1"
+        live.stop()
+
+    def test_end_iteration_passes_summary(self):
+        live = PipelineLive()
+        live.start()
+        live.start_iteration(0)
+        container = live._current_iteration
+        # In headless mode, set_result is called directly with summary_text
+        live.end_iteration("done", "green", "Iteration recap text")
+        # Container should have received the summary_text
+        # (no panels so collapse_iteration won't be called, but set_result stores subtitle)
+        assert container.border_subtitle == "done"
+        assert container._in_progress is False
         live.stop()
 
 

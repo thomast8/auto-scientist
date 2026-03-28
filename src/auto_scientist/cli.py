@@ -8,6 +8,8 @@ from dotenv import load_dotenv
 load_dotenv()
 
 from auto_scientist.console import PipelineApp, console
+from auto_scientist.experiment_config import ExperimentConfig
+from auto_scientist.launch_app import LaunchApp
 from auto_scientist.model_config import ModelConfig
 from auto_scientist.orchestrator import Orchestrator
 from auto_scientist.state import ExperimentState
@@ -71,12 +73,17 @@ def _next_output_dir(base: Path) -> Path:
         seq += 1
 
 
+def _is_yaml_config(path: str) -> bool:
+    """Check if a config file path is a YAML file by extension."""
+    return Path(path).suffix.lower() in (".yaml", ".yml")
+
+
 def _resolve_model_config(
     config_path: str | None,
     preset: str | None,
     no_summaries: bool = False,
 ) -> ModelConfig:
-    """Resolve ModelConfig from CLI flags."""
+    """Resolve ModelConfig from CLI flags (TOML configs only)."""
     if config_path and preset:
         raise click.UsageError("--config and --preset are mutually exclusive")
     if config_path:
@@ -92,21 +99,94 @@ def _resolve_model_config(
     return model_config
 
 
-@click.group()
-def cli():
-    """Auto-Scientist: Autonomous scientific investigation framework."""
+def _run_from_experiment_config(exp_config: ExperimentConfig, data_path: Path) -> None:
+    """Build Orchestrator from an ExperimentConfig and run it."""
+    try:
+        model_config = ModelConfig.from_experiment_config(exp_config)
+    except ValueError as e:
+        raise click.UsageError(str(e)) from None
+
+    if not data_path.exists():
+        raise click.UsageError(
+            f"Data path does not exist: {data_path}\n"
+            f"Resolved from config value: {exp_config.data!r}"
+        )
+
+    resolved_output = _next_output_dir(Path(exp_config.output_dir))
+    if resolved_output != Path(exp_config.output_dir):
+        console.print(
+            f"Previous run detected in {exp_config.output_dir}/. "
+            f"Using {resolved_output}/ instead.",
+            style="yellow",
+        )
+
+    state = ExperimentState(
+        domain="auto",
+        goal=exp_config.goal,
+        phase="ingestion",
+        schedule=exp_config.schedule,
+        data_path=str(data_path.resolve()),
+    )
+
+    orchestrator = Orchestrator(
+        state=state,
+        data_path=data_path,
+        output_dir=resolved_output,
+        max_iterations=exp_config.max_iterations,
+        model_config=model_config,
+        interactive=exp_config.interactive,
+        debate_rounds=exp_config.debate_rounds,
+        stream=exp_config.stream,
+        verbose=exp_config.verbose,
+    )
+
+    _run_orchestrator(orchestrator)
 
 
-@cli.command()
-@click.option("--data", required=True, type=click.Path(exists=True), help="Path to dataset")
-@click.option("--goal", required=True, help="Problem statement / investigation goal")
-@click.option("--max-iterations", default=20, help="Maximum iteration count")
+@click.group(invoke_without_command=True)
 @click.option(
-    "--config",
+    "--config", "-c",
     "config_path",
     default=None,
     type=click.Path(exists=True),
-    help="Path to models.toml config file",
+    help="Pre-fill TUI form from experiment.yaml",
+)
+@click.pass_context
+def cli(ctx: click.Context, config_path: str | None):
+    """Auto-Scientist: Autonomous scientific investigation framework."""
+    if ctx.invoked_subcommand is not None:
+        return
+
+    # Bare `auto-scientist` with no subcommand: launch the TUI form
+    prefill = None
+    if config_path and _is_yaml_config(config_path):
+        try:
+            prefill = ExperimentConfig.from_yaml(Path(config_path))
+        except ValueError as e:
+            raise click.UsageError(str(e)) from None
+
+    app = LaunchApp(prefill=prefill)
+    result = app.run()
+
+    if result is None or app.result_config is None:
+        return
+
+    exp_config = app.result_config
+    data_path = Path(exp_config.data)
+
+    _run_from_experiment_config(exp_config, data_path)
+
+
+@cli.command()
+@click.option("--data", default=None, type=click.Path(), help="Path to dataset")
+@click.option("--goal", default=None, help="Problem statement / investigation goal")
+@click.option("--max-iterations", default=20, help="Maximum iteration count")
+@click.option(
+    "--config", "-c",
+    "config_path",
+    default=None,
+    type=click.Path(exists=True),
+    help="Path to experiment.yaml or models.toml config file",
 )
 @click.option("--preset", default=None, help="Named preset: default (medium), fast, high, max")
 @click.option("--no-summaries", is_flag=True, help="Disable periodic agent summaries")
@@ -133,9 +213,11 @@ def cli():
     "-v", "--verbose", is_flag=True,
     help="Show debug log messages on console (always written to debug.log).",
 )
+@click.pass_context
 def run(
-    data: str,
-    goal: str,
+    ctx: click.Context,
+    data: str | None,
+    goal: str | None,
     max_iterations: int,
     config_path: str | None,
     preset: str | None,
@@ -148,6 +230,60 @@ def run(
     verbose: bool,
 ):
     """Run autonomous scientific investigation from raw data."""
+    # YAML config path: load ExperimentConfig, merge CLI overrides on top
+    if config_path and _is_yaml_config(config_path):
+        try:
+            exp_config = ExperimentConfig.from_yaml(Path(config_path))
+        except ValueError as e:
+            raise click.UsageError(str(e)) from None
+
+        yaml_dir = Path(config_path).parent
+
+        # CLI flags override YAML values (use get_parameter_source to detect explicit CLI flags)
+        _cli = click.core.ParameterSource.COMMANDLINE
+        if ctx.get_parameter_source("preset") == _cli:
+            exp_config.preset = preset
+        if ctx.get_parameter_source("max_iterations") == _cli:
+            exp_config.max_iterations = max_iterations
+        if ctx.get_parameter_source("debate_rounds") == _cli:
+            exp_config.debate_rounds = debate_rounds
+        if ctx.get_parameter_source("output_dir") == _cli:
+            exp_config.output_dir = output_dir
+        if ctx.get_parameter_source("schedule") == _cli:
+            exp_config.schedule = schedule
+        if ctx.get_parameter_source("interactive") == _cli:
+            exp_config.interactive = interactive
+        if ctx.get_parameter_source("no_stream") == _cli:
+            exp_config.stream = not no_stream
+        if ctx.get_parameter_source("verbose") == _cli:
+            exp_config.verbose = verbose
+        if ctx.get_parameter_source("no_summaries") == _cli and no_summaries:
+            exp_config.summaries = False
+
+        # Override data/goal only if explicitly provided on CLI
+        data_cli_override = ctx.get_parameter_source("data") == _cli
+        if data_cli_override:
+            exp_config.data = data
+        if ctx.get_parameter_source("goal") == _cli:
+            exp_config.goal = goal
+
+        # CLI --data resolves from CWD; YAML data resolves from YAML dir
+        if data_cli_override:
+            data_path = Path(data)
+        else:
+            data_path = exp_config.resolve_data_path(yaml_dir)
+
+        _run_from_experiment_config(exp_config, data_path)
+        return
+
+    # Non-YAML path: require --data and --goal
+    if not data:
+        raise click.UsageError("Missing option '--data'. Required when not using a YAML config.")
+    if not goal:
+        raise click.UsageError("Missing option '--goal'. Required when not using a YAML config.")
+    if not Path(data).exists():
+        raise click.UsageError(f"Path '{data}' does not exist.")
+
     model_config = _resolve_model_config(config_path, preset, no_summaries)
 
     data_abs = str(Path(data).resolve())

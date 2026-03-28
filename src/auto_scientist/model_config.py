@@ -4,12 +4,20 @@ Supports TOML config files, built-in presets, and a unified reasoning
 abstraction that maps to Anthropic/OpenAI/Google native APIs.
 """
 
+from __future__ import annotations
+
+
 import logging
 import tomllib
 from pathlib import Path
-from typing import ClassVar, Literal
+from typing import TYPE_CHECKING, ClassVar, Literal
 
-from pydantic import BaseModel, field_validator
+if TYPE_CHECKING:
+    from auto_scientist.experiment_config import ExperimentConfig
+
+from pydantic import BaseModel, ConfigDict, Field, field_validator
+
+logger = logging.getLogger(__name__)
 
 logger = logging.getLogger(__name__)
 
@@ -36,7 +44,7 @@ class AgentModelConfig(BaseModel):
     """Configuration for a single agent's model and reasoning."""
 
     provider: Literal["anthropic", "openai", "google"] = "anthropic"
-    model: str
+    model: str = Field(min_length=1)
     reasoning: ReasoningConfig = ReasoningConfig()
 
     @field_validator("reasoning", mode="before")
@@ -113,6 +121,8 @@ def reasoning_to_cc_extra_args(reasoning: ReasoningConfig) -> dict[str, str | No
 class ModelConfig(BaseModel):
     """Top-level model configuration loaded from TOML or presets."""
 
+    model_config = ConfigDict(validate_assignment=True)
+
     defaults: AgentModelConfig
     analyst: AgentModelConfig | None = None
     scientist: AgentModelConfig | None = None
@@ -141,21 +151,44 @@ class ModelConfig(BaseModel):
         return self.defaults
 
     @classmethod
-    def builtin_preset(cls, name: str) -> "ModelConfig":
+    def from_experiment_config(cls, exp_config: ExperimentConfig) -> ModelConfig:
+        """Build a ModelConfig from an ExperimentConfig.
+
+        Loads the preset, then layers per-agent model overrides from the
+        YAML models block on top. summaries=False always nullifies the summarizer.
+        """
+        mc = cls.builtin_preset(exp_config.preset)
+
+        if exp_config.models is not None:
+            overrides = exp_config.models
+            for field in cls._AGENT_FIELDS:
+                agent_override = getattr(overrides, field, None)
+                if agent_override is not None:
+                    setattr(mc, field, agent_override)
+            if overrides.critics:
+                mc.critics = list(overrides.critics)
+
+        if not exp_config.summaries:
+            mc.summarizer = None
+
+        return mc
+
+    @classmethod
+    def builtin_preset(cls, name: str) -> ModelConfig:
         """Return a built-in preset by name."""
         if name not in BUILTIN_PRESETS:
             raise ValueError(f"Unknown preset: {name!r}. Available: {list(BUILTIN_PRESETS)}")
         return cls._from_dict(BUILTIN_PRESETS[name])
 
     @classmethod
-    def from_toml(cls, path: Path) -> "ModelConfig":
+    def from_toml(cls, path: Path) -> ModelConfig:
         """Load config from a TOML file."""
         with open(path, "rb") as f:
             raw = tomllib.load(f)
         return cls._from_dict(raw)
 
     @classmethod
-    def _from_dict(cls, raw: dict) -> "ModelConfig":
+    def _from_dict(cls, raw: dict) -> ModelConfig:
         """Build a ModelConfig from a raw dict (from TOML or preset)."""
         kwargs: dict = {}
         kwargs["defaults"] = AgentModelConfig.model_validate(raw["defaults"])

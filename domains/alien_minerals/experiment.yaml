@@ -1,0 +1,8 @@
+data: seed/data/
+goal: >
+  Discover the classification rules for these 6 alien mineral types
+  based on their physical and chemical properties. The data may contain
+  mislabeled samples and instrument calibration issues. Express findings
+  as interpretable decision rules, not black-box models.
+max_iterations: 5
+preset: default

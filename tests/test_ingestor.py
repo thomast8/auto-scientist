@@ -456,6 +456,74 @@ class TestIngestorConfigValidation:
 
     @pytest.mark.asyncio
     @patch("auto_scientist.agents.ingestor.safe_query")
+    async def test_invalid_config_exhausts_retries_raises(self, mock_query, tmp_path):
+        """When config stays invalid after all attempts, RuntimeError is raised."""
+        raw_data = tmp_path / "data.csv"
+        raw_data.write_text("a,b\n1,2\n")
+        output_dir = tmp_path / "experiments"
+        output_dir.mkdir()
+        data_dir = output_dir / "data"
+        data_dir.mkdir()
+        (data_dir / "output.csv").write_text("a,b\n1,2\n")
+
+        config_path = output_dir / "domain_config.json"
+        # Always invalid: dict instead of list
+        config_path.write_text(json.dumps({
+            "name": "test",
+            "description": "Test domain",
+            "data_paths": {"file1": "data/output.csv"},
+            "run_command": "uv run {script_path}",
+        }))
+
+        async def fake_query(**kwargs):
+            yield _make_result_msg()
+
+        mock_query.side_effect = fake_query
+
+        with pytest.raises(RuntimeError, match="config validation failed after"):
+            await run_ingestor(
+                raw_data, output_dir, "test goal", config_path=config_path,
+            )
+
+    @pytest.mark.asyncio
+    @patch("auto_scientist.agents.ingestor.safe_query")
+    async def test_missing_config_file_triggers_retry(self, mock_query, tmp_path):
+        """When domain_config.json is not written, ingestor retries with hint."""
+        raw_data = tmp_path / "data.csv"
+        raw_data.write_text("a,b\n1,2\n")
+        output_dir = tmp_path / "experiments"
+        output_dir.mkdir()
+        data_dir = output_dir / "data"
+        data_dir.mkdir()
+        (data_dir / "output.csv").write_text("a,b\n1,2\n")
+
+        config_path = output_dir / "domain_config.json"
+        # config_path does NOT exist on disk
+        call_count = 0
+
+        async def fake_query(**kwargs):
+            nonlocal call_count
+            call_count += 1
+            if call_count == 2:
+                # On retry, write valid config
+                config_path.write_text(json.dumps({
+                    "name": "test",
+                    "description": "Test domain",
+                    "data_paths": ["data/output.csv"],
+                    "run_command": "uv run {script_path}",
+                }))
+            yield _make_result_msg()
+
+        mock_query.side_effect = fake_query
+
+        result = await run_ingestor(
+            raw_data, output_dir, "test goal", config_path=config_path,
+        )
+        assert result == data_dir
+        assert call_count == 2
+
+    @pytest.mark.asyncio
+    @patch("auto_scientist.agents.ingestor.safe_query")
     async def test_no_config_path_skips_validation(self, mock_query, tmp_path):
         """When config_path is None, skip config validation entirely."""
         raw_data = tmp_path / "data.csv"

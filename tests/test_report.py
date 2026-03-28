@@ -427,3 +427,29 @@ class TestReportStructuralValidation:
         correction = captured_prompts[1]
         assert "<validation_error>" in correction
         assert "Missing section" in correction
+
+    @pytest.mark.asyncio
+    @patch("auto_scientist.agents.report.safe_query")
+    async def test_incomplete_report_gets_warning_header(self, mock_query, tmp_path):
+        """When report stays incomplete after all retries, a warning header is prepended."""
+        async def fake_query(**kwargs):
+            assistant_msg = MagicMock(spec=AssistantMessage)
+            text_block = MagicMock(spec=TextBlock)
+            text_block.text = _INCOMPLETE_REPORT
+            assistant_msg.content = [text_block]
+            result_msg = MagicMock(spec=ResultMessage)
+            result_msg.session_id = "report-session-warn"
+            yield assistant_msg
+            yield result_msg
+
+        mock_query.side_effect = fake_query
+
+        state = ExperimentState(domain="test", goal="test goal")
+        notebook_path = tmp_path / "lab_notebook.xml"
+        notebook_path.write_text("# Notebook")
+
+        result = await run_report(
+            state=state, notebook_path=notebook_path, output_dir=tmp_path,
+        )
+        assert result.startswith("> **WARNING: This report is incomplete.**")
+        assert "Missing sections:" in result

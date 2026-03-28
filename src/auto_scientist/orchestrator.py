@@ -380,7 +380,8 @@ class Orchestrator:
                 self.state.save(state_path)
                 logger.info("Ingestion complete, entering iteration phase")
 
-                self._live.end_iteration("done", "blue")
+                iter_summary = await self._generate_iteration_summary()
+                self._live.end_iteration("done", "green", iter_summary)
                 self._live.flush_completed()
 
             # Phase 1: Unified iteration loop
@@ -432,7 +433,8 @@ class Orchestrator:
                 self.state.phase = "stopped"
                 self.state.save(state_path)
 
-                self._live.end_iteration("done", "blue")
+                iter_summary = await self._generate_iteration_summary()
+                self._live.end_iteration("done", "green", iter_summary)
                 self._live.flush_completed()
 
             logger.info("Run finished successfully")
@@ -519,8 +521,9 @@ class Orchestrator:
             self._persist_artifact(version_dir, "plan.json", plan)
             logger.info(f"Scientist stop: {plan.get('stop_reason', 'unknown')}")
             self.state.phase = "report"
+            iter_summary = await self._generate_iteration_summary()
             self._live.end_iteration(
-                f"stopped: {plan.get('stop_reason', 'unknown')}", "yellow",
+                f"stopped: {plan.get('stop_reason', 'unknown')}", "yellow", iter_summary,
             )
             self._live.flush_completed()
             return
@@ -572,7 +575,8 @@ class Orchestrator:
                 f"Iteration {self.state.iteration} complete: "
                 f"status=failed (coder produced no script)"
             )
-            self._live.end_iteration("failed (no script)", "red")
+            iter_summary = await self._generate_iteration_summary()
+            self._live.end_iteration("failed (no script)", "red", iter_summary)
             self._live.flush_completed()
             self.state.iteration += 1
             return
@@ -614,7 +618,8 @@ class Orchestrator:
 
         # Iteration border color: green=completed, red=failed
         status_style = "red" if version_entry.status != "completed" else "green"
-        self._live.end_iteration(version_entry.status, status_style)
+        iter_summary = await self._generate_iteration_summary()
+        self._live.end_iteration(version_entry.status, status_style, iter_summary)
         self._live.flush_completed()
 
         # Increment at end of loop body
@@ -679,6 +684,24 @@ class Orchestrator:
     def _should_summarize(self) -> bool:
         """Check if summaries are enabled."""
         return self.model_config.summarizer is not None
+
+    async def _generate_iteration_summary(self) -> str:
+        """Generate a combined recap from all agents' done_summaries for the current iteration."""
+        if not self._should_summarize():
+            return ""
+        container = self._live._current_iteration
+        if container is None:
+            return ""
+        summaries = [
+            (p.panel_name, p.done_summary)
+            for p in getattr(container, "_panels", [])
+            if p.done and p.done_summary
+        ]
+        if not summaries:
+            return ""
+        from auto_scientist.summarizer import summarize_iteration
+
+        return await summarize_iteration(summaries, self._summary_model)
 
     @property
     def _summary_model(self) -> str:
@@ -757,8 +780,15 @@ class Orchestrator:
         usage = getattr(collect_text_from_query, "last_usage", {})
         if not usage:
             return
+        # Claude Code SDK splits input tokens across cache buckets:
+        # input_tokens (non-cached) + cache_creation + cache_read = total input
+        in_tok = (
+            usage.get("input_tokens", 0)
+            + usage.get("cache_creation_input_tokens", 0)
+            + usage.get("cache_read_input_tokens", 0)
+        )
         panel.set_stats(
-            input_tokens=usage.get("input_tokens", 0),
+            input_tokens=in_tok,
             output_tokens=usage.get("output_tokens", 0),
             num_turns=usage.get("num_turns", 0),
         )
