@@ -85,33 +85,25 @@ plan as given.
 
 8. Include clear comments explaining changes from the previous version.
 
-9. When implementing threshold-based decision rules, always determine
-   the direction empirically: evaluate both assignments (feature > T
-   maps to class A vs class B) and select the one with better
-   performance. Report the chosen direction and its accuracy in
-   results.txt. Do not assume the direction from the plan alone,
-   even if the plan specifies one. The plan identifies which feature
-   separates which classes; the optimal direction is a data property.
+9. Use f-strings for string formatting (project convention).
 
-10. Use f-strings for string formatting (project convention).
-
-11. After writing the script, verify syntax by running:
+10. After writing the script, verify syntax by running:
     `python -c "import py_compile; py_compile.compile('<script_path>', doraise=True)"`
 
-12. Run the script:
+11. Run the script:
     `timeout {run_timeout_minutes}m {run_command} \
      > results.txt 2>stderr.txt; echo $? > exitcode.txt`
     Separate stdout and stderr so that results.txt contains only the script's
     output (which the Analyst will read), and stderr.txt contains error info
     for your debugging. Read exitcode.txt to determine the exit code.
 
-13. If the exit code is 0, the script succeeded. Write run_result.json and
+12. If the exit code is 0, the script succeeded. Write run_result.json and
     stop. Do not re-run because you dislike the metrics, the results look
     poor, or the hypothesis was not supported. Bad results are valid results.
     The Analyst and Scientist will evaluate quality and course-correct in the
     next iteration. Re-running to improve results is their job, not yours.
 
-14. If the exit code is non-zero:
+13. If the exit code is non-zero:
     - Exit code 124 means timeout. Note this for run_result.json. Do not retry
       on timeout (the approach likely needs rethinking by the Scientist).
     - Otherwise, read stderr.txt to diagnose the runtime error, fix the
@@ -119,16 +111,16 @@ plan as given.
       missing files, etc.), never change the methodology or approach.
       Repeat until the script runs to completion or you run out of turns.
 
-15. After the script finishes (success or final failure), write run_result.json
+14. After the script finishes (success or final failure), write run_result.json
     in the same directory as the script:
     {{"success": true/false, "return_code": N, "timed_out": true/false,
      "error": "..." or null, "attempts": N}}
 
-16. Always run the script in the foreground (synchronously). Never use
+15. Always run the script in the foreground (synchronously). Never use
     background execution (`&`), `nohup`, or `sleep` to wait for results.
     These scripts process small datasets and finish in seconds.
 
-17. Be concise. Do not write long summaries or status reports in your text
+16. Be concise. Do not write long summaries or status reports in your text
     output. Your deliverables are the script, results.txt, plots, and
     run_result.json. Text output is not read by any downstream agent.
 </instructions>
