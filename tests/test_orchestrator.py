@@ -39,7 +39,7 @@ class TestOrchestratorInit:
     def test_defaults(self, base_state, tmp_path):
         o = Orchestrator(state=base_state, data_path=tmp_path, output_dir=tmp_path)
         assert o.max_iterations == 20
-        assert len(o.model_config.critics) == 2
+        assert len(o.model_config.critics) == 3
         assert o.debate_rounds == 1
         assert o.max_consecutive_failures == 5
 
@@ -71,10 +71,12 @@ class TestValidatePrerequisites:
     def _skip_model_validation(self, monkeypatch):
         """Skip model name and reasoning API validation in prerequisite tests."""
         monkeypatch.setattr(
-            "auto_scientist.orchestrator._validate_model_names", lambda mc: [],
+            "auto_scientist.orchestrator._validate_model_names",
+            lambda mc: [],
         )
         monkeypatch.setattr(
-            "auto_scientist.orchestrator._validate_reasoning_configs", lambda mc: [],
+            "auto_scientist.orchestrator._validate_reasoning_configs",
+            lambda mc: [],
         )
 
     def _make_orchestrator(self, tmp_path, state=None, data_path=_SENTINEL, mc=None):
@@ -84,7 +86,8 @@ class TestValidatePrerequisites:
             state=s,
             data_path=dp,
             output_dir=tmp_path / "out",
-            model_config=mc or ModelConfig(
+            model_config=mc
+            or ModelConfig(
                 defaults=AgentModelConfig(model="claude-sonnet-4-6"),
                 critics=[],
             ),
@@ -99,11 +102,13 @@ class TestValidatePrerequisites:
     def _mock_auth_fail(fail_provider):
         """Return a factory that fails for a specific provider."""
         _names = {"anthropic": "Anthropic", "openai": "OpenAI", "google": "Google"}
+
         def _check(provider):
             if provider == fail_provider:
                 name = _names.get(provider, provider)
                 return f"{name} SDK authentication failed: missing credentials"
             return None
+
         return _check
 
     def test_passes_when_everything_present(self, tmp_path, monkeypatch):
@@ -681,7 +686,6 @@ class TestIteration0:
                 orchestrator, "_run_coder", new_callable=AsyncMock, return_value=script_path
             ),
             patch.object(orchestrator, "_read_run_result", return_value=run_result),
-
         ):
             await orchestrator._run_iteration_body()
 
@@ -736,7 +740,6 @@ class TestIteration0:
                 "_read_run_result",
                 return_value=run_result,
             ),
-
         ):
             await orchestrator._run_iteration_body()
 
@@ -827,7 +830,6 @@ class TestRunIteration:
                 new_callable=AsyncMock,
                 return_value=plan,
             ),
-
         ):
             await orchestrator._run_iteration_body()
 
@@ -892,7 +894,6 @@ class TestRunIteration:
                 "_read_run_result",
                 return_value=run_result,
             ),
-
         ):
             await orchestrator._run_iteration_body()
 
@@ -925,7 +926,6 @@ class TestRunIteration:
                 orchestrator, "_run_coder", new_callable=AsyncMock, return_value=script_path
             ),
             patch.object(orchestrator, "_read_run_result", return_value=run_result),
-
         ):
             await orchestrator._run_iteration_body()
 
@@ -953,7 +953,6 @@ class TestRunIteration:
             patch.object(
                 orchestrator, "_run_scientist_plan", new_callable=AsyncMock, return_value=plan
             ),
-
         ):
             await orchestrator._run_iteration_body()
 
@@ -980,7 +979,6 @@ class TestRunIteration:
             patch.object(
                 orchestrator, "_run_coder", new_callable=AsyncMock, return_value=script_path
             ),
-
         ):
             await orchestrator._run_iteration_body()
 
@@ -1015,7 +1013,6 @@ class TestRunIteration:
                 new_callable=AsyncMock,
                 return_value=None,
             ),
-
         ):
             await orchestrator._run_iteration_body()
 
@@ -1049,7 +1046,6 @@ class TestRunIteration:
                 orchestrator, "_run_coder", new_callable=AsyncMock, return_value=script_path
             ),
             patch.object(orchestrator, "_read_run_result", return_value=run_result),
-
         ):
             await orchestrator._run_iteration_body()
 
@@ -1248,12 +1244,15 @@ class TestRunDebateOrchestrator:
         debate_result = DebateResult(
             persona="Methodologist",
             critic_model="openai:gpt-4o",
-            rounds=[DebateRound(
-                critic_output=CriticOutput(
-                    concerns=[], alternative_hypotheses=[],
-                    overall_assessment="looks good",
-                ),
-            )],
+            rounds=[
+                DebateRound(
+                    critic_output=CriticOutput(
+                        concerns=[],
+                        alternative_hypotheses=[],
+                        overall_assessment="looks good",
+                    ),
+                )
+            ],
             raw_transcript=[],
         )
 
@@ -1271,8 +1270,8 @@ class TestRunDebateOrchestrator:
         ):
             result = await orchestrator._run_debate(plan, None)
 
-        # 3 debates (one per persona), all using the same single critic model
-        assert len(result) == 3
+        # 4 debates (one per persona), all using the same single critic model
+        assert len(result) == 4
         call_kwargs = mock_single.call_args.kwargs
         assert call_kwargs["config"].model == "gpt-4o"
 
@@ -1303,16 +1302,22 @@ class TestRunScientistRevisionOrchestrator:
             DebateResult(
                 persona="Methodologist",
                 critic_model="openai:gpt-4o",
-                rounds=[DebateRound(
-                    critic_output=CriticOutput(
-                        concerns=[Concern(
-                            claim="weak", severity="medium",
-                            confidence="medium", category="methodology",
-                        )],
-                        alternative_hypotheses=[],
-                        overall_assessment="weak",
-                    ),
-                )],
+                rounds=[
+                    DebateRound(
+                        critic_output=CriticOutput(
+                            concerns=[
+                                Concern(
+                                    claim="weak",
+                                    severity="medium",
+                                    confidence="medium",
+                                    category="methodology",
+                                )
+                            ],
+                            alternative_hypotheses=[],
+                            overall_assessment="weak",
+                        ),
+                    )
+                ],
                 raw_transcript=[{"role": "critic", "content": "weak"}],
             ),
         ]
@@ -1345,13 +1350,15 @@ class TestRunScientistRevisionOrchestrator:
             DebateResult(
                 persona="Methodologist",
                 critic_model="openai:gpt-4o",
-                rounds=[DebateRound(
-                    critic_output=CriticOutput(
-                        concerns=[],
-                        alternative_hypotheses=[],
-                        overall_assessment="weak",
-                    ),
-                )],
+                rounds=[
+                    DebateRound(
+                        critic_output=CriticOutput(
+                            concerns=[],
+                            alternative_hypotheses=[],
+                            overall_assessment="weak",
+                        ),
+                    )
+                ],
                 raw_transcript=[],
             ),
         ]
@@ -1368,8 +1375,11 @@ class TestRunScientistRevisionOrchestrator:
 
 class TestBuildConcernLedger:
     def _make_debate_result(
-        self, persona="Methodologist", model="openai:gpt-4o",
-        concerns=None, defense_responses=None,
+        self,
+        persona="Methodologist",
+        model="openai:gpt-4o",
+        concerns=None,
+        defense_responses=None,
     ):
         from auto_scientist.agents.debate_models import (
             Concern,
@@ -1381,8 +1391,10 @@ class TestBuildConcernLedger:
 
         concerns = concerns or [
             Concern(
-                claim="Data issue", severity="high",
-                confidence="high", category="methodology",
+                claim="Data issue",
+                severity="high",
+                confidence="high",
+                category="methodology",
             ),
         ]
         critic_output = CriticOutput(
@@ -1404,8 +1416,10 @@ class TestBuildConcernLedger:
             rounds = [DebateRound(critic_output=critic_output)]
 
         return DebateResult(
-            persona=persona, critic_model=model,
-            rounds=rounds, raw_transcript=[],
+            persona=persona,
+            critic_model=model,
+            rounds=rounds,
+            raw_transcript=[],
         )
 
     def test_single_round_no_defense(self):
@@ -1438,14 +1452,14 @@ class TestBuildConcernLedger:
     def test_multiple_personas(self):
         r1 = self._make_debate_result(persona="Methodologist")
         r2 = self._make_debate_result(
-            persona="Novelty Skeptic",
+            persona="Falsification Expert",
             model="google:gemini-3.1-pro-preview",
         )
         ledger = Orchestrator._build_concern_ledger([r1, r2])
 
         assert len(ledger) == 2
         assert ledger[0]["persona"] == "Methodologist"
-        assert ledger[1]["persona"] == "Novelty Skeptic"
+        assert ledger[1]["persona"] == "Falsification Expert"
         assert ledger[1]["critic_model"] == "google:gemini-3.1-pro-preview"
 
     def test_empty_results(self):
@@ -1461,21 +1475,27 @@ class TestBuildConcernLedger:
 
         concerns = [
             Concern(
-                claim="Issue A", severity="high",
-                confidence="high", category="methodology",
+                claim="Issue A",
+                severity="high",
+                confidence="high",
+                category="methodology",
             ),
             Concern(
-                claim="Issue B", severity="medium",
-                confidence="medium", category="feasibility",
+                claim="Issue B",
+                severity="medium",
+                confidence="medium",
+                category="falsification",
             ),
         ]
         defense_responses = [
             DefenseResponse(
-                concern="Issue A", verdict="accepted",
+                concern="Issue A",
+                verdict="accepted",
                 reasoning="Will fix A.",
             ),
             DefenseResponse(
-                concern="Issue B", verdict="rejected",
+                concern="Issue B",
+                verdict="rejected",
                 reasoning="B is fine.",
             ),
         ]
@@ -1550,9 +1570,7 @@ class TestRunCoderOrchestrator:
         ):
             await orchestrator._run_coder({"hypothesis": "test"})
 
-        assert str(captured_kwargs["previous_script"]) == str(
-            tmp_path / "v00" / "experiment.py"
-        )
+        assert str(captured_kwargs["previous_script"]) == str(tmp_path / "v00" / "experiment.py")
 
     @pytest.mark.asyncio
     async def test_forwards_run_config_from_domain(self, orchestrator, tmp_path):
@@ -1696,8 +1714,7 @@ class TestReadRunResult:
         version_dir = tmp_path / "v01"
         version_dir.mkdir()
         (version_dir / "run_result.json").write_text(
-            '{"success": true, "return_code": 0, "timed_out": false, '
-            '"error": null, "attempts": 1}'
+            '{"success": true, "return_code": 0, "timed_out": false, "error": null, "attempts": 1}'
         )
         (version_dir / "experiment.py").write_text("print('hi')")
         (version_dir / "plot.png").write_text("fake")
@@ -2061,7 +2078,6 @@ class TestSummaryIntegration:
                 orchestrator, "_run_coder", new_callable=AsyncMock, return_value=script_path
             ),
             patch.object(orchestrator, "_read_run_result", return_value=run_result),
-
             patch(
                 "auto_scientist.orchestrator.summarize_results",
                 new_callable=AsyncMock,
@@ -2106,7 +2122,6 @@ class TestSummaryIntegration:
                 return_value=script_path,
             ),
             patch.object(orchestrator, "_read_run_result", return_value=run_result),
-
             patch(
                 "auto_scientist.orchestrator.run_with_summaries",
                 new_callable=AsyncMock,
@@ -2121,6 +2136,7 @@ class TestSummaryIntegration:
 # ---------------------------------------------------------------------------
 # Prediction updates
 # ---------------------------------------------------------------------------
+
 
 class TestApplyPredictionUpdates:
     def test_stores_records_with_pred_ids(self, orchestrator):
@@ -2164,6 +2180,7 @@ class TestApplyPredictionUpdates:
 class TestResolvePredictionOutcomes:
     def _add_pending(self, orchestrator, prediction_text, pred_id=""):
         from auto_scientist.state import PredictionRecord
+
         orchestrator.state.prediction_history.append(
             PredictionRecord(
                 pred_id=pred_id,

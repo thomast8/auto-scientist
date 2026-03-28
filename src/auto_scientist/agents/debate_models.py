@@ -12,6 +12,15 @@ from typing import Any, Literal
 
 from pydantic import BaseModel, ConfigDict
 
+ConcernCategory = Literal[
+    "methodology",
+    "trajectory",
+    "falsification",
+    "consistency",
+    "criteria",
+    "other",
+]
+
 
 class Concern(BaseModel):
     """A single concern raised by a critic."""
@@ -21,7 +30,7 @@ class Concern(BaseModel):
     claim: str
     severity: Literal["high", "medium", "low"]
     confidence: Literal["high", "medium", "low"]
-    category: Literal["methodology", "novelty", "feasibility", "criteria", "other"]
+    category: ConcernCategory
 
 
 class CriticOutput(BaseModel):
@@ -65,7 +74,7 @@ class ConcernLedgerEntry(BaseModel):
     claim: str
     severity: Literal["high", "medium", "low"]
     confidence: Literal["high", "medium", "low"]
-    category: Literal["methodology", "novelty", "feasibility", "criteria", "other"]
+    category: ConcernCategory
     persona: str
     critic_model: str
     scientist_verdict: Literal["accepted", "rejected", "partially_accepted"] | None = None
@@ -101,7 +110,7 @@ CRITIC_OUTPUT_SCHEMA: dict[str, Any] = {
             "claim": "<specific concern about the plan>",
             "severity": "high | medium | low",
             "confidence": "high | medium | low",
-            "category": "methodology | novelty | feasibility | criteria | other",
+            "category": "methodology | trajectory | falsification | consistency | criteria | other",
         }
     ],
     "alternative_hypotheses": ["<alternative hypothesis the scientist has not considered>"],

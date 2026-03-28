@@ -62,6 +62,7 @@ BUILTIN_PRESETS: dict[str, dict] = {
             # Gemini 3 Pro: only LOW and HIGH thinkingLevel (MEDIUM is Flash-only, 2026-03)
             {"provider": "google", "model": "gemini-3.1-pro-preview", "reasoning": "high"},
             {"provider": "openai", "model": "gpt-5.4", "reasoning": "medium"},
+            {"provider": "anthropic", "model": "claude-sonnet-4-6", "reasoning": "medium"},
         ],
     },
     "fast": {
@@ -70,6 +71,7 @@ BUILTIN_PRESETS: dict[str, dict] = {
         "critics": [
             {"provider": "google", "model": "gemini-3.1-flash-lite-preview", "reasoning": "off"},
             {"provider": "openai", "model": "gpt-5.4-nano", "reasoning": "off"},
+            {"provider": "anthropic", "model": "claude-haiku-4-5-20251001", "reasoning": "off"},
         ],
     },
     "high": {
@@ -79,6 +81,7 @@ BUILTIN_PRESETS: dict[str, dict] = {
         "critics": [
             {"provider": "google", "model": "gemini-3.1-pro-preview", "reasoning": "high"},
             {"provider": "openai", "model": "gpt-5.4", "reasoning": "high"},
+            {"provider": "anthropic", "model": "claude-sonnet-4-6", "reasoning": "high"},
         ],
     },
     "max": {
@@ -89,6 +92,7 @@ BUILTIN_PRESETS: dict[str, dict] = {
         "critics": [
             {"provider": "google", "model": "gemini-3.1-pro-preview", "reasoning": "max"},
             {"provider": "openai", "model": "gpt-5.4", "reasoning": "max"},
+            {"provider": "anthropic", "model": "claude-sonnet-4-6", "reasoning": "max"},
         ],
     },
 }

@@ -54,7 +54,7 @@ _AGENT_FIELDS = ["ingestor", "analyst", "scientist", "coder", "report", "summari
 # SDK agents are locked to anthropic provider
 _SDK_AGENTS = {"ingestor", "analyst", "scientist", "coder", "report"}
 
-_NUM_CRITIC_SLOTS = 3
+_NUM_CRITIC_SLOTS = 4
 
 # Known models per provider (most capable first)
 MODELS_BY_PROVIDER: dict[str, list[tuple[str, str]]] = {

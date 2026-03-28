@@ -37,6 +37,7 @@ from auto_scientist.models.openai_client import query_openai
 from auto_scientist.prompts.critic import (
     CRITIC_SYSTEM_BASE,
     CRITIC_USER,
+    DEFAULT_CRITIC_INSTRUCTIONS,
     PERSONAS,
     SCIENTIST_DEBATE_SYSTEM,
     SCIENTIST_DEBATE_USER,
@@ -240,6 +241,7 @@ async def run_single_critic_debate(
     persona = persona or {"name": "Generic", "system_text": ""}
     persona_name = persona["name"]
     persona_text = persona["system_text"]
+    persona_instructions = persona.get("instructions", "")
 
     label = f"{config.provider}:{config.model}"
     raw_transcript: list[dict[str, str]] = []
@@ -253,6 +255,7 @@ async def run_single_critic_debate(
         notebook_content,
         domain_knowledge,
         persona_text=persona_text,
+        persona_instructions=persona_instructions,
         analysis_json=analysis_json,
         prediction_history=prediction_history,
         goal=goal,
@@ -317,6 +320,7 @@ async def run_single_critic_debate(
                 domain_knowledge,
                 scientist_defense=sci_result.text,
                 persona_text=persona_text,
+                persona_instructions=persona_instructions,
                 analysis_json=analysis_json,
                 prediction_history=prediction_history,
                 goal=goal,
@@ -456,6 +460,7 @@ def _build_critic_prompt(
     domain_knowledge: str,
     scientist_defense: str = "",
     persona_text: str = "",
+    persona_instructions: str = "",
     analysis_json: str = "",
     prediction_history: str = "",
     goal: str = "",
@@ -465,13 +470,19 @@ def _build_critic_prompt(
     For round 1, scientist_defense is empty.
     For round 2+, it contains the scientist's response to the previous critique.
     The critic is not told they are "refining" anything (stateless design).
+
+    persona_instructions overrides the default instructions block when provided
+    (used by the Trajectory Critic which needs arc-focused instructions).
     """
     defense_section = ""
     if scientist_defense:
         defense_section = f"<scientist_defense>{scientist_defense}</scientist_defense>"
 
+    effective_instructions = persona_instructions or DEFAULT_CRITIC_INSTRUCTIONS
+
     system = CRITIC_SYSTEM_BASE.format(
         persona_text=persona_text,
+        persona_instructions=effective_instructions,
         critic_output_schema=json.dumps(CRITIC_OUTPUT_SCHEMA, indent=2),
     )
 

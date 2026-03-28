@@ -51,9 +51,7 @@ class TestAgentModelConfig:
 
     def test_reasoning_string_shorthand(self):
         """A plain string like 'high' should parse as ReasoningConfig(level='high')."""
-        cfg = AgentModelConfig.model_validate(
-            {"model": "claude-sonnet-4-6", "reasoning": "high"}
-        )
+        cfg = AgentModelConfig.model_validate({"model": "claude-sonnet-4-6", "reasoning": "high"})
         assert cfg.reasoning.level == "high"
         assert cfg.reasoning.budget is None
 
@@ -149,11 +147,13 @@ class TestBuiltinPresets:
 
     def test_default_preset_has_critics(self):
         mc = ModelConfig.builtin_preset("default")
-        assert len(mc.critics) == 2
+        assert len(mc.critics) == 3
         assert mc.critics[0].provider == "google"
         assert mc.critics[0].model == "gemini-3.1-pro-preview"
         assert mc.critics[1].provider == "openai"
         assert mc.critics[1].model == "gpt-5.4"
+        assert mc.critics[2].provider == "anthropic"
+        assert mc.critics[2].model == "claude-sonnet-4-6"
 
 
 class TestFromToml:
@@ -321,4 +321,4 @@ class TestFromExperimentConfig:
         mc = ModelConfig.from_experiment_config(exp)
         assert mc.resolve("scientist").model == "claude-opus-4-6"
         assert mc.resolve("scientist").reasoning.level == "high"
-        assert len(mc.critics) == 2
+        assert len(mc.critics) == 3

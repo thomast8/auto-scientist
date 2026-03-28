@@ -27,7 +27,8 @@ def _valid_critic_json(
 ) -> str:
     """Build a valid CriticOutput JSON string."""
     obj = {
-        "concerns": concerns or [
+        "concerns": concerns
+        or [
             {
                 "claim": "Data quality issue",
                 "severity": "high",
@@ -46,7 +47,8 @@ def _valid_defense_json(
 ) -> str:
     """Build a valid ScientistDefense JSON string."""
     obj = {
-        "responses": responses or [
+        "responses": responses
+        or [
             {
                 "concern": "Data quality issue",
                 "verdict": "accepted",
@@ -156,7 +158,10 @@ class TestBuildCriticPrompt:
 
     def test_with_defense_includes_tag(self):
         prompt = _build_critic_prompt(
-            {"h": "p"}, "", "", scientist_defense="I disagree because...",
+            {"h": "p"},
+            "",
+            "",
+            scientist_defense="I disagree because...",
         )
         assert "<scientist_defense>" in prompt
         assert "I disagree because..." in prompt
@@ -193,19 +198,20 @@ class TestRunDebate:
         assert result == []
 
     @pytest.mark.asyncio
-    async def test_always_3_debates_with_2_critics(self, base_kwargs):
-        """Always runs 3 debates (one per persona), regardless of critic count."""
+    async def test_always_4_debates_with_2_critics(self, base_kwargs):
+        """Always runs 4 debates (one per persona), regardless of critic count."""
         with (
             patch(OPENAI_PATH, new_callable=AsyncMock, return_value=_CR()),
             patch(GOOGLE_PATH, new_callable=AsyncMock, return_value=_CR()),
         ):
             results = await run_debate(**base_kwargs, max_rounds=1)
 
-        assert len(results) == 3
+        assert len(results) == 4
         persona_names = [r.persona for r in results]
         assert "Methodologist" in persona_names
-        assert "Novelty Skeptic" in persona_names
-        assert "Feasibility Assessor" in persona_names
+        assert "Trajectory Critic" in persona_names
+        assert "Falsification Expert" in persona_names
+        assert "Evidence Auditor" in persona_names
 
     @pytest.mark.asyncio
     async def test_returns_debate_result_objects(self, base_kwargs):
@@ -323,9 +329,7 @@ class TestRunDebate:
     @pytest.mark.asyncio
     async def test_unknown_provider_raises_when_all_fail(self, plan):
         """Unknown provider causes all debates to fail, raising RuntimeError."""
-        bad_config = AgentModelConfig.model_validate(
-            {"provider": "openai", "model": "model"}
-        )
+        bad_config = AgentModelConfig.model_validate({"provider": "openai", "model": "model"})
         object.__setattr__(bad_config, "provider", "unknown")
         with pytest.raises(RuntimeError, match="All .* critic debates failed"):
             await run_debate(
@@ -349,7 +353,7 @@ class TestRunDebate:
                 max_rounds=1,
             )
 
-        assert len(result) == 3
+        assert len(result) == 4
         # All 3 debates use the same model (only 1 critic configured)
         for r in result:
             assert r.critic_model == "anthropic:claude-sonnet-4-6"
@@ -358,7 +362,8 @@ class TestRunDebate:
     async def test_reasoning_passed_to_critic(self, plan):
         """Critic reasoning config is forwarded to model client."""
         critic = AgentModelConfig(
-            provider="openai", model="o4-mini",
+            provider="openai",
+            model="o4-mini",
             reasoning=ReasoningConfig(level="high"),
         )
         with patch(
@@ -407,11 +412,13 @@ class TestCriticRetry:
             patch(GOOGLE_PATH, new_callable=AsyncMock, return_value=valid),
         ):
             result = await run_debate(
-                critic_configs=two_critics, plan=plan,
-                notebook_content="", max_rounds=1,
+                critic_configs=two_critics,
+                plan=plan,
+                notebook_content="",
+                max_rounds=1,
             )
 
-        assert len(result) == 3
+        assert len(result) == 4
         # OpenAI called: 2 for Methodologist (retry) + 1 for Feasibility
         assert mock_openai.call_count == 3
 
@@ -423,8 +430,10 @@ class TestCriticRetry:
             patch(GOOGLE_PATH, new_callable=AsyncMock, return_value=_CR()),
         ):
             result = await run_debate(
-                critic_configs=two_critics, plan=plan,
-                notebook_content="", max_rounds=1,
+                critic_configs=two_critics,
+                plan=plan,
+                notebook_content="",
+                max_rounds=1,
             )
         # Some debates may fail, but we get results from successful ones
         assert isinstance(result, list)
@@ -438,8 +447,10 @@ class TestCriticRetry:
             pytest.raises(RuntimeError, match="All .* critic debates failed"),
         ):
             await run_debate(
-                critic_configs=two_critics, plan=plan,
-                notebook_content="", max_rounds=1,
+                critic_configs=two_critics,
+                plan=plan,
+                notebook_content="",
+                max_rounds=1,
             )
 
 
@@ -454,7 +465,9 @@ class TestCriticValidation:
             return_value=_CR(),
         ):
             result = await run_single_critic_debate(
-                config=critic, plan=plan, notebook_content="",
+                config=critic,
+                plan=plan,
+                notebook_content="",
                 max_rounds=1,
             )
 
@@ -472,7 +485,9 @@ class TestCriticValidation:
             return_value=_critic_result("Not valid JSON at all, just prose critique."),
         ):
             result = await run_single_critic_debate(
-                config=critic, plan=plan, notebook_content="",
+                config=critic,
+                plan=plan,
+                notebook_content="",
                 max_rounds=1,
             )
 
@@ -495,7 +510,9 @@ class TestScientistDefenseValidation:
             patch(ANTHROPIC_PATH, new_callable=AsyncMock, return_value=_DR()),
         ):
             result = await run_single_critic_debate(
-                config=critic, plan=plan, notebook_content="",
+                config=critic,
+                plan=plan,
+                notebook_content="",
                 max_rounds=2,
             )
 
@@ -517,7 +534,9 @@ class TestScientistDefenseValidation:
             ),
         ):
             result = await run_single_critic_debate(
-                config=critic, plan=plan, notebook_content="",
+                config=critic,
+                plan=plan,
+                notebook_content="",
                 max_rounds=2,
             )
 
@@ -529,14 +548,19 @@ class TestScientistDefenseValidation:
 class TestBuildCriticPromptContext:
     def test_analysis_json_included(self):
         prompt = _build_critic_prompt(
-            {"h": "p"}, "", "", analysis_json='{"key_metrics": {"rmse": 0.52}}',
+            {"h": "p"},
+            "",
+            "",
+            analysis_json='{"key_metrics": {"rmse": 0.52}}',
         )
         assert "<analysis>" in prompt
         assert "rmse" in prompt
 
     def test_prediction_history_included(self):
         prompt = _build_critic_prompt(
-            {"h": "p"}, "", "",
+            {"h": "p"},
+            "",
+            "",
             prediction_history="[1.0] CONFIRMED: polynomial fits well",
         )
         assert "<prediction_history>" in prompt
@@ -554,7 +578,10 @@ class TestBuildCriticPromptContext:
 class TestBuildScientistDebatePromptContext:
     def test_analysis_json_included(self):
         prompt = _build_scientist_debate_user_prompt(
-            {"h": "p"}, "", "", critique="test",
+            {"h": "p"},
+            "",
+            "",
+            critique="test",
             analysis_json='{"key_metrics": {"r2": 0.97}}',
         )
         assert "<analysis>" in prompt
@@ -562,7 +589,10 @@ class TestBuildScientistDebatePromptContext:
 
     def test_prediction_history_included(self):
         prompt = _build_scientist_debate_user_prompt(
-            {"h": "p"}, "", "", critique="test",
+            {"h": "p"},
+            "",
+            "",
+            critique="test",
             prediction_history="[2.0] REFUTED: linear model insufficient",
         )
         assert "<prediction_history>" in prompt
@@ -572,7 +602,10 @@ class TestBuildScientistDebatePromptContext:
 class TestBuildScientistDebatePromptStructured:
     def test_critic_persona_in_prompt(self):
         prompt = _build_scientist_debate_user_prompt(
-            {"h": "p"}, "", "", critique="test",
+            {"h": "p"},
+            "",
+            "",
+            critique="test",
             critic_persona="Methodologist",
         )
         assert "<critic_persona>" in prompt
@@ -580,7 +613,10 @@ class TestBuildScientistDebatePromptStructured:
 
     def test_default_critic_persona(self):
         prompt = _build_scientist_debate_user_prompt(
-            {"h": "p"}, "", "", critique="test",
+            {"h": "p"},
+            "",
+            "",
+            critique="test",
         )
         assert "<critic_persona>" in prompt
         assert "(generic critic)" in prompt
@@ -650,10 +686,10 @@ class TestRunDebateWithContext:
 
 
 class TestPersonas:
-    def test_personas_has_three_entries(self):
+    def test_personas_has_four_entries(self):
         from auto_scientist.prompts.critic import PERSONAS
 
-        assert len(PERSONAS) == 3
+        assert len(PERSONAS) == 4
 
     def test_each_persona_has_name_and_system_text(self):
         from auto_scientist.prompts.critic import PERSONAS
@@ -669,8 +705,21 @@ class TestPersonas:
 
         names = [p["name"] for p in PERSONAS]
         assert "Methodologist" in names
-        assert "Novelty Skeptic" in names
-        assert "Feasibility Assessor" in names
+        assert "Trajectory Critic" in names
+        assert "Falsification Expert" in names
+        assert "Evidence Auditor" in names
+
+    def test_trajectory_critic_has_instructions(self):
+        from auto_scientist.prompts.critic import PERSONAS
+
+        tc = next(p for p in PERSONAS if p["name"] == "Trajectory Critic")
+        assert "instructions" in tc
+        assert "<instructions>" in tc["instructions"]
+
+    def test_default_instructions_constant_exists(self):
+        from auto_scientist.prompts.critic import DEFAULT_CRITIC_INSTRUCTIONS
+
+        assert "<instructions>" in DEFAULT_CRITIC_INSTRUCTIONS
 
     def test_model_rotation_two_models(self):
         from auto_scientist.prompts.critic import get_model_index_for_debate
@@ -712,7 +761,9 @@ class TestResponseSchemaPassthrough:
             return_value=_CR(),
         ) as mock_openai:
             await run_single_critic_debate(
-                config=critic, plan=plan, notebook_content="",
+                config=critic,
+                plan=plan,
+                notebook_content="",
                 max_rounds=1,
             )
 
@@ -731,7 +782,9 @@ class TestResponseSchemaPassthrough:
             ) as mock_anthropic,
         ):
             await run_single_critic_debate(
-                config=critic, plan=plan, notebook_content="",
+                config=critic,
+                plan=plan,
+                notebook_content="",
                 max_rounds=2,
             )
 
@@ -743,7 +796,9 @@ class TestGoalInPrompts:
 
     def test_goal_in_critic_prompt(self):
         prompt = _build_critic_prompt(
-            {"hypothesis": "test"}, "", "",
+            {"hypothesis": "test"},
+            "",
+            "",
             goal="discover causal relationships",
         )
         assert "discover causal relationships" in prompt
@@ -751,7 +806,9 @@ class TestGoalInPrompts:
 
     def test_goal_in_scientist_debate_prompt(self):
         prompt = _build_scientist_debate_user_prompt(
-            {"hypothesis": "test"}, "", "",
+            {"hypothesis": "test"},
+            "",
+            "",
             goal="optimize alloy compositions",
         )
         assert "optimize alloy compositions" in prompt
