@@ -59,8 +59,6 @@ BUILTIN_PRESETS: dict[str, dict] = {
         "scientist": {"model": "claude-opus-4-6", "reasoning": "medium"},
         "summarizer": {"provider": "openai", "model": "gpt-5.4-nano", "reasoning": "off"},
         "critics": [
-            # Gemini 3 Pro: only LOW and HIGH thinkingLevel (MEDIUM is Flash-only, 2026-03)
-            {"provider": "google", "model": "gemini-3.1-pro-preview", "reasoning": "high"},
             {"provider": "openai", "model": "gpt-5.4", "reasoning": "medium"},
             {"provider": "anthropic", "model": "claude-sonnet-4-6", "reasoning": "medium"},
         ],
@@ -69,7 +67,6 @@ BUILTIN_PRESETS: dict[str, dict] = {
         "defaults": {"model": "claude-haiku-4-5-20251001", "reasoning": "off"},
         "summarizer": {"provider": "openai", "model": "gpt-5.4-nano", "reasoning": "off"},
         "critics": [
-            {"provider": "google", "model": "gemini-3.1-flash-lite-preview", "reasoning": "off"},
             {"provider": "openai", "model": "gpt-5.4-nano", "reasoning": "off"},
             {"provider": "anthropic", "model": "claude-haiku-4-5-20251001", "reasoning": "off"},
         ],
@@ -79,7 +76,6 @@ BUILTIN_PRESETS: dict[str, dict] = {
         "scientist": {"model": "claude-opus-4-6", "reasoning": "high"},
         "summarizer": {"provider": "openai", "model": "gpt-5.4-nano", "reasoning": "off"},
         "critics": [
-            {"provider": "google", "model": "gemini-3.1-pro-preview", "reasoning": "high"},
             {"provider": "openai", "model": "gpt-5.4", "reasoning": "high"},
             {"provider": "anthropic", "model": "claude-sonnet-4-6", "reasoning": "high"},
         ],
@@ -90,7 +86,6 @@ BUILTIN_PRESETS: dict[str, dict] = {
         "scientist": {"model": "claude-opus-4-6", "reasoning": "max"},
         "summarizer": {"provider": "openai", "model": "gpt-5.4-mini", "reasoning": "off"},
         "critics": [
-            {"provider": "google", "model": "gemini-3.1-pro-preview", "reasoning": "max"},
             {"provider": "openai", "model": "gpt-5.4", "reasoning": "max"},
             {"provider": "anthropic", "model": "claude-sonnet-4-6", "reasoning": "max"},
         ],
