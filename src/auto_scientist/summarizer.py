@@ -129,6 +129,47 @@ async def summarize_agent_output(
         return ""
 
 
+ITERATION_RECAP_PREFIX = (
+    "Reply with 2-3 sentences, max 50 words total. "
+    "Use past tense. Combine the agent summaries into a cohesive iteration recap. "
+    "Focus on the main outcome and key findings. "
+    "Write in first person plural: 'We explored...', 'We found...'."
+)
+
+
+async def summarize_iteration(
+    agent_summaries: list[tuple[str, str]],
+    model: str,
+) -> str:
+    """Generate a combined recap from all agents' final summaries.
+
+    Args:
+        agent_summaries: List of (agent_name, done_summary) pairs.
+        model: OpenAI model to use for summarization.
+
+    Returns:
+        Combined summary string, or "" on failure.
+    """
+    if not agent_summaries:
+        return ""
+
+    lines = [f"{name}: {summary}" for name, summary in agent_summaries if summary]
+    if not lines:
+        return ""
+
+    combined = "\n".join(lines)
+    try:
+        return await _query_summary(
+            model,
+            f"Summarize this iteration's agent results into a cohesive recap.\n\n{ITERATION_RECAP_PREFIX}",
+            f"Agent summaries:\n{combined}",
+            max_tokens=100,
+        )
+    except Exception as e:
+        logger.warning(f"Error generating iteration recap: {e}")
+        return ""
+
+
 async def summarize_results(
     results_text: str,
     model: str,

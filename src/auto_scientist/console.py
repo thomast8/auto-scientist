@@ -48,6 +48,7 @@ from textual.command import Hit, Hits, Provider
 from textual.containers import Vertical, VerticalScroll
 from textual._context import NoActiveAppError
 from textual.css.query import NoMatches
+from textual.message import Message
 from textual.screen import ModalScreen
 from textual.widget import Widget
 from textual.widgets import (
@@ -523,6 +524,35 @@ class MetricsBar(Widget):
 # ---------------------------------------------------------------------------
 
 
+class IterationToggle(Static, can_focus=True):
+    """Clickable toggle for expanding/collapsing iteration agent panels."""
+
+    DEFAULT_CSS = """
+    IterationToggle {
+        padding: 0 1;
+        color: $text-muted;
+    }
+    IterationToggle:hover {
+        background: $surface;
+    }
+    IterationToggle:focus {
+        background: $surface;
+    }
+    """
+
+    class Toggled(Message):
+        """Posted when the toggle is activated."""
+
+    BINDINGS = [Binding("enter", "activate", show=False)]
+
+    async def _on_click(self, event) -> None:
+        event.stop()
+        self.post_message(self.Toggled())
+
+    def action_activate(self) -> None:
+        self.post_message(self.Toggled())
+
+
 class IterationContainer(Vertical):
     """Bordered container grouping panels for one iteration."""
 
@@ -534,6 +564,11 @@ class IterationContainer(Vertical):
         border: solid grey;
         transition: border 300ms in_out_cubic;
     }
+    IterationContainer .iteration-recap {
+        padding: 0 1;
+        color: $text-muted;
+        text-style: italic;
+    }
     """
 
     def __init__(self, iter_title: str) -> None:
@@ -542,6 +577,8 @@ class IterationContainer(Vertical):
         self.border_title = iter_title
         self._in_progress = True
         self._spinner_index = 0
+        self._panels: list[AgentPanel] = []
+        self._is_collapsed = False
 
     def on_mount(self) -> None:
         self._spinner_timer = self.set_interval(1 / 10, self._tick_spinner)
@@ -554,14 +591,91 @@ class IterationContainer(Vertical):
         self.border_title = f"{char} {self._iter_title}"
         self._spinner_index += 1
 
-    def set_result(self, text: str, style: str) -> None:
-        """Set the iteration result as border subtitle."""
+    def add_panel(self, panel: AgentPanel) -> None:
+        """Register an agent panel as a child of this iteration."""
+        self._panels.append(panel)
+
+    def collapse_iteration(self, summary_text: str = "") -> None:
+        """Collapse all agent panels and show an aggregated recap.
+
+        Called once when the iteration finishes. Subsequent show/hide
+        is handled by toggle_iteration().
+        """
+        if self._is_collapsed:
+            return
+        self._is_collapsed = True
+
+        # Aggregate metrics from all panels
+        total_elapsed = sum(p.elapsed for p in self._panels)
+        total_in = sum(p.input_tokens for p in self._panels)
+        total_out = sum(p.output_tokens for p in self._panels)
+        total_turns = sum(p.num_turns for p in self._panels)
+
+        # Build aggregated subtitle: "status | 4m 32s | 1,200 in / 800 out | 5 turns"
+        status = str(self.border_subtitle or "")
+        parts = [status] if status else []
+        parts.append(_format_elapsed(total_elapsed))
+        if total_in or total_out:
+            parts.append(f"{total_in:,} in / {total_out:,} out")
+        if total_turns:
+            label = "turn" if total_turns == 1 else "turns"
+            parts.append(f"{total_turns} {label}")
+        self.border_subtitle = " | ".join(parts)
+
+        # Mount recap summary text (before agent panels)
+        first_panel = self._panels[0] if self._panels else None
+        if summary_text:
+            recap = Static(summary_text, classes="iteration-recap")
+            if first_panel:
+                self.mount(recap, before=first_panel)
+            else:
+                self.mount(recap)
+
+        # Mount toggle widget
+        n = len(self._panels)
+        toggle = IterationToggle(f"▶ Show {n} agent{'s' if n != 1 else ''}")
+        if first_panel:
+            self.mount(toggle, before=first_panel)
+        else:
+            self.mount(toggle)
+
+        # Hide all agent panels
+        for panel in self._panels:
+            panel.styles.display = "none"
+
+    def toggle_iteration(self) -> None:
+        """Toggle agent panel visibility between shown and hidden."""
+        if self._is_collapsed:
+            # Expand
+            self._is_collapsed = False
+            for panel in self._panels:
+                panel.styles.display = "block"
+            for toggle in self.query(IterationToggle):
+                n = len(self._panels)
+                toggle.update(f"▼ Hide {n} agent{'s' if n != 1 else ''}")
+        else:
+            # Collapse
+            self._is_collapsed = True
+            for panel in self._panels:
+                panel.styles.display = "none"
+            for toggle in self.query(IterationToggle):
+                n = len(self._panels)
+                toggle.update(f"▶ Show {n} agent{'s' if n != 1 else ''}")
+
+    def on_iteration_toggle_toggled(self, event: IterationToggle.Toggled) -> None:
+        event.stop()
+        self.toggle_iteration()
+
+    def set_result(self, text: str, style: str, summary_text: str = "") -> None:
+        """Set the iteration result as border subtitle and collapse."""
         self._in_progress = False
         self.border_title = self._iter_title
         self.border_subtitle = text
         valid = {"red", "green", "yellow"}
         if style in valid:
             self.styles.border = ("solid", style)
+        if self._panels:
+            self.collapse_iteration(summary_text)
 
 
 # ---------------------------------------------------------------------------
@@ -821,15 +935,15 @@ class PipelineLive:
             self._file_console.print(iter_title)
             self._file_console.print(f"{'=' * 60}")
 
-    def end_iteration(self, subtitle: str, style: str) -> None:
+    def end_iteration(self, subtitle: str, style: str, summary_text: str = "") -> None:
         """Finalize the iteration container with a result."""
         if self._current_iteration is not None:
             if self._app is not None:
                 self._app.call_from_thread(
-                    self._current_iteration.set_result, subtitle, style,
+                    self._current_iteration.set_result, subtitle, style, summary_text,
                 )
             else:
-                self._current_iteration.set_result(subtitle, style)
+                self._current_iteration.set_result(subtitle, style, summary_text)
         if self._file_console is not None:
             label = subtitle
             if self._current_iteration is not None:
@@ -1031,17 +1145,28 @@ class PipelineApp(App):
     # -- Key binding actions --
 
     def action_toggle_expand(self) -> None:
-        """Toggle expanded state on all AgentPanel Collapsibles.
+        """Toggle expanded state on all AgentPanel Collapsibles and IterationContainers.
 
         When collapsing, skip panels that are still running so their
         live output remains visible.
         """
         panels = list(self.query(AgentPanel))
-        if not panels:
+        containers = list(self.query(IterationContainer))
+        if not panels and not containers:
             return
-        first_collapsible = panels[0].query_one(Collapsible)
-        collapsing = not first_collapsible.collapsed
+
+        # Determine direction from first available panel
+        collapsing = True
+        if panels:
+            try:
+                first_collapsible = panels[0].query_one(Collapsible)
+                collapsing = not first_collapsible.collapsed
+            except NoMatches:
+                pass
+
         was_near_bottom = self._is_near_bottom()
+
+        # Toggle agent panels
         for panel in panels:
             if collapsing and not panel.done:
                 continue
@@ -1053,6 +1178,16 @@ class PipelineApp(App):
             c.scroll_visible = lambda *a, **kw: None
             c.collapsed = collapsing
             del c.scroll_visible
+
+        # Toggle finished iteration containers
+        for container in containers:
+            if container._in_progress or not container._panels:
+                continue
+            if collapsing and not container._is_collapsed:
+                container.toggle_iteration()
+            elif not collapsing and container._is_collapsed:
+                container.toggle_iteration()
+
         if was_near_bottom:
             self._scroll_to_end()
 
@@ -1170,6 +1305,8 @@ class PipelineApp(App):
             or self.query_one("#main-scroll")
         )
         target.mount(panel)
+        if isinstance(target, IterationContainer):
+            target.add_panel(panel)
         if near_bottom:
             self._scroll_to_end()
 
