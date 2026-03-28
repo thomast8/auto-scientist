@@ -78,6 +78,12 @@ when applicable.
 5. Create prioritized changes, each with what/why/how and priority:
    1 = must-do, 2 = should-do, 3 = nice-to-have
 
+   When a change involves a threshold rule (e.g., feature > T leads to
+   class A), verify the direction: state which class has higher values
+   for that feature (from the analysis) and confirm the rule routes
+   accordingly. A reversed direction can make entire branches
+   unreachable.
+
 6. Define 1-4 testable predictions with conditional outcomes. Each
    predicts what a diagnostic step will reveal and what it means:
    - prediction: what you expect (falsifiable)

@@ -60,7 +60,7 @@ BUILTIN_PRESETS: dict[str, dict] = {
         "summarizer": {"provider": "openai", "model": "gpt-5.4-nano", "reasoning": "off"},
         "critics": [
             # Gemini 3 Pro: only LOW and HIGH thinkingLevel (MEDIUM is Flash-only, 2026-03)
-            {"provider": "google", "model": "gemini-3.1-pro-preview", "reasoning": "low"},
+            {"provider": "google", "model": "gemini-3.1-pro-preview", "reasoning": "high"},
             {"provider": "openai", "model": "gpt-5.4", "reasoning": "medium"},
         ],
     },
