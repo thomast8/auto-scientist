@@ -18,8 +18,6 @@ from pydantic import BaseModel, ConfigDict, Field, field_validator
 
 logger = logging.getLogger(__name__)
 
-logger = logging.getLogger(__name__)
-
 
 class ReasoningConfig(BaseModel):
     """Unified reasoning config that maps to any provider's native API."""
@@ -54,41 +52,57 @@ class AgentModelConfig(BaseModel):
 
 
 BUILTIN_PRESETS: dict[str, dict] = {
+    # Smoke tests, cheapest possible, quality not important
+    "turbo": {
+        "defaults": {"model": "claude-haiku-4-5-20251001", "reasoning": "off"},
+        "summarizer": {"provider": "openai", "model": "gpt-5.4-nano", "reasoning": "off"},
+        "critics": [
+            {"provider": "google", "model": "gemini-3-flash-preview", "reasoning": "off"},
+            {"provider": "google", "model": "gemini-3-flash-preview", "reasoning": "off"},
+        ],
+    },
+    # Quick but competent: scientist upgraded so plans are usable
+    "fast": {
+        "defaults": {"model": "claude-haiku-4-5-20251001", "reasoning": "low"},
+        "scientist": {"model": "claude-sonnet-4-6", "reasoning": "low"},
+        "summarizer": {"provider": "openai", "model": "gpt-5.4-nano", "reasoning": "off"},
+        "critics": [
+            {"provider": "openai", "model": "gpt-5.4-mini", "reasoning": "low"},
+            {"provider": "anthropic", "model": "claude-haiku-4-5-20251001", "reasoning": "off"},
+        ],
+    },
+    # Balanced quality/cost
     "default": {
         "defaults": {"model": "claude-sonnet-4-6", "reasoning": "medium"},
         "scientist": {"model": "claude-opus-4-6", "reasoning": "medium"},
         "summarizer": {"provider": "openai", "model": "gpt-5.4-nano", "reasoning": "off"},
         "critics": [
-            # Gemini 3 Pro: only LOW and HIGH thinkingLevel (MEDIUM is Flash-only, 2026-03)
-            {"provider": "google", "model": "gemini-3.1-pro-preview", "reasoning": "low"},
             {"provider": "openai", "model": "gpt-5.4", "reasoning": "medium"},
+            {"provider": "anthropic", "model": "claude-sonnet-4-6", "reasoning": "medium"},
         ],
     },
-    "fast": {
-        "defaults": {"model": "claude-haiku-4-5-20251001", "reasoning": "off"},
-        "summarizer": {"provider": "openai", "model": "gpt-5.4-nano", "reasoning": "off"},
-        "critics": [
-            {"provider": "google", "model": "gemini-3.1-flash-lite-preview", "reasoning": "off"},
-            {"provider": "openai", "model": "gpt-5.4-nano", "reasoning": "off"},
-        ],
-    },
+    # High quality: analyst upgraded to Opus for deeper observations
     "high": {
         "defaults": {"model": "claude-sonnet-4-6", "reasoning": "high"},
+        "analyst": {"model": "claude-opus-4-6", "reasoning": "medium"},
         "scientist": {"model": "claude-opus-4-6", "reasoning": "high"},
         "summarizer": {"provider": "openai", "model": "gpt-5.4-nano", "reasoning": "off"},
         "critics": [
-            {"provider": "google", "model": "gemini-3.1-pro-preview", "reasoning": "high"},
             {"provider": "openai", "model": "gpt-5.4", "reasoning": "high"},
+            {"provider": "anthropic", "model": "claude-sonnet-4-6", "reasoning": "high"},
         ],
     },
+    # Best quality, but coder/ingestor/report stay on Sonnet (they're high-volume)
     "max": {
-        "defaults": {"model": "claude-opus-4-6", "reasoning": "max"},
-        "analyst": {"model": "claude-opus-4-6", "reasoning": "max"},
+        "defaults": {"model": "claude-opus-4-6", "reasoning": "high"},
         "scientist": {"model": "claude-opus-4-6", "reasoning": "max"},
+        "coder": {"model": "claude-sonnet-4-6", "reasoning": "high"},
+        "ingestor": {"model": "claude-sonnet-4-6", "reasoning": "high"},
+        "report": {"model": "claude-sonnet-4-6", "reasoning": "high"},
         "summarizer": {"provider": "openai", "model": "gpt-5.4-mini", "reasoning": "off"},
         "critics": [
-            {"provider": "google", "model": "gemini-3.1-pro-preview", "reasoning": "max"},
             {"provider": "openai", "model": "gpt-5.4", "reasoning": "max"},
+            {"provider": "anthropic", "model": "claude-sonnet-4-6", "reasoning": "max"},
         ],
     },
 }

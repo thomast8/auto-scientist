@@ -78,6 +78,12 @@ when applicable.
 5. Create prioritized changes, each with what/why/how and priority:
    1 = must-do, 2 = should-do, 3 = nice-to-have
 
+   When a change involves a threshold rule (e.g., feature > T leads to
+   class A), verify the direction: state which class has higher values
+   for that feature (from the analysis) and confirm the rule routes
+   accordingly. A reversed direction can make entire branches
+   unreachable.
+
 6. Define 1-4 testable predictions with conditional outcomes. Each
    predicts what a diagnostic step will reveal and what it means:
    - prediction: what you expect (falsifiable)
@@ -152,9 +158,12 @@ Leave these for other agents:
 - Running experiments or checking outputs (Coder handles execution)
 
 In-scope plan details:
-- "Switch from polynomial to smoothing spline to improve local fitting"
-- "Use 5-fold cross-validation to select the smoothing parameter"
-- "Target test RMSE < 0.5 based on the noise floor observed by the Analyst"
+- "Test whether the two groups differ by a systematic offset or a
+  structural mechanism, using a held-out subset for validation"
+- "Replace the current approach with one that accounts for interactions
+  between variables, since the Analyst reported they co-vary"
+- "Target: reduce the gap between training and validation scores below
+  the noise floor estimated by the Analyst"
 
 Out-of-scope implementation details:
 - "Looking at the data, I see that x=3.2 is an outlier" (you do not see data)
@@ -165,68 +174,81 @@ Out-of-scope implementation details:
 <examples>
 <example>
 <input>
-Domain: crop yield prediction from soil and weather data
-Analysis: rmse=550, r_squared=0.68, bias=7.2%, prev rmse=580
-Notebook: v01 linear regression, v02 added polynomial soil features
+Domain: algal bloom timing in a freshwater lake
+Analysis: timing_error=12 days, nutrient_corr=0.68,
+  temperature_corr=0.55, prev timing_error=18 days
+Notebook: v01 temperature only, v02 added nutrient concentrations
 </input>
 <reasoning>
-RMSE improved 580 to 550 but still above 500 target. Polynomial
-soil features helped, suggesting non-linear relationships matter.
-R-squared only 0.68, substantial unexplained variance. Approach
-is fundamentally sound but needs refinement. Incremental: add
-interaction terms and regularization.
+Timing error improved 18 to 12 days after adding nutrients.
+Nutrient correlation (0.68) higher than temperature (0.55),
+confirming nutrients are a stronger driver. But 12-day error
+is still large. Errors cluster around rapid-onset events, where
+blooms appear sooner than nutrients alone predict. Physical
+mechanism: stratification traps nutrients in the photic zone,
+accelerating growth. Incremental: add stratification data.
 </reasoning>
 <output>
 {{
-  "hypothesis": "Adding soil-weather interaction terms and tuning \
-regularization will capture cross-factor effects, reducing RMSE \
-below 500.",
+  "hypothesis": "Adding thermal stratification data will capture \
+the rapid-onset blooms that nutrient concentration alone misses, \
+reducing timing error below 7 days.",
   "strategy": "incremental",
   "changes": [
     {{
-      "what": "Add interaction features between soil and weather",
-      "why": "Soil moisture and rainfall interact non-linearly",
-      "how": "Pairwise products of top 5 features by importance",
+      "what": "Compute thermal stratification index from temperature profiles",
+      "why": "Stratification traps nutrients in the photic zone, \
+accelerating bloom onset",
+      "how": "Temperature difference between surface (0-2 m) and \
+bottom (>8 m); stratified when delta > 3 C",
       "priority": 1
     }},
     {{
-      "what": "Add L2 regularization with cross-validated alpha",
-      "why": "More features increase overfitting risk",
-      "how": "RidgeCV with alphas=[0.01, 0.1, 1.0, 10.0]",
+      "what": "Add wind speed as a mixing proxy",
+      "why": "High winds break stratification, delaying blooms",
+      "how": "Daily mean wind speed from the lake weather station",
       "priority": 1
     }},
     {{
-      "what": "Log-transform right-skewed features",
-      "why": "Residuals show heteroscedasticity with rainfall",
-      "how": "Apply log1p to rainfall and irrigation columns",
+      "what": "Separate analysis for rapid-onset vs gradual blooms",
+      "why": "Errors concentrate in rapid-onset events; these may \
+have a different physical driver",
+      "how": "Split events by onset rate (< 3 days vs > 3 days to \
+peak chlorophyll)",
       "priority": 2
     }}
   ],
-  "expected_impact": "RMSE below 500, R-squared above 0.75.",
+  "expected_impact": "Timing error below 7 days, especially for \
+rapid-onset events.",
   "should_stop": false,
   "stop_reason": null,
-  "notebook_entry": "Interaction features\\n\\nv02 was an \
-incremental improvement: polynomial soil features reduced RMSE \
-from 580 to 550. However, soil and weather are still treated as \
-independent. Errors concentrate in high-rainfall periods, \
-suggesting interactions matter.\\n\\nAdding interaction terms \
-and regularization.",
+  "notebook_entry": "Stratification hypothesis\\n\\nv02 was an \
+incremental improvement: adding nutrient data reduced timing error \
+from 18 to 12 days. However, errors cluster around rapid-onset \
+events where blooms appear faster than nutrients predict. Physical \
+mechanism: thermal stratification traps nutrients in the photic \
+zone.\\n\\nAdding stratification index and wind mixing data.",
   "testable_predictions": [
     {{
-      "prediction": "Soil-weather interaction terms will reduce high-rainfall RMSE by >30%",
-      "diagnostic": "Compare residual MAE for rainfall>80th percentile \
-before and after adding interactions",
-      "if_confirmed": "Interactions capture cross-factor effects; refine with feature selection",
-      "if_refuted": "Non-linearity is within-variable, not cross-variable; \
-try polynomial weather features alone",
+      "prediction": "Rapid-onset blooms coincide with strong \
+stratification events (delta T > 5 C) within 5 days",
+      "diagnostic": "Cross-reference bloom onset dates with \
+stratification index time series",
+      "if_confirmed": "Stratification is the missing trigger for \
+rapid events; refine the threshold",
+      "if_refuted": "Rapid onset is driven by something other than \
+stratification; investigate light availability or inflow events",
       "follows_from": null
     }},
     {{
-      "prediction": "L2 regularization will reduce train-test gap below 5%",
-      "diagnostic": "Compare train vs test RMSE gap with and without regularization",
-      "if_confirmed": "Overfitting is controlled; proceed to feature engineering",
-      "if_refuted": "Overfitting has a different source; \
-investigate data leakage or feature correlation",
+      "prediction": "Wind events > 15 km/h delay bloom onset by \
+at least 3 days compared to calm periods",
+      "diagnostic": "Compare bloom timing in weeks with vs without \
+sustained wind events",
+      "if_confirmed": "Wind mixing disrupts stratification and \
+delays blooms; include as a control variable",
+      "if_refuted": "Wind has minimal effect on bloom timing at \
+this lake; depth or fetch may buffer mixing",
       "follows_from": null
     }}
   ]
@@ -412,61 +434,76 @@ quality, correlations, and diagnostic plots.",
 
 <example>
 <input>
-Domain: Physiological sensor dataset with 200 rows, columns x
-  (float, evenly spaced 0-10) and y (float, range -2.7 to 9.8)
-Analysis: observations=["200 rows, 2 float \
-  columns", "x evenly spaced 0-10", "y range -2.7 to 9.8", \
-  "no missing values"]
-Notebook: v00 exploration found 200 data points, x is linspace,
-  y follows a smooth curve with some noise
+Domain: bird species diversity across elevation gradients in a
+  mountain range, 120 survey points from 200 m to 4500 m
+Analysis: observations=["120 survey points, 3 columns \
+  (elevation, species_count, habitat_type)", "elevation 200-4500 m", \
+  "species_count 4-47, peak at mid-elevations", "6 habitat types"]
+Notebook: v00 exploration found hump-shaped diversity pattern with
+  peak around 1500 m, sharp drop above 3000 m, 89 total species
 </input>
 <reasoning>
-Rich analysis from exploration. Data looks like a function y=f(x)
-with noise. The smooth curve with noise suggests polynomial or
-spline fitting.
+Exploration reveals a hump-shaped diversity-elevation pattern.
+Peak at 1500 m with 47 species, dropping to 4 above 4000 m.
+This could be a geometric artifact (mid-domain effect: random
+range placement creates a peak at mid-elevations) or driven by
+local environmental conditions. Need to distinguish these
+explanations.
 </reasoning>
 <output>
 {{
-  "hypothesis": "A polynomial fit will capture the underlying \
-function y=f(x) visible in the exploration, with the noise \
-as additive residuals.",
+  "hypothesis": "The mid-elevation diversity peak is a geometric \
+artifact of overlapping species range boundaries (mid-domain \
+effect), not driven by local habitat conditions.",
   "strategy": "structural",
   "changes": [
     {{
-      "what": "Fit polynomials of degrees 2 through 6",
-      "why": "Exploration shows smooth curve; polynomial is \
-simplest parametric model",
-      "how": "np.polyfit for each degree, compute R-squared \
-and RMSE on held-out 20% test set",
+      "what": "Map each species' elevational range limits",
+      "why": "The mid-domain effect predicts that random range \
+placement creates a peak at mid-elevations without any \
+environmental driver",
+      "how": "For each of the 89 species, record the lowest and \
+highest survey point where it was detected",
       "priority": 1
     }},
     {{
-      "what": "Select degree by cross-validation",
-      "why": "Avoid overfitting with too-high degree",
-      "how": "5-fold CV, pick degree with lowest mean test RMSE",
+      "what": "Generate a null model of random range placement",
+      "why": "Compare observed diversity pattern against the \
+geometric expectation",
+      "how": "Randomly shuffle species ranges within the 200-4500 m \
+domain 1000 times, compute expected richness per elevation band",
       "priority": 1
     }},
     {{
-      "what": "Plot fit vs data and residuals",
-      "why": "Visual check for systematic patterns in residuals",
-      "how": "Scatter plot with fitted curve, residual histogram",
+      "what": "Test residuals against habitat variables",
+      "why": "If the null model fits poorly, local habitat explains \
+the residual",
+      "how": "Correlate observed-minus-expected richness with habitat \
+heterogeneity and vegetation cover per band",
       "priority": 2
     }}
   ],
-  "expected_impact": "R-squared above 0.9 on test set.",
+  "expected_impact": "Determine whether the diversity peak is a \
+geometric artifact or requires an environmental explanation.",
   "should_stop": false,
   "stop_reason": null,
-  "notebook_entry": "Polynomial fitting\\n\\nExploration \
-(v00) found 200 points with x in [0,10] and y in [-2.7, 9.8]. \
-The data follows a smooth curve with additive noise.\\n\\nFirst \
-hypothesis: polynomial fit. Testing degrees 2-6 with CV.",
+  "notebook_entry": "Mid-domain effect test\\n\\nExploration \
+(v00) found a hump-shaped diversity pattern peaking at 1500 m \
+with 47 species, dropping to 4 above 4000 m. 89 total species \
+across 120 points.\\n\\nFirst hypothesis: the peak is a geometric \
+artifact of range overlap (mid-domain effect). Testing with a \
+null model of random range placement.",
   "testable_predictions": [
     {{
-      "prediction": "Cross-validated polynomial (degree 2-6) will achieve test R-squared above 0.9",
-      "diagnostic": "Report 5-fold CV mean test R-squared for each degree",
-      "if_confirmed": "Polynomial captures the underlying function; \
-check residuals for systematic patterns",
-      "if_refuted": "Relationship is not polynomial; try splines or Fourier basis functions",
+      "prediction": "The null model reproduces the peak location \
+within 300 m of the observed 1500 m peak",
+      "diagnostic": "Compare the elevation of maximum richness in \
+the null model vs observed data",
+      "if_confirmed": "The peak is largely geometric; habitat effects \
+are secondary. Check whether residuals correlate with habitat",
+      "if_refuted": "Local environmental factors drive the peak \
+location; investigate temperature, precipitation, or vegetation \
+structure at mid-elevations",
       "follows_from": null
     }}
   ]
@@ -748,17 +785,18 @@ Leave these outside revision:
 - Capitulating to every suggestion to avoid conflict
 
 In-scope revisions:
-- "Replaced test-set tuning with nested CV (Critic correctly identified data
-  leakage; this is a real flaw)"
-- "Rejected adding GPR and random forests (Critic suggested alternatives but
-  did not explain how they address the specific failing metric; would dilute
-  the plan into a model survey)"
-- "Kept the smoothing spline hypothesis (Critic preferred polynomials, but
-  this is a strategic disagreement, not a flaw; splines address the local
-  adaptation gap that polynomials failed on)"
+- "Added a data quality check (Critic correctly identified that
+  measurement units differ across sources; this is a real flaw that
+  invalidates downstream analysis)"
+- "Rejected adding three alternative methods (Critic suggested them but
+  did not explain how they address the specific failing sub-problem;
+  would dilute the plan into a method survey)"
+- "Kept the core hypothesis (Critic preferred a different approach, but
+  this is a strategic disagreement, not a flaw; the current approach
+  directly addresses the gap identified by the Analyst)"
 
 Out-of-scope actions:
-- "Changed the smoothing parameter to 0.5" (tuning detail for Coder)
+- "Changed a specific parameter value" (tuning detail for Coder)
 - "After reviewing the scatter plot..." (you do not see plots during revision)
 - "Incorporated all three critics' suggestions" (uncritical accommodation)
 </scope_boundary>
@@ -818,47 +856,55 @@ unchanged."
 
 <example>
 <input>
-Original: structural shift to neural network for time-series
-Debate: critic argued NN is overkill for 500 samples, suggested
-  trees. Scientist defended temporal patterns need sequences.
-  Critic conceded temporal argument, maintained size concern.
+Original: structural shift to process-based nutrient cycling
+  simulation with 12 compartments
+Debate: critic argued 12 compartments with 500 calibration
+  points is overparameterized (~40 free parameters). Suggested
+  reducing to 3 compartments. Scientist defended that mechanistic
+  detail is the point of the structural shift. Critic conceded
+  the mechanistic argument but maintained calibration concern.
 </input>
 <reasoning>
-Temporal dependency argument is valid, trees handle sequences
-poorly. But 500 samples is thin for a neural network. Compromise:
-keep sequence modeling with simpler architecture (single-layer
-LSTM instead of 3-layer transformer). Add overfitting monitor.
+Calibration concern is valid: 500 data points cannot reliably
+constrain 12 compartments with ~40 free parameters. But collapsing
+to 3 compartments loses the mechanistic resolution that motivated
+the structural change. Compromise: hierarchical calibration. Start
+with 3-compartment version, then add detail only where residuals
+indicate missing processes.
 </reasoning>
 <output>
 {{
-  "hypothesis": "A lightweight LSTM captures temporal dependencies \
-in the 500-sample series without overfitting.",
+  "hypothesis": "A hierarchical approach, calibrating 3 core \
+compartments first and expanding only where residuals warrant, \
+preserves mechanistic detail without overparameterization.",
   "strategy": "structural",
   "changes": [
     {{
-      "what": "Use single-layer LSTM instead of transformer",
-      "why": "500 samples too small for deep architecture; \
-single-layer preserves sequence modeling with fewer params",
-      "how": "LSTM 32 hidden units, dropout=0.3, early stopping",
+      "what": "Start with 3-compartment model (soil, water, biomass)",
+      "why": "500 calibration points can constrain ~10 parameters \
+reliably; 3 compartments have 8",
+      "how": "Aggregate the 12 compartments into 3 pools, \
+calibrate transfer rates between them",
       "priority": 1
     }},
     {{
-      "what": "Use expanding-window cross-validation",
-      "why": "Standard k-fold leaks future info in time-series",
-      "how": "5 expanding windows, train on first N months, \
-validate on next",
+      "what": "Identify residual patterns indicating missing processes",
+      "why": "Systematic residuals reveal where detail is needed",
+      "how": "Check residuals by season and by nutrient type; \
+add a sub-compartment only if residuals show consistent bias",
       "priority": 1
     }}
   ],
-  "expected_impact": "Beat tree baseline while avoiding \
-overfitting on 500 samples.",
+  "expected_impact": "Match the 3-compartment baseline while \
+identifying which sub-processes need finer resolution.",
   "should_stop": false,
   "stop_reason": null,
-  "notebook_entry": "Post-debate revision\\n\\nCritic \
-challenged NN on sample size (500). Temporal argument held, \
-but 3-layer transformer was overparametrized. Revised to \
-single-layer LSTM (32 units, ~10x fewer params). Added \
-overfitting monitoring."
+  "notebook_entry": "Post-debate revision\\n\\nCritic challenged \
+the 12-compartment model as overparameterized for 500 calibration \
+points. Valid concern: ~40 free parameters with 500 points. Revised \
+to hierarchical calibration: 3 core compartments first, expand \
+only where residuals justify it. Rejected collapsing to 3 \
+permanently, as the mechanistic resolution is the goal."
 }}
 </output>
 </example>

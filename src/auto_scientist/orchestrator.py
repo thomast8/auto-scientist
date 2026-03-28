@@ -540,30 +540,28 @@ class Orchestrator:
             self._live.flush_completed()
             return
 
-        # Step 4: Debate (skip on iteration 0, nothing to challenge)
-        final_plan = plan
-        if self.state.iteration > 0:
-            debate_result = await self._run_debate(plan, analysis)
-            revised_plan = await self._run_scientist_revision(plan, debate_result, analysis)
-            final_plan = revised_plan or plan
+        # Step 4: Debate (subset personas on iteration 0, all on iteration 1+)
+        debate_result = await self._run_debate(plan, analysis)
+        revised_plan = await self._run_scientist_revision(plan, debate_result, analysis)
+        final_plan = revised_plan or plan
 
-            # Persist debate transcript with original plan for context
-            if debate_result:
-                from auto_scientist.agents.debate_models import DebateResult
+        # Persist debate transcript with original plan for context
+        if debate_result:
+            from auto_scientist.agents.debate_models import DebateResult
 
-                serialized_results = [
-                    r.model_dump() if isinstance(r, DebateResult) else r for r in debate_result
-                ]
-                concern_ledger = self._build_concern_ledger(debate_result)
-                self._persist_artifact(
-                    version_dir,
-                    "debate.json",
-                    {
-                        "original_plan": plan,
-                        "debate_results": serialized_results,
-                        "concern_ledger": concern_ledger,
-                    },
-                )
+            serialized_results = [
+                r.model_dump() if isinstance(r, DebateResult) else r for r in debate_result
+            ]
+            concern_ledger = self._build_concern_ledger(debate_result)
+            self._persist_artifact(
+                version_dir,
+                "debate.json",
+                {
+                    "original_plan": plan,
+                    "debate_results": serialized_results,
+                    "concern_ledger": concern_ledger,
+                },
+            )
 
         # Apply prediction updates from the final plan (after debate revision)
         if final_plan:
@@ -1110,10 +1108,14 @@ class Orchestrator:
         self._live.update_status(phase="DEBATE")
 
         # Per-persona buffers (run_debate keys buffers by persona name)
-        from auto_scientist.prompts.critic import PERSONAS
+        from auto_scientist.prompts.critic import ITERATION_0_PERSONAS, PERSONAS
+
+        active_personas = [
+            p for p in PERSONAS if self.state.iteration > 0 or p["name"] in ITERATION_0_PERSONAS
+        ]
 
         buffers: dict[str, list[str]] = {}
-        for persona in PERSONAS:
+        for persona in active_personas:
             buffers[persona["name"]] = []
 
         try:
@@ -1170,18 +1172,26 @@ class Orchestrator:
 
         from auto_scientist.agents.critic import run_single_critic_debate
         from auto_scientist.agents.debate_models import DebateResult
-        from auto_scientist.prompts.critic import PERSONAS, get_model_index_for_debate
+        from auto_scientist.prompts.critic import (
+            ITERATION_0_PERSONAS,
+            PERSONAS,
+            get_model_index_for_debate,
+        )
+
+        active_personas = [
+            p for p in PERSONAS if self.state.iteration > 0 or p["name"] in ITERATION_0_PERSONAS
+        ]
 
         summary_model = self._summary_model
 
         # Create per-persona panels and collectors
         panels: dict[str, AgentPanel] = {}
         collectors: dict[str, list[tuple[str, str, str]]] = {}
-        persona_names = [p["name"] for p in PERSONAS]
-        for persona in PERSONAS:
+        persona_names = [p["name"] for p in active_personas]
+        for persona in active_personas:
             name = persona["name"]
             model_idx = get_model_index_for_debate(
-                PERSONAS.index(persona),
+                active_personas.index(persona),
                 self.state.iteration,
                 len(self.model_config.critics),
             )
@@ -1281,7 +1291,7 @@ class Orchestrator:
         drain_task = asyncio.create_task(_drain_loop())
         raw_results: list[DebateResult | BaseException] = []
         try:
-            tasks = [_summarized_debate(i, persona) for i, persona in enumerate(PERSONAS)]
+            tasks = [_summarized_debate(i, persona) for i, persona in enumerate(active_personas)]
             raw_results = await asyncio.gather(*tasks, return_exceptions=True)
         finally:
             drain_task.cancel()
@@ -1290,12 +1300,18 @@ class Orchestrator:
 
         # Log failures, return successes
         successful = []
-        persona_names = [p["name"] for p in PERSONAS]
+        persona_names = [p["name"] for p in active_personas]
         for name, r in zip(persona_names, raw_results, strict=True):
             if isinstance(r, BaseException):
                 logger.error(f"Critic debate failed for {name}: {r}", exc_info=r)
             else:
                 successful.append(r)
+        if not successful:
+            failed_msgs = [str(r) for r in raw_results if isinstance(r, BaseException)]
+            raise RuntimeError(
+                f"All {len(raw_results)} critic debates failed. "
+                f"Check API keys and network connectivity. Errors: {failed_msgs}"
+            )
         if len(successful) < len(raw_results):
             lost = [
                 n

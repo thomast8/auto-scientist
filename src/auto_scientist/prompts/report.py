@@ -48,11 +48,11 @@ Your report is the final deliverable. No further agents run after you.
       | Version | Status | Key Change | Key Metric | Prediction Outcome |
 
 5. Writing standards:
-   - Reference specific numbers from the results (e.g., "RMSE decreased from
-     12.3 to 8.7" rather than "RMSE improved significantly")
-   - State limitations with their practical impact (e.g., "fails on inputs
-     above x=100 because the polynomial diverges" rather than "has some
-     limitations")
+   - Reference specific numbers from the results (e.g., "error decreased
+     from 12.3 to 8.7" rather than "error improved significantly")
+   - State limitations with their practical impact (e.g., "accuracy on
+     subset C is only 62%, driven by overlap with subset D in the 400-500
+     range" rather than "has some limitations")
    - Write for a technical audience with domain knowledge
    - Include units and confidence intervals where available
 </instructions>
@@ -74,12 +74,13 @@ Leave these outside the report:
 - Making claims not supported by the experiment outputs
 
 In-scope report content:
-- "v02 achieved test R² = 0.964 with a degree-8 polynomial (best result)"
-- "v03's spline approach regressed to R² = 0.718 due to overfitting"
-- "Future work: explore regularized splines or Gaussian process regression"
+- "v03 achieved score = 0.91 on the validation set (best result)"
+- "v04 reduced the primary error metric from 22% to 11%"
+- "Future work: test whether the identified pattern holds under different
+  conditions and validate on independent data"
 
 Out-of-scope content:
-- "The R² was approximately 0.96" (imprecise; use the exact number)
+- "The score was approximately 0.91" (imprecise; use the exact number)
 - "Results improved significantly" (vague; state the delta)
 - "The system performed admirably" (editorializing)
 </scope_boundary>

@@ -37,6 +37,8 @@ from auto_scientist.models.openai_client import query_openai
 from auto_scientist.prompts.critic import (
     CRITIC_SYSTEM_BASE,
     CRITIC_USER,
+    DEFAULT_CRITIC_INSTRUCTIONS,
+    ITERATION_0_PERSONAS,
     PERSONAS,
     SCIENTIST_DEBATE_SYSTEM,
     SCIENTIST_DEBATE_USER,
@@ -240,6 +242,7 @@ async def run_single_critic_debate(
     persona = persona or {"name": "Generic", "system_text": ""}
     persona_name = persona["name"]
     persona_text = persona["system_text"]
+    persona_instructions = persona.get("instructions", "")
 
     label = f"{config.provider}:{config.model}"
     raw_transcript: list[dict[str, str]] = []
@@ -253,6 +256,7 @@ async def run_single_critic_debate(
         notebook_content,
         domain_knowledge,
         persona_text=persona_text,
+        persona_instructions=persona_instructions,
         analysis_json=analysis_json,
         prediction_history=prediction_history,
         goal=goal,
@@ -317,6 +321,7 @@ async def run_single_critic_debate(
                 domain_knowledge,
                 scientist_defense=sci_result.text,
                 persona_text=persona_text,
+                persona_instructions=persona_instructions,
                 analysis_json=analysis_json,
                 prediction_history=prediction_history,
                 goal=goal,
@@ -367,8 +372,10 @@ async def run_debate(
 ) -> list[DebateResult]:
     """Run parallel debates, one per persona, with rotating model assignment.
 
-    Always runs 3 debates (one per persona) regardless of how many critic
-    models are configured. Model assignment rotates across iterations.
+    On iteration 0, only Methodologist and Falsification Expert run (the
+    Trajectory Critic and Evidence Auditor require prior iteration history).
+    On iteration 1+, all four personas run. Model assignment rotates across
+    iterations regardless of persona count.
 
     Args:
         critic_configs: Pool of critic model configs (round-robin assigned).
@@ -379,13 +386,13 @@ async def run_debate(
         scientist_config: Config for the Scientist's debate responses.
         message_buffer: Legacy single shared buffer.
         message_buffers: Per-persona buffers keyed by persona name.
-        iteration: Current iteration number (for model rotation).
+        iteration: Current iteration number (for model rotation and persona filtering).
         analysis_json: Serialized analysis JSON from the Analyst.
         prediction_history: Formatted prediction history string.
         goal: Investigation goal string passed through to prompt builders.
 
     Returns:
-        List of DebateResult, one per persona (always 3 unless no critics).
+        List of DebateResult, one per active persona.
     """
     if not critic_configs:
         return []
@@ -393,8 +400,10 @@ async def run_debate(
     if scientist_config is None:
         scientist_config = AgentModelConfig(model="claude-sonnet-4-6")
 
+    active_personas = [p for p in PERSONAS if iteration > 0 or p["name"] in ITERATION_0_PERSONAS]
+
     tasks = []
-    for persona_index, persona in enumerate(PERSONAS):
+    for persona_index, persona in enumerate(active_personas):
         model_index = get_model_index_for_debate(
             persona_index,
             iteration,
@@ -428,7 +437,7 @@ async def run_debate(
 
     raw_results = await asyncio.gather(*tasks, return_exceptions=True)
     successful: list[DebateResult] = []
-    persona_names = [p["name"] for p in PERSONAS]
+    persona_names = [p["name"] for p in active_personas]
     for persona_name, r in zip(persona_names, raw_results, strict=True):
         if isinstance(r, BaseException):
             logger.error(f"Critic debate failed for {persona_name}: {r}", exc_info=r)
@@ -456,6 +465,7 @@ def _build_critic_prompt(
     domain_knowledge: str,
     scientist_defense: str = "",
     persona_text: str = "",
+    persona_instructions: str = "",
     analysis_json: str = "",
     prediction_history: str = "",
     goal: str = "",
@@ -465,13 +475,19 @@ def _build_critic_prompt(
     For round 1, scientist_defense is empty.
     For round 2+, it contains the scientist's response to the previous critique.
     The critic is not told they are "refining" anything (stateless design).
+
+    persona_instructions overrides the default instructions block when provided
+    (used by the Trajectory Critic which needs arc-focused instructions).
     """
     defense_section = ""
     if scientist_defense:
         defense_section = f"<scientist_defense>{scientist_defense}</scientist_defense>"
 
+    effective_instructions = persona_instructions or DEFAULT_CRITIC_INSTRUCTIONS
+
     system = CRITIC_SYSTEM_BASE.format(
         persona_text=persona_text,
+        persona_instructions=effective_instructions,
         critic_output_schema=json.dumps(CRITIC_OUTPUT_SCHEMA, indent=2),
     )
 

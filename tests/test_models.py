@@ -272,6 +272,7 @@ class TestQueryGoogle:
 
 def _make_anthropic_stream_mock(chunks):
     """Create a mock that behaves like client.messages.stream() context manager."""
+
     async def fake_text_stream():
         for chunk in chunks:
             yield chunk
@@ -290,9 +291,7 @@ class TestQueryAnthropicStreaming:
         mock_client = MagicMock()
         mock_client.messages.create = AsyncMock()
         mock_cls.return_value = mock_client
-        mock_client.messages.stream.return_value = _make_anthropic_stream_mock(
-            ["anthro", "pic"]
-        )
+        mock_client.messages.stream.return_value = _make_anthropic_stream_mock(["anthro", "pic"])
 
         tokens = []
         result = await query_anthropic("claude-sonnet-4-6", "test", on_token=tokens.append)
@@ -452,7 +451,8 @@ class TestQueryAnthropicReasoning:
         mock_client.messages.create.return_value = mock_response
 
         await query_anthropic(
-            "claude-sonnet-4-6", "test",
+            "claude-sonnet-4-6",
+            "test",
             reasoning=ReasoningConfig(level="high", budget=8000),
         )
 
@@ -516,7 +516,8 @@ class TestQueryOpenAIReasoning:
         mock_client.responses.create.return_value = mock_response
 
         await query_openai(
-            "o3", "test",
+            "o3",
+            "test",
             web_search=True,
             reasoning=ReasoningConfig(level="high"),
         )
@@ -567,7 +568,8 @@ class TestQueryGoogleReasoning:
         )
 
         await query_google(
-            "gemini-2.5-pro", "test",
+            "gemini-2.5-pro",
+            "test",
             reasoning=ReasoningConfig(level="high"),
         )
 
@@ -584,7 +586,8 @@ class TestQueryGoogleReasoning:
         )
 
         await query_google(
-            "gemini-3-flash", "test",
+            "gemini-3-flash",
+            "test",
             reasoning=ReasoningConfig(level="high"),
         )
 
@@ -603,7 +606,8 @@ class TestQueryGoogleReasoning:
         )
 
         await query_google(
-            "gemini-2.5-flash", "test",
+            "gemini-2.5-flash",
+            "test",
             reasoning=ReasoningConfig(level="high", budget=8192),
         )
 
@@ -629,7 +633,8 @@ class TestAnthropicStructuredOutput:
         mock_client.messages.create.return_value = mock_response
 
         result = await query_anthropic(
-            "claude-sonnet-4-6", "plan something",
+            "claude-sonnet-4-6",
+            "plan something",
             response_schema=ScientistPlanOutput,
         )
 
@@ -652,7 +657,8 @@ class TestAnthropicStructuredOutput:
         mock_client.messages.create.return_value = mock_response
 
         await query_anthropic(
-            "claude-sonnet-4-6", "test",
+            "claude-sonnet-4-6",
+            "test",
             system_prompt="You are a scientist.",
         )
 
@@ -674,7 +680,8 @@ class TestAnthropicStructuredOutput:
         mock_client.messages.create.return_value = mock_response
 
         result = await query_anthropic(
-            "claude-sonnet-4-6", "plan something",
+            "claude-sonnet-4-6",
+            "plan something",
             web_search=True,
             response_schema=ScientistPlanOutput,
         )
@@ -712,7 +719,8 @@ class TestAnthropicStructuredOutput:
         mock_client.messages.create.return_value = mock_response
 
         result = await query_anthropic(
-            "claude-sonnet-4-6", "test",
+            "claude-sonnet-4-6",
+            "test",
             web_search=True,
             response_schema=ScientistPlanOutput,
         )
@@ -736,7 +744,8 @@ class TestAnthropicStructuredOutput:
 
         with pytest.raises(RuntimeError, match="did not call submit_response"):
             await query_anthropic(
-                "claude-sonnet-4-6", "test",
+                "claude-sonnet-4-6",
+                "test",
                 response_schema=ScientistPlanOutput,
             )
 
@@ -790,7 +799,8 @@ class TestOpenAIStructuredOutputWithWebSearch:
         mock_client.responses.create.return_value = mock_response
 
         result = await query_openai(
-            "gpt-5.4", "plan something",
+            "gpt-5.4",
+            "plan something",
             web_search=True,
             response_schema=ScientistPlanOutput,
         )
@@ -819,7 +829,8 @@ class TestOpenAIStructuredOutput:
         mock_client.chat.completions.create.return_value = mock_response
 
         result = await query_openai(
-            "gpt-5.4", "plan something",
+            "gpt-5.4",
+            "plan something",
             response_schema=ScientistPlanOutput,
         )
 
@@ -827,7 +838,7 @@ class TestOpenAIStructuredOutput:
         rf = call_kwargs.get("response_format")
         assert rf is not None
         assert rf["type"] == "json_schema"
-        assert result.text =='{"hypothesis": "test"}'
+        assert result.text == '{"hypothesis": "test"}'
 
     @pytest.mark.asyncio
     @patch("auto_scientist.models.openai_client.AsyncOpenAI")
@@ -839,7 +850,8 @@ class TestOpenAIStructuredOutput:
         mock_client.chat.completions.create.return_value = mock_response
 
         await query_openai(
-            "gpt-5.4", "test",
+            "gpt-5.4",
+            "test",
             system_prompt="You are a scientist.",
         )
 
@@ -859,14 +871,15 @@ class TestGoogleStructuredOutput:
         )
 
         result = await query_google(
-            "gemini-2.5-pro", "plan something",
+            "gemini-2.5-pro",
+            "plan something",
             response_schema=ScientistPlanOutput,
         )
 
         call_kwargs = mock_genai.Client.return_value.aio.models.generate_content.call_args.kwargs
         config = call_kwargs.get("config")
         assert config is not None
-        assert result.text =='{"hypothesis": "test"}'
+        assert result.text == '{"hypothesis": "test"}'
 
     @pytest.mark.asyncio
     @patch("auto_scientist.models.google_client.types")
@@ -878,7 +891,8 @@ class TestGoogleStructuredOutput:
         )
 
         await query_google(
-            "gemini-2.5-pro", "plan something",
+            "gemini-2.5-pro",
+            "plan something",
             web_search=True,
             response_schema=ScientistPlanOutput,
         )
@@ -899,7 +913,8 @@ class TestGoogleStructuredOutput:
         )
 
         await query_google(
-            "gemini-2.5-pro", "test",
+            "gemini-2.5-pro",
+            "test",
             system_prompt="You are a scientist.",
         )
 

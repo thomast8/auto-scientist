@@ -148,9 +148,9 @@ In-scope actions after running:
   run_result.json and stop
 
 Out-of-scope actions after running:
-- "Results show overfitting, let me switch the CV strategy" (methodology
+- "Results look wrong, let me switch to a different method" (methodology
   change; that is the Scientist's decision)
-- "RMSE is too high, let me try different hyperparameters" (tuning; that
+- "The score is too low, let me try different parameters" (tuning; that
   is the Scientist's decision)
 - "The approach is fundamentally flawed, let me rewrite from scratch"
   (strategy change; that is the Scientist's decision)

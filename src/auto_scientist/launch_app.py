@@ -25,10 +25,12 @@ from textual.widgets import (
 
 from auto_scientist.experiment_config import ExperimentConfig, ExperimentModelsConfig
 from auto_scientist.model_config import AgentModelConfig
+from auto_scientist.preferences import load_theme, save_theme
 
 PRESET_OPTIONS = [
-    ("default (medium)", "default"),
+    ("turbo", "turbo"),
     ("fast", "fast"),
+    ("default (medium)", "default"),
     ("high", "high"),
     ("max", "max"),
 ]
@@ -49,12 +51,15 @@ REASONING_OPTIONS = [
 ]
 
 # Agents that can be overridden, in display order
-_AGENT_FIELDS = ["ingestor", "analyst", "scientist", "coder", "report", "summarizer"]
+_AGENT_FIELDS = ["ingestor", "analyst", "scientist", "coder", "report"]
 
 # SDK agents are locked to anthropic provider
 _SDK_AGENTS = {"ingestor", "analyst", "scientist", "coder", "report"}
 
-_NUM_CRITIC_SLOTS = 3
+# Non-SDK agents rendered after critics
+_TRAILING_AGENTS = ["summarizer"]
+
+_NUM_CRITIC_SLOTS = 4
 
 # Known models per provider (most capable first)
 MODELS_BY_PROVIDER: dict[str, list[tuple[str, str]]] = {
@@ -88,12 +93,12 @@ ALL_MODELS: list[tuple[str, str]] = [
 # Sentinel for "no domain selected" in the domain picker
 _CUSTOM = "__custom__"
 
-DOMAIN_DIFFICULTY: dict[str, tuple[str, int]] = {
-    "toy_function": ("easy", 0),
-    "alien_minerals": ("medium", 1),
-    "alloy_design": ("medium", 2),
-    "water_treatment": ("hard", 3),
-    "spo2": ("hard", 4),
+DOMAIN_DIFFICULTY: dict[str, tuple[str, int, str]] = {
+    "toy_function": ("easy", 0, "fast"),
+    "alien_minerals": ("medium", 1, "default"),
+    "alloy_design": ("medium", 2, "default"),
+    "water_treatment": ("hard", 3, "high"),
+    "spo2": ("hard", 4, "high"),
 }
 
 
@@ -575,18 +580,49 @@ class LaunchApp(App[ExperimentConfig | None]):
                             classes="model-reasoning",
                         )
 
+                # Non-SDK agents after critics
+                for agent in _TRAILING_AGENTS:
+                    display = agent.title()
+                    with Horizontal(classes="model-row"):
+                        yield Label(f"{display}:", classes="model-label")
+                        yield Select(
+                            PROVIDER_OPTIONS,
+                            allow_blank=True,
+                            id=f"model-{agent}-provider",
+                            classes="model-provider",
+                        )
+                        yield Select(
+                            ALL_MODELS,
+                            allow_blank=True,
+                            id=f"model-{agent}-name",
+                            classes="model-name",
+                        )
+                        yield Select(
+                            REASONING_OPTIONS,
+                            allow_blank=True,
+                            id=f"model-{agent}-reasoning",
+                            classes="model-reasoning",
+                        )
+
                 # Error display
                 yield Static("", id="error-display", markup=False)
 
         yield Footer()
 
     def on_mount(self) -> None:
+        saved_theme = load_theme()
+        if saved_theme in self.available_themes:
+            self.theme = saved_theme
         if self._prefill:
             self._apply_config(self._prefill)
         else:
             # Populate model fields from the default preset
             default_cfg = ExperimentConfig(data=".", goal=".")
             self._apply_model_defaults(default_cfg)
+
+    def watch_theme(self, theme_name: str) -> None:
+        """Persist every theme change made through the launcher UI."""
+        save_theme(theme_name)
 
     def _apply_model_defaults(self, cfg: ExperimentConfig) -> None:
         """Populate only the model/reasoning fields from the resolved preset."""
@@ -595,7 +631,7 @@ class LaunchApp(App[ExperimentConfig | None]):
         mc = ModelConfig.from_experiment_config(cfg)
 
         for agent in _AGENT_FIELDS:
-            agent_cfg = mc.resolve(agent) if agent != "summarizer" else mc.summarizer
+            agent_cfg = mc.resolve(agent)
             if agent_cfg is None:
                 continue
             self._set_agent_model(f"model-{agent}", agent_cfg)
@@ -603,6 +639,12 @@ class LaunchApp(App[ExperimentConfig | None]):
         for i in range(_NUM_CRITIC_SLOTS):
             if i < len(mc.critics):
                 self._set_agent_model(f"model-critic-{i}", mc.critics[i])
+
+        for agent in _TRAILING_AGENTS:
+            resolved = mc.summarizer if agent == "summarizer" else mc.resolve(agent)
+            if resolved is None:
+                continue
+            self._set_agent_model(f"model-{agent}", resolved)
 
     def _set_agent_model(self, prefix: str, cfg: AgentModelConfig) -> None:
         """Set provider, model, and reasoning for one agent row."""
@@ -636,7 +678,7 @@ class LaunchApp(App[ExperimentConfig | None]):
 
         # Fill per-agent model fields from resolved config
         for agent in _AGENT_FIELDS:
-            agent_cfg = mc.resolve(agent) if agent != "summarizer" else mc.summarizer
+            agent_cfg = mc.resolve(agent)
             if agent_cfg is None:
                 continue
             self._set_agent_model(f"model-{agent}", agent_cfg)
@@ -645,6 +687,13 @@ class LaunchApp(App[ExperimentConfig | None]):
         for i in range(_NUM_CRITIC_SLOTS):
             if i < len(mc.critics):
                 self._set_agent_model(f"model-critic-{i}", mc.critics[i])
+
+        # Fill trailing agent fields (e.g. summarizer)
+        for agent in _TRAILING_AGENTS:
+            resolved = mc.summarizer if agent == "summarizer" else mc.resolve(agent)
+            if resolved is None:
+                continue
+            self._set_agent_model(f"model-{agent}", resolved)
 
     @on(Button.Pressed, "#browse-btn")
     def _on_browse(self, event: Button.Pressed) -> None:
@@ -674,7 +723,10 @@ class LaunchApp(App[ExperimentConfig | None]):
 
     @on(Select.Changed, "#domain-select")
     def _on_domain_changed(self, event: Select.Changed) -> None:
-        """When a domain is selected, load its experiment.yaml and fill the form."""
+        """When a domain is selected, load its experiment.yaml and fill the form.
+
+        Also sets the preset to a sensible default based on domain difficulty.
+        """
         if event.value == _CUSTOM:
             self._yaml_path = None
             return
@@ -689,6 +741,12 @@ class LaunchApp(App[ExperimentConfig | None]):
         except (ValueError, OSError) as e:
             self._show_error(f"Failed to load {yaml_path}: {e}")
             return
+
+        # Pick preset from difficulty mapping if the YAML uses the default preset
+        domain_name = yaml_path.parent.name
+        diff_info = DOMAIN_DIFFICULTY.get(domain_name)
+        if diff_info and cfg.preset == "default":
+            cfg.preset = diff_info[2]
 
         self._yaml_path = yaml_path
         # Resolve data path relative to the YAML file for display
@@ -730,7 +788,7 @@ class LaunchApp(App[ExperimentConfig | None]):
 
         # Collect per-agent model overrides
         models_dict: dict[str, AgentModelConfig] = {}
-        for agent in _AGENT_FIELDS:
+        for agent in [*_AGENT_FIELDS, *_TRAILING_AGENTS]:
             model_val = self.query_one(f"#model-{agent}-name", Select).value
             if not isinstance(model_val, str):
                 continue

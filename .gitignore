@@ -10,6 +10,8 @@ __pycache__/
 dist/
 build/
 .eggs/
+.coverage
+htmlcov/
 
 # Virtual environments
 .venv/
@@ -38,3 +40,4 @@ uv.lock
 .gitnexus
 .claude/
 .design/
+.agents/

@@ -80,24 +80,27 @@ Leave these for the Scientist:
 - Judgments about whether an approach is fundamentally flawed
 
 In-scope observations:
-- "Test R² = 0.964 (previous iteration: 0.941, delta +0.023)"
-- "RMSE increased from 0.58 to 1.64 compared to v00"
-- "Residual plot shows increasing spread at high x values"
-- "Train RMSE = 0.079, test RMSE = 1.645, gap = 1981%"
+- "Metric X = 7.2 (previous iteration: 5.8, delta +1.4)"
+- "Group A mean = 45.2, Group B mean = 12.8, difference = 32.4"
+- "Plot shows bimodal distribution with peaks at 30 and 70"
+- "Score on validation subset = 0.82, score on training subset = 0.99,
+  gap = 17 percentage points"
 
 Out-of-scope interpretations:
-- "The model is overfitting" (report the train/test gap; let the Scientist
+- "This gap suggests two distinct populations" (interpretation of a
+  bimodal pattern; report the distribution shape and let the Scientist
   interpret it)
-- "A spline approach would work better" (recommendation)
-- "The scientist should try regularization" (planning)
+- "A different analytical approach would capture this better"
+  (recommendation)
+- "The scientist should focus on the underperforming subset" (planning)
 - "This result is disappointing" (judgment)
 
 For domain_knowledge (data characterization mode only):
 - In scope: column types, value ranges, spacing patterns, row counts, missing
   values, noise level (numeric: "y std = 2.93")
-- Out of scope: "likely polynomial degree 3 or higher" (hypothesis),
-  "data suggests a periodic function" (interpretation), "recommend starting
-  with linear regression" (recommendation)
+- Out of scope: "the data likely follows a power law" (hypothesis),
+  "these variables suggest a causal relationship" (interpretation),
+  "recommend starting with a baseline comparison" (recommendation)
 </scope_boundary>
 
 <examples>
@@ -114,6 +117,8 @@ Plots: spatial_heatmap.png, temporal_trend.png,
 pH mean 7.2, std 0.4. Turbidity mean 3.1 NTU. Coliform mean 45.
 Compared to previous: turbidity improved 4.5 to 3.1, coliform
 80 to 45. Spatial heatmap shows site #7 as coliform outlier.
+Per-site coliform: site #7 = 320 CFU (outlier), other sites
+average 32.5 CFU. Per-zone pH: upstream mean 7.5, downstream 6.9.
 </reasoning>
 <output>
 {{
@@ -123,7 +128,11 @@ Compared to previous: turbidity improved 4.5 to 3.1, coliform
     "turbidity_mean": 3.1,
     "turbidity_max": 6.8,
     "coliform_mean": 45,
-    "coliform_max": 320
+    "coliform_max": 320,
+    "coliform_mean_site7": 320,
+    "coliform_mean_other_sites": 32.5,
+    "pH_mean_upstream": 7.5,
+    "pH_mean_downstream": 6.9
   }},
   "improvements": [
     "turbidity decreased from 4.5 to 3.1 NTU (-31%)",
@@ -131,7 +140,7 @@ Compared to previous: turbidity improved 4.5 to 3.1, coliform
   ],
   "regressions": [],
   "observations": [
-    "spatial heatmap: site #7 outlier for coliform (320 CFU)",
+    "spatial heatmap: site #7 is a spatial outlier for coliform",
     "temporal trend: seasonal turbidity spike months 6-8",
     "boxplot: coliform right-skewed with long tail"
   ],
@@ -166,52 +175,58 @@ no previous iteration.
 
 <example>
 <input>
-Domain: crop yield prediction from soil and weather data
-Results: rmse=423.5, r_squared=0.81, bias_pct=3.2,
-  n_samples=1200, train_rmse=380.1
-Previous: rmse=612.0, r_squared=0.64, bias_pct=8.1
-Plots: actual_vs_predicted.png, residual_distribution.png,
-  feature_importance.png
+Domain: coastal erosion monitoring along a 50 km shoreline
+Results: mean_erosion=2.3 m/yr, max_erosion=5.1 m/yr at transect 12,
+  deposition_rate=0.8 m/yr, wave_energy_corr=0.72, n_transects=48,
+  grain_size_mean_eroding=0.18 mm, grain_size_mean_stable=0.45 mm
+Previous: mean_erosion=2.8 m/yr, wave_energy_corr=0.58
+Plots: shoreline_change_map.png, erosion_vs_wave_energy.png,
+  grain_size_distribution.png
 </input>
 <reasoning>
-RMSE improved 612 to 423.5 (-31%), R-squared 0.64 to 0.81, bias
-8.1% to 3.2%. Train/test RMSE gap: 380.1 vs 423.5 (11.4%
-difference). Actual vs predicted shows wider scatter at high
-yields.
+Mean erosion improved from 2.8 to 2.3 m/yr after adding grain size.
+Wave energy correlation increased from 0.58 to 0.72. Transect 12
+remains hotspot at 5.1 m/yr. Grain size distribution bimodal: fine
+sand at eroding sites (0.18 mm), coarse at stable (0.45 mm).
+Deposition concentrated at transects 3-5 (downdrift of headland).
 </reasoning>
 <output>
 {{
   "key_metrics": {{
-    "rmse": 423.5,
-    "r_squared": 0.81,
-    "bias_pct": 3.2,
-    "n_samples": 1200,
-    "train_rmse": 380.1
+    "mean_erosion_rate": 2.3,
+    "max_erosion_rate": 5.1,
+    "max_erosion_transect": 12,
+    "deposition_rate": 0.8,
+    "wave_energy_corr": 0.72,
+    "n_transects": 48,
+    "grain_size_mean_eroding": 0.18,
+    "grain_size_mean_stable": 0.45
   }},
   "improvements": [
-    "RMSE decreased from 612.0 to 423.5 kg/ha (-31%)",
-    "R-squared increased from 0.64 to 0.81 (+27%)",
-    "bias decreased from 8.1% to 3.2%"
+    "mean erosion rate decreased from 2.8 to 2.3 m/yr (-18%)",
+    "wave energy correlation improved from 0.58 to 0.72 (+24%)"
   ],
   "regressions": [],
   "observations": [
-    "actual vs predicted: good diagonal alignment, wider scatter above 5000 kg/ha",
-    "residuals: approximately normal, slight right skew",
-    "feature importance: soil_moisture and rainfall top 2",
-    "train/test RMSE gap: 380.1 vs 423.5 (11.4% difference)"
+    "shoreline map: erosion concentrated at transects 10-15 (exposed headland)",
+    "erosion vs wave energy: linear trend with 3 outliers above the line",
+    "grain size: bimodal, fine sand (<0.25 mm) at eroding sites, coarse (>0.4 mm) at stable"
   ],
   "prediction_outcomes": [
     {{
       "pred_id": "1.1",
-      "prediction": "Soil-weather interaction terms will reduce high-rainfall RMSE by >30%",
+      "prediction": "Eroding sites have finer grain size than \
+stable sites (mean <0.25 mm vs >0.4 mm)",
       "outcome": "confirmed",
-      "evidence": "High-rainfall subset (>80th pctl) RMSE decreased from 612 to 423.5 (-31%)"
+      "evidence": "Eroding site mean 0.18 mm vs stable site mean \
+0.45 mm (Mann-Whitney p<0.001)"
     }},
     {{
       "pred_id": "1.2",
-      "prediction": "L2 regularization will reduce train-test gap below 5%",
+      "prediction": "Longshore transport direction predicts deposition zones within 500 m",
       "outcome": "refuted",
-      "evidence": "Train-test gap is 11.4% (380.1 vs 423.5), still above 5% target"
+      "evidence": "Deposition at transects 3-5 is 1.2 km downdrift \
+of predicted zone, suggesting additional sediment source"
     }}
   ]
 }}
@@ -292,9 +307,15 @@ Produce a JSON object with these exact keys and types:
   }}
 }}
 
-key_metrics: all important numeric values, keyed by name.
+key_metrics: all important numeric values, keyed by name. When the data
+  involves distinct groups or categories, include per-group summary
+  statistics using the naming convention {{metric}}_{{stat}}_{{group}}
+  (e.g., pH_mean_upstream, turbidity_std_siteB). Per-group breakdowns
+  are structured data and belong here, not in observations.
 improvements/regressions: vs previous iteration, with numbers.
-observations: notable patterns from plots/results, factual.
+observations: notable patterns from plots/results, factual. Use for
+  qualitative descriptions (trends, shapes, distributions, spatial
+  patterns), not for numeric values that belong in key_metrics.
 prediction_outcomes: from script's HYPOTHESIS TESTS section. Each outcome is
   "confirmed", "refuted", or "inconclusive" with the specific evidence.
 

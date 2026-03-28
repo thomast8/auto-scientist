@@ -14,7 +14,6 @@ Provides:
 from __future__ import annotations
 
 import asyncio
-import json
 import logging
 import subprocess
 import threading
@@ -46,29 +45,9 @@ from textual.widgets import (
 from textual.widgets._collapsible import CollapsibleTitle
 from textual.worker import Worker, WorkerState
 
+from auto_scientist.preferences import load_theme, save_theme
+
 logger = logging.getLogger(__name__)
-
-_PREFS_PATH = Path.home() / ".config" / "auto-scientist" / "preferences.json"
-
-
-def _load_prefs() -> dict[str, object]:
-    """Load user preferences from disk."""
-    try:
-        result: dict[str, object] = json.loads(_PREFS_PATH.read_text())
-        return result
-    except (FileNotFoundError, json.JSONDecodeError, OSError):
-        return {}
-
-
-def _save_prefs(prefs: dict) -> None:
-    """Save user preferences to disk (atomic write). Silently ignores write failures."""
-    try:
-        _PREFS_PATH.parent.mkdir(parents=True, exist_ok=True)
-        tmp = _PREFS_PATH.with_suffix(".tmp")
-        tmp.write_text(json.dumps(prefs, indent=2))
-        tmp.replace(_PREFS_PATH)
-    except OSError as e:
-        logger.debug(f"Could not save preferences: {e}")
 
 
 # Module-level console for one-time prints (startup banner in headless mode, etc.)
@@ -140,9 +119,10 @@ class AgentPanel(Widget):
         border: round $accent;
         border-subtitle-align: right;
         border-title-align: left;
+        background: $surface;
     }
     AgentPanel:hover {
-        background: $surface;
+        background: $surface-lighten-1;
     }
     AgentPanel Collapsible {
         border-top: none;
@@ -613,9 +593,8 @@ class IterationContainer(Vertical):
         total_out = sum(p.output_tokens for p in self._panels)
         total_turns = sum(p.num_turns for p in self._panels)
 
-        # Build aggregated subtitle: "status | 4m 32s | 1,200 in / 800 out | 5 turns"
-        status = str(self.border_subtitle or "")
-        parts = [status] if status else []
+        # Build aggregated subtitle: "4m 32s | 1,200 in / 800 out | 5 turns"
+        parts: list[str] = []
         parts.append(_format_elapsed(total_elapsed))
         if total_in or total_out:
             parts.append(f"{total_in:,} in / {total_out:,} out")
@@ -672,7 +651,7 @@ class IterationContainer(Vertical):
         """Set the iteration result as border subtitle and collapse."""
         self._in_progress = False
         self.border_title = self._iter_title
-        self.border_subtitle = text
+        self.border_subtitle = ""
         valid = {"red", "green", "yellow"}
         if style in valid:
             self.styles.border = ("solid", style)
@@ -1118,8 +1097,8 @@ class PipelineApp(App):
         yield Footer()
 
     def on_mount(self) -> None:
-        saved_theme = _load_prefs().get("theme")
-        if isinstance(saved_theme, str) and saved_theme in self.available_themes:
+        saved_theme = load_theme()
+        if saved_theme in self.available_themes:
             self.theme = saved_theme
         self.title = "Auto-Scientist"
         self._live._app = self
@@ -1294,9 +1273,7 @@ class PipelineApp(App):
         Catches changes from Ctrl+T, the custom command palette, AND the
         built-in Textual ThemeProvider (which otherwise bypasses persistence).
         """
-        prefs = _load_prefs()
-        prefs["theme"] = theme_name
-        _save_prefs(prefs)
+        save_theme(theme_name)
 
     def action_cycle_theme(self) -> None:
         """Cycle through available themes."""

@@ -44,12 +44,31 @@ class TestConcern:
         with pytest.raises(ValidationError):
             Concern(claim="x", severity="high", confidence="high", category="invalid")
 
+    def test_new_categories_accepted(self):
+        """New persona categories: trajectory, falsification, consistency."""
+        from auto_scientist.agents.debate_models import Concern
+
+        for cat in ("trajectory", "falsification", "consistency"):
+            c = Concern(claim="x", severity="high", confidence="high", category=cat)
+            assert c.category == cat
+
+    def test_old_categories_rejected(self):
+        """Old persona categories novelty/feasibility are no longer valid."""
+        from auto_scientist.agents.debate_models import Concern
+
+        for cat in ("novelty", "feasibility"):
+            with pytest.raises(ValidationError):
+                Concern(claim="x", severity="high", confidence="high", category=cat)
+
     def test_extra_fields_tolerated(self):
         from auto_scientist.agents.debate_models import Concern
 
         c = Concern(
-            claim="x", severity="high", confidence="high",
-            category="methodology", extra_field="ignored",
+            claim="x",
+            severity="high",
+            confidence="high",
+            category="methodology",
+            extra_field="ignored",
         )
         assert c.claim == "x"
 
@@ -81,8 +100,10 @@ class TestCriticOutput:
 
     def test_extra_fields_tolerated(self):
         co = CriticOutput(
-            concerns=[], alternative_hypotheses=[],
-            overall_assessment="ok", bonus="ignored",
+            concerns=[],
+            alternative_hypotheses=[],
+            overall_assessment="ok",
+            bonus="ignored",
         )
         assert co.overall_assessment == "ok"
 
@@ -99,7 +120,9 @@ class TestDefenseResponse:
     def test_invalid_verdict_raises(self):
         with pytest.raises(ValidationError):
             DefenseResponse(
-                concern="x", verdict="maybe", reasoning="unsure",
+                concern="x",
+                verdict="maybe",
+                reasoning="unsure",
             )
 
     def test_all_verdicts_accepted(self):
@@ -151,8 +174,8 @@ class TestConcernLedgerEntry:
             claim="Redundant approach",
             severity="medium",
             confidence="low",
-            category="novelty",
-            persona="Novelty Skeptic",
+            category="trajectory",
+            persona="Falsification Expert",
             critic_model="openai:gpt-5.4",
         )
         assert entry.scientist_verdict is None
@@ -160,8 +183,12 @@ class TestConcernLedgerEntry:
 
     def test_model_dump_serializable(self):
         entry = ConcernLedgerEntry(
-            claim="x", severity="low", confidence="low",
-            category="other", persona="p", critic_model="m",
+            claim="x",
+            severity="low",
+            confidence="low",
+            category="other",
+            persona="p",
+            critic_model="m",
         )
         d = entry.model_dump()
         assert isinstance(d, dict)
@@ -172,7 +199,8 @@ class TestConcernLedgerEntry:
 class TestDebateRoundAndResult:
     def test_debate_round_critic_only(self):
         co = CriticOutput(
-            concerns=[], alternative_hypotheses=[],
+            concerns=[],
+            alternative_hypotheses=[],
             overall_assessment="ok",
         )
         dr = DebateRound(critic_output=co)
@@ -180,7 +208,8 @@ class TestDebateRoundAndResult:
 
     def test_debate_round_with_defense(self):
         co = CriticOutput(
-            concerns=[], alternative_hypotheses=[],
+            concerns=[],
+            alternative_hypotheses=[],
             overall_assessment="ok",
         )
         sd = ScientistDefense(responses=[])
@@ -189,7 +218,8 @@ class TestDebateRoundAndResult:
 
     def test_debate_result(self):
         co = CriticOutput(
-            concerns=[], alternative_hypotheses=[],
+            concerns=[],
+            alternative_hypotheses=[],
             overall_assessment="ok",
         )
         result = DebateResult(

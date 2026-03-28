@@ -1,5 +1,6 @@
 """Tests for the TUI launch form."""
 
+import json
 from unittest.mock import patch
 
 import yaml
@@ -62,6 +63,30 @@ class TestLaunchAppRun:
 
             # App should still be running (not exited)
             assert app.result_config is None
+
+
+class TestLaunchAppTheme:
+    async def test_saved_theme_is_restored(self, tmp_path):
+        prefs_path = tmp_path / "preferences.json"
+        prefs_path.write_text(json.dumps({"theme": "atom-one-light"}))
+
+        with patch("auto_scientist.preferences.PREFS_PATH", prefs_path):
+            app = LaunchApp()
+            async with app.run_test() as pilot:
+                await pilot.pause()
+                assert app.theme == "atom-one-light"
+
+    async def test_theme_changes_are_persisted(self, tmp_path):
+        prefs_path = tmp_path / "preferences.json"
+
+        with patch("auto_scientist.preferences.PREFS_PATH", prefs_path):
+            app = LaunchApp()
+            async with app.run_test() as pilot:
+                await pilot.pause()
+                app.theme = "atom-one-light"
+                await pilot.pause()
+
+        assert json.loads(prefs_path.read_text())["theme"] == "atom-one-light"
 
 
 class TestLaunchAppSave:
