@@ -60,7 +60,6 @@ class TestHelperFunctions:
         assert _format_elapsed(125) == "2m 5s"
 
 
-
 # ---------------------------------------------------------------------------
 # Constants tests
 # ---------------------------------------------------------------------------
@@ -69,15 +68,26 @@ class TestHelperFunctions:
 class TestConstants:
     def test_agent_styles_has_all_agents(self):
         expected = {
-            "Analyst", "Scientist", "Coder", "Ingestor",
-            "Report", "Critic", "Debate", "Results",
+            "Analyst",
+            "Scientist",
+            "Coder",
+            "Ingestor",
+            "Report",
+            "Critic",
+            "Debate",
+            "Results",
         }
         assert set(AGENT_STYLES.keys()) == expected
 
     def test_phase_styles_has_all_phases(self):
         expected = {
-            "INGESTION", "ANALYZE", "PLAN", "DEBATE",
-            "REVISE", "IMPLEMENT", "REPORT",
+            "INGESTION",
+            "ANALYZE",
+            "PLAN",
+            "DEBATE",
+            "REVISE",
+            "IMPLEMENT",
+            "REPORT",
         }
         assert set(PHASE_STYLES.keys()) == expected
 
@@ -303,8 +313,8 @@ class TestIterationContainer:
     def test_set_result(self):
         container = IterationContainer(iter_title="Iteration 1")
         container.set_result("completed (85)", "green")
-        # No panels, so collapse_iteration is not called and subtitle is unchanged
-        assert container.border_subtitle == "completed (85)"
+        # Status text is not shown (green border already signals completion)
+        assert container.border_subtitle == ""
         assert container._in_progress is False
         assert container.border_title == "Iteration 1"
 
@@ -431,7 +441,9 @@ class TestMetricsBar:
     async def test_add_agent_stats(self):
         bar = MetricsBar()
         panel = AgentPanel(
-            name="Analyst", model="claude-sonnet-4-6", style="green",
+            name="Analyst",
+            model="claude-sonnet-4-6",
+            style="green",
         )
         async with MetricsBarTestApp(bar).run_test():
             panel.set_stats(input_tokens=100, output_tokens=50, num_turns=3)
@@ -481,7 +493,9 @@ class TestPipelineLiveHeadless:
         live = PipelineLive()
         live.start()
         panel = AgentPanel(
-            name="Analyst", model="claude-sonnet-4-6", style="green",
+            name="Analyst",
+            model="claude-sonnet-4-6",
+            style="green",
         )
         live.add_panel(panel)
         assert live.has_panel(panel)
@@ -492,7 +506,9 @@ class TestPipelineLiveHeadless:
         live = PipelineLive()
         live.start()
         panel = AgentPanel(
-            name="Analyst", model="claude-sonnet-4-6", style="green",
+            name="Analyst",
+            model="claude-sonnet-4-6",
+            style="green",
         )
         live.add_panel(panel)
         live.collapse_panel(panel, "done")
@@ -505,7 +521,9 @@ class TestPipelineLiveHeadless:
         live = PipelineLive()
         live.start(log_path=log_path)
         panel = AgentPanel(
-            name="Analyst", model="claude-sonnet-4-6", style="green",
+            name="Analyst",
+            model="claude-sonnet-4-6",
+            style="green",
         )
         live.add_panel(panel)
         live.collapse_panel(panel, "analysis done")
@@ -527,10 +545,14 @@ class TestPipelineLiveHeadless:
         live = PipelineLive()
         live.start()
         p1 = AgentPanel(
-            name="Analyst", model="claude-sonnet-4-6", style="green",
+            name="Analyst",
+            model="claude-sonnet-4-6",
+            style="green",
         )
         p2 = AgentPanel(
-            name="Scientist", model="claude-sonnet-4-6", style="cyan",
+            name="Scientist",
+            model="claude-sonnet-4-6",
+            style="cyan",
         )
         live.add_panel(p1)
         live.add_panel(p2)
@@ -541,7 +563,9 @@ class TestPipelineLiveHeadless:
         live = PipelineLive()
         live.start()
         panel = AgentPanel(
-            name="Analyst", model="claude-sonnet-4-6", style="green",
+            name="Analyst",
+            model="claude-sonnet-4-6",
+            style="green",
         )
         live.add_panel(panel)
         live.remove_panel(panel)
@@ -565,7 +589,9 @@ class TestPipelineLiveHeadless:
         live = PipelineLive()
         live.start()
         panel = AgentPanel(
-            name="Analyst", model="claude-sonnet-4-6", style="green",
+            name="Analyst",
+            model="claude-sonnet-4-6",
+            style="green",
         )
         live.add_panel(panel)
         live.collapse_panel(panel, "done")
@@ -584,10 +610,14 @@ class TestPipelineLiveHeadless:
         live = PipelineLive()
         live.start()
         p1 = AgentPanel(
-            name="Analyst", model="claude-sonnet-4-6", style="green",
+            name="Analyst",
+            model="claude-sonnet-4-6",
+            style="green",
         )
         p2 = AgentPanel(
-            name="Scientist", model="claude-sonnet-4-6", style="cyan",
+            name="Scientist",
+            model="claude-sonnet-4-6",
+            style="cyan",
         )
         live.add_panel(p1)
         live.add_panel(p2)
@@ -641,9 +671,8 @@ class TestPipelineLiveHeadless:
         container = live._current_iteration
         # In headless mode, set_result is called directly with summary_text
         live.end_iteration("done", "green", "Iteration recap text")
-        # Container should have received the summary_text
-        # (no panels so collapse_iteration won't be called, but set_result stores subtitle)
-        assert container.border_subtitle == "done"
+        # Status text is not shown (green border already signals completion)
+        assert container.border_subtitle == ""
         assert container._in_progress is False
         live.stop()
 
@@ -676,7 +705,8 @@ class TestPipelineApp:
             async def run(self):
                 self._live.add_panel(
                     AgentPanel(
-                        name="Analyst", model="claude-sonnet-4-6",
+                        name="Analyst",
+                        model="claude-sonnet-4-6",
                         style="green",
                     )
                 )
@@ -736,11 +766,14 @@ class TestPipelineApp:
 
             async def run(self):
                 panel = AgentPanel(
-                    name="Analyst", model="claude-sonnet-4-6",
+                    name="Analyst",
+                    model="claude-sonnet-4-6",
                     style="green",
                 )
                 panel.set_stats(
-                    input_tokens=500, output_tokens=200, num_turns=3,
+                    input_tokens=500,
+                    output_tokens=200,
+                    num_turns=3,
                 )
                 self._live.add_panel(panel)
                 self._live.collapse_panel(panel, "done")
@@ -769,7 +802,9 @@ class TestOrchestratorFlags:
         state = MagicMock()
         state.phase = "ingestion"
         orch = Orchestrator(
-            state=state, data_path=None, output_dir=MagicMock(),
+            state=state,
+            data_path=None,
+            output_dir=MagicMock(),
         )
         assert orch.pause_requested is False
         assert orch.skip_to_report is False
@@ -793,12 +828,14 @@ class TestAgentDetailScreen:
         app = PipelineApp(orch)
         async with app.run_test() as pilot:
             await pilot.pause()
-            app.push_screen(AgentDetailScreen(
-                panel_name="Analyst",
-                model="claude-sonnet-4-6",
-                stats="5s | 100 in / 50 out",
-                lines=["line 1", "line 2", "line 3"],
-            ))
+            app.push_screen(
+                AgentDetailScreen(
+                    panel_name="Analyst",
+                    model="claude-sonnet-4-6",
+                    stats="5s | 100 in / 50 out",
+                    lines=["line 1", "line 2", "line 3"],
+                )
+            )
             await pilot.pause()
             rich_log = app.screen.query_one(RichLog)
             assert rich_log is not None
@@ -815,12 +852,14 @@ class TestAgentDetailScreen:
         app = PipelineApp(orch)
         async with app.run_test() as pilot:
             await pilot.pause()
-            app.push_screen(AgentDetailScreen(
-                panel_name="Analyst",
-                model="claude-sonnet-4-6",
-                stats="5s",
-                lines=["line 1"],
-            ))
+            app.push_screen(
+                AgentDetailScreen(
+                    panel_name="Analyst",
+                    model="claude-sonnet-4-6",
+                    stats="5s",
+                    lines=["line 1"],
+                )
+            )
             await pilot.pause()
             assert isinstance(app.screen, AgentDetailScreen)
             await pilot.press("escape")
@@ -844,7 +883,8 @@ class TestQuitConfirmScreen:
             await pilot.pause()
             app._finished = False  # Pretend still running
             app.push_screen(
-                QuitConfirmScreen(), callback=results.append,
+                QuitConfirmScreen(),
+                callback=results.append,
             )
             await pilot.pause()
             await pilot.press("y")
@@ -865,7 +905,8 @@ class TestQuitConfirmScreen:
         async with app.run_test() as pilot:
             await pilot.pause()
             app.push_screen(
-                QuitConfirmScreen(), callback=results.append,
+                QuitConfirmScreen(),
+                callback=results.append,
             )
             await pilot.pause()
             await pilot.press("n")

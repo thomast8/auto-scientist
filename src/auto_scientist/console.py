@@ -613,9 +613,8 @@ class IterationContainer(Vertical):
         total_out = sum(p.output_tokens for p in self._panels)
         total_turns = sum(p.num_turns for p in self._panels)
 
-        # Build aggregated subtitle: "status | 4m 32s | 1,200 in / 800 out | 5 turns"
-        status = str(self.border_subtitle or "")
-        parts = [status] if status else []
+        # Build aggregated subtitle: "4m 32s | 1,200 in / 800 out | 5 turns"
+        parts: list[str] = []
         parts.append(_format_elapsed(total_elapsed))
         if total_in or total_out:
             parts.append(f"{total_in:,} in / {total_out:,} out")
@@ -672,7 +671,7 @@ class IterationContainer(Vertical):
         """Set the iteration result as border subtitle and collapse."""
         self._in_progress = False
         self.border_title = self._iter_title
-        self.border_subtitle = text
+        self.border_subtitle = ""
         valid = {"red", "green", "yellow"}
         if style in valid:
             self.styles.border = ("solid", style)
