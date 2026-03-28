@@ -32,9 +32,7 @@ class ReasoningConfig(BaseModel):
     def _migrate_default_level(cls, v):
         """Accept legacy 'default' and migrate to 'off'."""
         if v == "default":
-            logger.warning(
-                "ReasoningConfig level='default' is deprecated, use 'off' instead"
-            )
+            logger.warning("ReasoningConfig level='default' is deprecated, use 'off' instead")
             return "off"
         return v
 
@@ -132,7 +130,12 @@ class ModelConfig(BaseModel):
     critics: list[AgentModelConfig] = []
 
     _AGENT_FIELDS: ClassVar[set[str]] = {
-        "analyst", "scientist", "coder", "ingestor", "report", "summarizer",
+        "analyst",
+        "scientist",
+        "coder",
+        "ingestor",
+        "report",
+        "summarizer",
     }
 
     def resolve(self, agent: str) -> AgentModelConfig:
@@ -144,7 +147,7 @@ class ModelConfig(BaseModel):
             raise ValueError("Use model_config.critics directly for critic configs")
         if agent not in self._AGENT_FIELDS:
             raise ValueError(f"Unknown agent: {agent!r}")
-        override = getattr(self, agent, None)
+        override: AgentModelConfig | None = getattr(self, agent, None)
         if override is not None:
             return override
         return self.defaults

@@ -18,7 +18,7 @@ if TYPE_CHECKING:
 logger = logging.getLogger(__name__)
 
 
-def _make_strict_schema(schema: dict[str, Any]) -> dict[str, Any]:
+def _make_strict_schema(schema: Any) -> Any:
     """Add additionalProperties: false to all object types in a JSON schema.
 
     OpenAI's structured output (both Chat Completions and Responses API)
@@ -87,10 +87,12 @@ async def query_openai(
         if images:
             resp_content: list[dict] = [{"type": "input_text", "text": prompt}]
             for img in images:
-                resp_content.append({
-                    "type": "input_image",
-                    "image_url": f"data:{img.media_type};base64,{img.data}",
-                })
+                resp_content.append(
+                    {
+                        "type": "input_image",
+                        "image_url": f"data:{img.media_type};base64,{img.data}",
+                    }
+                )
             resp_input: str | list[dict] = [{"role": "user", "content": resp_content}]
         else:
             resp_input = prompt
@@ -107,9 +109,7 @@ async def query_openai(
                 "format": {
                     "type": "json_schema",
                     "name": "response",
-                    "schema": _make_strict_schema(
-                        response_schema.model_json_schema()
-                    ),
+                    "schema": _make_strict_schema(response_schema.model_json_schema()),
                 },
             }
 
@@ -137,13 +137,17 @@ async def query_openai(
         return AgentResult(text=result, input_tokens=in_tok, output_tokens=out_tok)
 
     # Build user message content (multimodal when images provided)
+    user_content: str | list[dict[str, Any]]
     if images:
-        user_content: str | list[dict] = [{"type": "text", "text": prompt}]
+        content_parts: list[dict[str, Any]] = [{"type": "text", "text": prompt}]
         for img in images:
-            user_content.append({
-                "type": "image_url",
-                "image_url": {"url": f"data:{img.media_type};base64,{img.data}"},
-            })
+            content_parts.append(
+                {
+                    "type": "image_url",
+                    "image_url": {"url": f"data:{img.media_type};base64,{img.data}"},
+                }
+            )
+        user_content = content_parts
     else:
         user_content = prompt
 
@@ -162,9 +166,7 @@ async def query_openai(
             "type": "json_schema",
             "json_schema": {
                 "name": "response",
-                "schema": _make_strict_schema(
-                    response_schema.model_json_schema()
-                ),
+                "schema": _make_strict_schema(response_schema.model_json_schema()),
             },
         }
 

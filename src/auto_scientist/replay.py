@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import logging
 import re
 import shutil
 from pathlib import Path
@@ -11,6 +12,8 @@ from auto_scientist.iteration_manifest import MANIFEST_FILENAME, load_manifest, 
 from auto_scientist.notebook import NOTEBOOK_FILENAME
 from auto_scientist.state import ExperimentState
 
+logger = logging.getLogger(__name__)
+
 # Regex to extract the two-digit iteration number from buffer filenames
 # e.g. "analyst_02.txt" -> 2, "debate_novelty_skeptic_04.txt" -> 4
 _BUFFER_ITER_RE = re.compile(r"_(\d{2})\.txt$")
@@ -18,12 +21,12 @@ _BUFFER_ITER_RE = re.compile(r"_(\d{2})\.txt$")
 # Regex to extract version directory names like "v00", "v01"
 _VERSION_DIR_RE = re.compile(r"^v(\d{2})$")
 
-# Files generated only during the report phase or that should be regenerated
-_FINAL_ARTIFACTS = ("report.md", "exegesis.md", "console.log", "debug.log")
+# Artifacts to remove when rewinding: report output + run-wide logs that will be regenerated
+_FINAL_ARTIFACTS = ("report.md", "console.log", "debug.log")
 
 
 def _detect_old_output_dir(state: ExperimentState) -> str | None:
-    """Infer the original output directory from absolute paths in state."""
+    """Infer the original output directory from paths stored in state."""
     if state.config_path:
         return str(Path(state.config_path).parent)
     if state.versions:
@@ -41,7 +44,7 @@ def _rewrite_path(path: str | None, old_base: str, new_base: str) -> str | None:
     if path is None:
         return None
     if path.startswith(old_base):
-        return new_base + path[len(old_base):]
+        return new_base + path[len(old_base) :]
     return path
 
 
@@ -58,29 +61,30 @@ def _truncate_notebook(notebook_path: Path, allowed_versions: set[str]) -> None:
         re.DOTALL,
     )
 
-    kept_entries = []
-    for match in entry_pattern.finditer(text):
-        version = match.group(1)
-        if version in allowed_versions:
-            kept_entries.append(match.group(0))
+    all_matches = list(entry_pattern.finditer(text))
+    kept_entries = [m.group(0) for m in all_matches if m.group(1) in allowed_versions]
+
+    if all_matches and not kept_entries:
+        logger.warning(
+            f"Notebook had {len(all_matches)} entries but none matched "
+            f"allowed versions {allowed_versions}; notebook will be empty"
+        )
 
     if kept_entries:
         new_text = (
             '<?xml version="1.0" encoding="utf-8"?>\n'
-            "<lab_notebook>\n"
-            + "\n".join(kept_entries)
-            + "\n</lab_notebook>\n"
+            "<lab_notebook>\n" + "\n".join(kept_entries) + "\n</lab_notebook>\n"
         )
     else:
-        new_text = (
-            '<?xml version="1.0" encoding="utf-8"?>\n'
-            "<lab_notebook>\n</lab_notebook>\n"
-        )
+        new_text = '<?xml version="1.0" encoding="utf-8"?>\n<lab_notebook>\n</lab_notebook>\n'
     notebook_path.write_text(new_text)
 
 
 def _reconstruct_domain_knowledge(run_dir: Path, target_iteration: int) -> str:
-    """Rebuild domain_knowledge by replaying analysis.json files up to target_iteration."""
+    """Rebuild domain_knowledge from analysis.json files.
+
+    Reads iterations 0 through target_iteration - 1.
+    """
     if target_iteration == 0:
         return ""
 
@@ -89,7 +93,11 @@ def _reconstruct_domain_knowledge(run_dir: Path, target_iteration: int) -> str:
         analysis_path = run_dir / f"v{i:02d}" / "analysis.json"
         if not analysis_path.exists():
             continue
-        analysis = json.loads(analysis_path.read_text())
+        try:
+            analysis = json.loads(analysis_path.read_text())
+        except (json.JSONDecodeError, OSError) as e:
+            logger.warning(f"Skipping corrupt analysis file {analysis_path}: {e}")
+            continue
         dk = analysis.get("domain_knowledge", "")
         if dk:
             domain_knowledge = dk
@@ -100,14 +108,17 @@ def rewind_run(run_dir: Path, target_iteration: int) -> ExperimentState:
     """Rewind a run directory in-place to the given iteration.
 
     The caller is responsible for copying the source run directory first.
-    This function modifies run_dir to look as if the orchestrator just
-    finished iteration target_iteration - 1 and is about to start
-    target_iteration.
+    This function modifies run_dir so that the orchestrator will begin
+    from iteration target_iteration.  For target_iteration > 0, state
+    reflects completion through iteration target_iteration - 1.  For
+    target_iteration = 0, state reflects completion of the ingestion
+    phase only.
 
     When target_iteration equals state.iteration (extend mode), all
-    iterations are preserved and only report-phase artifacts are removed.
-    The report-phase analyst buffer is kept since it contains useful
-    prediction resolution context.
+    iterations are preserved and report-phase artifacts plus run-wide
+    logs are removed.  The analyst buffer at the target iteration is
+    kept in extend mode, as it typically contains prediction resolution
+    context from the report phase.
 
     Returns the rewound ExperimentState.
     """
@@ -130,6 +141,8 @@ def rewind_run(run_dir: Path, target_iteration: int) -> ExperimentState:
 
     # --- Detect old output dir for path rewriting ---
     old_base = _detect_old_output_dir(state)
+    if old_base is None:
+        logger.warning("Could not detect original output dir; path rewriting skipped")
     new_base = str(run_dir.resolve())
     original_iteration = state.iteration
 
@@ -138,8 +151,7 @@ def rewind_run(run_dir: Path, target_iteration: int) -> ExperimentState:
     state.iteration = target_iteration
     state.versions = state.versions[:target_iteration]
     state.prediction_history = [
-        p for p in state.prediction_history
-        if p.iteration_prescribed < target_iteration
+        p for p in state.prediction_history if p.iteration_prescribed < target_iteration
     ]
     state.consecutive_failures = 0
     state.dead_ends = []
@@ -203,7 +215,8 @@ def rewind_run(run_dir: Path, target_iteration: int) -> ExperimentState:
     if manifest_path.exists():
         records = load_manifest(manifest_path)
         kept = [
-            r for r in records
+            r
+            for r in records
             if r.iteration == "ingestion"
             or (isinstance(r.iteration, int) and r.iteration < target_iteration)
         ]

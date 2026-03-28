@@ -34,10 +34,14 @@ def _run_orchestrator(orchestrator: Orchestrator) -> None:
         for issue in issues:
             if "not found" in issue and "openai" in issue.lower():
                 parts.append(f"  - {issue}")
-                parts.append("    Fix: check the model ID at https://platform.openai.com/docs/models")
+                parts.append(
+                    "    Fix: check the model ID at https://platform.openai.com/docs/models"
+                )
             elif "not found" in issue and "google" in issue.lower():
                 parts.append(f"  - {issue}")
-                parts.append("    Fix: check the model ID at https://ai.google.dev/gemini-api/docs/models")
+                parts.append(
+                    "    Fix: check the model ID at https://ai.google.dev/gemini-api/docs/models"
+                )
             elif "require provider 'anthropic'" in issue:
                 parts.append(f"  - {issue}")
                 parts.append(
@@ -115,8 +119,7 @@ def _run_from_experiment_config(exp_config: ExperimentConfig, data_path: Path) -
     resolved_output = _next_output_dir(Path(exp_config.output_dir))
     if resolved_output != Path(exp_config.output_dir):
         console.print(
-            f"Previous run detected in {exp_config.output_dir}/. "
-            f"Using {resolved_output}/ instead.",
+            f"Previous run detected in {exp_config.output_dir}/. Using {resolved_output}/ instead.",
             style="yellow",
         )
 
@@ -145,7 +148,8 @@ def _run_from_experiment_config(exp_config: ExperimentConfig, data_path: Path) -
 
 @click.group(invoke_without_command=True)
 @click.option(
-    "--config", "-c",
+    "--config",
+    "-c",
     "config_path",
     default=None,
     type=click.Path(exists=True),
@@ -182,7 +186,8 @@ def cli(ctx: click.Context, config_path: str | None):
 @click.option("--goal", default=None, help="Problem statement / investigation goal")
 @click.option("--max-iterations", default=20, help="Maximum iteration count")
 @click.option(
-    "--config", "-c",
+    "--config",
+    "-c",
     "config_path",
     default=None,
     type=click.Path(exists=True),
@@ -210,7 +215,9 @@ def cli(ctx: click.Context, config_path: str | None):
     help="Disable live token streaming during debate phase",
 )
 @click.option(
-    "-v", "--verbose", is_flag=True,
+    "-v",
+    "--verbose",
+    is_flag=True,
     help="Show debug log messages on console (always written to debug.log).",
 )
 @click.pass_context
@@ -241,7 +248,7 @@ def run(
 
         # CLI flags override YAML values (use get_parameter_source to detect explicit CLI flags)
         _cli = click.core.ParameterSource.COMMANDLINE
-        if ctx.get_parameter_source("preset") == _cli:
+        if ctx.get_parameter_source("preset") == _cli and preset is not None:
             exp_config.preset = preset
         if ctx.get_parameter_source("max_iterations") == _cli:
             exp_config.max_iterations = max_iterations
@@ -262,13 +269,17 @@ def run(
 
         # Override data/goal only if explicitly provided on CLI
         data_cli_override = ctx.get_parameter_source("data") == _cli
-        if data_cli_override:
+        if data_cli_override and data is not None:
             exp_config.data = data
-        if ctx.get_parameter_source("goal") == _cli:
+        if ctx.get_parameter_source("goal") == _cli and goal is not None:
             exp_config.goal = goal
 
         # CLI --data resolves from CWD; YAML data resolves from YAML dir
-        data_path = Path(data) if data_cli_override else exp_config.resolve_data_path(yaml_dir)
+        data_path = (
+            Path(data)
+            if data_cli_override and data is not None
+            else exp_config.resolve_data_path(yaml_dir)
+        )
 
         _run_from_experiment_config(exp_config, data_path)
         return
@@ -288,8 +299,7 @@ def run(
     resolved_output = _next_output_dir(Path(output_dir))
     if resolved_output != Path(output_dir):
         console.print(
-            f"Previous run detected in {output_dir}/. "
-            f"Using {resolved_output}/ instead.",
+            f"Previous run detected in {output_dir}/. Using {resolved_output}/ instead.",
             style="yellow",
         )
 
@@ -333,7 +343,9 @@ def run(
 @click.option("--preset", default=None, help="Named preset: default (medium), fast, high, max")
 @click.option("--no-summaries", is_flag=True, help="Disable periodic agent summaries")
 @click.option(
-    "-v", "--verbose", is_flag=True,
+    "-v",
+    "--verbose",
+    is_flag=True,
     help="Show debug log messages on console (always written to debug.log).",
 )
 def resume(
@@ -373,7 +385,8 @@ def resume(
 
 @cli.command()
 @click.option(
-    "--from", "source_dir",
+    "--from",
+    "source_dir",
     required=True,
     type=click.Path(exists=True),
     help="Path to a saved run directory containing state.json",
@@ -381,8 +394,11 @@ def resume(
 @click.option(
     "--at-iteration",
     default=None,
-    type=int,
-    help="Iteration to rewind to (0-based). Defaults to the last completed iteration (extend mode).",
+    type=click.IntRange(min=0),
+    help=(
+        "Iteration to rewind to (0-based). "
+        "Omit to continue from the current iteration (extend mode)."
+    ),
 )
 @click.option("--max-iterations", default=20, type=int, help="Maximum iteration count")
 @click.option(
@@ -392,7 +408,8 @@ def resume(
     help="Output directory for the replayed run (default: auto-generated)",
 )
 @click.option(
-    "--config", "-c",
+    "--config",
+    "-c",
     "config_path",
     default=None,
     type=click.Path(exists=True),
@@ -412,7 +429,9 @@ def resume(
     help="Disable live token streaming during debate phase",
 )
 @click.option(
-    "-v", "--verbose", is_flag=True,
+    "-v",
+    "--verbose",
+    is_flag=True,
     help="Show debug log messages on console (always written to debug.log).",
 )
 def replay(
@@ -447,7 +466,13 @@ def replay(
 
     # Default to the current iteration (extend mode)
     if at_iteration is None:
-        source_state = ExperimentState.load(src / "state.json")
+        try:
+            source_state = ExperimentState.load(src / "state.json")
+        except Exception as e:
+            raise click.UsageError(
+                f"Could not read state.json in {source_dir}: {e}\n"
+                "The file may be corrupt. Try specifying --at-iteration explicitly."
+            ) from None
         at_iteration = source_state.iteration
 
     # Determine output directory
@@ -457,19 +482,25 @@ def replay(
         output_path = _next_output_dir(Path(output_dir))
 
     console.print(f"Copying {src} -> {output_path}")
-    shutil.copytree(src, output_path)
+    try:
+        shutil.copytree(src, output_path)
+    except (shutil.Error, OSError) as e:
+        if output_path.exists():
+            shutil.rmtree(output_path, ignore_errors=True)
+        raise click.ClickException(f"Failed to copy {src} to {output_path}: {e}") from None
 
     # Rewind the copied directory
     try:
         rewound_state = rewind_run(output_path, at_iteration)
     except ValueError as e:
-        # Clean up on validation failure
-        shutil.rmtree(output_path)
+        shutil.rmtree(output_path, ignore_errors=True)
         raise click.UsageError(str(e)) from None
+    except Exception as e:
+        shutil.rmtree(output_path, ignore_errors=True)
+        raise click.ClickException(f"Failed to rewind run: {e}") from None
 
     console.print(
-        f"Rewound to iteration {at_iteration} "
-        f"({len(rewound_state.versions)} versions preserved)"
+        f"Rewound to iteration {at_iteration} ({len(rewound_state.versions)} versions preserved)"
     )
 
     # Resolve model config

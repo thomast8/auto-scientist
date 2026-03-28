@@ -118,7 +118,6 @@ def run_dir(tmp_path):
 
     # Final artifacts
     (d / "report.md").write_text("# Report")
-    (d / "exegesis.md").write_text("# Exegesis")
     (d / "console.log").write_text("console output")
     (d / "debug.log").write_text("debug output")
 
@@ -245,7 +244,6 @@ class TestRewindRun:
     def test_deletes_report_artifacts(self, run_dir):
         rewind_run(run_dir, 1)
         assert not (run_dir / "report.md").exists()
-        assert not (run_dir / "exegesis.md").exists()
         assert not (run_dir / "console.log").exists()
         assert not (run_dir / "debug.log").exists()
 
@@ -285,7 +283,10 @@ class TestRewindValidation:
         d = tmp_path / "bad_run"
         d.mkdir()
         state = ExperimentState(
-            domain="test", goal="g", phase="ingestion", iteration=0,
+            domain="test",
+            goal="g",
+            phase="ingestion",
+            iteration=0,
         )
         state.save(d / "state.json")
         with pytest.raises(ValueError, match="Cannot rewind"):
@@ -330,7 +331,6 @@ class TestExtendRun:
     def test_extend_removes_report_artifacts(self, run_dir):
         rewind_run(run_dir, 3)
         assert not (run_dir / "report.md").exists()
-        assert not (run_dir / "exegesis.md").exists()
 
     def test_extend_preserves_predictions(self, run_dir):
         state = rewind_run(run_dir, 3)

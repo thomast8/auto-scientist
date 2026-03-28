@@ -63,20 +63,26 @@ async def _query_critic(
     """Dispatch a prompt to the appropriate provider with web search enabled."""
     if config.provider == "openai":
         return await query_openai(
-            config.model, prompt,
-            web_search=True, reasoning=config.reasoning,
+            config.model,
+            prompt,
+            web_search=True,
+            reasoning=config.reasoning,
             response_schema=response_schema,
         )
     elif config.provider == "google":
         return await query_google(
-            config.model, prompt,
-            web_search=True, reasoning=config.reasoning,
+            config.model,
+            prompt,
+            web_search=True,
+            reasoning=config.reasoning,
             response_schema=response_schema,
         )
     elif config.provider == "anthropic":
         return await query_anthropic(
-            config.model, prompt,
-            web_search=True, reasoning=config.reasoning,
+            config.model,
+            prompt,
+            web_search=True,
+            reasoning=config.reasoning,
             response_schema=response_schema,
         )
     else:
@@ -107,7 +113,9 @@ async def _query_critic_structured(
         effective_prompt = prompt + correction_hint
         try:
             result = await _query_critic(
-                config, effective_prompt, response_schema=CriticOutput,
+                config,
+                effective_prompt,
+                response_schema=CriticOutput,
             )
         except Exception as e:
             if attempt < MAX_RETRIES:
@@ -134,12 +142,14 @@ async def _query_critic_structured(
                     )
                 raw = (result.text or "(empty response)")[:500]
                 fallback = CriticOutput(
-                    concerns=[Concern(
-                        claim=f"[SYNTHETIC - PARSE ERROR] {raw}",
-                        severity="low",
-                        confidence="low",
-                        category="other",
-                    )],
+                    concerns=[
+                        Concern(
+                            claim=f"[SYNTHETIC - PARSE ERROR] {raw}",
+                            severity="low",
+                            confidence="low",
+                            category="other",
+                        )
+                    ],
                     alternative_hypotheses=[],
                     overall_assessment=result.text or "(empty response)",
                 )
@@ -169,7 +179,9 @@ async def _query_scientist_structured(
         full_prompt = f"{system_prompt}\n\n{effective_prompt}"
         try:
             result = await _query_critic(
-                config, full_prompt, response_schema=ScientistDefense,
+                config,
+                full_prompt,
+                response_schema=ScientistDefense,
             )
         except Exception as e:
             if attempt < MAX_RETRIES:
@@ -237,14 +249,17 @@ async def run_single_critic_debate(
 
     # Round 1: initial critique (no defense context)
     critic_prompt = _build_critic_prompt(
-        plan, notebook_content, domain_knowledge,
+        plan,
+        notebook_content,
+        domain_knowledge,
         persona_text=persona_text,
         analysis_json=analysis_json,
         prediction_history=prediction_history,
         goal=goal,
     )
     critic_output, critic_result = await _query_critic_structured(
-        config, critic_prompt,
+        config,
+        critic_prompt,
         label=f"Critic ({persona_name}, {label}) round 1",
         message_buffer=message_buffer,
     )
@@ -275,7 +290,9 @@ async def run_single_critic_debate(
                 goal=goal,
             )
             scientist_defense, sci_result = await _query_scientist_structured(
-                scientist_config, scientist_user_prompt, scientist_system,
+                scientist_config,
+                scientist_user_prompt,
+                scientist_system,
                 label=f"Scientist ({persona_name}) round {round_num}",
                 message_buffer=message_buffer,
             )
@@ -286,14 +303,18 @@ async def run_single_critic_debate(
                 message_buffer.append(f"[Scientist] {sci_result.text}")
 
             # Record the round with both critic output and scientist defense
-            rounds.append(DebateRound(
-                critic_output=critic_output,
-                scientist_defense=scientist_defense,
-            ))
+            rounds.append(
+                DebateRound(
+                    critic_output=critic_output,
+                    scientist_defense=scientist_defense,
+                )
+            )
 
             # Stateless: critic gets the defense but not their own prior critique
             critic_prompt = _build_critic_prompt(
-                plan, notebook_content, domain_knowledge,
+                plan,
+                notebook_content,
+                domain_knowledge,
                 scientist_defense=sci_result.text,
                 persona_text=persona_text,
                 analysis_json=analysis_json,
@@ -301,7 +322,8 @@ async def run_single_critic_debate(
                 goal=goal,
             )
             critic_output, critic_result = await _query_critic_structured(
-                config, critic_prompt,
+                config,
+                critic_prompt,
                 label=f"Critic ({persona_name}, {label}) round {round_num + 1}",
                 message_buffer=message_buffer,
             )
@@ -374,12 +396,15 @@ async def run_debate(
     tasks = []
     for persona_index, persona in enumerate(PERSONAS):
         model_index = get_model_index_for_debate(
-            persona_index, iteration, len(critic_configs),
+            persona_index,
+            iteration,
+            len(critic_configs),
         )
         config = critic_configs[model_index]
         persona_name = persona["name"]
 
         # Resolve buffer: per-persona dict > shared legacy buffer > None
+        buf: list[str] | None
         if message_buffers is not None:
             buf = message_buffers.setdefault(persona_name, [])
         else:
@@ -416,9 +441,7 @@ async def run_debate(
             f"Check API keys and network connectivity. Errors: {failed_msgs}"
         )
     if len(successful) < len(raw_results):
-        logger.warning(
-            f"Debate: {len(successful)}/{len(raw_results)} debates succeeded"
-        )
+        logger.warning(f"Debate: {len(successful)}/{len(raw_results)} debates succeeded")
     return successful
 
 
@@ -445,9 +468,7 @@ def _build_critic_prompt(
     """
     defense_section = ""
     if scientist_defense:
-        defense_section = (
-            f"<scientist_defense>{scientist_defense}</scientist_defense>"
-        )
+        defense_section = f"<scientist_defense>{scientist_defense}</scientist_defense>"
 
     system = CRITIC_SYSTEM_BASE.format(
         persona_text=persona_text,
@@ -487,5 +508,3 @@ def _build_scientist_debate_user_prompt(
         critique=critique,
         critic_persona=critic_persona or "(generic critic)",
     )
-
-
