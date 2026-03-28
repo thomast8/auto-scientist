@@ -57,7 +57,7 @@ warn_unused_configs = true
 
 [[tool.mypy.overrides]]
 module = "tests.conftest"
-ignore_errors = true
+ignore_errors = true  # dynamic mock modules for claude_code_sdk cannot be typed
 
 [dependency-groups]
 dev = [

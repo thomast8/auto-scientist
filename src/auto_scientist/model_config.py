@@ -18,8 +18,6 @@ from pydantic import BaseModel, ConfigDict, Field, field_validator
 
 logger = logging.getLogger(__name__)
 
-logger = logging.getLogger(__name__)
-
 
 class ReasoningConfig(BaseModel):
     """Unified reasoning config that maps to any provider's native API."""

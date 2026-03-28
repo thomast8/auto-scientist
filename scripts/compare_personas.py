@@ -45,7 +45,11 @@ from auto_scientist.agents.debate_models import (  # noqa: E402
 )
 from auto_scientist.agents.scientist import _format_predictions_for_prompt  # noqa: E402
 from auto_scientist.model_config import AgentModelConfig  # noqa: E402
-from auto_scientist.prompts.critic import CRITIC_SYSTEM_BASE, CRITIC_USER  # noqa: E402
+from auto_scientist.prompts.critic import (  # noqa: E402
+    CRITIC_SYSTEM_BASE,
+    CRITIC_USER,
+    DEFAULT_CRITIC_INSTRUCTIONS,
+)
 from auto_scientist.prompts.critic import PERSONAS as CURRENT_PERSONAS  # noqa: E402
 from auto_scientist.sdk_utils import (  # noqa: E402
     OutputValidationError,
@@ -350,8 +354,10 @@ async def run_single_sdk(
     t0 = time.time()
 
     persona_text = persona.get("system_text", "")
+    persona_instructions = persona.get("instructions", DEFAULT_CRITIC_INSTRUCTIONS)
     system = CRITIC_SYSTEM_BASE.format(
         persona_text=persona_text,
+        persona_instructions=persona_instructions,
         critic_output_schema=json.dumps(CRITIC_OUTPUT_SCHEMA, indent=2),
     )
 

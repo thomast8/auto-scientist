@@ -1191,7 +1191,7 @@ class Orchestrator:
         for persona in active_personas:
             name = persona["name"]
             model_idx = get_model_index_for_debate(
-                PERSONAS.index(persona),
+                active_personas.index(persona),
                 self.state.iteration,
                 len(self.model_config.critics),
             )
@@ -1306,6 +1306,12 @@ class Orchestrator:
                 logger.error(f"Critic debate failed for {name}: {r}", exc_info=r)
             else:
                 successful.append(r)
+        if not successful:
+            failed_msgs = [str(r) for r in raw_results if isinstance(r, BaseException)]
+            raise RuntimeError(
+                f"All {len(raw_results)} critic debates failed. "
+                f"Check API keys and network connectivity. Errors: {failed_msgs}"
+            )
         if len(successful) < len(raw_results):
             lost = [
                 n

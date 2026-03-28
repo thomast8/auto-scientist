@@ -15,7 +15,13 @@ def load_preferences() -> dict[str, object]:
     """Load user preferences from disk."""
     try:
         raw = json.loads(PREFS_PATH.read_text())
-    except (FileNotFoundError, json.JSONDecodeError, OSError):
+    except FileNotFoundError:
+        return {}
+    except json.JSONDecodeError as e:
+        logger.warning(f"Preferences file is corrupt ({PREFS_PATH}), using defaults: {e}")
+        return {}
+    except OSError as e:
+        logger.warning(f"Could not read preferences ({PREFS_PATH}): {e}")
         return {}
     return raw if isinstance(raw, dict) else {}
 
@@ -28,7 +34,7 @@ def save_preferences(prefs: dict[str, object]) -> None:
         tmp.write_text(json.dumps(prefs, indent=2))
         tmp.replace(PREFS_PATH)
     except OSError as e:
-        logger.debug(f"Could not save preferences: {e}")
+        logger.warning(f"Could not save preferences to {PREFS_PATH}: {e}")
 
 
 def load_theme() -> str | None:

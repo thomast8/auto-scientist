@@ -4,7 +4,7 @@ import sys
 from types import ModuleType
 from unittest.mock import MagicMock
 
-import pytest  # noqa: E402 - needed for autouse fixture below
+import pytest
 
 
 @pytest.fixture(autouse=True)
