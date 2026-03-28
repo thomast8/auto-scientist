@@ -78,11 +78,14 @@ when applicable.
 5. Create prioritized changes, each with what/why/how and priority:
    1 = must-do, 2 = should-do, 3 = nice-to-have
 
-   When a change involves a threshold rule (e.g., feature > T leads to
-   class A), verify the direction: state which class has higher values
-   for that feature (from the analysis) and confirm the rule routes
-   accordingly. A reversed direction can make entire branches
-   unreachable.
+   When a change involves separating classes by a feature threshold,
+   specify which feature separates which classes and let the Coder
+   determine the optimal threshold value AND direction from the data.
+   The direction (which side maps to which class) is an empirical fact,
+   not a hypothesis. State your expectation ("Erythian likely has lower
+   values") but instruct the Coder to verify by trying both directions
+   and selecting the one with better performance. This prevents a
+   reversed split from making entire branches unreachable.
 
 6. Define 1-4 testable predictions with conditional outcomes. Each
    predicts what a diagnostic step will reveal and what it means:
