@@ -380,9 +380,9 @@ def resume(
 )
 @click.option(
     "--at-iteration",
-    required=True,
+    default=None,
     type=int,
-    help="Iteration to rewind to (0-based). The run resumes from this iteration.",
+    help="Iteration to rewind to (0-based). Defaults to the last completed iteration (extend mode).",
 )
 @click.option("--max-iterations", default=20, type=int, help="Maximum iteration count")
 @click.option(
@@ -417,7 +417,7 @@ def resume(
 )
 def replay(
     source_dir: str,
-    at_iteration: int,
+    at_iteration: int | None,
     max_iterations: int,
     output_dir: str | None,
     config_path: str | None,
@@ -444,6 +444,11 @@ def replay(
     src = Path(source_dir)
     if not (src / "state.json").exists():
         raise click.UsageError(f"No state.json found in {source_dir}")
+
+    # Default to the current iteration (extend mode)
+    if at_iteration is None:
+        source_state = ExperimentState.load(src / "state.json")
+        at_iteration = source_state.iteration
 
     # Determine output directory
     if output_dir is None:

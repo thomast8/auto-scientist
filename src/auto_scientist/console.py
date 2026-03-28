@@ -1037,6 +1037,10 @@ class PipelineLive:
                 panel.num_turns = p.get("num_turns", 0)
                 # Freeze elapsed at saved value
                 panel._end_time = panel.start_time + p.get("elapsed_seconds", 0)
+                # Populate saved summary lines so the panel is expandable
+                for line in p.get("lines", []):
+                    panel.all_lines.append(line)
+                    panel._write_to_richlog(line)
                 panel.complete(p.get("done_summary", ""))
                 panel._apply_complete_dom()
 

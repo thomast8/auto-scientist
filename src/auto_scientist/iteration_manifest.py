@@ -21,6 +21,7 @@ class PanelRecord(BaseModel):
     output_tokens: int = 0
     num_turns: int = 0
     elapsed_seconds: float = 0.0
+    lines: list[str] = Field(default_factory=list)
 
 
 class IterationRecord(BaseModel):

@@ -733,6 +733,7 @@ class Orchestrator:
                 output_tokens=p.output_tokens,
                 num_turns=p.num_turns,
                 elapsed_seconds=p.elapsed,
+                lines=list(p.all_lines),
             ))
         return IterationRecord(
             iteration="ingestion" if isinstance(title, str) else self.state.iteration,

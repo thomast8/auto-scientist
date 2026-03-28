@@ -695,7 +695,7 @@ class LaunchApp(App[ExperimentConfig | None]):
         resolved_data = cfg.resolve_data_path(yaml_path.parent)
         cfg.data = str(resolved_data)
         # Set output dir to domain name
-        cfg.output_dir = f"experiments/{yaml_path.parent.name}"
+        cfg.output_dir = f"experiments/runs/{yaml_path.parent.name}"
         self._apply_config(cfg)
 
     @on(Select.Changed)
