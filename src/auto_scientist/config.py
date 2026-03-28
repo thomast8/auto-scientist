@@ -22,7 +22,7 @@ class DomainConfig(BaseModel):
 
     @field_validator("data_paths", mode="before")
     @classmethod
-    def coerce_data_paths(cls, v: object) -> list[str]:
+    def coerce_data_paths(cls, v: list[str] | dict[str, str]) -> list[str]:
         if isinstance(v, dict):
             logger.warning(
                 "Deprecated: data_paths received as dict, coercing to list. "
@@ -35,10 +35,9 @@ class DomainConfig(BaseModel):
     @classmethod
     def run_command_must_contain_placeholder(cls, v: str) -> str:
         if "{script_path}" not in v:
-            raise ValueError(
-                f"run_command must contain '{{script_path}}' placeholder, got: {v}"
-            )
+            raise ValueError(f"run_command must contain '{{script_path}}' placeholder, got: {v}")
         return v
+
     run_timeout_minutes: int = 120
     version_prefix: str = "v"
     protected_paths: list[str] = Field(default_factory=list)

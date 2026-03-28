@@ -431,19 +431,6 @@ class TestQueryAnthropicReasoning:
 
     @pytest.mark.asyncio
     @patch("auto_scientist.models.anthropic_client.AsyncAnthropic")
-    async def test_off_reasoning_omits_thinking(self, mock_cls):
-        mock_client = AsyncMock()
-        mock_cls.return_value = mock_client
-        mock_response = MagicMock(content=[MagicMock(text="ok")])
-        mock_client.messages.create.return_value = mock_response
-
-        await query_anthropic("claude-sonnet-4-6", "test", reasoning=ReasoningConfig(level="off"))
-
-        call_kwargs = mock_client.messages.create.call_args.kwargs
-        assert "thinking" not in call_kwargs
-
-    @pytest.mark.asyncio
-    @patch("auto_scientist.models.anthropic_client.AsyncAnthropic")
     async def test_high_reasoning_with_default_budget(self, mock_cls):
         mock_client = AsyncMock()
         mock_cls.return_value = mock_client

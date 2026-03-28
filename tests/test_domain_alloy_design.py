@@ -94,7 +94,9 @@ def test_element_costs_yaml(tmp_path):
     for elem in ["Fe", "Cr", "Ni", "Mo", "V"]:
         assert elem in costs
         # Costs are nested: {elem: {price_usd_per_kg: float, ...}}
-        price = costs[elem] if isinstance(costs[elem], (int, float)) else costs[elem]["price_usd_per_kg"]
+        price = costs[elem] if isinstance(costs[elem], (int, float)) else (
+            costs[elem]["price_usd_per_kg"]
+        )
         assert price > 0
 
 
@@ -121,7 +123,9 @@ def test_interaction_effects_detectable(tmp_path):
     df["CrMo"] = df["Cr"] * df["Mo"]
     # The Cr*Mo interaction on hardness should show positive correlation
     # after controlling for main effects (rough test)
-    residual = df["hardness_HV"] - (200 + 15 * df["Cr"] + 8 * df["Ni"] + 25 * df["Mo"] + 30 * df["V"])
+    residual = df["hardness_HV"] - (
+        200 + 15 * df["Cr"] + 8 * df["Ni"] + 25 * df["Mo"] + 30 * df["V"]
+    )
     corr_crmo = np.corrcoef(df["CrMo"], residual)[0, 1]
     assert corr_crmo > 0.2  # positive synergy should be visible
 
@@ -196,7 +200,7 @@ def test_cost_is_deterministic(tmp_path):
     computed_cost = (
         1.0 * df["Fe"] + 3.5 * df["Cr"] + 8.0 * df["Ni"] + 12.0 * df["Mo"] + 15.0 * df["V"]
     )
-    # Allow tolerance for composition noise (each element +/- 0.3, max 5 elements, max cost coeff 15)
+    # Allow tolerance for composition noise (+/- 0.3 per element, 5 elements, max cost coeff 15)
     max_error = 5 * 0.6 * 15  # generous upper bound
     assert (abs(df["cost_per_kg"] - computed_cost) < max_error).all()
     # But most should be very close (within a few dollars)

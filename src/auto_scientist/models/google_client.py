@@ -28,12 +28,12 @@ GOOGLE_BUDGET_DEFAULTS: dict[str, int] = {
     "max": 32768,
 }
 
-GOOGLE_LEVEL_MAP: dict[str, str] = {
-    "minimal": "MINIMAL",
-    "low": "LOW",
-    "medium": "MEDIUM",
-    "high": "HIGH",
-    "max": "HIGH",
+GOOGLE_LEVEL_MAP: dict[str, types.ThinkingLevel] = {
+    "minimal": types.ThinkingLevel.MINIMAL,
+    "low": types.ThinkingLevel.LOW,
+    "medium": types.ThinkingLevel.MEDIUM,
+    "high": types.ThinkingLevel.HIGH,
+    "max": types.ThinkingLevel.HIGH,
 }
 
 

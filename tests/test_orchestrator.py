@@ -293,7 +293,9 @@ class TestValidateReasoningConfigs:
         from auto_scientist.orchestrator import _validate_reasoning_configs
 
         mc = ModelConfig(
-            defaults=AgentModelConfig(model="claude-sonnet-4-6", reasoning=ReasoningConfig(level="high")),
+            defaults=AgentModelConfig(
+                model="claude-sonnet-4-6", reasoning=ReasoningConfig(level="high")
+            ),
             critics=[],
         )
         errors = _validate_reasoning_configs(mc)
@@ -304,7 +306,11 @@ class TestValidateReasoningConfigs:
 
         mc = ModelConfig(
             defaults=AgentModelConfig(model="claude-sonnet-4-6"),
-            critics=[AgentModelConfig(provider="openai", model="gpt-5.4", reasoning=ReasoningConfig(level="high"))],
+            critics=[
+                AgentModelConfig(
+                    provider="openai", model="gpt-5.4", reasoning=ReasoningConfig(level="high")
+                )
+            ],
         )
         errors = _validate_reasoning_configs(mc)
         assert errors == []
@@ -314,7 +320,13 @@ class TestValidateReasoningConfigs:
 
         mc = ModelConfig(
             defaults=AgentModelConfig(model="claude-sonnet-4-6"),
-            critics=[AgentModelConfig(provider="google", model="gemini-3.1-pro-preview", reasoning=ReasoningConfig(level="high"))],
+            critics=[
+                AgentModelConfig(
+                    provider="google",
+                    model="gemini-3.1-pro-preview",
+                    reasoning=ReasoningConfig(level="high"),
+                )
+            ],
         )
         errors = _validate_reasoning_configs(mc)
         assert errors == []
@@ -325,7 +337,13 @@ class TestValidateReasoningConfigs:
 
         mc = ModelConfig(
             defaults=AgentModelConfig(model="claude-sonnet-4-6"),
-            critics=[AgentModelConfig(provider="google", model="gemini-3.1-pro-preview", reasoning=ReasoningConfig(level="medium"))],
+            critics=[
+                AgentModelConfig(
+                    provider="google",
+                    model="gemini-3.1-pro-preview",
+                    reasoning=ReasoningConfig(level="medium"),
+                )
+            ],
         )
         errors = _validate_reasoning_configs(mc)
         assert len(errors) == 1
@@ -338,7 +356,13 @@ class TestValidateReasoningConfigs:
 
         mc = ModelConfig(
             defaults=AgentModelConfig(model="claude-sonnet-4-6"),
-            critics=[AgentModelConfig(provider="google", model="gemini-3-flash-preview", reasoning=ReasoningConfig(level="minimal"))],
+            critics=[
+                AgentModelConfig(
+                    provider="google",
+                    model="gemini-3-flash-preview",
+                    reasoning=ReasoningConfig(level="minimal"),
+                )
+            ],
         )
         errors = _validate_reasoning_configs(mc)
         assert errors == []
@@ -347,8 +371,14 @@ class TestValidateReasoningConfigs:
         from auto_scientist.orchestrator import _validate_reasoning_configs
 
         mc = ModelConfig(
-            defaults=AgentModelConfig(model="claude-sonnet-4-6", reasoning=ReasoningConfig(level="off")),
-            critics=[AgentModelConfig(provider="openai", model="gpt-5.4", reasoning=ReasoningConfig(level="off"))],
+            defaults=AgentModelConfig(
+                model="claude-sonnet-4-6", reasoning=ReasoningConfig(level="off")
+            ),
+            critics=[
+                AgentModelConfig(
+                    provider="openai", model="gpt-5.4", reasoning=ReasoningConfig(level="off")
+                )
+            ],
         )
         errors = _validate_reasoning_configs(mc)
         assert errors == []
@@ -366,7 +396,9 @@ class TestValidateReasoningConfigs:
 
         mc = ModelConfig(
             defaults=AgentModelConfig(model="claude-sonnet-4-6"),
-            analyst=AgentModelConfig(model="claude-sonnet-4-6", reasoning=ReasoningConfig(level="high", budget=50)),
+            analyst=AgentModelConfig(
+                model="claude-sonnet-4-6", reasoning=ReasoningConfig(level="high", budget=50)
+            ),
             critics=[],
         )
         errors = _validate_reasoning_configs(mc)
@@ -379,7 +411,10 @@ class TestValidateReasoningConfigs:
 
         mc = ModelConfig(
             defaults=AgentModelConfig(model="claude-sonnet-4-6"),
-            analyst=AgentModelConfig(model="claude-sonnet-4-6", reasoning=ReasoningConfig(level="high", budget=200_000)),
+            analyst=AgentModelConfig(
+                model="claude-sonnet-4-6",
+                reasoning=ReasoningConfig(level="high", budget=200_000),
+            ),
             critics=[],
         )
         errors = _validate_reasoning_configs(mc)
@@ -1341,7 +1376,6 @@ class TestBuildConcernLedger:
             CriticOutput,
             DebateResult,
             DebateRound,
-            DefenseResponse,
             ScientistDefense,
         )
 
@@ -1876,7 +1910,6 @@ class TestRunIngestionFull:
             await o.run()
 
         # Ingestor panel is in history with data file info in done_summary
-        from auto_scientist.console import AgentPanel
 
         assert any("data.csv" in p.done_summary for p in o._live._panels)
 
@@ -2001,7 +2034,9 @@ class TestSummaryIntegration:
     async def test_results_summary_after_run(self, orchestrator, tmp_path):
         """After successful experiment, results.txt should be summarized."""
         orchestrator.output_dir.mkdir(parents=True, exist_ok=True)
-        orchestrator.model_config.summarizer = AgentModelConfig(provider="openai", model="gpt-4o-mini")
+        orchestrator.model_config.summarizer = AgentModelConfig(
+            provider="openai", model="gpt-4o-mini"
+        )
         orchestrator.state.phase = "iteration"
         orchestrator.state.iteration = 0
 
@@ -2041,7 +2076,9 @@ class TestSummaryIntegration:
     async def test_summary_failure_does_not_break(self, orchestrator, tmp_path):
         """run_with_summaries handles summary errors internally; pipeline completes."""
         orchestrator.output_dir.mkdir(parents=True, exist_ok=True)
-        orchestrator.model_config.summarizer = AgentModelConfig(provider="openai", model="gpt-4o-mini")
+        orchestrator.model_config.summarizer = AgentModelConfig(
+            provider="openai", model="gpt-4o-mini"
+        )
         orchestrator.state.phase = "iteration"
         orchestrator.state.iteration = 0
 
@@ -2186,7 +2223,12 @@ class TestResolvePredictionOutcomes:
         self._add_pending(orchestrator, "prediction A", pred_id="0.1")
         analysis = {
             "prediction_outcomes": [
-                {"pred_id": "9.9", "prediction": "different", "outcome": "refuted", "evidence": "n/a"},
+                {
+                    "pred_id": "9.9",
+                    "prediction": "different",
+                    "outcome": "refuted",
+                    "evidence": "n/a",
+                },
             ],
         }
         orchestrator._resolve_prediction_outcomes(analysis)

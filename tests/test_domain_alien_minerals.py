@@ -4,7 +4,6 @@ import json
 import sqlite3
 from pathlib import Path
 
-import numpy as np
 import pandas as pd
 
 
@@ -246,7 +245,8 @@ def test_mislabeled_specimens_have_wrong_majority_vote(tmp_path):
 
         # Majority vote should disagree with the true rule
         assert majority != expected, (
-            f"Specimen {row['specimen_id']}: majority vote {majority} should differ from rule {expected}"
+            f"Specimen {row['specimen_id']}: majority vote {majority} "
+            f"should differ from rule {expected}"
         )
 
         # At least one geologist should have the correct label (dissenting opinion)

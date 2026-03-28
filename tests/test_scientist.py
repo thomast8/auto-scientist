@@ -11,8 +11,8 @@ from auto_scientist.agents.scientist import (
     run_scientist,
     run_scientist_revision,
 )
-from auto_scientist.state import PredictionRecord
 from auto_scientist.sdk_utils import OutputValidationError
+from auto_scientist.state import PredictionRecord
 
 SAMPLE_LEDGER = [
     {
@@ -131,7 +131,7 @@ class TestRunScientistMessageBuffer:
     @pytest.mark.asyncio
     @patch("auto_scientist.sdk_utils.query")
     async def test_populates_message_buffer(self, mock_query, tmp_path):
-        from claude_code_sdk import AssistantMessage, ResultMessage, TextBlock
+        from claude_code_sdk import ResultMessage
 
         assistant_msg = MagicMock(spec=AssistantMessage)
         text_block = MagicMock(spec=TextBlock)
@@ -161,7 +161,7 @@ class TestRunScientistMessageBuffer:
     @pytest.mark.asyncio
     @patch("auto_scientist.sdk_utils.query")
     async def test_revision_populates_message_buffer(self, mock_query, tmp_path):
-        from claude_code_sdk import AssistantMessage, ResultMessage, TextBlock
+        from claude_code_sdk import ResultMessage
 
         assistant_msg = MagicMock(spec=AssistantMessage)
         text_block = MagicMock(spec=TextBlock)
@@ -289,7 +289,7 @@ class TestRunScientistRevision:
     @pytest.mark.asyncio
     @patch("auto_scientist.sdk_utils.query")
     async def test_fallback_to_assistant_text(self, mock_query, tmp_path):
-        from claude_code_sdk import AssistantMessage, ResultMessage, TextBlock
+        from claude_code_sdk import ResultMessage
 
         result_msg = MagicMock(spec=ResultMessage)
         result_msg.result = ""
@@ -321,7 +321,7 @@ class TestRunScientistAssistantFallback:
     @pytest.mark.asyncio
     @patch("auto_scientist.sdk_utils.query")
     async def test_run_scientist_fallback_to_assistant_text(self, mock_query, tmp_path):
-        from claude_code_sdk import AssistantMessage, ResultMessage, TextBlock
+        from claude_code_sdk import ResultMessage
 
         result_msg = MagicMock(spec=ResultMessage)
         result_msg.result = ""
@@ -347,7 +347,7 @@ class TestRunScientistAssistantFallback:
     @pytest.mark.asyncio
     @patch("auto_scientist.sdk_utils.query")
     async def test_run_scientist_markdown_fenced_response(self, mock_query, tmp_path):
-        from claude_code_sdk import AssistantMessage, ResultMessage, TextBlock
+        from claude_code_sdk import ResultMessage
 
         result_msg = MagicMock(spec=ResultMessage)
         result_msg.result = ""

@@ -110,8 +110,30 @@ when applicable.
    Good: "Interaction features\n\nv02 was incremental..."
    Bad: "v03 didn't work, trying something different."
 
-8. Set should_stop=true when the investigation has converged or
-   stagnation persists after structural changes.
+8. Actively evaluate whether to stop or continue. This is not an
+   afterthought; it is one of the most important decisions you make.
+
+   Set should_stop=true when the core question is answered and the
+   findings are validated. Convergence means:
+   - Recent predictions are consistently confirmed with no structural
+     issues remaining
+   - Performance is stable across validation methods (CV and holdout
+     agree, parameters are consistent across folds)
+   - All sub-problems are performing reasonably, not just the
+     aggregate (a high overall score can mask a broken sub-problem)
+   - Remaining open questions are peripheral (edge cases, alternative
+     formulations, minor refinements) rather than structural (broken
+     sub-problems, untested core hypotheses)
+
+   Do not confuse convergence with perfection. There are always more
+   questions to investigate: edge cases, alternative feature choices,
+   parameter sensitivity. The investigation ends when the core
+   question is answered, not when all possible questions are
+   exhausted. Document remaining peripheral questions as future work.
+
+   If stagnation persists after structural changes (fundamentally
+   different approaches yield no improvement), stop and report what
+   was learned, including negative results.
 </instructions>
 
 <scope_boundary>
@@ -192,16 +214,19 @@ and regularization.",
   "testable_predictions": [
     {{
       "prediction": "Soil-weather interaction terms will reduce high-rainfall RMSE by >30%",
-      "diagnostic": "Compare residual MAE for rainfall>80th percentile before and after adding interactions",
+      "diagnostic": "Compare residual MAE for rainfall>80th percentile \
+before and after adding interactions",
       "if_confirmed": "Interactions capture cross-factor effects; refine with feature selection",
-      "if_refuted": "Non-linearity is within-variable, not cross-variable; try polynomial weather features alone",
+      "if_refuted": "Non-linearity is within-variable, not cross-variable; \
+try polynomial weather features alone",
       "follows_from": null
     }},
     {{
       "prediction": "L2 regularization will reduce train-test gap below 5%",
       "diagnostic": "Compare train vs test RMSE gap with and without regularization",
       "if_confirmed": "Overfitting is controlled; proceed to feature engineering",
-      "if_refuted": "Overfitting has a different source; investigate data leakage or feature correlation",
+      "if_refuted": "Overfitting has a different source; \
+investigate data leakage or feature correlation",
       "follows_from": null
     }}
   ]
@@ -266,8 +291,10 @@ shift to cell-transmission simulation.",
     {{
       "prediction": "Cell-transmission model will achieve queue R-squared above 0.5",
       "diagnostic": "Compare queue predictions vs observed queue lengths across all intersections",
-      "if_confirmed": "Network-level modeling captures congestion propagation; calibrate per-intersection",
-      "if_refuted": "Queue dynamics depend on factors beyond topology (signal timing, pedestrians); add those inputs",
+      "if_confirmed": "Network-level modeling captures congestion propagation; \
+calibrate per-intersection",
+      "if_refuted": "Queue dynamics depend on factors beyond topology \
+(signal timing, pedestrians); add those inputs",
       "follows_from": null
     }}
   ]
@@ -437,7 +464,8 @@ hypothesis: polynomial fit. Testing degrees 2-6 with CV.",
     {{
       "prediction": "Cross-validated polynomial (degree 2-6) will achieve test R-squared above 0.9",
       "diagnostic": "Report 5-fold CV mean test R-squared for each degree",
-      "if_confirmed": "Polynomial captures the underlying function; check residuals for systematic patterns",
+      "if_confirmed": "Polynomial captures the underlying function; \
+check residuals for systematic patterns",
       "if_refuted": "Relationship is not polynomial; try splines or Fourier basis functions",
       "follows_from": null
     }}
@@ -474,6 +502,64 @@ R-squared=0.94 (> 0.85). Converged since v06.",
 metrics converged since v06. v07 further improved settling 5% to 3%. \
 Transport RMSE (0.08) well below 0.15, shear R-squared (0.94) \
 exceeds 0.85.\\n\\nStopping: converged, all targets met.",
+  "testable_predictions": []
+}}
+</output>
+</example>
+
+<example>
+<input>
+Domain: urban heat island characterization
+Goal: Identify the environmental factors that drive heat island
+  severity and express findings as interpretable classification
+  rules.
+Analysis: macro_F1=0.91 (CV), 0.90 (holdout), all 4 severity
+  categories above F1=0.83, benchmark random-forest=0.89,
+  hand-crafted rules exceed by +0.02, all thresholds stable
+Previous: v03 added elevation interactions, v04 confirmed
+  vegetation index adds less than 0.5% accuracy and simplified
+  to 3-variable rules
+Notebook: Core finding stable since v03: impervious surface
+  fraction (>60% = severe), building height (>25m = moderate
+  if surface <60%), and distance to water (<500m reduces severity
+  by one category). v04 confirmed vegetation index is redundant.
+  Remaining open questions: seasonal variation in thresholds,
+  nighttime vs daytime patterns, interaction with wind corridors.
+Prediction history: 4 predictions from v04 all confirmed:
+  vegetation redundancy, 3-variable sufficiency, benchmark parity,
+  threshold stability across CV folds.
+</input>
+<reasoning>
+No predefined numerical targets, but the core question is answered:
+three environmental drivers identified, validated, and expressed as
+interpretable rules. Rules exceed the automated benchmark. All sub-
+problems performing well. Remaining questions (seasonal, diurnal,
+wind) are extensions of the current findings, not structural gaps
+in the current answer. Time to stop.
+</reasoning>
+<output>
+{{
+  "hypothesis": "Investigation complete. Three-variable rule set \
+captures urban heat island severity categories.",
+  "strategy": "incremental",
+  "changes": [],
+  "expected_impact": "No further changes needed.",
+  "should_stop": true,
+  "stop_reason": "Core question answered: impervious surface, \
+building height, and water proximity drive heat island severity. \
+Rules exceed random forest benchmark (+0.02). All 4 categories \
+above F1=0.83, thresholds stable across folds. Remaining \
+questions (seasonal variation, diurnal patterns, wind corridors) \
+are extensions, not gaps in the current findings.",
+  "notebook_entry": "Investigation complete\\n\\nUrban heat \
+island severity is driven by three factors: impervious surface \
+fraction, building height, and distance to water. The 3-rule \
+hierarchy exceeds the random forest benchmark and is stable \
+across validation splits. v04 confirmed vegetation index is \
+redundant (< 0.5% gain).\\n\\nSeasonal threshold variation, \
+diurnal patterns, and wind corridor effects are documented \
+as future work. These would refine the rules for specific \
+deployment contexts but do not change the core finding.",
   "testable_predictions": []
 }}
 </output>
@@ -535,6 +621,10 @@ what/why/how/priority. Testable predictions test your reasoning
 with conditional outcomes (if confirmed/refuted). Build prediction
 trajectories by linking to prior predictions via follows_from.
 The notebook_entry is a continuous narrative.
+
+Actively evaluate whether to stop. The investigation ends when the
+core question is answered, not when all questions are exhausted.
+Check that all sub-problems are sound, not just the aggregate.
 </recap>
 """
 

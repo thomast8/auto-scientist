@@ -2,10 +2,9 @@
 
 import json
 import logging
-from unittest.mock import AsyncMock, MagicMock, patch
+from unittest.mock import MagicMock, patch
 
 import pytest
-from pydantic import ValidationError
 
 from auto_scientist.schemas import AnalystOutput, ScientistPlanOutput
 from auto_scientist.sdk_utils import (
@@ -43,9 +42,8 @@ class TestTolerantParseMessage:
         with patch(
             "auto_scientist.sdk_utils._original_parse_message",
             side_effect=MessageParseError("Malformed JSON payload"),
-        ):
-            with pytest.raises(MessageParseError, match="Malformed JSON payload"):
-                _tolerant_parse_message({"type": "bad"})
+        ), pytest.raises(MessageParseError, match="Malformed JSON payload"):
+            _tolerant_parse_message({"type": "bad"})
 
     def test_logs_skipped_type(self, caplog):
         from claude_code_sdk._errors import MessageParseError
@@ -53,9 +51,8 @@ class TestTolerantParseMessage:
         with patch(
             "auto_scientist.sdk_utils._original_parse_message",
             side_effect=MessageParseError("Unknown message type: foo_event"),
-        ):
-            with caplog.at_level(logging.DEBUG, logger="auto_scientist.sdk_utils"):
-                _tolerant_parse_message({"type": "foo_event"})
+        ), caplog.at_level(logging.DEBUG, logger="auto_scientist.sdk_utils"):
+            _tolerant_parse_message({"type": "foo_event"})
 
         assert "foo_event" in caplog.text
 
@@ -252,9 +249,11 @@ class TestCollectTextFromQuery:
         async def fake_query(**kwargs):
             yield result_msg
 
-        with patch("auto_scientist.sdk_utils.query", side_effect=fake_query):
-            with pytest.raises(RuntimeError, match="returned no output"):
-                await collect_text_from_query("prompt", MagicMock(), agent_name="Analyst")
+        with (
+            patch("auto_scientist.sdk_utils.query", side_effect=fake_query),
+            pytest.raises(RuntimeError, match="returned no output"),
+        ):
+            await collect_text_from_query("prompt", MagicMock(), agent_name="Analyst")
 
     @pytest.mark.asyncio
     async def test_populates_message_buffer(self):
@@ -273,10 +272,12 @@ class TestCollectTextFromQuery:
             yield result_msg
 
         buffer: list[str] = []
-        with patch("auto_scientist.sdk_utils.query", side_effect=fake_query):
-            with patch("auto_scientist.sdk_utils.append_block_to_buffer") as mock_append:
-                await collect_text_from_query("prompt", MagicMock(), message_buffer=buffer)
-                mock_append.assert_called_once_with(text_block, buffer)
+        with (
+            patch("auto_scientist.sdk_utils.query", side_effect=fake_query),
+            patch("auto_scientist.sdk_utils.append_block_to_buffer") as mock_append,
+        ):
+            await collect_text_from_query("prompt", MagicMock(), message_buffer=buffer)
+            mock_append.assert_called_once_with(text_block, buffer)
 
 
 # Valid report with all 10 sections

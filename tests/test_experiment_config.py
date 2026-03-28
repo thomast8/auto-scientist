@@ -30,7 +30,7 @@ class TestExperimentConfigDefaults:
         assert cfg.max_iterations == 20
         assert cfg.preset == "default"
         assert cfg.debate_rounds == 1
-        assert cfg.output_dir == "experiments"
+        assert cfg.output_dir == "experiments/runs"
         assert cfg.schedule is None
         assert cfg.interactive is False
         assert cfg.stream is True

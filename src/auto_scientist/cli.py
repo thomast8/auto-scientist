@@ -5,14 +5,14 @@ from pathlib import Path
 import click
 from dotenv import load_dotenv
 
-load_dotenv()
-
 from auto_scientist.console import PipelineApp, console
 from auto_scientist.experiment_config import ExperimentConfig
 from auto_scientist.launch_app import LaunchApp
 from auto_scientist.model_config import ModelConfig
 from auto_scientist.orchestrator import Orchestrator
 from auto_scientist.state import ExperimentState
+
+load_dotenv()
 
 
 def _run_orchestrator(orchestrator: Orchestrator) -> None:
@@ -34,10 +34,14 @@ def _run_orchestrator(orchestrator: Orchestrator) -> None:
         for issue in issues:
             if "not found" in issue and "openai" in issue.lower():
                 parts.append(f"  - {issue}")
-                parts.append("    Fix: check the model ID at https://platform.openai.com/docs/models")
+                parts.append(
+                    "    Fix: check the model ID at https://platform.openai.com/docs/models"
+                )
             elif "not found" in issue and "google" in issue.lower():
                 parts.append(f"  - {issue}")
-                parts.append("    Fix: check the model ID at https://ai.google.dev/gemini-api/docs/models")
+                parts.append(
+                    "    Fix: check the model ID at https://ai.google.dev/gemini-api/docs/models"
+                )
             elif "require provider 'anthropic'" in issue:
                 parts.append(f"  - {issue}")
                 parts.append(
@@ -115,8 +119,7 @@ def _run_from_experiment_config(exp_config: ExperimentConfig, data_path: Path) -
     resolved_output = _next_output_dir(Path(exp_config.output_dir))
     if resolved_output != Path(exp_config.output_dir):
         console.print(
-            f"Previous run detected in {exp_config.output_dir}/. "
-            f"Using {resolved_output}/ instead.",
+            f"Previous run detected in {exp_config.output_dir}/. Using {resolved_output}/ instead.",
             style="yellow",
         )
 
@@ -145,7 +148,8 @@ def _run_from_experiment_config(exp_config: ExperimentConfig, data_path: Path) -
 
 @click.group(invoke_without_command=True)
 @click.option(
-    "--config", "-c",
+    "--config",
+    "-c",
     "config_path",
     default=None,
     type=click.Path(exists=True),
@@ -182,7 +186,8 @@ def cli(ctx: click.Context, config_path: str | None):
 @click.option("--goal", default=None, help="Problem statement / investigation goal")
 @click.option("--max-iterations", default=20, help="Maximum iteration count")
 @click.option(
-    "--config", "-c",
+    "--config",
+    "-c",
     "config_path",
     default=None,
     type=click.Path(exists=True),
@@ -200,9 +205,9 @@ def cli(ctx: click.Context, config_path: str | None):
 )
 @click.option(
     "--output-dir",
-    default="experiments",
+    default="experiments/runs",
     type=click.Path(),
-    help="Output directory for experiments",
+    help="Output directory for experiment runs",
 )
 @click.option(
     "--no-stream",
@@ -210,7 +215,9 @@ def cli(ctx: click.Context, config_path: str | None):
     help="Disable live token streaming during debate phase",
 )
 @click.option(
-    "-v", "--verbose", is_flag=True,
+    "-v",
+    "--verbose",
+    is_flag=True,
     help="Show debug log messages on console (always written to debug.log).",
 )
 @click.pass_context
@@ -241,7 +248,7 @@ def run(
 
         # CLI flags override YAML values (use get_parameter_source to detect explicit CLI flags)
         _cli = click.core.ParameterSource.COMMANDLINE
-        if ctx.get_parameter_source("preset") == _cli:
+        if ctx.get_parameter_source("preset") == _cli and preset is not None:
             exp_config.preset = preset
         if ctx.get_parameter_source("max_iterations") == _cli:
             exp_config.max_iterations = max_iterations
@@ -262,16 +269,17 @@ def run(
 
         # Override data/goal only if explicitly provided on CLI
         data_cli_override = ctx.get_parameter_source("data") == _cli
-        if data_cli_override:
+        if data_cli_override and data is not None:
             exp_config.data = data
-        if ctx.get_parameter_source("goal") == _cli:
+        if ctx.get_parameter_source("goal") == _cli and goal is not None:
             exp_config.goal = goal
 
         # CLI --data resolves from CWD; YAML data resolves from YAML dir
-        if data_cli_override:
-            data_path = Path(data)
-        else:
-            data_path = exp_config.resolve_data_path(yaml_dir)
+        data_path = (
+            Path(data)
+            if data_cli_override and data is not None
+            else exp_config.resolve_data_path(yaml_dir)
+        )
 
         _run_from_experiment_config(exp_config, data_path)
         return
@@ -291,8 +299,7 @@ def run(
     resolved_output = _next_output_dir(Path(output_dir))
     if resolved_output != Path(output_dir):
         console.print(
-            f"Previous run detected in {output_dir}/. "
-            f"Using {resolved_output}/ instead.",
+            f"Previous run detected in {output_dir}/. Using {resolved_output}/ instead.",
             style="yellow",
         )
 
@@ -336,7 +343,9 @@ def run(
 @click.option("--preset", default=None, help="Named preset: default (medium), fast, high, max")
 @click.option("--no-summaries", is_flag=True, help="Disable periodic agent summaries")
 @click.option(
-    "-v", "--verbose", is_flag=True,
+    "-v",
+    "--verbose",
+    is_flag=True,
     help="Show debug log messages on console (always written to debug.log).",
 )
 def resume(
@@ -368,6 +377,154 @@ def resume(
         data_path=data_path,
         output_dir=output_dir,
         model_config=model_config,
+        verbose=verbose,
+    )
+
+    _run_orchestrator(orchestrator)
+
+
+@cli.command()
+@click.option(
+    "--from",
+    "source_dir",
+    required=True,
+    type=click.Path(exists=True),
+    help="Path to a saved run directory containing state.json",
+)
+@click.option(
+    "--at-iteration",
+    default=None,
+    type=click.IntRange(min=0),
+    help=(
+        "Iteration to rewind to (0-based). "
+        "Omit to continue from the current iteration (extend mode)."
+    ),
+)
+@click.option("--max-iterations", default=20, type=int, help="Maximum iteration count")
+@click.option(
+    "--output-dir",
+    default=None,
+    type=click.Path(),
+    help="Output directory for the replayed run (default: auto-generated)",
+)
+@click.option(
+    "--config",
+    "-c",
+    "config_path",
+    default=None,
+    type=click.Path(exists=True),
+    help="Path to models.toml config file (overrides saved config)",
+)
+@click.option("--preset", default=None, help="Named preset: default (medium), fast, high, max")
+@click.option("--no-summaries", is_flag=True, help="Disable periodic agent summaries")
+@click.option(
+    "--debate-rounds",
+    default=1,
+    type=int,
+    help="Number of critic-scientist debate rounds per persona",
+)
+@click.option(
+    "--no-stream",
+    is_flag=True,
+    help="Disable live token streaming during debate phase",
+)
+@click.option(
+    "-v",
+    "--verbose",
+    is_flag=True,
+    help="Show debug log messages on console (always written to debug.log).",
+)
+def replay(
+    source_dir: str,
+    at_iteration: int | None,
+    max_iterations: int,
+    output_dir: str | None,
+    config_path: str | None,
+    preset: str | None,
+    no_summaries: bool,
+    debate_rounds: int,
+    no_stream: bool,
+    verbose: bool,
+):
+    """Replay a saved run from a specific iteration.
+
+    Copies a saved run directory, rewinds it to the target iteration, and
+    continues the investigation from there. Useful for testing prompt changes,
+    different model configs, or alternative investigation paths.
+
+    Example:
+
+      auto-scientist replay --from runs/my-run --at-iteration 1 --max-iterations 5
+    """
+    import shutil
+
+    from auto_scientist.replay import rewind_run
+
+    src = Path(source_dir)
+    if not (src / "state.json").exists():
+        raise click.UsageError(f"No state.json found in {source_dir}")
+
+    # Default to the current iteration (extend mode)
+    if at_iteration is None:
+        try:
+            source_state = ExperimentState.load(src / "state.json")
+        except Exception as e:
+            raise click.UsageError(
+                f"Could not read state.json in {source_dir}: {e}\n"
+                "The file may be corrupt. Try specifying --at-iteration explicitly."
+            ) from None
+        at_iteration = source_state.iteration
+
+    # Determine output directory
+    if output_dir is None:
+        output_path = _next_output_dir(Path("experiments/runs") / src.name)
+    else:
+        output_path = _next_output_dir(Path(output_dir))
+
+    console.print(f"Copying {src} -> {output_path}")
+    try:
+        shutil.copytree(src, output_path)
+    except (shutil.Error, OSError) as e:
+        if output_path.exists():
+            shutil.rmtree(output_path, ignore_errors=True)
+        raise click.ClickException(f"Failed to copy {src} to {output_path}: {e}") from None
+
+    # Rewind the copied directory
+    try:
+        rewound_state = rewind_run(output_path, at_iteration)
+    except ValueError as e:
+        shutil.rmtree(output_path, ignore_errors=True)
+        raise click.UsageError(str(e)) from None
+    except Exception as e:
+        shutil.rmtree(output_path, ignore_errors=True)
+        raise click.ClickException(f"Failed to rewind run: {e}") from None
+
+    console.print(
+        f"Rewound to iteration {at_iteration} ({len(rewound_state.versions)} versions preserved)"
+    )
+
+    # Resolve model config
+    if config_path or preset:
+        model_config = _resolve_model_config(config_path, preset, no_summaries)
+    else:
+        saved_mc = output_path / "model_config.json"
+        if saved_mc.exists():
+            model_config = ModelConfig.model_validate_json(saved_mc.read_text())
+        else:
+            model_config = ModelConfig.builtin_preset("default")
+        if no_summaries:
+            model_config.summarizer = None
+
+    data_path = Path(rewound_state.data_path) if rewound_state.data_path else None
+
+    orchestrator = Orchestrator(
+        state=rewound_state,
+        data_path=data_path,
+        output_dir=output_path,
+        max_iterations=max_iterations,
+        model_config=model_config,
+        debate_rounds=debate_rounds,
+        stream=not no_stream,
         verbose=verbose,
     )
 

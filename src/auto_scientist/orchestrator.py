@@ -4,6 +4,7 @@ import json
 import logging
 import os
 import shutil
+from collections.abc import Callable
 from pathlib import Path
 from typing import Any
 
@@ -18,6 +19,13 @@ from auto_scientist.console import (
     AgentPanel,
     PipelineLive,
     console,
+)
+from auto_scientist.iteration_manifest import (
+    MANIFEST_FILENAME,
+    IterationRecord,
+    PanelRecord,
+    append_record,
+    load_manifest,
 )
 from auto_scientist.log_setup import setup_file_logging
 from auto_scientist.model_config import AgentModelConfig, ModelConfig
@@ -84,24 +92,16 @@ def _validate_reasoning_configs(mc: ModelConfig) -> list[str]:
         if cfg.provider == "anthropic":
             budget = r.budget or ANTHROPIC_BUDGET_DEFAULTS.get(r.level)
             if budget is None:
-                errors.append(
-                    f"{label}: no budget_tokens mapping for level '{r.level}'"
-                )
+                errors.append(f"{label}: no budget_tokens mapping for level '{r.level}'")
             elif budget < 1024:
-                errors.append(
-                    f"{label}: budget_tokens={budget} is below Anthropic minimum (1024)"
-                )
+                errors.append(f"{label}: budget_tokens={budget} is below Anthropic minimum (1024)")
             elif budget > 128_000:
-                errors.append(
-                    f"{label}: budget_tokens={budget} exceeds Anthropic maximum (128000)"
-                )
+                errors.append(f"{label}: budget_tokens={budget} exceeds Anthropic maximum (128000)")
 
         elif cfg.provider == "openai":
             effort = OPENAI_EFFORT_MAP.get(r.level)
             if effort is None:
-                errors.append(
-                    f"{label}: no reasoning effort mapping for level '{r.level}'"
-                )
+                errors.append(f"{label}: no reasoning effort mapping for level '{r.level}'")
 
         elif cfg.provider == "google":
             model = cfg.model
@@ -111,9 +111,7 @@ def _validate_reasoning_configs(mc: ModelConfig) -> list[str]:
             if is_3x:
                 mapped = GOOGLE_LEVEL_MAP.get(r.level)
                 if mapped is None:
-                    errors.append(
-                        f"{label}: no thinkingLevel mapping for level '{r.level}'"
-                    )
+                    errors.append(f"{label}: no thinkingLevel mapping for level '{r.level}'")
                 elif mapped in ("MINIMAL", "MEDIUM") and "flash" not in model.lower():
                     errors.append(
                         f"{label}: thinkingLevel={mapped} is only valid for Gemini 3 Flash models"
@@ -122,10 +120,9 @@ def _validate_reasoning_configs(mc: ModelConfig) -> list[str]:
                 # Budget-based; just verify we have a default
                 if r.budget is None:
                     from auto_scientist.models.google_client import GOOGLE_BUDGET_DEFAULTS
+
                     if r.level not in GOOGLE_BUDGET_DEFAULTS:
-                        errors.append(
-                            f"{label}: no thinkingBudget mapping for level '{r.level}'"
-                        )
+                        errors.append(f"{label}: no thinkingBudget mapping for level '{r.level}'")
 
     return errors
 
@@ -198,8 +195,8 @@ def _check_model_exists(provider: str, model: str) -> str | None:
             from google import genai
             from google.genai import errors as genai_errors
 
-            client = genai.Client()
-            client.models.get(model=model)
+            google_client = genai.Client()
+            google_client.models.get(model=model)
             return None
         except genai_errors.APIError as e:
             if e.code == 401 or e.code == 403:
@@ -323,9 +320,7 @@ class Orchestrator:
                 errors.append(err)
 
         if errors:
-            raise RuntimeError(
-                "Pre-flight check failed:\n  - " + "\n  - ".join(errors)
-            )
+            raise RuntimeError("Pre-flight check failed:\n  - " + "\n  - ".join(errors))
 
     async def run(self) -> None:
         """Execute the full orchestration loop."""
@@ -356,6 +351,9 @@ class Orchestrator:
             self._live.start(log_path=self.output_dir / "console.log")
             self._live.print_static(self._build_startup_banner())
 
+        # Restore previous iterations from manifest (for replay / resume)
+        self._restore_iterations_from_manifest()
+
         try:
             # Phase 0: Ingestion (with its own border)
             if self.state.phase == "ingestion":
@@ -381,6 +379,7 @@ class Orchestrator:
                 logger.info("Ingestion complete, entering iteration phase")
 
                 iter_summary = await self._generate_iteration_summary()
+                self._save_iteration_manifest("Ingestion", "done", "green", iter_summary)
                 self._live.end_iteration("done", "green", iter_summary)
                 self._live.flush_completed()
 
@@ -388,7 +387,10 @@ class Orchestrator:
             while self.state.phase == "iteration":
                 if self.state.iteration >= self.max_iterations:
                     self._live.add_rule(
-                        Rule(f"Reached max iterations ({self.max_iterations}). Stopping.", style="yellow")
+                        Rule(
+                            f"Reached max iterations ({self.max_iterations}). Stopping.",
+                            style="yellow",
+                        )
                     )
                     self._live.flush_completed()
                     self.state.phase = "report"
@@ -396,7 +398,10 @@ class Orchestrator:
 
                 if self.state.should_stop_on_failures(self.max_consecutive_failures):
                     self._live.add_rule(
-                        Rule(f"Hit {self.max_consecutive_failures} consecutive failures. Stopping.", style="red")
+                        Rule(
+                            f"Hit {self.max_consecutive_failures} consecutive failures. Stopping.",
+                            style="red",
+                        )
                     )
                     self._live.flush_completed()
                     self.state.phase = "report"
@@ -434,6 +439,12 @@ class Orchestrator:
                 self.state.save(state_path)
 
                 iter_summary = await self._generate_iteration_summary()
+                self._save_iteration_manifest(
+                    "Report",
+                    "done",
+                    "green",
+                    iter_summary,
+                )
                 self._live.end_iteration("done", "green", iter_summary)
                 self._live.flush_completed()
 
@@ -447,11 +458,7 @@ class Orchestrator:
         from auto_scientist.agents.ingestor import run_ingestor
 
         # On resume, use raw_data_path (original); on fresh run, use data_path
-        source_path = (
-            Path(self.state.raw_data_path)
-            if self.state.raw_data_path
-            else self.data_path
-        )
+        source_path = Path(self.state.raw_data_path) if self.state.raw_data_path else self.data_path
         if source_path is None:
             raise ValueError(
                 "Cannot run ingestion without a data path. "
@@ -461,7 +468,9 @@ class Orchestrator:
         config_path = self.output_dir / "domain_config.json"
 
         cfg = self.model_config.resolve("ingestor")
-        panel = AgentPanel(name="Ingestor", model=cfg.model, style=AGENT_STYLES.get("Ingestor", "bright_red"))
+        panel = AgentPanel(
+            name="Ingestor", model=cfg.model, style=AGENT_STYLES.get("Ingestor", "bright_red")
+        )
         self._live.add_panel(panel)
         self._live.update_status(phase="INGESTION")
 
@@ -478,8 +487,11 @@ class Orchestrator:
 
         buffer: list[str] = []
         try:
-            canonical_data_dir = await self._with_summaries(
-                _ingestor_coro, "Ingestor", buffer, panel=panel,
+            canonical_data_dir: Path = await self._with_summaries(
+                _ingestor_coro,
+                "Ingestor",
+                buffer,
+                panel=panel,
             )
             data_files = sorted(canonical_data_dir.iterdir())
             file_list = ", ".join(f.name for f in data_files)
@@ -522,9 +534,9 @@ class Orchestrator:
             logger.info(f"Scientist stop: {plan.get('stop_reason', 'unknown')}")
             self.state.phase = "report"
             iter_summary = await self._generate_iteration_summary()
-            self._live.end_iteration(
-                f"stopped: {plan.get('stop_reason', 'unknown')}", "yellow", iter_summary,
-            )
+            stop_label = f"stopped: {plan.get('stop_reason', 'unknown')}"
+            self._save_iteration_manifest(self.state.iteration, stop_label, "yellow", iter_summary)
+            self._live.end_iteration(stop_label, "yellow", iter_summary)
             self._live.flush_completed()
             return
 
@@ -538,16 +550,20 @@ class Orchestrator:
             # Persist debate transcript with original plan for context
             if debate_result:
                 from auto_scientist.agents.debate_models import DebateResult
+
                 serialized_results = [
-                    r.model_dump() if isinstance(r, DebateResult) else r
-                    for r in debate_result
+                    r.model_dump() if isinstance(r, DebateResult) else r for r in debate_result
                 ]
                 concern_ledger = self._build_concern_ledger(debate_result)
-                self._persist_artifact(version_dir, "debate.json", {
-                    "original_plan": plan,
-                    "debate_results": serialized_results,
-                    "concern_ledger": concern_ledger,
-                })
+                self._persist_artifact(
+                    version_dir,
+                    "debate.json",
+                    {
+                        "original_plan": plan,
+                        "debate_results": serialized_results,
+                        "concern_ledger": concern_ledger,
+                    },
+                )
 
         # Apply prediction updates from the final plan (after debate revision)
         if final_plan:
@@ -576,6 +592,9 @@ class Orchestrator:
                 f"status=failed (coder produced no script)"
             )
             iter_summary = await self._generate_iteration_summary()
+            self._save_iteration_manifest(
+                self.state.iteration, "failed (no script)", "red", iter_summary
+            )
             self._live.end_iteration("failed (no script)", "red", iter_summary)
             self._live.flush_completed()
             self.state.iteration += 1
@@ -599,7 +618,8 @@ class Orchestrator:
                 try:
                     results_text = results_path.read_text()
                     summary = await summarize_results(
-                        results_text, self._summary_model,
+                        results_text,
+                        self._summary_model,
                     )
                     if summary:
                         self._live.log(f"Results: {summary}")
@@ -619,14 +639,14 @@ class Orchestrator:
         # Iteration border color: green=completed, red=failed
         status_style = "red" if version_entry.status != "completed" else "green"
         iter_summary = await self._generate_iteration_summary()
+        self._save_iteration_manifest(
+            self.state.iteration, version_entry.status, status_style, iter_summary
+        )
         self._live.end_iteration(version_entry.status, status_style, iter_summary)
         self._live.flush_completed()
 
         # Increment at end of loop body
-        logger.info(
-            f"Iteration {self.state.iteration} complete: "
-            f"status={version_entry.status}"
-        )
+        logger.info(f"Iteration {self.state.iteration} complete: status={version_entry.status}")
         self.state.iteration += 1
 
     def _build_startup_banner(self) -> Panel:
@@ -645,7 +665,8 @@ class Orchestrator:
 
         # Agent models
         agent_map = [
-            ("Ingestor", "ingestor"), ("Analyst", "analyst"),
+            ("Ingestor", "ingestor"),
+            ("Analyst", "analyst"),
             ("Scientist", "scientist"),
         ]
         for display_name, field_name in agent_map:
@@ -660,7 +681,10 @@ class Orchestrator:
             label = f"Critic {i + 1}" if len(mc.critics) > 1 else "Critic"
             table.add_row(
                 Text(label, style="yellow"),
-                Text(f"{critic.provider}:{critic.model}  [{critic.reasoning.level}]", style="yellow"),
+                Text(
+                    f"{critic.provider}:{critic.model}  [{critic.reasoning.level}]",
+                    style="yellow",
+                ),
             )
 
         # Coder + Report go after critics
@@ -684,6 +708,70 @@ class Orchestrator:
     def _should_summarize(self) -> bool:
         """Check if summaries are enabled."""
         return self.model_config.summarizer is not None
+
+    def _collect_iteration_record(
+        self,
+        title: str | int,
+        result_text: str,
+        result_style: str,
+        summary: str,
+    ) -> IterationRecord:
+        """Snapshot current iteration's panel metadata for the manifest."""
+        container = self._live._current_iteration
+        panels = []
+        for p in getattr(container, "_panels", []):
+            panels.append(
+                PanelRecord(
+                    name=p.panel_name,
+                    model=p.model,
+                    style=p.panel_style,
+                    done_summary=p.done_summary,
+                    input_tokens=p.input_tokens,
+                    output_tokens=p.output_tokens,
+                    num_turns=p.num_turns,
+                    elapsed_seconds=p.elapsed,
+                    lines=list(p.all_lines),
+                )
+            )
+        return IterationRecord(
+            iteration="ingestion" if isinstance(title, str) else self.state.iteration,
+            title=f"Iteration {title}" if isinstance(title, int) else str(title),
+            result_text=result_text,
+            result_style=result_style,
+            summary=summary,
+            panels=panels,
+        )
+
+    def _save_iteration_manifest(
+        self,
+        title: str | int,
+        result_text: str,
+        result_style: str,
+        summary: str,
+    ) -> None:
+        """Collect and persist an iteration record to the manifest file."""
+        record = self._collect_iteration_record(title, result_text, result_style, summary)
+        append_record(record, self.output_dir / MANIFEST_FILENAME)
+
+    def _restore_iterations_from_manifest(self) -> None:
+        """Mount collapsed iteration panels from a saved manifest.
+
+        Called at startup to show previous iterations in the TUI when
+        resuming or replaying. Silently skips if no manifest exists.
+        """
+        manifest_path = self.output_dir / MANIFEST_FILENAME
+        records = load_manifest(manifest_path)
+        if not records:
+            return
+
+        for record in records:
+            self._live.mount_restored_iteration(
+                title=record.title,
+                result_text=record.result_text,
+                result_style=record.result_style,
+                summary=record.summary,
+                panels=[p.model_dump() for p in record.panels],
+            )
 
     async def _generate_iteration_summary(self) -> str:
         """Generate a combined recap from all agents' done_summaries for the current iteration."""
@@ -711,9 +799,12 @@ class Orchestrator:
         return self.model_config.summarizer.model
 
     async def _with_summaries(
-        self, coro_fn, agent_name: str, message_buffer: list[str],
+        self,
+        coro_fn: Callable[..., Any],
+        agent_name: str,
+        message_buffer: list[str],
         panel: AgentPanel | None = None,
-    ):
+    ) -> Any:
         """Wrap an agent call in run_with_summaries if enabled.
 
         When a panel is provided, summaries are routed to it via
@@ -746,7 +837,10 @@ class Orchestrator:
             poll_task = asyncio.create_task(_poll_collector())
             try:
                 result = await run_with_summaries(
-                    coro_fn, agent_name, self._summary_model, message_buffer,
+                    coro_fn,
+                    agent_name,
+                    self._summary_model,
+                    message_buffer,
                     summary_collector=summary_collector,
                 )
                 self._apply_sdk_usage(panel)
@@ -761,7 +855,10 @@ class Orchestrator:
             return result
 
         return await run_with_summaries(
-            coro_fn, agent_name, self._summary_model, message_buffer,
+            coro_fn,
+            agent_name,
+            self._summary_model,
+            message_buffer,
         )
 
     def _collapse(self, panel: AgentPanel, fallback: str = "") -> None:
@@ -794,7 +891,10 @@ class Orchestrator:
         )
 
     def _persist_buffer(
-        self, agent_name: str, buffer: list[str], iteration: int | None = None,
+        self,
+        agent_name: str,
+        buffer: list[str],
+        iteration: int | None = None,
     ) -> None:
         """Write an agent's message buffer to disk for debugging."""
         if not buffer:
@@ -824,12 +924,15 @@ class Orchestrator:
         domain_knowledge = self.state.domain_knowledge
         cfg = self.model_config.resolve("analyst")
 
-        panel = AgentPanel(name="Analyst", model=cfg.model, style=AGENT_STYLES.get("Analyst", "green"))
+        panel = AgentPanel(
+            name="Analyst", model=cfg.model, style=AGENT_STYLES.get("Analyst", "green")
+        )
         self._live.add_panel(panel)
         self._live.update_status(phase="ANALYZE")
 
         buffer: list[str] = []
         try:
+
             async def _analyst_coro(buf):
                 return await run_analyst(
                     results_path=None,
@@ -841,7 +944,12 @@ class Orchestrator:
                     message_buffer=buf,
                 )
 
-            analysis = await self._with_summaries(_analyst_coro, "Analyst", buffer, panel=panel)
+            analysis: dict[str, Any] | None = await self._with_summaries(
+                _analyst_coro,
+                "Analyst",
+                buffer,
+                panel=panel,
+            )
             logger.info("Analyst initial: data characterization complete")
             self._collapse(panel, "Data characterization complete")
             return analysis
@@ -877,12 +985,15 @@ class Orchestrator:
 
         cfg = self.model_config.resolve("analyst")
 
-        panel = AgentPanel(name="Analyst", model=cfg.model, style=AGENT_STYLES.get("Analyst", "green"))
+        panel = AgentPanel(
+            name="Analyst", model=cfg.model, style=AGENT_STYLES.get("Analyst", "green")
+        )
         self._live.add_panel(panel)
         self._live.update_status(phase="ANALYZE")
 
         buffer: list[str] = []
         try:
+
             async def _analyst_coro(buf):
                 return await run_analyst(
                     results_path=results_path,
@@ -893,10 +1004,14 @@ class Orchestrator:
                     message_buffer=buf,
                 )
 
-            analysis = await self._with_summaries(_analyst_coro, "Analyst", buffer, panel=panel)
+            analysis: dict[str, Any] = await self._with_summaries(
+                _analyst_coro,
+                "Analyst",
+                buffer,
+                panel=panel,
+            )
             logger.info(
-                f"Analyst complete: "
-                f"data_summary={'yes' if analysis.get('data_summary') else 'no'}"
+                f"Analyst complete: data_summary={'yes' if analysis.get('data_summary') else 'no'}"
             )
             self._collapse(panel, "Analysis complete")
             return analysis
@@ -918,12 +1033,15 @@ class Orchestrator:
 
         cfg = self.model_config.resolve("scientist")
 
-        panel = AgentPanel(name="Scientist", model=cfg.model, style=AGENT_STYLES.get("Scientist", "cyan"))
+        panel = AgentPanel(
+            name="Scientist", model=cfg.model, style=AGENT_STYLES.get("Scientist", "cyan")
+        )
         self._live.add_panel(panel)
         self._live.update_status(phase="PLAN")
 
         buffer: list[str] = []
         try:
+
             async def _scientist_coro(buf):
                 return await run_scientist(
                     analysis=analysis or {},
@@ -936,7 +1054,12 @@ class Orchestrator:
                     goal=self.state.goal,
                 )
 
-            plan = await self._with_summaries(_scientist_coro, "Scientist", buffer, panel=panel)
+            plan: dict[str, Any] = await self._with_summaries(
+                _scientist_coro,
+                "Scientist",
+                buffer,
+                panel=panel,
+            )
 
             # Write the notebook entry from the plan
             if plan.get("notebook_entry"):
@@ -949,7 +1072,8 @@ class Orchestrator:
                 f"should_stop={plan.get('should_stop', False)}"
             )
             self._collapse(
-                panel, f"strategy={plan.get('strategy', '?')}, changes={len(plan.get('changes', []))}"
+                panel,
+                f"strategy={plan.get('strategy', '?')}, changes={len(plan.get('changes', []))}",
             )
             return plan
         except Exception as e:
@@ -961,7 +1085,9 @@ class Orchestrator:
             self._persist_buffer("scientist", buffer)
 
     async def _run_debate(
-        self, plan: dict | None, analysis: dict | None,
+        self,
+        plan: dict | None,
+        analysis: dict | None,
     ) -> list[dict[str, Any]] | None:
         """Send plan to critic model(s) for parallel debate with the Scientist."""
         if not self.model_config.critics or plan is None:
@@ -985,6 +1111,7 @@ class Orchestrator:
 
         # Per-persona buffers (run_debate keys buffers by persona name)
         from auto_scientist.prompts.critic import PERSONAS
+
         buffers: dict[str, list[str]] = {}
         for persona in PERSONAS:
             buffers[persona["name"]] = []
@@ -992,8 +1119,13 @@ class Orchestrator:
         try:
             if self._should_summarize():
                 critiques = await self._run_debate_with_summaries(
-                    buffers, plan, notebook_content, domain_knowledge,
-                    scientist_cfg, analysis_json, prediction_history,
+                    buffers,
+                    plan,
+                    notebook_content,
+                    domain_knowledge,
+                    scientist_cfg,
+                    analysis_json,
+                    prediction_history,
                     self.state.goal,
                 )
             else:
@@ -1049,12 +1181,15 @@ class Orchestrator:
         for persona in PERSONAS:
             name = persona["name"]
             model_idx = get_model_index_for_debate(
-                PERSONAS.index(persona), self.state.iteration,
+                PERSONAS.index(persona),
+                self.state.iteration,
                 len(self.model_config.critics),
             )
             config = self.model_config.critics[model_idx]
             label = f"{config.provider}:{config.model}"
-            panel = AgentPanel(name=f"Critic/{name}", model=label, style=AGENT_STYLES.get("Critic", "yellow"))
+            panel = AgentPanel(
+                name=f"Critic/{name}", model=label, style=AGENT_STYLES.get("Critic", "yellow")
+            )
             panels[name] = panel
             collectors[name] = []
             self._live.add_panel(panel)
@@ -1065,7 +1200,7 @@ class Orchestrator:
         def _flush_collectors():
             for name in persona_names:
                 entries = collectors[name]
-                new_entries = entries[seen[name]:]
+                new_entries = entries[seen[name] :]
                 for _agent_name, summary, time_label in new_entries:
                     panels[name].add_line(f"[{time_label}] {summary}")
                 seen[name] = len(entries)
@@ -1086,14 +1221,12 @@ class Orchestrator:
             )
             # Flush collector entries before collapsing
             entries = collectors[name]
-            new_entries = entries[seen[name]:]
+            new_entries = entries[seen[name] :]
             for _agent_name, summary, time_label in new_entries:
                 panel.add_line(f"[{time_label}] {summary}")
             seen[name] = len(entries)
 
-            done_entries = [
-                e for e in collectors[name] if e[2].endswith("done")
-            ]
+            done_entries = [e for e in collectors[name] if e[2].endswith("done")]
             if done_entries:
                 done_summary = done_entries[-1][1]
             else:
@@ -1106,7 +1239,8 @@ class Orchestrator:
         async def _summarized_debate(persona_index, persona):
             name = persona["name"]
             model_idx = get_model_index_for_debate(
-                persona_index, self.state.iteration,
+                persona_index,
+                self.state.iteration,
                 len(self.model_config.critics),
             )
             config = self.model_config.critics[model_idx]
@@ -1127,9 +1261,13 @@ class Orchestrator:
                     prediction_history=prediction_history,
                     goal=goal,
                 )
+
             try:
                 result = await run_with_summaries(
-                    coro, f"Debate: {name}", summary_model, buffers[buf_key],
+                    coro,
+                    f"Debate: {name}",
+                    summary_model,
+                    buffers[buf_key],
                     label_prefix="",
                     summary_collector=collectors[name],
                 )
@@ -1143,10 +1281,7 @@ class Orchestrator:
         drain_task = asyncio.create_task(_drain_loop())
         raw_results: list[DebateResult | BaseException] = []
         try:
-            tasks = [
-                _summarized_debate(i, persona)
-                for i, persona in enumerate(PERSONAS)
-            ]
+            tasks = [_summarized_debate(i, persona) for i, persona in enumerate(PERSONAS)]
             raw_results = await asyncio.gather(*tasks, return_exceptions=True)
         finally:
             drain_task.cancel()
@@ -1163,7 +1298,8 @@ class Orchestrator:
                 successful.append(r)
         if len(successful) < len(raw_results):
             lost = [
-                n for n, r in zip(persona_names, raw_results, strict=True)
+                n
+                for n, r in zip(persona_names, raw_results, strict=True)
                 if isinstance(r, BaseException)
             ]
             logger.warning(
@@ -1193,9 +1329,7 @@ class Orchestrator:
             seen_claims: set[str] = set()
             for rnd in result.rounds:
                 critic_output = rnd.critic_output
-                defense_responses = (
-                    rnd.scientist_defense.responses if rnd.scientist_defense else []
-                )
+                defense_responses = rnd.scientist_defense.responses if rnd.scientist_defense else []
                 # Build a lookup by concern text for fuzzy matching
                 defense_by_text = {}
                 for resp in defense_responses:
@@ -1209,11 +1343,11 @@ class Orchestrator:
                     seen_claims.add(claim_key)
 
                     # Try text match first, fall back to positional
-                    resp = defense_by_text.get(claim_key)
-                    if resp is None and i < len(defense_responses):
-                        resp = defense_responses[i]
-                    verdict = resp.verdict if resp else None
-                    reasoning = resp.reasoning if resp else None
+                    matched_resp = defense_by_text.get(claim_key)
+                    if matched_resp is None and i < len(defense_responses):
+                        matched_resp = defense_responses[i]
+                    verdict = matched_resp.verdict if matched_resp else None
+                    reasoning = matched_resp.reasoning if matched_resp else None
 
                     entry = ConcernLedgerEntry(
                         claim=concern.claim,
@@ -1251,12 +1385,15 @@ class Orchestrator:
 
         cfg = self.model_config.resolve("scientist")
 
-        panel = AgentPanel(name="Revision", model=cfg.model, style=AGENT_STYLES.get("Scientist", "cyan"))
+        panel = AgentPanel(
+            name="Revision", model=cfg.model, style=AGENT_STYLES.get("Scientist", "cyan")
+        )
         self._live.add_panel(panel)
         self._live.update_status(phase="REVISE")
 
         buffer: list[str] = []
         try:
+
             async def _revision_coro(buf):
                 return await run_scientist_revision(
                     original_plan=plan,
@@ -1271,8 +1408,11 @@ class Orchestrator:
                     goal=self.state.goal,
                 )
 
-            revised = await self._with_summaries(
-                _revision_coro, "Scientist Revision", buffer, panel=panel,
+            revised: dict[str, Any] = await self._with_summaries(
+                _revision_coro,
+                "Scientist Revision",
+                buffer,
+                panel=panel,
             )
 
             # Write revised notebook entry
@@ -1318,7 +1458,7 @@ class Orchestrator:
             exe = parts[0]
             abs_exe = shutil.which(exe)
             if abs_exe and abs_exe != exe:
-                run_cmd = abs_exe + run_cmd[len(exe):]
+                run_cmd = abs_exe + run_cmd[len(exe) :]
             elif not abs_exe:
                 logger.warning(
                     f"Executable '{exe}' not found on PATH; "
@@ -1338,7 +1478,9 @@ class Orchestrator:
         else:
             data_files_listing = ""
 
-        panel = AgentPanel(name="Coder", model=cfg.model, style=AGENT_STYLES.get("Coder", "magenta1"))
+        panel = AgentPanel(
+            name="Coder", model=cfg.model, style=AGENT_STYLES.get("Coder", "magenta1")
+        )
         self._live.add_panel(panel)
         self._live.update_status(phase="IMPLEMENT")
 
@@ -1360,7 +1502,12 @@ class Orchestrator:
                     data_files_listing=data_files_listing,
                 )
 
-            new_script = await self._with_summaries(_coder_coro, "Coder", buffer, panel=panel)
+            new_script: Path | None = await self._with_summaries(
+                _coder_coro,
+                "Coder",
+                buffer,
+                panel=panel,
+            )
             self._collapse(panel, f"Created {new_script}")
             return new_script
         except Exception as e:
@@ -1387,7 +1534,9 @@ class Orchestrator:
         stored = []
         for i, pred in enumerate(predictions, 1):
             if not isinstance(pred, dict):
-                logger.warning(f"Prediction {i}: expected dict, got {type(pred).__name__}; skipping")
+                logger.warning(
+                    f"Prediction {i}: expected dict, got {type(pred).__name__}; skipping"
+                )
                 continue
             text = pred.get("prediction", "")
             if not text or not isinstance(text, str) or not text.strip():
@@ -1442,7 +1591,9 @@ class Orchestrator:
 
         for outcome in outcomes:
             if not isinstance(outcome, dict):
-                logger.warning(f"Prediction outcome: expected dict, got {type(outcome).__name__}; skipping")
+                logger.warning(
+                    f"Prediction outcome: expected dict, got {type(outcome).__name__}; skipping"
+                )
                 continue
 
             # Primary: match by pred_id
@@ -1459,7 +1610,9 @@ class Orchestrator:
             outcome_text = outcome.get("prediction", "")
             outcome_text = outcome_text.lower().strip() if isinstance(outcome_text, str) else ""
             if len(outcome_text) < 10:
-                logger.warning(f"Prediction outcome text too short for text matching: '{outcome_text}'")
+                logger.warning(
+                    f"Prediction outcome text too short for text matching: '{outcome_text}'"
+                )
                 continue
 
             best_match = None
@@ -1474,12 +1627,15 @@ class Orchestrator:
             if best_match:
                 if _resolve(best_match, outcome):
                     logger.info(
-                        f"Prediction {best_match.pred_id}: resolved by text fallback as '{best_match.outcome}'"
+                        f"Prediction {best_match.pred_id}: "
+                        f"resolved by text fallback as '{best_match.outcome}'"
                     )
                     pending.remove(best_match)
                     pending_by_id.pop(best_match.pred_id, None)
             else:
-                logger.warning(f"Prediction outcome unmatched: pred_id='{oid}', text='{outcome_text[:80]}'...")
+                logger.warning(
+                    f"Prediction outcome unmatched: pred_id='{oid}', text='{outcome_text[:80]}'..."
+                )
 
     async def _resolve_final_predictions(self) -> None:
         """Run the Analyst on the last version to resolve pending predictions."""
@@ -1491,8 +1647,12 @@ class Orchestrator:
                 self._persist_artifact(version_dir, "final_analysis.json", analysis)
 
     _INFRA_FILES = {
-        "run_result.json", "exitcode.txt", "stderr.txt",
-        "analysis.json", "plan.json", "debate.json",
+        "run_result.json",
+        "exitcode.txt",
+        "stderr.txt",
+        "analysis.json",
+        "plan.json",
+        "debate.json",
     }
 
     def _read_run_result(self, version_dir: Path) -> RunResult:
@@ -1509,9 +1669,9 @@ class Orchestrator:
                 stderr="Coder did not produce run_result.json",
             )
 
-        from auto_scientist.schemas import CoderRunResult
-
         from pydantic import ValidationError
+
+        from auto_scientist.schemas import CoderRunResult
 
         try:
             raw = json.loads(run_result_path.read_text())
@@ -1551,9 +1711,9 @@ class Orchestrator:
 
         # Discover output files (exclude infra files)
         output_files = [
-            str(f) for f in version_dir.iterdir()
-            if f.suffix in (".png", ".txt", ".csv", ".json")
-            and f.name not in self._INFRA_FILES
+            str(f)
+            for f in version_dir.iterdir()
+            if f.suffix in (".png", ".txt", ".csv", ".json") and f.name not in self._INFRA_FILES
         ]
 
         return RunResult(
@@ -1604,6 +1764,7 @@ class Orchestrator:
 
         buffer: list[str] = []
         try:
+
             async def _report_coro(buf):
                 return await run_report(
                     state=self.state,

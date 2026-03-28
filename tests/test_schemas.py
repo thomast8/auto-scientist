@@ -6,12 +6,11 @@ from pydantic import ValidationError
 from auto_scientist.schemas import (
     AnalystOutput,
     CoderRunResult,
+    HypothesisPrediction,
     PlanChange,
     PredictionOutcome,
     ScientistPlanOutput,
-    HypothesisPrediction,
 )
-
 
 # ---------------------------------------------------------------------------
 # AnalystOutput
@@ -92,7 +91,9 @@ class TestCoderRunResult:
         assert not hasattr(r, "extra")
 
     def test_timed_out(self):
-        r = CoderRunResult(success=False, return_code=124, timed_out=True, error="Timed out after 120 minutes")
+        r = CoderRunResult(
+            success=False, return_code=124, timed_out=True, error="Timed out after 120 minutes"
+        )
         assert r.timed_out is True
 
     def test_bool_coercion_from_string(self):
@@ -107,7 +108,9 @@ class TestCoderRunResult:
 
 class TestPlanChange:
     def test_valid(self):
-        c = PlanChange(what="add regularization", why="prevent overfitting", how="L2 penalty", priority=1)
+        c = PlanChange(
+            what="add regularization", why="prevent overfitting", how="L2 penalty", priority=1
+        )
         assert c.priority == 1
 
     def test_missing_field(self):
@@ -126,7 +129,12 @@ class TestScientistPlanOutput:
             "hypothesis": "Adding regularization will reduce overfitting",
             "strategy": "incremental",
             "changes": [
-                {"what": "add L2", "why": "reduce overfitting", "how": "sklearn param", "priority": 1},
+                {
+                    "what": "add L2",
+                    "why": "reduce overfitting",
+                    "how": "sklearn param",
+                    "priority": 1,
+                },
             ],
             "expected_impact": "Lower test error",
             "should_stop": False,

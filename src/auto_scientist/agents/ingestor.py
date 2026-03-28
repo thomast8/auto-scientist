@@ -112,10 +112,10 @@ async def run_ingestor(
         output_files = [f for f in data_files if f.name != "ingest.py"]
         if not output_files:
             if attempt == MAX_ATTEMPTS - 1:
-                msg = f"Ingestor agent did not produce any data files in {data_dir}"
+                err_msg = f"Ingestor agent did not produce any data files in {data_dir}"
                 if last_sdk_error:
-                    msg += f" (prior SDK error: {last_sdk_error})"
-                raise FileNotFoundError(msg)
+                    err_msg += f" (prior SDK error: {last_sdk_error})"
+                raise FileNotFoundError(err_msg)
             correction_hint = (
                 "\n\n<validation_error>\n"
                 f"No data files were produced in {data_dir}. "
@@ -146,7 +146,10 @@ async def run_ingestor(
                         )
                     DomainConfig.model_validate(raw_config)
                 except (
-                    ValidationError, json.JSONDecodeError, TypeError, ValueError,
+                    ValidationError,
+                    json.JSONDecodeError,
+                    TypeError,
+                    ValueError,
                 ) as e:
                     config_error = str(e)
 

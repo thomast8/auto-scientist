@@ -695,7 +695,7 @@ class LaunchApp(App[ExperimentConfig | None]):
         resolved_data = cfg.resolve_data_path(yaml_path.parent)
         cfg.data = str(resolved_data)
         # Set output dir to domain name
-        cfg.output_dir = f"experiments/{yaml_path.parent.name}"
+        cfg.output_dir = f"experiments/runs/{yaml_path.parent.name}"
         self._apply_config(cfg)
 
     @on(Select.Changed)
@@ -737,11 +737,13 @@ class LaunchApp(App[ExperimentConfig | None]):
             model_name = model_val
             provider_val = self.query_one(f"#model-{agent}-provider", Select).value
             reasoning_val = self.query_one(f"#model-{agent}-reasoning", Select).value
-            provider = provider_val if isinstance(provider_val, str) else "anthropic"
-            reasoning = reasoning_val if isinstance(reasoning_val, str) else "off"
+            provider_str = provider_val if isinstance(provider_val, str) else "anthropic"
+            reasoning_str = reasoning_val if isinstance(reasoning_val, str) else "off"
             try:
                 models_dict[agent] = AgentModelConfig(
-                    provider=provider, model=model_name, reasoning=reasoning,
+                    provider=provider_str,  # type: ignore[arg-type]
+                    model=model_name,
+                    reasoning=reasoning_str,  # type: ignore[arg-type]
                 )
             except (ValidationError, ValueError) as e:
                 self._show_error(f"Invalid model config for {agent}: {e}")
@@ -755,34 +757,38 @@ class LaunchApp(App[ExperimentConfig | None]):
                 continue
             provider_val = self.query_one(f"#model-critic-{i}-provider", Select).value
             reasoning_val = self.query_one(f"#model-critic-{i}-reasoning", Select).value
-            provider = provider_val if isinstance(provider_val, str) else "anthropic"
-            reasoning = reasoning_val if isinstance(reasoning_val, str) else "off"
+            provider_str = provider_val if isinstance(provider_val, str) else "anthropic"
+            reasoning_str = reasoning_val if isinstance(reasoning_val, str) else "off"
             try:
-                critics_list.append(AgentModelConfig(
-                    provider=provider, model=model_val, reasoning=reasoning,
-                ))
+                critics_list.append(
+                    AgentModelConfig(
+                        provider=provider_str,  # type: ignore[arg-type]
+                        model=model_val,
+                        reasoning=reasoning_str,  # type: ignore[arg-type]
+                    )
+                )
             except (ValidationError, ValueError) as e:
                 self._show_error(f"Invalid model config for critic {i + 1}: {e}")
                 return None
 
         has_overrides = bool(models_dict) or bool(critics_list)
-        models = ExperimentModelsConfig(
-            **models_dict, critics=critics_list,
-        ) if has_overrides else None
+        models = (
+            ExperimentModelsConfig(
+                **models_dict,
+                critics=critics_list,
+            )
+            if has_overrides
+            else None
+        )
 
         try:
             return ExperimentConfig(
                 data=data,
                 goal=goal,
                 preset=str(self.query_one("#preset-select", Select).value),
-                max_iterations=int(
-                    self.query_one("#max-iterations-input", Input).value or "20"
-                ),
-                debate_rounds=int(
-                    self.query_one("#debate-rounds-input", Input).value or "1"
-                ),
-                output_dir=self.query_one("#output-dir-input", Input).value
-                or "experiments",
+                max_iterations=int(self.query_one("#max-iterations-input", Input).value or "20"),
+                debate_rounds=int(self.query_one("#debate-rounds-input", Input).value or "1"),
+                output_dir=self.query_one("#output-dir-input", Input).value or "experiments",
                 models=models,
             )
         except (ValidationError, ValueError) as e:
@@ -853,5 +859,5 @@ class LaunchApp(App[ExperimentConfig | None]):
         self._show_error("")
         self.notify(f"Config saved to {save_path}")
 
-    def action_quit(self) -> None:
+    async def action_quit(self) -> None:
         self.exit(None)

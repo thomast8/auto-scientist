@@ -11,45 +11,26 @@ Provides:
 - PipelineApp: Textual App with screens, command palette, and message handlers
 """
 
+from __future__ import annotations
+
 import asyncio
 import json
 import logging
 import subprocess
 import threading
 import time
+from collections.abc import Callable
 from functools import partial
+from io import TextIOWrapper
 from pathlib import Path
-
-logger = logging.getLogger(__name__)
-
-_PREFS_PATH = Path.home() / ".config" / "auto-scientist" / "preferences.json"
-
-
-def _load_prefs() -> dict:
-    """Load user preferences from disk."""
-    try:
-        return json.loads(_PREFS_PATH.read_text())
-    except (FileNotFoundError, json.JSONDecodeError, OSError):
-        return {}
-
-
-def _save_prefs(prefs: dict) -> None:
-    """Save user preferences to disk (atomic write). Silently ignores write failures."""
-    try:
-        _PREFS_PATH.parent.mkdir(parents=True, exist_ok=True)
-        tmp = _PREFS_PATH.with_suffix(".tmp")
-        tmp.write_text(json.dumps(prefs, indent=2))
-        tmp.replace(_PREFS_PATH)
-    except OSError as e:
-        logger.debug(f"Could not save preferences: {e}")
 
 from rich.console import Console, RenderableType
 from rich.text import Text
+from textual._context import NoActiveAppError
 from textual.app import App, ComposeResult
 from textual.binding import Binding
 from textual.command import Hit, Hits, Provider
 from textual.containers import Vertical, VerticalScroll
-from textual._context import NoActiveAppError
 from textual.css.query import NoMatches
 from textual.message import Message
 from textual.screen import ModalScreen
@@ -64,6 +45,31 @@ from textual.widgets import (
 )
 from textual.widgets._collapsible import CollapsibleTitle
 from textual.worker import Worker, WorkerState
+
+logger = logging.getLogger(__name__)
+
+_PREFS_PATH = Path.home() / ".config" / "auto-scientist" / "preferences.json"
+
+
+def _load_prefs() -> dict[str, object]:
+    """Load user preferences from disk."""
+    try:
+        result: dict[str, object] = json.loads(_PREFS_PATH.read_text())
+        return result
+    except (FileNotFoundError, json.JSONDecodeError, OSError):
+        return {}
+
+
+def _save_prefs(prefs: dict) -> None:
+    """Save user preferences to disk (atomic write). Silently ignores write failures."""
+    try:
+        _PREFS_PATH.parent.mkdir(parents=True, exist_ok=True)
+        tmp = _PREFS_PATH.with_suffix(".tmp")
+        tmp.write_text(json.dumps(prefs, indent=2))
+        tmp.replace(_PREFS_PATH)
+    except OSError as e:
+        logger.debug(f"Could not save preferences: {e}")
+
 
 # Module-level console for one-time prints (startup banner in headless mode, etc.)
 console = Console()
@@ -300,12 +306,12 @@ class AgentPanel(Widget):
         # Auto-scroll main container if user is near the bottom
         try:
             app = self.app
-            near_bottom = app._is_near_bottom()
+            near_bottom = app._is_near_bottom()  # type: ignore[attr-defined]
         except (NoActiveAppError, NoMatches, AttributeError):
             near_bottom = False
         rich_log.write(Text(text), expand=True)
         if near_bottom:
-            app._scroll_to_end()
+            app._scroll_to_end()  # type: ignore[attr-defined]
 
     def complete(self, done_summary: str = "") -> None:
         """Mark this panel as done.
@@ -333,7 +339,7 @@ class AgentPanel(Widget):
             return
         summary = self.done_summary
         if summary.startswith("[done] "):
-            summary = summary[len("[done] "):]
+            summary = summary[len("[done] ") :]
         collapsible.title = f"[{self.panel_style}]{summary}[/]"
         self.border_subtitle = self._build_footer()
         # Show the CollapsibleTitle now that we have content to toggle
@@ -344,9 +350,10 @@ class AgentPanel(Widget):
             pass
         # Suppress Textual's built-in scroll-on-collapse (Collapsible._watch_collapsed
         # calls self.call_after_refresh(self.scroll_visible) unconditionally)
-        collapsible.scroll_visible = lambda *a, **kw: None
+        object.__setattr__(collapsible, "scroll_visible", lambda *a, **kw: None)
         collapsible.collapsed = True
-        del collapsible.scroll_visible  # Restore inherited method for user-initiated toggles
+        # Restore inherited method for user-initiated toggles
+        object.__delattr__(collapsible, "scroll_visible")
         self._apply_border_color()
         if len(self.all_lines) <= 1:
             collapsible.disabled = True
@@ -421,14 +428,9 @@ class AgentPanel(Widget):
         """Build the footer subtitle string."""
         parts = [_format_elapsed(self.elapsed)]
         if self.input_tokens or self.output_tokens:
-            parts.append(
-                f"{self.input_tokens:,} in / {self.output_tokens:,} out"
-            )
+            parts.append(f"{self.input_tokens:,} in / {self.output_tokens:,} out")
         if self.num_turns:
-            parts.append(
-                f"{self.num_turns} "
-                f"{'turn' if self.num_turns == 1 else 'turns'}"
-            )
+            parts.append(f"{self.num_turns} {'turn' if self.num_turns == 1 else 'turns'}")
         return " | ".join(parts)
 
 
@@ -481,7 +483,7 @@ class MetricsBar(Widget):
         self.finished = True
         self._end_time = time.monotonic()
 
-    def add_agent_stats(self, panel: "AgentPanel") -> None:
+    def add_agent_stats(self, panel: AgentPanel) -> None:
         """Accumulate a completed agent's stats into the running totals."""
         self.total_input_tokens += panel.input_tokens
         self.total_output_tokens += panel.output_tokens
@@ -501,10 +503,7 @@ class MetricsBar(Widget):
 
         total_tokens = self.total_input_tokens + self.total_output_tokens
         if total_tokens > 0:
-            tokens = (
-                f"{self.total_input_tokens:,} in"
-                f" / {self.total_output_tokens:,} out"
-            )
+            tokens = f"{self.total_input_tokens:,} in / {self.total_output_tokens:,} out"
             line.append(f" | {tokens}", style="dim")
         if self.total_turns:
             label = "turn" if self.total_turns == 1 else "turns"
@@ -728,10 +727,7 @@ class AgentDetailScreen(ModalScreen):
 
     def compose(self) -> ComposeResult:
         with Vertical():
-            yield Static(
-                f"[bold]{self._panel_name}[/bold] ({self._model})"
-                f" | {self._stats}"
-            )
+            yield Static(f"[bold]{self._panel_name}[/bold] ({self._model}) | {self._stats}")
             yield RichLog(auto_scroll=False, markup=True, wrap=True)
 
     def on_mount(self) -> None:
@@ -739,7 +735,7 @@ class AgentDetailScreen(ModalScreen):
         for line in self._lines:
             rich_log.write(Text(line))
 
-    def action_dismiss(self) -> None:
+    async def action_dismiss(self, result: object = None) -> None:
         self.app.pop_screen()
 
 
@@ -807,7 +803,7 @@ class PipelineCommandProvider(Provider):
             return
 
         # Static commands
-        commands = [
+        commands: list[tuple[str, Callable[[], object]]] = [
             ("Expand all panels", app.action_toggle_expand),
             ("Collapse all panels", app.action_toggle_expand),
             ("Go to top", partial(app._scroll_to, "top")),
@@ -817,53 +813,67 @@ class PipelineCommandProvider(Provider):
 
         # Theme switching
         for theme_name in sorted(app.available_themes):
-            commands.append((
-                f"Switch theme: {theme_name}",
-                partial(app._set_theme, theme_name),
-            ))
+            commands.append(
+                (
+                    f"Switch theme: {theme_name}",
+                    partial(app._set_theme, theme_name),
+                )
+            )
 
         # Pipeline control
         if hasattr(app._orchestrator, "pause_requested"):
-            commands.append((
-                "Pause after current iteration",
-                partial(app._set_orchestrator_flag, "pause_requested"),
-            ))
+            commands.append(
+                (
+                    "Pause after current iteration",
+                    partial(app._set_orchestrator_flag, "pause_requested"),
+                )
+            )
         if hasattr(app._orchestrator, "skip_to_report"):
-            commands.append((
-                "Skip to report",
-                partial(app._set_orchestrator_flag, "skip_to_report"),
-            ))
+            commands.append(
+                (
+                    "Skip to report",
+                    partial(app._set_orchestrator_flag, "skip_to_report"),
+                )
+            )
 
         # Dynamic: go to iteration N
         for container in app.query(IterationContainer):
             title = getattr(container, "_iter_title", container.border_title) or "?"
-            commands.append((
-                f"Go to {title}",
-                partial(app._scroll_to_widget, container),
-            ))
+            commands.append(
+                (
+                    f"Go to {title}",
+                    partial(app._scroll_to_widget, container),
+                )
+            )
 
         # Dynamic: view agent details
         for panel in app.query(AgentPanel):
-            commands.append((
-                f"View {panel.panel_name} details",
-                partial(app._open_agent_detail, panel),
-            ))
+            commands.append(
+                (
+                    f"View {panel.panel_name} details",
+                    partial(app._open_agent_detail, panel),
+                )
+            )
 
         # Open experiment directory (macOS)
         if app._orchestrator and hasattr(app._orchestrator, "output_dir"):
-            commands.append((
-                "Open experiment directory",
-                partial(
-                    app._open_directory,
-                    app._orchestrator.output_dir,
-                ),
-            ))
+            commands.append(
+                (
+                    "Open experiment directory",
+                    partial(
+                        app._open_directory,
+                        app._orchestrator.output_dir,
+                    ),
+                )
+            )
 
         for label, callback in commands:
             score = matcher.match(label)
             if score > 0:
                 yield Hit(
-                    score, matcher.highlight(label), callback,
+                    score,
+                    matcher.highlight(label),
+                    callback,
                 )
 
 
@@ -884,14 +894,16 @@ class PipelineLive:
         self._app: PipelineApp | None = None
         self._current_iteration: IterationContainer | None = None
         self._file_console: Console | None = None
-        self._file_handle = None
+        self._file_handle: TextIOWrapper | None = None
 
     def start(self, log_path: Path | None = None) -> None:
         """Open the optional log file."""
         if log_path:
             self._file_handle = log_path.open("a")
             self._file_console = Console(
-                file=self._file_handle, no_color=True, width=120,
+                file=self._file_handle,
+                no_color=True,
+                width=120,
             )
 
     def stop(self) -> None:
@@ -908,30 +920,31 @@ class PipelineLive:
             self._app.call_from_thread(self._app._mount_panel, panel)
 
     def collapse_panel(
-        self, panel: AgentPanel, done_summary: str = "",
+        self,
+        panel: AgentPanel,
+        done_summary: str = "",
     ) -> None:
         """Mark a panel as complete and accumulate stats."""
         panel.complete(done_summary)
         if self._app is not None:
             self._app.call_from_thread(
-                self._app._do_panel_collapse, panel,
+                self._app._do_panel_collapse,
+                panel,
             )
         if self._file_console is not None:
             self._file_console.print(
-                f"[{panel.panel_name}] "
-                f"{panel.done_summary} ({panel._build_footer()})"
+                f"[{panel.panel_name}] {panel.done_summary} ({panel._build_footer()})"
             )
 
     def start_iteration(self, title: int | str) -> None:
         """Begin an iteration container."""
-        iter_title = (
-            f"Iteration {title}" if isinstance(title, int) else title
-        )
+        iter_title = f"Iteration {title}" if isinstance(title, int) else title
         container = IterationContainer(iter_title=iter_title)
         self._current_iteration = container
         if self._app is not None:
             self._app.call_from_thread(
-                self._app._mount_iteration, container,
+                self._app._mount_iteration,
+                container,
             )
         if self._file_console is not None:
             self._file_console.print(f"\n{'=' * 60}")
@@ -943,16 +956,17 @@ class PipelineLive:
         if self._current_iteration is not None:
             if self._app is not None:
                 self._app.call_from_thread(
-                    self._current_iteration.set_result, subtitle, style, summary_text,
+                    self._current_iteration.set_result,
+                    subtitle,
+                    style,
+                    summary_text,
                 )
             else:
                 self._current_iteration.set_result(subtitle, style, summary_text)
         if self._file_console is not None:
             label = subtitle
             if self._current_iteration is not None:
-                label = (
-                    f"{self._current_iteration._iter_title}: {subtitle}"
-                )
+                label = f"{self._current_iteration._iter_title}: {subtitle}"
             self._file_console.print(f"--- {label} ---")
 
     def flush_completed(self) -> None:
@@ -964,13 +978,14 @@ class PipelineLive:
         if panel in self._panels:
             self._panels.remove(panel)
         if self._app is not None:
-            self._app.call_from_thread(panel.remove)
+            self._app.call_from_thread(panel.remove)  # type: ignore[arg-type]
 
     def update_status(self, **kwargs) -> None:
         """Update the metrics bar fields."""
         if self._app is not None:
             self._app.call_from_thread(
-                self._app._on_status_update, **kwargs,
+                self._app._on_status_update,
+                **kwargs,
             )
 
     def log(self, message: str) -> None:
@@ -982,7 +997,8 @@ class PipelineLive:
         """Print a renderable. In app mode, mount as Static widget."""
         if self._app is not None:
             self._app.call_from_thread(
-                self._app._mount_static, renderable,
+                self._app._mount_static,
+                renderable,
             )
         else:
             console.print(renderable)
@@ -1004,6 +1020,51 @@ class PipelineLive:
     def panel_count(self) -> int:
         """Number of tracked panels that are not yet done."""
         return sum(1 for p in self._panels if not p.done)
+
+    def mount_restored_iteration(
+        self,
+        title: str,
+        result_text: str,
+        result_style: str,
+        summary: str,
+        panels: list[dict],
+    ) -> None:
+        """Mount a pre-built collapsed iteration from saved manifest data.
+
+        Each entry in *panels* must have keys: name, model, style,
+        done_summary, input_tokens, output_tokens, num_turns, elapsed_seconds, lines.
+        """
+        if self._app is None:
+            return
+
+        def _do_mount():
+            container = IterationContainer(iter_title=title)
+            self._app.query_one("#main-scroll").mount(container)
+
+            for p in panels:
+                panel = AgentPanel(
+                    name=p["name"],
+                    model=p["model"],
+                    style=p.get("style", "cyan"),
+                )
+                container.mount(panel)
+                container.add_panel(panel)
+                # Pre-set metadata so _build_footer() works
+                panel.input_tokens = p.get("input_tokens", 0)
+                panel.output_tokens = p.get("output_tokens", 0)
+                panel.num_turns = p.get("num_turns", 0)
+                # Populate saved summary lines so the panel is expandable
+                for line in p.get("lines", []):
+                    panel.all_lines.append(line)
+                    panel._write_to_richlog(line)
+                panel.complete(p.get("done_summary", ""))
+                panel._apply_complete_dom()
+                # Override _end_time AFTER complete() so saved elapsed is preserved
+                panel._end_time = panel.start_time + p.get("elapsed_seconds", 0)
+
+            container.set_result(result_text, result_style, summary)
+
+        self._app.call_from_thread(_do_mount)
 
     def wait_for_dismiss(self) -> None:
         """No-op. PipelineApp handles dismiss via key binding."""
@@ -1027,7 +1088,10 @@ class PipelineApp(App):
         Binding("ctrl+q", "quit", "Quit", show=True),
         Binding("ctrl+t", "cycle_theme", "Theme", show=True),
         Binding(
-            "enter", "open_focused_detail", "Detail", show=False,
+            "enter",
+            "open_focused_detail",
+            "Detail",
+            show=False,
         ),
     ]
 
@@ -1055,13 +1119,15 @@ class PipelineApp(App):
 
     def on_mount(self) -> None:
         saved_theme = _load_prefs().get("theme")
-        if saved_theme and saved_theme in self.available_themes:
+        if isinstance(saved_theme, str) and saved_theme in self.available_themes:
             self.theme = saved_theme
         self.title = "Auto-Scientist"
         self._live._app = self
         self._orchestrator._live = self._live
         self.run_worker(
-            self._run_pipeline, thread=True, exit_on_error=False,
+            self._run_pipeline,
+            thread=True,
+            exit_on_error=False,
         )
 
     def _run_pipeline(self) -> None:
@@ -1142,7 +1208,8 @@ class PipelineApp(App):
     def _scroll_to_end(self) -> None:
         """Scroll to the bottom of the main scroll area."""
         self.call_after_refresh(
-            self.query_one("#main-scroll").scroll_end, animate=False,
+            self.query_one("#main-scroll").scroll_end,
+            animate=False,
         )
 
     # -- Key binding actions --
@@ -1178,27 +1245,28 @@ class PipelineApp(App):
             except NoMatches:
                 continue
             # Suppress Textual's scroll_visible during batch toggle
-            c.scroll_visible = lambda *a, **kw: None
+            object.__setattr__(c, "scroll_visible", lambda *a, **kw: None)
             c.collapsed = collapsing
-            del c.scroll_visible
+            object.__delattr__(c, "scroll_visible")
 
         # Toggle finished iteration containers
         for container in containers:
             if container._in_progress or not container._panels:
                 continue
-            if collapsing and not container._is_collapsed:
-                container.toggle_iteration()
-            elif not collapsing and container._is_collapsed:
+            if (collapsing and not container._is_collapsed) or (
+                not collapsing and container._is_collapsed
+            ):
                 container.toggle_iteration()
 
         if was_near_bottom:
             self._scroll_to_end()
 
-    def action_quit(self) -> None:
+    async def action_quit(self) -> None:
         """Quit with confirmation if pipeline is still running."""
         if not self._finished:
             self.push_screen(
-                QuitConfirmScreen(), callback=self._handle_quit_confirm,
+                QuitConfirmScreen(),
+                callback=self._handle_quit_confirm,
             )
         else:
             self.exit()
@@ -1249,12 +1317,12 @@ class PipelineApp(App):
         if focused is None:
             return
         panel = None
-        widget = focused
+        widget: Widget | None = focused
         while widget is not None:
             if isinstance(widget, AgentPanel):
                 panel = widget
                 break
-            widget = widget.parent
+            widget = widget.parent  # type: ignore[assignment]
         if panel is not None:
             self._open_agent_detail(panel)
 
@@ -1262,12 +1330,14 @@ class PipelineApp(App):
 
     def _open_agent_detail(self, panel: AgentPanel) -> None:
         """Push the AgentDetailScreen for a panel."""
-        self.push_screen(AgentDetailScreen(
-            panel_name=panel.panel_name,
-            model=panel.model,
-            stats=panel._build_footer(),
-            lines=list(panel.all_lines),
-        ))
+        self.push_screen(
+            AgentDetailScreen(
+                panel_name=panel.panel_name,
+                model=panel.model,
+                stats=panel._build_footer(),
+                lines=list(panel.all_lines),
+            )
+        )
 
     def _scroll_to(self, direction: str) -> None:
         """Scroll the main area to top or bottom."""
@@ -1303,10 +1373,7 @@ class PipelineApp(App):
     def _mount_panel(self, panel: AgentPanel) -> None:
         """Mount a panel into the current iteration container or scroll."""
         near_bottom = self._is_near_bottom()
-        target = (
-            self._live._current_iteration
-            or self.query_one("#main-scroll")
-        )
+        target = self._live._current_iteration or self.query_one("#main-scroll")
         target.mount(panel)
         if isinstance(target, IterationContainer):
             target.add_panel(panel)

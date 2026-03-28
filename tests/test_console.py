@@ -275,7 +275,9 @@ class TestAgentPanelIdempotency:
 class IterationTestApp(App):
     """Test app hosting an IterationContainer with panels inside."""
 
-    def __init__(self, container: IterationContainer, panels: list[AgentPanel] | None = None) -> None:
+    def __init__(
+        self, container: IterationContainer, panels: list[AgentPanel] | None = None
+    ) -> None:
         super().__init__()
         self._container = container
         self._test_panels = panels or []

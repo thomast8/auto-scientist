@@ -5,7 +5,7 @@ from __future__ import annotations
 import json
 import logging
 from collections.abc import Callable
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Any
 
 from anthropic import AsyncAnthropic
 from pydantic import BaseModel
@@ -54,13 +54,17 @@ async def query_anthropic(
     client = AsyncAnthropic()
 
     # Build user message content (multimodal when images provided)
+    user_content: str | list[dict[str, Any]]
     if images:
-        user_content: str | list[dict] = [{"type": "text", "text": prompt}]
+        content_parts: list[dict[str, Any]] = [{"type": "text", "text": prompt}]
         for img in images:
-            user_content.append({
-                "type": "image",
-                "source": {"type": "base64", "media_type": img.media_type, "data": img.data},
-            })
+            content_parts.append(
+                {
+                    "type": "image",
+                    "source": {"type": "base64", "media_type": img.media_type, "data": img.data},
+                }
+            )
+        user_content = content_parts
     else:
         user_content = prompt
 
@@ -80,11 +84,13 @@ async def query_anthropic(
     if response_schema is not None:
         schema = response_schema.model_json_schema()
         kwargs.setdefault("tools", [])
-        kwargs["tools"].append({
-            "name": "submit_response",
-            "description": "Submit your structured response.",
-            "input_schema": schema,
-        })
+        kwargs["tools"].append(
+            {
+                "name": "submit_response",
+                "description": "Submit your structured response.",
+                "input_schema": schema,
+            }
+        )
         # Only force tool_choice when web_search is not enabled;
         # when both are active, let the model choose freely between tools
         if not web_search:

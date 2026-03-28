@@ -436,7 +436,7 @@ class TestAnalystRetry:
         results_path.write_text("data")
         notebook_path = tmp_path / "notebook.md"
 
-        result = await run_analyst(
+        await run_analyst(
             results_path=results_path, plot_paths=[], notebook_path=notebook_path,
         )
         assert call_count == 2

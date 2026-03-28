@@ -12,7 +12,6 @@ from typing import Any, TypeVar
 
 from openai import AsyncOpenAI
 
-
 T = TypeVar("T")
 
 logger = logging.getLogger(__name__)
@@ -161,7 +160,8 @@ async def summarize_iteration(
     try:
         return await _query_summary(
             model,
-            f"Summarize this iteration's agent results into a cohesive recap.\n\n{ITERATION_RECAP_PREFIX}",
+            "Summarize this iteration's agent results into a cohesive recap."
+            f"\n\n{ITERATION_RECAP_PREFIX}",
             f"Agent summaries:\n{combined}",
             max_tokens=100,
         )
