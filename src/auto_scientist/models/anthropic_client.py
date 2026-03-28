@@ -103,7 +103,7 @@ async def query_anthropic(
             raise ValueError(
                 f"Unknown Anthropic reasoning level: {reasoning.level!r}. Valid levels: {valid}"
             )
-        kwargs["thinking"] = {"type": "adaptive", "budget_tokens": budget}
+        kwargs["thinking"] = {"type": "enabled", "budget_tokens": budget}
         kwargs["max_tokens"] = max(kwargs["max_tokens"], budget + 4096)
 
     if on_token is not None:

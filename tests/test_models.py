@@ -439,7 +439,7 @@ class TestQueryAnthropicReasoning:
         await query_anthropic("claude-sonnet-4-6", "test", reasoning=ReasoningConfig(level="high"))
 
         call_kwargs = mock_client.messages.create.call_args.kwargs
-        assert call_kwargs["thinking"]["type"] == "adaptive"
+        assert call_kwargs["thinking"]["type"] == "enabled"
         assert call_kwargs["thinking"]["budget_tokens"] == 16384
 
     @pytest.mark.asyncio
