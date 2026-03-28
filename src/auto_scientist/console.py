@@ -45,11 +45,11 @@ def _save_prefs(prefs: dict) -> None:
 
 from rich.console import Console, RenderableType
 from rich.text import Text
+from textual._context import NoActiveAppError
 from textual.app import App, ComposeResult
 from textual.binding import Binding
 from textual.command import Hit, Hits, Provider
 from textual.containers import Vertical, VerticalScroll
-from textual._context import NoActiveAppError
 from textual.css.query import NoMatches
 from textual.message import Message
 from textual.screen import ModalScreen
@@ -1005,6 +1005,45 @@ class PipelineLive:
         """Number of tracked panels that are not yet done."""
         return sum(1 for p in self._panels if not p.done)
 
+    def mount_restored_iteration(
+        self,
+        title: str,
+        result_text: str,
+        result_style: str,
+        summary: str,
+        panels: list[dict],
+    ) -> None:
+        """Mount a pre-built collapsed iteration from saved manifest data.
+
+        Each entry in *panels* must have keys: name, model, style,
+        done_summary, input_tokens, output_tokens, num_turns, elapsed_seconds.
+        """
+        if self._app is None:
+            return
+
+        def _do_mount():
+            container = IterationContainer(iter_title=title)
+            self._app.query_one("#main-scroll").mount(container)
+
+            for p in panels:
+                panel = AgentPanel(
+                    name=p["name"], model=p["model"], style=p.get("style", "cyan"),
+                )
+                container.mount(panel)
+                container.add_panel(panel)
+                # Pre-set metadata so _build_footer() works
+                panel.input_tokens = p.get("input_tokens", 0)
+                panel.output_tokens = p.get("output_tokens", 0)
+                panel.num_turns = p.get("num_turns", 0)
+                # Freeze elapsed at saved value
+                panel._end_time = panel.start_time + p.get("elapsed_seconds", 0)
+                panel.complete(p.get("done_summary", ""))
+                panel._apply_complete_dom()
+
+            container.set_result(result_text, result_style, summary)
+
+        self._app.call_from_thread(_do_mount)
+
     def wait_for_dismiss(self) -> None:
         """No-op. PipelineApp handles dismiss via key binding."""
 
@@ -1186,9 +1225,7 @@ class PipelineApp(App):
         for container in containers:
             if container._in_progress or not container._panels:
                 continue
-            if collapsing and not container._is_collapsed:
-                container.toggle_iteration()
-            elif not collapsing and container._is_collapsed:
+            if collapsing and not container._is_collapsed or not collapsing and container._is_collapsed:
                 container.toggle_iteration()
 
         if was_near_bottom:

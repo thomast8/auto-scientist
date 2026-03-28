@@ -19,6 +19,13 @@ from auto_scientist.console import (
     PipelineLive,
     console,
 )
+from auto_scientist.iteration_manifest import (
+    MANIFEST_FILENAME,
+    IterationRecord,
+    PanelRecord,
+    append_record,
+    load_manifest,
+)
 from auto_scientist.log_setup import setup_file_logging
 from auto_scientist.model_config import AgentModelConfig, ModelConfig
 from auto_scientist.notebook import NOTEBOOK_FILENAME, append_entry, read_notebook
@@ -356,6 +363,9 @@ class Orchestrator:
             self._live.start(log_path=self.output_dir / "console.log")
             self._live.print_static(self._build_startup_banner())
 
+        # Restore previous iterations from manifest (for replay / resume)
+        self._restore_iterations_from_manifest()
+
         try:
             # Phase 0: Ingestion (with its own border)
             if self.state.phase == "ingestion":
@@ -381,6 +391,7 @@ class Orchestrator:
                 logger.info("Ingestion complete, entering iteration phase")
 
                 iter_summary = await self._generate_iteration_summary()
+                self._save_iteration_manifest("Ingestion", "done", "green", iter_summary)
                 self._live.end_iteration("done", "green", iter_summary)
                 self._live.flush_completed()
 
@@ -522,9 +533,9 @@ class Orchestrator:
             logger.info(f"Scientist stop: {plan.get('stop_reason', 'unknown')}")
             self.state.phase = "report"
             iter_summary = await self._generate_iteration_summary()
-            self._live.end_iteration(
-                f"stopped: {plan.get('stop_reason', 'unknown')}", "yellow", iter_summary,
-            )
+            stop_label = f"stopped: {plan.get('stop_reason', 'unknown')}"
+            self._save_iteration_manifest(self.state.iteration, stop_label, "yellow", iter_summary)
+            self._live.end_iteration(stop_label, "yellow", iter_summary)
             self._live.flush_completed()
             return
 
@@ -576,6 +587,7 @@ class Orchestrator:
                 f"status=failed (coder produced no script)"
             )
             iter_summary = await self._generate_iteration_summary()
+            self._save_iteration_manifest(self.state.iteration, "failed (no script)", "red", iter_summary)
             self._live.end_iteration("failed (no script)", "red", iter_summary)
             self._live.flush_completed()
             self.state.iteration += 1
@@ -619,6 +631,7 @@ class Orchestrator:
         # Iteration border color: green=completed, red=failed
         status_style = "red" if version_entry.status != "completed" else "green"
         iter_summary = await self._generate_iteration_summary()
+        self._save_iteration_manifest(self.state.iteration, version_entry.status, status_style, iter_summary)
         self._live.end_iteration(version_entry.status, status_style, iter_summary)
         self._live.flush_completed()
 
@@ -684,6 +697,67 @@ class Orchestrator:
     def _should_summarize(self) -> bool:
         """Check if summaries are enabled."""
         return self.model_config.summarizer is not None
+
+    def _collect_iteration_record(
+        self,
+        title: str | int,
+        result_text: str,
+        result_style: str,
+        summary: str,
+    ) -> IterationRecord:
+        """Snapshot current iteration's panel metadata for the manifest."""
+        container = self._live._current_iteration
+        panels = []
+        for p in getattr(container, "_panels", []):
+            panels.append(PanelRecord(
+                name=p.panel_name,
+                model=p.model,
+                style=p.panel_style,
+                done_summary=p.done_summary,
+                input_tokens=p.input_tokens,
+                output_tokens=p.output_tokens,
+                num_turns=p.num_turns,
+                elapsed_seconds=p.elapsed,
+            ))
+        return IterationRecord(
+            iteration="ingestion" if isinstance(title, str) else self.state.iteration,
+            title=f"Iteration {title}" if isinstance(title, int) else str(title),
+            result_text=result_text,
+            result_style=result_style,
+            summary=summary,
+            panels=panels,
+        )
+
+    def _save_iteration_manifest(
+        self,
+        title: str | int,
+        result_text: str,
+        result_style: str,
+        summary: str,
+    ) -> None:
+        """Collect and persist an iteration record to the manifest file."""
+        record = self._collect_iteration_record(title, result_text, result_style, summary)
+        append_record(record, self.output_dir / MANIFEST_FILENAME)
+
+    def _restore_iterations_from_manifest(self) -> None:
+        """Mount collapsed iteration panels from a saved manifest.
+
+        Called at startup to show previous iterations in the TUI when
+        resuming or replaying. Silently skips if no manifest exists.
+        """
+        manifest_path = self.output_dir / MANIFEST_FILENAME
+        records = load_manifest(manifest_path)
+        if not records:
+            return
+
+        for record in records:
+            self._live.mount_restored_iteration(
+                title=record.title,
+                result_text=record.result_text,
+                result_style=record.result_style,
+                summary=record.summary,
+                panels=[p.model_dump() for p in record.panels],
+            )
 
     async def _generate_iteration_summary(self) -> str:
         """Generate a combined recap from all agents' done_summaries for the current iteration."""
@@ -1509,9 +1583,9 @@ class Orchestrator:
                 stderr="Coder did not produce run_result.json",
             )
 
-        from auto_scientist.schemas import CoderRunResult
-
         from pydantic import ValidationError
+
+        from auto_scientist.schemas import CoderRunResult
 
         try:
             raw = json.loads(run_result_path.read_text())

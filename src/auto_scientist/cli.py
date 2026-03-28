@@ -376,6 +376,130 @@ def resume(
 
 @cli.command()
 @click.option(
+    "--from", "source_dir",
+    required=True,
+    type=click.Path(exists=True),
+    help="Path to a saved run directory containing state.json",
+)
+@click.option(
+    "--at-iteration",
+    required=True,
+    type=int,
+    help="Iteration to rewind to (0-based). The run resumes from this iteration.",
+)
+@click.option("--max-iterations", default=20, type=int, help="Maximum iteration count")
+@click.option(
+    "--output-dir",
+    default=None,
+    type=click.Path(),
+    help="Output directory for the replayed run (default: auto-generated)",
+)
+@click.option(
+    "--config", "-c",
+    "config_path",
+    default=None,
+    type=click.Path(exists=True),
+    help="Path to models.toml config file (overrides saved config)",
+)
+@click.option("--preset", default=None, help="Named preset: default (medium), fast, high, max")
+@click.option("--no-summaries", is_flag=True, help="Disable periodic agent summaries")
+@click.option(
+    "--debate-rounds",
+    default=1,
+    type=int,
+    help="Number of critic-scientist debate rounds per persona",
+)
+@click.option(
+    "--no-stream",
+    is_flag=True,
+    help="Disable live token streaming during debate phase",
+)
+@click.option(
+    "-v", "--verbose", is_flag=True,
+    help="Show debug log messages on console (always written to debug.log).",
+)
+def replay(
+    source_dir: str,
+    at_iteration: int,
+    max_iterations: int,
+    output_dir: str | None,
+    config_path: str | None,
+    preset: str | None,
+    no_summaries: bool,
+    debate_rounds: int,
+    no_stream: bool,
+    verbose: bool,
+):
+    """Replay a saved run from a specific iteration.
+
+    Copies a saved run directory, rewinds it to the target iteration, and
+    continues the investigation from there. Useful for testing prompt changes,
+    different model configs, or alternative investigation paths.
+
+    Example:
+
+      auto-scientist replay --from runs/my-run --at-iteration 1 --max-iterations 5
+    """
+    import shutil
+
+    from auto_scientist.replay import rewind_run
+
+    src = Path(source_dir)
+    if not (src / "state.json").exists():
+        raise click.UsageError(f"No state.json found in {source_dir}")
+
+    # Determine output directory
+    if output_dir is None:
+        output_path = _next_output_dir(Path("experiments") / src.name)
+    else:
+        output_path = _next_output_dir(Path(output_dir))
+
+    console.print(f"Copying {src} -> {output_path}")
+    shutil.copytree(src, output_path)
+
+    # Rewind the copied directory
+    try:
+        rewound_state = rewind_run(output_path, at_iteration)
+    except ValueError as e:
+        # Clean up on validation failure
+        shutil.rmtree(output_path)
+        raise click.UsageError(str(e)) from None
+
+    console.print(
+        f"Rewound to iteration {at_iteration} "
+        f"({len(rewound_state.versions)} versions preserved)"
+    )
+
+    # Resolve model config
+    if config_path or preset:
+        model_config = _resolve_model_config(config_path, preset, no_summaries)
+    else:
+        saved_mc = output_path / "model_config.json"
+        if saved_mc.exists():
+            model_config = ModelConfig.model_validate_json(saved_mc.read_text())
+        else:
+            model_config = ModelConfig.builtin_preset("default")
+        if no_summaries:
+            model_config.summarizer = None
+
+    data_path = Path(rewound_state.data_path) if rewound_state.data_path else None
+
+    orchestrator = Orchestrator(
+        state=rewound_state,
+        data_path=data_path,
+        output_dir=output_path,
+        max_iterations=max_iterations,
+        model_config=model_config,
+        debate_rounds=debate_rounds,
+        stream=not no_stream,
+        verbose=verbose,
+    )
+
+    _run_orchestrator(orchestrator)
+
+
+@cli.command()
+@click.option(
     "--state",
     required=True,
     type=click.Path(exists=True),
