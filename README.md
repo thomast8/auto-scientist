@@ -87,6 +87,20 @@ It went down a dead end (a hand-crafted hierarchy that dropped F1 from 0.92 to 0
 | Unanimous specimens misclassified | 0 / 475 |
 | Features in final rules | 5 of 12 |
 
+### Toy Function Discovery
+
+Given 200 noisy (x, y) points and zero hints, the system recovered the exact generating formula in two iterations. Full writeup: [docs/showcase-toy-function.md](docs/showcase-toy-function.md).
+
+It screened polynomials and trig composites, identified a phase ambiguity in the cosine fit, reparameterized to sine, proved the clean constants (0.3, 2.5, 1.5) are preferred over free parameters by BIC, and confirmed residual whiteness with Fisher's g-test. Critics caught test-set leakage and goal drift before they could corrupt the results.
+
+| Metric | Value |
+|--------|-------|
+| Wall time | 39 minutes |
+| Iterations | 2 |
+| Discovered formula | y = 0.3x² + 2.5·sin(1.5x) |
+| Parameter accuracy | within 1.5% |
+| Test R² | 0.959 (ceiling: 0.978) |
+
 ## Usage
 
 ### TUI Launcher
