@@ -133,8 +133,15 @@ async def query_openai(
         usage = getattr(response, "usage", None)
         in_tok = getattr(usage, "input_tokens", 0) or 0
         out_tok = getattr(usage, "output_tokens", 0) or 0
-        logger.debug(f"OpenAI response: {len(result)} chars, {in_tok} in / {out_tok} out tokens")
-        return AgentResult(text=result, input_tokens=in_tok, output_tokens=out_tok)
+        details = getattr(usage, "output_tokens_details", None)
+        think_tok = getattr(details, "reasoning_tokens", 0) or 0
+        logger.debug(
+            f"OpenAI response: {len(result)} chars, "
+            f"{in_tok} in / {think_tok} think / {out_tok} out tokens"
+        )
+        return AgentResult(
+            text=result, input_tokens=in_tok, output_tokens=out_tok, thinking_tokens=think_tok
+        )
 
     # Build user message content (multimodal when images provided)
     user_content: str | list[dict[str, Any]]
@@ -197,5 +204,12 @@ async def query_openai(
     usage = getattr(response, "usage", None)
     in_tok = getattr(usage, "prompt_tokens", 0) or 0
     out_tok = getattr(usage, "completion_tokens", 0) or 0
-    logger.debug(f"OpenAI response: {len(result)} chars, {in_tok} in / {out_tok} out tokens")
-    return AgentResult(text=result, input_tokens=in_tok, output_tokens=out_tok)
+    details = getattr(usage, "completion_tokens_details", None)
+    think_tok = getattr(details, "reasoning_tokens", 0) or 0
+    logger.debug(
+        f"OpenAI response: {len(result)} chars, "
+        f"{in_tok} in / {think_tok} think / {out_tok} out tokens"
+    )
+    return AgentResult(
+        text=result, input_tokens=in_tok, output_tokens=out_tok, thinking_tokens=think_tok
+    )

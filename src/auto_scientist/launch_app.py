@@ -289,10 +289,12 @@ class LaunchApp(App[ExperimentConfig | None]):
         max-width: 100;
         height: 1fr;
         scrollbar-color: grey;
+        border: round grey;
+        padding: 0 1;
     }
     #banner-container {
         height: auto;
-        border: solid grey;
+        border: round grey;
         padding: 1 2;
     }
     #banner {
@@ -301,7 +303,7 @@ class LaunchApp(App[ExperimentConfig | None]):
     }
     #form-container {
         height: auto;
-        border: solid grey;
+        border: round grey;
         padding: 1 2;
     }
     .form-row {
@@ -432,12 +434,14 @@ class LaunchApp(App[ExperimentConfig | None]):
     )
 
     def compose(self) -> ComposeResult:
-        with VerticalScroll(id="outer"):
+        with VerticalScroll(id="outer") as outer:
+            outer.border_title = "Auto-Scientist"
             with Vertical(id="banner-container") as banner:
-                banner.border_title = "Auto-Scientist"
+                banner.border_title = "Description"
                 yield Static(self.BANNER, id="banner", markup=True)
 
-            with Vertical(id="form-container"):
+            with Vertical(id="form-container") as form:
+                form.border_title = "Config"
                 # Domain picker (only if domains are available)
                 if self._domain_options:
                     with Horizontal(classes="form-row"):

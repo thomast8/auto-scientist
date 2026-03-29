@@ -200,6 +200,38 @@ class TestAgentPanel:
             panel.error("Connection timeout")
             assert panel.done
             assert panel.error_msg == "Connection timeout"
+            assert panel._in_error
+
+    @pytest.mark.asyncio
+    async def test_error_border_turns_red(self):
+        panel = AgentPanel(name="Analyst", model="claude-sonnet-4-6", style="green")
+        async with PanelTestApp(panel).run_test():
+            panel.error("API failure")
+            panel._apply_error_dom("API failure")
+            # Border color should be red (255, 0, 0), not the agent's green
+            top_style, top_color = panel.styles.border.top
+            assert top_style == "round"
+            assert top_color.r == 255 and top_color.g == 0 and top_color.b == 0
+
+    @pytest.mark.asyncio
+    async def test_error_preserves_border_title(self):
+        panel = AgentPanel(name="Analyst", model="claude-sonnet-4-6", style="green")
+        async with PanelTestApp(panel).run_test():
+            panel.error("API failure")
+            panel._apply_error_dom("API failure")
+            assert panel.border_title == "Analyst (claude-sonnet-4-6)"
+
+    @pytest.mark.asyncio
+    async def test_complete_dom_noop_after_error(self):
+        panel = AgentPanel(name="Analyst", model="claude-sonnet-4-6", style="green")
+        async with PanelTestApp(panel).run_test():
+            panel.error("API failure")
+            panel._apply_error_dom("API failure")
+            # Simulate what collapse_panel triggers
+            panel._apply_complete_dom()
+            # Border should still be red, not reverted to green
+            top_style, top_color = panel.styles.border.top
+            assert top_color.r == 255 and top_color.g == 0 and top_color.b == 0
 
     @pytest.mark.asyncio
     async def test_set_tokens(self):
@@ -697,7 +729,7 @@ class TestPipelineApp:
         orch = FakeOrch()
         app = PipelineApp(orch)
         async with app.run_test():
-            assert app.query_one("#main-scroll") is not None
+            assert app.query_one("#run-area") is not None
             assert app.query_one(MetricsBar) is not None
 
     @pytest.mark.asyncio
@@ -964,23 +996,6 @@ class TestQuitConfirmScreen:
 
 
 class TestThemeCycling:
-    @pytest.mark.asyncio
-    async def test_ctrl_t_changes_theme(self):
-        class FakeOrch:
-            _live: PipelineLive | None = None
-
-            async def run(self):
-                pass
-
-        orch = FakeOrch()
-        app = PipelineApp(orch)
-        async with app.run_test() as pilot:
-            await pilot.pause()
-            initial_theme = app.theme
-            await pilot.press("ctrl+t")
-            await pilot.pause()
-            assert app.theme != initial_theme
-
     @pytest.mark.asyncio
     async def test_saved_theme_is_restored(self, tmp_path):
         prefs_path = tmp_path / "preferences.json"

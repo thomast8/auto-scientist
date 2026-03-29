@@ -23,6 +23,7 @@ class PanelRecord(BaseModel):
     done_summary: str = ""
     input_tokens: int = Field(default=0, ge=0)
     output_tokens: int = Field(default=0, ge=0)
+    thinking_tokens: int = Field(default=0, ge=0)
     num_turns: int = Field(default=0, ge=0)
     elapsed_seconds: float = Field(default=0.0, ge=0.0)
     lines: list[str] = Field(default_factory=list)

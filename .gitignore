@@ -1,3 +1,6 @@
+# Playwright MCP artifacts
+.playwright-mcp/
+
 # Experiments output (generated at runtime)
 experiments/
 !experiments/.gitkeep

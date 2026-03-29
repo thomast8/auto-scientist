@@ -8,6 +8,7 @@ from auto_scientist.model_config import (
     AgentModelConfig,
     ModelConfig,
     ReasoningConfig,
+    reasoning_to_cc_extra_args,
 )
 
 
@@ -101,6 +102,26 @@ class TestModelConfigResolve:
             assert cfg.model == "claude-sonnet-4-6"
 
 
+class TestReasoningToCCExtraArgs:
+    def test_off_returns_empty(self):
+        assert reasoning_to_cc_extra_args(ReasoningConfig(level="off")) == {}
+
+    def test_high_maps_to_effort_high(self):
+        assert reasoning_to_cc_extra_args(ReasoningConfig(level="high")) == {"effort": "high"}
+
+    def test_medium_maps_to_effort_medium(self):
+        assert reasoning_to_cc_extra_args(ReasoningConfig(level="medium")) == {"effort": "medium"}
+
+    def test_low_maps_to_effort_low(self):
+        assert reasoning_to_cc_extra_args(ReasoningConfig(level="low")) == {"effort": "low"}
+
+    def test_minimal_maps_to_effort_low(self):
+        assert reasoning_to_cc_extra_args(ReasoningConfig(level="minimal")) == {"effort": "low"}
+
+    def test_max_maps_to_effort_max(self):
+        assert reasoning_to_cc_extra_args(ReasoningConfig(level="max")) == {"effort": "max"}
+
+
 class TestBuiltinPresets:
     def test_default_preset(self):
         mc = ModelConfig.builtin_preset("default")
@@ -163,7 +184,7 @@ class TestBuiltinPresets:
         mc = ModelConfig.builtin_preset("default")
         assert len(mc.critics) == 2
         assert mc.critics[0].provider == "openai"
-        assert mc.critics[0].model == "gpt-5.4"
+        assert mc.critics[0].model == "gpt-5.4-mini"
         assert mc.critics[1].provider == "anthropic"
         assert mc.critics[1].model == "claude-sonnet-4-6"
 

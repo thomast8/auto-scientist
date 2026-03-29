@@ -45,8 +45,7 @@ git clone https://github.com/thomast8/auto-scientist.git
 cd auto-scientist
 uv sync
 
-# Set API keys
-export ANTHROPIC_API_KEY="..."   # Required (Claude runs the agents)
+# Set API keys (only needed for non-Anthropic critics)
 export OPENAI_API_KEY="..."      # Optional (GPT as critic)
 export GOOGLE_API_KEY="..."      # Optional (Gemini as critic)
 
@@ -204,7 +203,7 @@ models:
 | `high` | Quality | opus-4-6 (high reasoning) | Gemini 3.1 Pro + GPT-5.4 (high) |
 | `max` | Maximum | opus-4-6 (max reasoning) | Gemini 3.1 Pro + GPT-5.4 (max) |
 
-SDK agents (analyst, scientist, coder, ingestor, report) require Anthropic models. Non-Anthropic models are only allowed for critics and summarizer.
+All core agents (analyst, scientist, coder, ingestor, report) run through the [Claude Code SDK](https://docs.anthropic.com/en/docs/claude-code), which uses your Claude Code subscription instead of per-token API billing. No `ANTHROPIC_API_KEY` is needed. Only the critics support non-Anthropic providers (OpenAI, Google), which do require their respective API keys and are billed per-token.
 
 ## CLI Reference
 
@@ -297,7 +296,7 @@ uv run ruff check src/ tests/
 - Python >= 3.11
 - [uv](https://docs.astral.sh/uv/)
 - [Claude Code CLI](https://docs.anthropic.com/en/docs/claude-code) (`npm install -g @anthropic-ai/claude-code`)
-- API keys: `ANTHROPIC_API_KEY` (required), `OPENAI_API_KEY` and `GOOGLE_API_KEY` (optional, for critics)
+- API keys: `OPENAI_API_KEY` and `GOOGLE_API_KEY` (optional, for non-Anthropic critics). Core agents use Claude Code (subscription-based, no per-token cost)
 
 ## Architecture
 
@@ -305,4 +304,4 @@ See [docs/architecture.md](docs/architecture.md) for the full spec, or open [doc
 
 ## Status
 
-**Alpha** (v0.1.0-alpha). The core pipeline works end-to-end but expect breaking changes.
+**Stable** (v1.0.0). The core pipeline works end-to-end with full autonomous investigation capabilities.

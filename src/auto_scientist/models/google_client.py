@@ -137,5 +137,11 @@ async def query_google(
     usage = getattr(response, "usage_metadata", None)
     in_tok = getattr(usage, "prompt_token_count", 0) or 0
     out_tok = getattr(usage, "candidates_token_count", 0) or 0
-    logger.debug(f"Google response: {len(result)} chars, {in_tok} in / {out_tok} out tokens")
-    return AgentResult(text=result, input_tokens=in_tok, output_tokens=out_tok)
+    think_tok = getattr(usage, "thoughts_token_count", 0) or 0
+    logger.debug(
+        f"Google response: {len(result)} chars, "
+        f"{in_tok} in / {think_tok} think / {out_tok} out tokens"
+    )
+    return AgentResult(
+        text=result, input_tokens=in_tok, output_tokens=out_tok, thinking_tokens=think_tok
+    )

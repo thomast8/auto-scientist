@@ -21,7 +21,8 @@ class TestTolerantParseMessage:
     def test_known_type_passes_through(self):
         msg = MagicMock()
         with patch(
-            "auto_scientist.sdk_utils._original_parse_message", return_value=msg,
+            "auto_scientist.sdk_utils._original_parse_message",
+            return_value=msg,
         ):
             result = _tolerant_parse_message({"type": "assistant"})
         assert result is msg
@@ -39,19 +40,25 @@ class TestTolerantParseMessage:
     def test_non_unknown_parse_error_reraises(self):
         from claude_code_sdk._errors import MessageParseError
 
-        with patch(
-            "auto_scientist.sdk_utils._original_parse_message",
-            side_effect=MessageParseError("Malformed JSON payload"),
-        ), pytest.raises(MessageParseError, match="Malformed JSON payload"):
+        with (
+            patch(
+                "auto_scientist.sdk_utils._original_parse_message",
+                side_effect=MessageParseError("Malformed JSON payload"),
+            ),
+            pytest.raises(MessageParseError, match="Malformed JSON payload"),
+        ):
             _tolerant_parse_message({"type": "bad"})
 
     def test_logs_skipped_type(self, caplog):
         from claude_code_sdk._errors import MessageParseError
 
-        with patch(
-            "auto_scientist.sdk_utils._original_parse_message",
-            side_effect=MessageParseError("Unknown message type: foo_event"),
-        ), caplog.at_level(logging.DEBUG, logger="auto_scientist.sdk_utils"):
+        with (
+            patch(
+                "auto_scientist.sdk_utils._original_parse_message",
+                side_effect=MessageParseError("Unknown message type: foo_event"),
+            ),
+            caplog.at_level(logging.DEBUG, logger="auto_scientist.sdk_utils"),
+        ):
             _tolerant_parse_message({"type": "foo_event"})
 
         assert "foo_event" in caplog.text
@@ -112,11 +119,14 @@ class TestSafeQuery:
 # OutputValidationError
 # ---------------------------------------------------------------------------
 
+
 class TestOutputValidationError:
     def test_stores_attributes(self):
         inner = ValueError("bad field")
         e = OutputValidationError(
-            raw_output='{"bad": true}', validation_error=inner, agent_name="Analyst",
+            raw_output='{"bad": true}',
+            validation_error=inner,
+            agent_name="Analyst",
         )
         assert e.raw_output == '{"bad": true}'
         assert e.validation_error is inner
@@ -125,7 +135,9 @@ class TestOutputValidationError:
     def test_correction_prompt_contains_error(self):
         inner = ValueError("missing field 'observations'")
         e = OutputValidationError(
-            raw_output='{"bad": true}', validation_error=inner, agent_name="Analyst",
+            raw_output='{"bad": true}',
+            validation_error=inner,
+            agent_name="Analyst",
         )
         prompt = e.correction_prompt()
         assert "<validation_error>" in prompt
@@ -135,7 +147,9 @@ class TestOutputValidationError:
     def test_correction_prompt_truncates_long_output(self):
         long_output = "x" * 1000
         e = OutputValidationError(
-            raw_output=long_output, validation_error=ValueError("err"), agent_name="Test",
+            raw_output=long_output,
+            validation_error=ValueError("err"),
+            agent_name="Test",
         )
         prompt = e.correction_prompt()
         assert len(prompt) < len(long_output) + 500  # correction text + truncated output
@@ -144,6 +158,7 @@ class TestOutputValidationError:
 # ---------------------------------------------------------------------------
 # validate_json_output
 # ---------------------------------------------------------------------------
+
 
 class TestValidateJsonOutput:
     def test_valid_json_valid_schema(self):
@@ -191,10 +206,47 @@ class TestValidateJsonOutput:
         result = validate_json_output(json.dumps(data), AnalystOutput, "Analyst")
         assert "llm_reasoning" not in result
 
+    def test_trailing_text_after_json(self):
+        """raw_decode() handles JSON followed by model commentary."""
+        data = {
+            "key_metrics": {},
+            "improvements": [],
+            "regressions": [],
+            "observations": ["ok"],
+        }
+        raw = json.dumps(data) + "\n\nHere is my analysis of the above..."
+        result = validate_json_output(raw, AnalystOutput, "Analyst")
+        assert result["observations"] == ["ok"]
+
+    def test_leading_prose_before_json(self):
+        """Leading prose before JSON object is stripped."""
+        data = {
+            "key_metrics": {},
+            "improvements": [],
+            "regressions": [],
+            "observations": ["ok"],
+        }
+        raw = "Here is my structured output:\n\n" + json.dumps(data)
+        result = validate_json_output(raw, AnalystOutput, "Analyst")
+        assert result["observations"] == ["ok"]
+
+    def test_leading_prose_and_trailing_text(self):
+        """Both leading prose and trailing commentary handled."""
+        data = {
+            "key_metrics": {},
+            "improvements": [],
+            "regressions": [],
+            "observations": ["ok"],
+        }
+        raw = "My analysis:\n" + json.dumps(data) + "\n\nLet me know if you need more."
+        result = validate_json_output(raw, AnalystOutput, "Analyst")
+        assert result["observations"] == ["ok"]
+
 
 # ---------------------------------------------------------------------------
 # collect_text_from_query
 # ---------------------------------------------------------------------------
+
 
 class TestCollectTextFromQuery:
     @pytest.mark.asyncio
@@ -215,7 +267,7 @@ class TestCollectTextFromQuery:
             yield result_msg
 
         with patch("auto_scientist.sdk_utils.query", side_effect=fake_query):
-            raw = await collect_text_from_query("prompt", MagicMock())
+            raw, usage = await collect_text_from_query("prompt", MagicMock())
         assert raw == '{"answer": 42}'
 
     @pytest.mark.asyncio
@@ -236,7 +288,7 @@ class TestCollectTextFromQuery:
             yield result_msg
 
         with patch("auto_scientist.sdk_utils.query", side_effect=fake_query):
-            raw = await collect_text_from_query("prompt", MagicMock())
+            raw, usage = await collect_text_from_query("prompt", MagicMock())
         assert raw == '{"answer": 42}'
 
     @pytest.mark.asyncio
@@ -278,6 +330,26 @@ class TestCollectTextFromQuery:
         ):
             await collect_text_from_query("prompt", MagicMock(), message_buffer=buffer)
             mock_append.assert_called_once_with(text_block, buffer)
+
+    @pytest.mark.asyncio
+    async def test_returns_usage_dict(self):
+        """Usage dict from ResultMessage is returned as second element."""
+        from claude_code_sdk import ResultMessage
+
+        result_msg = MagicMock(spec=ResultMessage)
+        result_msg.result = "output"
+        result_msg.usage = {"input_tokens": 100, "output_tokens": 50}
+        result_msg.num_turns = 3
+        result_msg.total_cost_usd = 0.01
+
+        async def fake_query(**kwargs):
+            yield result_msg
+
+        with patch("auto_scientist.sdk_utils.query", side_effect=fake_query):
+            _text, usage = await collect_text_from_query("prompt", MagicMock())
+        assert usage["input_tokens"] == 100
+        assert usage["output_tokens"] == 50
+        assert usage["num_turns"] == 3
 
 
 # Valid report with all 10 sections

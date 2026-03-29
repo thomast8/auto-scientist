@@ -45,6 +45,7 @@ from textual.widgets import (
 from textual.widgets._collapsible import CollapsibleTitle
 from textual.worker import Worker, WorkerState
 
+from auto_scientist.latex_to_unicode import latex_to_unicode
 from auto_scientist.preferences import load_theme, save_theme
 
 logger = logging.getLogger(__name__)
@@ -163,10 +164,12 @@ class AgentPanel(Widget):
         self.start_time = time.monotonic()
         self.input_tokens = 0
         self.output_tokens = 0
+        self.thinking_tokens = 0
         self.num_turns = 0
         self.done = False
         self.done_summary = ""
         self.error_msg = ""
+        self._in_error = False
         self._end_time: float | None = None
         # Resolve description: explicit > exact lookup > prefix lookup (e.g. "Critic/X" -> "Critic")
         if not description:
@@ -199,8 +202,10 @@ class AgentPanel(Widget):
 
         Without this, some Textual themes override Rich markup colors on the
         CollapsibleTitle widget, making completed panels appear grey.
+        Uses red when the panel is in an error state.
         """
-        css_color = self._RICH_TO_TEXTUAL_COLOR.get(self.panel_style, self.panel_style)
+        color = "red" if self._in_error else self.panel_style
+        css_color = self._RICH_TO_TEXTUAL_COLOR.get(color, color)
         try:
             title_widget = self.query_one(CollapsibleTitle)
             title_widget.styles.color = css_color
@@ -263,7 +268,7 @@ class AgentPanel(Widget):
         """Append a summary line. Thread-safe: routes DOM update to UI thread."""
         if self.done:
             return
-        cleaned = " ".join(text.split())
+        cleaned = latex_to_unicode(" ".join(text.split()))
         self.all_lines.append(cleaned)
         try:
             app = self.app
@@ -304,13 +309,15 @@ class AgentPanel(Widget):
             return
         self.done = True
         if done_summary:
-            self.done_summary = done_summary
+            self.done_summary = latex_to_unicode(done_summary)
         elif self.all_lines:
             self.done_summary = self.all_lines[-1]
         self._end_time = time.monotonic()
 
     def _apply_complete_dom(self) -> None:
         """Apply completion state to DOM (must be called from UI thread)."""
+        if self._in_error:
+            return  # Error DOM is already applied; don't overwrite it
         for desc in self.query(".agent-description"):
             desc.remove()
         try:
@@ -351,6 +358,7 @@ class AgentPanel(Widget):
             return
         self.done = True
         self.error_msg = msg
+        self._in_error = True
         self._end_time = time.monotonic()
         try:
             app = self.app
@@ -371,7 +379,6 @@ class AgentPanel(Widget):
         except NoMatches:
             return
         collapsible.title = f"[red][error] {msg}[/red]"
-        self.border_title = f"{self._panel_name}: [error] {msg}"
         self.border_subtitle = self._build_footer()
         # Show the CollapsibleTitle for the error message
         try:
@@ -382,20 +389,23 @@ class AgentPanel(Widget):
         rich_log.write(Text(f"[error] {msg}", style="red"))
         self._apply_border_color()
 
-    def set_tokens(self, input_tokens: int, output_tokens: int) -> None:
+    def set_tokens(self, input_tokens: int, output_tokens: int, thinking_tokens: int = 0) -> None:
         """Set token usage metadata."""
         self.input_tokens = input_tokens
         self.output_tokens = output_tokens
+        self.thinking_tokens = thinking_tokens
 
     def set_stats(
         self,
         input_tokens: int = 0,
         output_tokens: int = 0,
+        thinking_tokens: int = 0,
         num_turns: int = 0,
     ) -> None:
         """Set rich usage stats from SDK ResultMessage or direct API calls."""
         self.input_tokens = input_tokens
         self.output_tokens = output_tokens
+        self.thinking_tokens = thinking_tokens
         self.num_turns = num_turns
 
     @property
@@ -408,7 +418,11 @@ class AgentPanel(Widget):
         """Build the footer subtitle string."""
         parts = [_format_elapsed(self.elapsed)]
         if self.input_tokens or self.output_tokens:
-            parts.append(f"{self.input_tokens:,} in / {self.output_tokens:,} out")
+            tok = f"{self.input_tokens:,} in"
+            if self.thinking_tokens:
+                tok += f" / {self.thinking_tokens:,} think"
+            tok += f" / {self.output_tokens:,} out"
+            parts.append(tok)
         if self.num_turns:
             parts.append(f"{self.num_turns} {'turn' if self.num_turns == 1 else 'turns'}")
         return " | ".join(parts)
@@ -438,6 +452,7 @@ class MetricsBar(Widget):
         self.phase = ""
         self.total_input_tokens = 0
         self.total_output_tokens = 0
+        self.total_thinking_tokens = 0
         self.total_turns = 0
         self.scores: list[float] = []
         self.finished: bool = False
@@ -467,6 +482,7 @@ class MetricsBar(Widget):
         """Accumulate a completed agent's stats into the running totals."""
         self.total_input_tokens += panel.input_tokens
         self.total_output_tokens += panel.output_tokens
+        self.total_thinking_tokens += panel.thinking_tokens
         self.total_turns += panel.num_turns
 
     def render(self) -> Text:
@@ -483,7 +499,10 @@ class MetricsBar(Widget):
 
         total_tokens = self.total_input_tokens + self.total_output_tokens
         if total_tokens > 0:
-            tokens = f"{self.total_input_tokens:,} in / {self.total_output_tokens:,} out"
+            tokens = f"{self.total_input_tokens:,} in"
+            if self.total_thinking_tokens:
+                tokens += f" / {self.total_thinking_tokens:,} think"
+            tokens += f" / {self.total_output_tokens:,} out"
             line.append(f" | {tokens}", style="dim")
         if self.total_turns:
             label = "turn" if self.total_turns == 1 else "turns"
@@ -543,7 +562,7 @@ class IterationContainer(Vertical):
     DEFAULT_CSS = """
     IterationContainer {
         height: auto;
-        border: solid grey;
+        border: round grey;
         transition: border 300ms in_out_cubic;
     }
     IterationContainer .iteration-recap {
@@ -591,13 +610,18 @@ class IterationContainer(Vertical):
         total_elapsed = sum(p.elapsed for p in self._panels)
         total_in = sum(p.input_tokens for p in self._panels)
         total_out = sum(p.output_tokens for p in self._panels)
+        total_think = sum(p.thinking_tokens for p in self._panels)
         total_turns = sum(p.num_turns for p in self._panels)
 
         # Build aggregated subtitle: "4m 32s | 1,200 in / 800 out | 5 turns"
         parts: list[str] = []
         parts.append(_format_elapsed(total_elapsed))
         if total_in or total_out:
-            parts.append(f"{total_in:,} in / {total_out:,} out")
+            tok = f"{total_in:,} in"
+            if total_think:
+                tok += f" / {total_think:,} think"
+            tok += f" / {total_out:,} out"
+            parts.append(tok)
         if total_turns:
             label = "turn" if total_turns == 1 else "turns"
             parts.append(f"{total_turns} {label}")
@@ -606,6 +630,7 @@ class IterationContainer(Vertical):
         # Mount recap summary text (before agent panels)
         first_panel = self._panels[0] if self._panels else None
         if summary_text:
+            summary_text = latex_to_unicode(summary_text)
             recap = Static(summary_text, classes="iteration-recap")
             if first_panel:
                 self.mount(recap, before=first_panel)
@@ -654,7 +679,7 @@ class IterationContainer(Vertical):
         self.border_subtitle = ""
         valid = {"red", "green", "yellow"}
         if style in valid:
-            self.styles.border = ("solid", style)
+            self.styles.border = ("round", style)
         if self._panels:
             self.collapse_iteration(summary_text)
 
@@ -972,6 +997,18 @@ class PipelineLive:
         if self._file_console is not None:
             self._file_console.print(message)
 
+    def mount_banner(self, renderable: RenderableType) -> None:
+        """Mount the startup banner into the banner area (above Run)."""
+        if self._app is not None:
+            self._app.call_from_thread(
+                self._app._mount_banner,
+                renderable,
+            )
+        else:
+            console.print(renderable)
+        if self._file_console is not None:
+            self._file_console.print(renderable)
+
     def print_static(self, renderable: RenderableType) -> None:
         """Print a renderable. In app mode, mount as Static widget."""
         if self._app is not None:
@@ -1018,7 +1055,7 @@ class PipelineLive:
 
         def _do_mount():
             container = IterationContainer(iter_title=title)
-            self._app.query_one("#main-scroll").mount(container)
+            self._app.query_one("#run-area").mount(container)
 
             for p in panels:
                 panel = AgentPanel(
@@ -1031,6 +1068,7 @@ class PipelineLive:
                 # Pre-set metadata so _build_footer() works
                 panel.input_tokens = p.get("input_tokens", 0)
                 panel.output_tokens = p.get("output_tokens", 0)
+                panel.thinking_tokens = p.get("thinking_tokens", 0)
                 panel.num_turns = p.get("num_turns", 0)
                 # Populate saved summary lines so the panel is expandable
                 for line in p.get("lines", []):
@@ -1065,7 +1103,6 @@ class PipelineApp(App):
     BINDINGS = [
         Binding("ctrl+o", "toggle_expand", "Expand/Collapse", show=True),
         Binding("ctrl+q", "quit", "Quit", show=True),
-        Binding("ctrl+t", "cycle_theme", "Theme", show=True),
         Binding(
             "enter",
             "open_focused_detail",
@@ -1075,10 +1112,19 @@ class PipelineApp(App):
     ]
 
     DEFAULT_CSS = """
-    #main-scroll {
+    #outer-container {
         height: 1fr;
+        border: round grey;
+        padding: 0 1;
     }
-    #main-scroll > Static {
+    #banner-area {
+        height: auto;
+    }
+    #run-area {
+        height: auto;
+        border: round grey;
+    }
+    #run-area > Static {
         width: 100%;
     }
     """
@@ -1093,7 +1139,12 @@ class PipelineApp(App):
     def compose(self) -> ComposeResult:
         yield Header()
         yield MetricsBar()
-        yield VerticalScroll(id="main-scroll")
+        with VerticalScroll(id="outer-container") as outer:
+            outer.border_title = "Auto-Scientist"
+            yield Vertical(id="banner-area")
+            with Vertical(id="run-area") as run:
+                run.border_title = "Run"
+                pass
         yield Footer()
 
     def on_mount(self) -> None:
@@ -1181,13 +1232,13 @@ class PipelineApp(App):
 
     def _is_near_bottom(self) -> bool:
         """Check if the scroll view is at or near the bottom."""
-        scroll = self.query_one("#main-scroll", VerticalScroll)
+        scroll = self.query_one("#outer-container", VerticalScroll)
         return scroll.scroll_offset.y >= scroll.max_scroll_y - 2
 
     def _scroll_to_end(self) -> None:
         """Scroll to the bottom of the main scroll area."""
         self.call_after_refresh(
-            self.query_one("#main-scroll").scroll_end,
+            self.query_one("#outer-container").scroll_end,
             animate=False,
         )
 
@@ -1270,23 +1321,10 @@ class PipelineApp(App):
     def watch_theme(self, theme_name: str) -> None:
         """Persist every theme change, regardless of how it was triggered.
 
-        Catches changes from Ctrl+T, the custom command palette, AND the
-        built-in Textual ThemeProvider (which otherwise bypasses persistence).
+        Catches changes from the custom command palette AND the built-in
+        Textual ThemeProvider (which otherwise bypasses persistence).
         """
         save_theme(theme_name)
-
-    def action_cycle_theme(self) -> None:
-        """Cycle through available themes."""
-        themes = sorted(self.available_themes)
-        if not themes:
-            return
-        current = self.theme or themes[0]
-        try:
-            idx = themes.index(current)
-            self.theme = themes[(idx + 1) % len(themes)]
-        except ValueError:
-            self.theme = themes[0]
-        self.notify(f"Theme: {self.theme}")
 
     def action_open_focused_detail(self) -> None:
         """Open detail view for the currently focused AgentPanel."""
@@ -1318,7 +1356,7 @@ class PipelineApp(App):
 
     def _scroll_to(self, direction: str) -> None:
         """Scroll the main area to top or bottom."""
-        scroll = self.query_one("#main-scroll", VerticalScroll)
+        scroll = self.query_one("#outer-container", VerticalScroll)
         if direction == "top":
             scroll.scroll_home(animate=False)
         else:
@@ -1350,7 +1388,7 @@ class PipelineApp(App):
     def _mount_panel(self, panel: AgentPanel) -> None:
         """Mount a panel into the current iteration container or scroll."""
         near_bottom = self._is_near_bottom()
-        target = self._live._current_iteration or self.query_one("#main-scroll")
+        target = self._live._current_iteration or self.query_one("#run-area")
         target.mount(panel)
         if isinstance(target, IterationContainer):
             target.add_panel(panel)
@@ -1358,15 +1396,19 @@ class PipelineApp(App):
             self._scroll_to_end()
 
     def _mount_iteration(self, container: IterationContainer) -> None:
-        """Mount an iteration container into the main scroll."""
+        """Mount an iteration container into the run area."""
         near_bottom = self._is_near_bottom()
-        self.query_one("#main-scroll").mount(container)
+        self.query_one("#run-area").mount(container)
         if near_bottom:
             self._scroll_to_end()
+
+    def _mount_banner(self, renderable: RenderableType) -> None:
+        """Mount the startup banner into the banner area."""
+        self.query_one("#banner-area").mount(Static(renderable))
 
     def _mount_static(self, renderable: RenderableType) -> None:
         """Mount a Rich renderable as a Static widget."""
         near_bottom = self._is_near_bottom()
-        self.query_one("#main-scroll").mount(Static(renderable))
+        self.query_one("#run-area").mount(Static(renderable))
         if near_bottom:
             self._scroll_to_end()

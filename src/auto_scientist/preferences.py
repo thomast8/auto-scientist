@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 import logging
+import tempfile
 from pathlib import Path
 
 logger = logging.getLogger(__name__)
@@ -30,9 +31,14 @@ def save_preferences(prefs: dict[str, object]) -> None:
     """Save user preferences to disk with an atomic replace."""
     try:
         PREFS_PATH.parent.mkdir(parents=True, exist_ok=True)
-        tmp = PREFS_PATH.with_suffix(".tmp")
-        tmp.write_text(json.dumps(prefs, indent=2))
-        tmp.replace(PREFS_PATH)
+        fd, tmp_name = tempfile.mkstemp(dir=PREFS_PATH.parent, suffix=".tmp", prefix="prefs-")
+        try:
+            with open(fd, "w") as fh:
+                json.dump(prefs, fh, indent=2)
+            Path(tmp_name).replace(PREFS_PATH)
+        except BaseException:
+            Path(tmp_name).unlink(missing_ok=True)
+            raise
     except OSError as e:
         logger.warning(f"Could not save preferences to {PREFS_PATH}: {e}")
 

@@ -10,23 +10,29 @@ import logging
 from collections.abc import Callable, Coroutine
 from typing import Any, TypeVar
 
-from openai import AsyncOpenAI
+from openai import AsyncOpenAI, AuthenticationError, BadRequestError
 
 T = TypeVar("T")
 
 logger = logging.getLogger(__name__)
 
+# Track persistent failures so we log them once instead of spamming.
+# Using a set (mutable container) avoids the need for `global` statements.
+_persistent_failure_logged: set[bool] = set()
+
 PROGRESS_PREFIX = (
     "Reply with ONE sentence, max 15 words. "
     "Use present participle (-ing) voice: 'Inspecting...', 'Writing...', 'Computing...'. "
-    "Never refer to the agent in third person. Write as if you are the agent."
+    "Never refer to the agent in third person. Write as if you are the agent. "
+    "Use plain Unicode for math symbols (R², σ, ε, ≈, Δ), not LaTeX notation."
 )
 FINAL_PREFIX = (
     "Reply with 2-3 sentences, max 40 words total. "
     "Use past tense. First sentence: the main outcome. "
     "Remaining sentences: key metrics, notable findings, or comparisons to prior iterations. "
     "Never refer to the agent in third person (no 'they', 'the agent', 'it'). "
-    "Write as if you are the agent: 'Loaded 200 rows...', 'Found high variance in y...'."
+    "Write as if you are the agent: 'Loaded 200 rows...', 'Found high variance in y...'. "
+    "Use plain Unicode for math symbols (R², σ, ε, ≈, Δ), not LaTeX notation."
 )
 
 SUMMARY_PROMPTS: dict[str, str] = {
@@ -73,7 +79,11 @@ SUMMARY_PROMPTS: dict[str, str] = {
 
 
 async def _query_summary(
-    model: str, instructions: str, input_text: str, *, max_tokens: int = 60,
+    model: str,
+    instructions: str,
+    input_text: str,
+    *,
+    max_tokens: int = 60,
 ) -> str:
     """Call the OpenAI Responses API for a short summary."""
     client = AsyncOpenAI()
@@ -121,10 +131,18 @@ async def summarize_agent_output(
         instructions = f"{instruction}\n\n{prefix}"
         max_tokens = 60 if progress else 150
         return await _query_summary(
-            model, instructions, f"Agent output:\n{output}", max_tokens=max_tokens,
+            model,
+            instructions,
+            f"Agent output:\n{output}",
+            max_tokens=max_tokens,
         )
+    except (AuthenticationError, BadRequestError, ImportError, TypeError) as e:
+        if True not in _persistent_failure_logged:
+            logger.error(f"Summarizer permanently broken ({type(e).__name__}): {e}")
+            _persistent_failure_logged.add(True)
+        return ""
     except Exception as e:
-        logger.warning(f"Error summarizing {agent_name}: {e}")
+        logger.warning(f"Transient error summarizing {agent_name}: {e}")
         return ""
 
 
@@ -165,8 +183,13 @@ async def summarize_iteration(
             f"Agent summaries:\n{combined}",
             max_tokens=100,
         )
+    except (AuthenticationError, BadRequestError, ImportError, TypeError) as e:
+        if True not in _persistent_failure_logged:
+            logger.error(f"Summarizer permanently broken ({type(e).__name__}): {e}")
+            _persistent_failure_logged.add(True)
+        return ""
     except Exception as e:
-        logger.warning(f"Error generating iteration recap: {e}")
+        logger.warning(f"Transient error generating iteration recap: {e}")
         return ""
 
 
@@ -190,10 +213,18 @@ async def summarize_results(
         instruction = SUMMARY_PROMPTS["Results"]
         instructions = f"{instruction}\n\n{FINAL_PREFIX}"
         return await _query_summary(
-            model, instructions, f"Results:\n{results_text}", max_tokens=150,
+            model,
+            instructions,
+            f"Results:\n{results_text}",
+            max_tokens=150,
         )
+    except (AuthenticationError, BadRequestError, ImportError, TypeError) as e:
+        if True not in _persistent_failure_logged:
+            logger.error(f"Summarizer permanently broken ({type(e).__name__}): {e}")
+            _persistent_failure_logged.add(True)
+        return ""
     except Exception as e:
-        logger.warning(f"Error summarizing results: {e}")
+        logger.warning(f"Transient error summarizing results: {e}")
         return ""
 
 
@@ -256,7 +287,10 @@ async def run_with_summaries(
             label = f"{label_prefix}{int(elapsed)}s"
             try:
                 summary = await summarize_agent_output(
-                    agent_name, tail, summary_model, progress=True,
+                    agent_name,
+                    tail,
+                    summary_model,
+                    progress=True,
                 )
                 if summary:
                     progress_summaries.append(summary)
@@ -281,7 +315,10 @@ async def run_with_summaries(
             try:
                 tail = "\n".join(message_buffer[-20:])
                 summary = await summarize_agent_output(
-                    agent_name, tail, summary_model, progress=False,
+                    agent_name,
+                    tail,
+                    summary_model,
+                    progress=False,
                 )
                 if summary:
                     done_label = f"{label_prefix}done"

@@ -84,9 +84,7 @@ def append_block_to_buffer(block: Any, buffer: list[str]) -> None:
         logger.debug(entry)
 
 
-async def safe_query(
-    prompt: str, options: ClaudeCodeOptions
-) -> AsyncIterator[Message]:
+async def safe_query(prompt: str, options: ClaudeCodeOptions) -> AsyncIterator[Message]:
     """Wrap claude_code_sdk.query, filtering out None (unknown message types)."""
     logger.debug(
         f"SDK query start: model={options.model}, "
@@ -102,6 +100,7 @@ async def safe_query(
 # Output validation and retry
 # ---------------------------------------------------------------------------
 
+
 class OutputValidationError(Exception):
     """Raised when an agent's output fails JSON parsing or schema validation."""
 
@@ -114,9 +113,7 @@ class OutputValidationError(Exception):
         self.raw_output = raw_output
         self.validation_error = validation_error
         self.agent_name = agent_name
-        super().__init__(
-            f"{agent_name} output validation failed: {validation_error}"
-        )
+        super().__init__(f"{agent_name} output validation failed: {validation_error}")
 
     def correction_prompt(self) -> str:
         """Format a correction hint for the LLM to fix its output."""
@@ -133,12 +130,34 @@ class OutputValidationError(Exception):
 
 
 def _strip_markdown_fencing(raw: str) -> str:
-    """Remove markdown code fences from a string."""
+    """Remove markdown code fences and leading prose from a string.
+
+    Handles several messy-output patterns:
+    - ```json ... ``` fencing
+    - Leading prose before the JSON object/array
+    - Multiple fenced blocks (extracts the first)
+    """
     raw = raw.strip()
+
+    # Strip ``` fences (possibly with language tag)
     if raw.startswith("```"):
         lines = raw.split("\n")
         lines = [line for line in lines if not line.strip().startswith("```")]
-        raw = "\n".join(lines)
+        raw = "\n".join(lines).strip()
+
+    # If the string doesn't start with { or [, try to find the first JSON
+    # object/array start. Models sometimes prepend prose like "Here is my output:"
+    if raw and raw[0] not in "{[":
+        for i, ch in enumerate(raw):
+            if ch in "{[":
+                discarded = raw[:i]
+                logger.warning(
+                    f"Stripped {len(discarded)} chars of leading prose before JSON: "
+                    f"{discarded[:100]!r}"
+                )
+                raw = raw[i:]
+                break
+
     return raw
 
 
@@ -151,23 +170,83 @@ def validate_json_output(
 
     Returns model_dump() dict on success.
     Raises OutputValidationError on JSON parse or schema validation failure.
+
+    Uses raw_decode() to extract the first JSON object, tolerating
+    trailing text that models sometimes append after the JSON.
     """
     cleaned = _strip_markdown_fencing(raw)
     try:
-        parsed = json.loads(cleaned)
+        parsed, end_idx = json.JSONDecoder().raw_decode(cleaned)
+        trailing = cleaned[end_idx:].strip()
+        if trailing:
+            logger.warning(
+                f"{agent_name}: raw_decode ignored {len(trailing)} chars of trailing content: "
+                f"{trailing[:200]!r}"
+            )
     except json.JSONDecodeError as e:
         raise OutputValidationError(
-            raw_output=raw, validation_error=e, agent_name=agent_name,
+            raw_output=raw,
+            validation_error=e,
+            agent_name=agent_name,
         ) from e
 
     try:
         validated = model_cls.model_validate(parsed)
     except ValidationError as e:
         raise OutputValidationError(
-            raw_output=raw, validation_error=e, agent_name=agent_name,
+            raw_output=raw,
+            validation_error=e,
+            agent_name=agent_name,
         ) from e
 
     return validated.model_dump()
+
+
+# Descriptions for deferred tools (not loaded by default in Claude Code).
+# Including these in the system prompt lets the model call them directly
+# without wasting a turn on ToolSearch.
+_DEFERRED_TOOL_DESCRIPTIONS: dict[str, str] = {
+    "WebSearch": (
+        "WebSearch(query: str) - Search the web. "
+        "Required param: query (string, min 2 chars). "
+        "Optional: allowed_domains (list[str]), blocked_domains (list[str])."
+    ),
+    "AskUserQuestion": ("AskUserQuestion(question: str) - Ask the user a clarifying question."),
+}
+
+
+def with_turn_budget(system_prompt: str, max_turns: int, tools: list[str] | None = None) -> str:
+    """Append turn budget and available tool descriptions to a system prompt.
+
+    Tells the model how many turns it has so it can plan tool usage
+    accordingly instead of spiraling into unbounded research loops.
+    Lists available tools so the model can call them directly without
+    wasting a turn on ToolSearch.
+    """
+    parts = [system_prompt]
+
+    if tools:
+        tool_lines = []
+        for tool in tools:
+            if tool in _DEFERRED_TOOL_DESCRIPTIONS:
+                tool_lines.append(f"  - {_DEFERRED_TOOL_DESCRIPTIONS[tool]}")
+            else:
+                tool_lines.append(f"  - {tool}")
+        tool_block = "\n".join(tool_lines)
+        parts.append(
+            f"\n<available_tools>\n"
+            f"Your available tools (call directly, do NOT use ToolSearch):\n"
+            f"{tool_block}\n"
+            f"</available_tools>"
+        )
+
+    parts.append(
+        f"\n<turn_budget>You have a budget of {max_turns} turns for this task. "
+        f"Each tool use consumes one turn. Plan your tool usage carefully "
+        f"and produce your final output within this budget.</turn_budget>"
+    )
+
+    return "".join(parts)
 
 
 async def collect_text_from_query(
@@ -175,17 +254,16 @@ async def collect_text_from_query(
     options: ClaudeCodeOptions,
     message_buffer: list[str] | None = None,
     agent_name: str = "Agent",
-) -> str:
+) -> tuple[str, dict[str, Any]]:
     """Run an SDK query and collect the text response.
 
     Prefers ResultMessage.result; falls back to concatenated AssistantMessage
     TextBlocks. Raises RuntimeError if no text is produced.
 
-    Token usage from ResultMessage.usage is stored on the function-level
-    `last_usage` attribute for the caller to read after the call completes.
-
-    This extracts the common pattern shared by Analyst, Scientist, and
-    Scientist Revision agents.
+    Returns:
+        (text, usage) tuple. Usage dict contains token counts and cost info.
+        Also sets ``last_usage`` on the function object so the orchestrator
+        can read it after sequential agent phases (coder, ingestor).
     """
     result_text = ""
     assistant_texts: list[str] = []
@@ -210,10 +288,11 @@ async def collect_text_from_query(
     if not raw:
         raise RuntimeError(f"{agent_name} agent returned no output")
 
-    # Store usage on the function for the caller to read
+    # Also store on the function for callers that don't use the return value
+    # (orchestrator's _apply_sdk_usage reads this after sequential agent phases)
     collect_text_from_query.last_usage = usage  # type: ignore[attr-defined]
 
-    return raw
+    return raw, usage
 
 
 # Initialize the usage attribute
@@ -280,9 +359,7 @@ def validate_report_structure(text: str) -> list[str]:
                     break
             section = "\n".join(lines[line_num + 1 : end])
             if "|" not in section:
-                issues.append(
-                    "Version Comparison Table section missing markdown table"
-                )
+                issues.append("Version Comparison Table section missing markdown table")
             break
 
     return issues
