@@ -544,7 +544,7 @@ class IterationContainer(Vertical):
     DEFAULT_CSS = """
     IterationContainer {
         height: auto;
-        border: solid grey;
+        border: round grey;
         transition: border 300ms in_out_cubic;
     }
     IterationContainer .iteration-recap {
@@ -974,6 +974,18 @@ class PipelineLive:
         if self._file_console is not None:
             self._file_console.print(message)
 
+    def mount_banner(self, renderable: RenderableType) -> None:
+        """Mount the startup banner into the banner area (above Run)."""
+        if self._app is not None:
+            self._app.call_from_thread(
+                self._app._mount_banner,
+                renderable,
+            )
+        else:
+            console.print(renderable)
+        if self._file_console is not None:
+            self._file_console.print(renderable)
+
     def print_static(self, renderable: RenderableType) -> None:
         """Print a renderable. In app mode, mount as Static widget."""
         if self._app is not None:
@@ -1076,8 +1088,17 @@ class PipelineApp(App):
     ]
 
     DEFAULT_CSS = """
+    #outer-container {
+        height: 1fr;
+        border: round grey;
+        padding: 0 1;
+    }
+    #banner-area {
+        height: auto;
+    }
     #main-scroll {
         height: 1fr;
+        border: round grey;
     }
     #main-scroll > Static {
         width: 100%;
@@ -1094,7 +1115,12 @@ class PipelineApp(App):
     def compose(self) -> ComposeResult:
         yield Header()
         yield MetricsBar()
-        yield VerticalScroll(id="main-scroll")
+        with Vertical(id="outer-container") as outer:
+            outer.border_title = "Auto-Scientist"
+            yield Vertical(id="banner-area")
+            with VerticalScroll(id="main-scroll") as run:
+                run.border_title = "Run"
+                pass
         yield Footer()
 
     def on_mount(self) -> None:
@@ -1351,6 +1377,10 @@ class PipelineApp(App):
         self.query_one("#main-scroll").mount(container)
         if near_bottom:
             self._scroll_to_end()
+
+    def _mount_banner(self, renderable: RenderableType) -> None:
+        """Mount the startup banner into the banner area."""
+        self.query_one("#banner-area").mount(Static(renderable))
 
     def _mount_static(self, renderable: RenderableType) -> None:
         """Mount a Rich renderable as a Static widget."""

@@ -349,7 +349,7 @@ class Orchestrator:
         else:
             # Open log file now that the output dir exists
             self._live.start(log_path=self.output_dir / "console.log")
-            self._live.print_static(self._build_startup_banner())
+            self._live.mount_banner(self._build_startup_banner())
 
         # Restore previous iterations from manifest (for replay / resume)
         self._restore_iterations_from_manifest()
