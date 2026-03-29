@@ -169,6 +169,7 @@ class AgentPanel(Widget):
         self.done = False
         self.done_summary = ""
         self.error_msg = ""
+        self._in_error = False
         self._end_time: float | None = None
         # Resolve description: explicit > exact lookup > prefix lookup (e.g. "Critic/X" -> "Critic")
         if not description:
@@ -201,8 +202,10 @@ class AgentPanel(Widget):
 
         Without this, some Textual themes override Rich markup colors on the
         CollapsibleTitle widget, making completed panels appear grey.
+        Uses red when the panel is in an error state.
         """
-        css_color = self._RICH_TO_TEXTUAL_COLOR.get(self.panel_style, self.panel_style)
+        color = "red" if self._in_error else self.panel_style
+        css_color = self._RICH_TO_TEXTUAL_COLOR.get(color, color)
         try:
             title_widget = self.query_one(CollapsibleTitle)
             title_widget.styles.color = css_color
@@ -313,6 +316,8 @@ class AgentPanel(Widget):
 
     def _apply_complete_dom(self) -> None:
         """Apply completion state to DOM (must be called from UI thread)."""
+        if self._in_error:
+            return  # Error DOM is already applied; don't overwrite it
         for desc in self.query(".agent-description"):
             desc.remove()
         try:
@@ -353,6 +358,7 @@ class AgentPanel(Widget):
             return
         self.done = True
         self.error_msg = msg
+        self._in_error = True
         self._end_time = time.monotonic()
         try:
             app = self.app
@@ -373,7 +379,6 @@ class AgentPanel(Widget):
         except NoMatches:
             return
         collapsible.title = f"[red][error] {msg}[/red]"
-        self.border_title = f"{self._panel_name}: [error] {msg}"
         self.border_subtitle = self._build_footer()
         # Show the CollapsibleTitle for the error message
         try:

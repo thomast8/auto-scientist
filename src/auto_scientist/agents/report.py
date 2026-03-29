@@ -14,6 +14,7 @@ from claude_code_sdk import AssistantMessage, ClaudeCodeOptions, ResultMessage, 
 from auto_scientist.prompts.report import REPORT_SYSTEM, REPORT_USER
 from auto_scientist.sdk_utils import (
     append_block_to_buffer,
+    collect_text_from_query,
     safe_query,
     validate_report_structure,
     with_turn_budget,
@@ -88,6 +89,10 @@ async def run_report(
                             report_parts.append(block.text)
                 elif isinstance(message, ResultMessage):
                     session_id = getattr(message, "session_id", None)
+                    usage = getattr(message, "usage", None) or {}
+                    usage["num_turns"] = getattr(message, "num_turns", 0)
+                    usage["total_cost_usd"] = getattr(message, "total_cost_usd", None)
+                    collect_text_from_query.last_usage = usage  # type: ignore[attr-defined]
         except Exception as e:
             if attempt == MAX_ATTEMPTS - 1:
                 raise

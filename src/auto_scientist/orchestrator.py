@@ -501,6 +501,25 @@ class Orchestrator:
 
         return canonical_data_dir
 
+    async def _fail_iteration(self, label: str) -> None:
+        """Record a failed iteration and finalize the TUI with a red border."""
+        version = f"v{self.state.iteration:02d}"
+        version_entry = VersionEntry(
+            version=version,
+            iteration=self.state.iteration,
+            script_path="",
+            hypothesis="",
+            status="failed",
+        )
+        self.state.record_failure()
+        self.state.record_version(version_entry)
+        logger.info(f"Iteration {self.state.iteration} complete: status={label}")
+        iter_summary = await self._generate_iteration_summary()
+        self._save_iteration_manifest(self.state.iteration, label, "red", iter_summary)
+        self._live.end_iteration(label, "red", iter_summary)
+        self._live.flush_completed()
+        self.state.iteration += 1
+
     async def _run_iteration_body(self) -> None:
         """Run one iteration of the pipeline (inlined, not _run_iteration)."""
         logger.info(f"=== Iteration {self.state.iteration} start ===")
@@ -513,12 +532,15 @@ class Orchestrator:
         # Step 1: Analyst observes latest results (or raw data on iteration 0)
         analysis = await self._run_analyst()
 
+        if analysis is None:
+            await self._fail_iteration("failed (analyst error)")
+            return
+
         # Persist analysis for audit trail
-        if analysis:
-            self._persist_artifact(version_dir, "analysis.json", analysis)
+        self._persist_artifact(version_dir, "analysis.json", analysis)
 
         # Apply domain_knowledge from Analyst if present
-        if analysis and analysis.get("domain_knowledge"):
+        if analysis.get("domain_knowledge"):
             self.state.domain_knowledge = analysis["domain_knowledge"]
             logger.info("Domain knowledge updated from Analyst")
 
@@ -527,6 +549,10 @@ class Orchestrator:
 
         # Step 2: Scientist plans next iteration
         plan = await self._run_scientist_plan(analysis)
+
+        if plan is None:
+            await self._fail_iteration("failed (scientist error)")
+            return
 
         # Step 3: Check if Scientist recommends stopping
         if plan and plan.get("should_stop"):
@@ -575,27 +601,7 @@ class Orchestrator:
         new_script = await self._run_coder(final_plan)
 
         if new_script is None:
-            # Coder failed to produce a script; record failure and move on
-            version_entry = VersionEntry(
-                version=version,
-                iteration=self.state.iteration,
-                script_path="",
-                hypothesis=final_plan.get("hypothesis", "") if final_plan else "",
-                status="failed",
-            )
-            self.state.record_failure()
-            self.state.record_version(version_entry)
-            logger.info(
-                f"Iteration {self.state.iteration} complete: "
-                f"status=failed (coder produced no script)"
-            )
-            iter_summary = await self._generate_iteration_summary()
-            self._save_iteration_manifest(
-                self.state.iteration, "failed (no script)", "red", iter_summary
-            )
-            self._live.end_iteration("failed (no script)", "red", iter_summary)
-            self._live.flush_completed()
-            self.state.iteration += 1
+            await self._fail_iteration("failed (no script)")
             return
 
         # Step 6: Read run result from Coder's output files

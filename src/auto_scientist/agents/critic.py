@@ -16,6 +16,7 @@ model assignment rotates across iterations so no model is always the same role.
 import asyncio
 import json
 import logging
+import random
 from typing import Any
 
 from claude_code_sdk import ClaudeCodeOptions
@@ -100,7 +101,7 @@ async def _query_critic(
         extra_args: dict[str, str | None] = {"setting-sources": ""}
         if config.reasoning and config.reasoning.level != "off":
             extra_args.update(reasoning_to_cc_extra_args(config.reasoning))
-        max_turns = 2
+        max_turns = 5  # Allows 1-2 web searches + structured JSON response + buffer
         allowed_tools = ["WebSearch"]
         options = ClaudeCodeOptions(
             model=config.model,
@@ -483,6 +484,7 @@ async def run_debate(
         scientist_config = AgentModelConfig(model="claude-sonnet-4-6")
 
     active_personas = [p for p in PERSONAS if iteration > 0 or p["name"] in ITERATION_0_PERSONAS]
+    random.shuffle(active_personas)
 
     # Track how many non-SDK critics per provider have been launched
     # to assign incremental stagger delays
