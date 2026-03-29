@@ -86,6 +86,20 @@ It went down a dead end (a hand-crafted hierarchy that dropped F1 from 0.92 to 0
 | Unanimous specimens misclassified | 0 / 475 |
 | Features in final rules | 5 of 12 |
 
+### Alloy Composition-Property Relationships
+
+The system investigated what drives hardness in Fe-Cr-Ni-Mo-V alloys, navigating corrupt lab data, a synthetic corrosion column, and literature-contradicting results. Full writeup: [docs/showcase-alloy-design.md](docs/showcase-alloy-design.md).
+
+It discovered that molybdenum is the dominant nonlinear hardness driver (101 HV/% below 6%, saturating to 7 HV/% above 12%), proved corrosion resistance was a synthetic score (R² = 0.84 from raw compositions), and killed a Cr threshold hypothesis after its critics called out sunk-cost reasoning. The debate forced three methodology corrections: CLR transforms for compositional data, ALE over PDP plots, and restricted cross-lab pooling.
+
+| Metric | Value |
+|--------|-------|
+| Wall time | 80 minutes |
+| Iterations | 4 |
+| Nested CV R² | 0.80 |
+| External validation R² | 0.70 |
+| Testable predictions | 17 (47% confirmed, 47% refuted) |
+
 ### Toy Function Discovery
 
 Given 200 noisy (x, y) points and zero hints, the system recovered the exact generating formula in two iterations. Full writeup: [docs/showcase-toy-function.md](docs/showcase-toy-function.md).
