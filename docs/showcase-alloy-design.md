@@ -201,14 +201,14 @@ All top compositions share the same recipe: maximize Mo (11-13%), keep Cr in the
 
 ### Model Configuration
 
-| Agent | Model | Provider |
-|-------|-------|----------|
-| Scientist | Claude Opus 4.6 | Anthropic |
-| Analyst | Claude Sonnet 4.6 | Anthropic |
-| Coder | Claude Sonnet 4.6 | Anthropic |
-| Critic 1 | GPT-5.4-mini | OpenAI |
-| Critic 2 | Claude Sonnet 4.6 | Anthropic |
-| Summarizer | GPT-5.4-nano | OpenAI |
+| Agent | Model | Provider | Reasoning |
+|-------|-------|----------|-----------|
+| Scientist | Claude Opus 4.6 | Anthropic | medium |
+| Analyst | Claude Sonnet 4.6 | Anthropic | medium |
+| Coder | Claude Sonnet 4.6 | Anthropic | medium |
+| Critic 1 | GPT-5.4-mini | OpenAI | medium |
+| Critic 2 | Claude Sonnet 4.6 | Anthropic | medium |
+| Summarizer | GPT-5.4-nano | OpenAI | off |
 
 ## Reproducing This Run
 
