@@ -15,6 +15,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import re
 import subprocess
 import threading
 import time
@@ -24,6 +25,7 @@ from io import TextIOWrapper
 from pathlib import Path
 
 from rich.console import Console, RenderableType
+from rich.markup import escape as rich_escape
 from rich.text import Text
 from textual._context import NoActiveAppError
 from textual.app import App, ComposeResult
@@ -195,6 +197,10 @@ class AgentPanel(Widget):
     _RICH_TO_TEXTUAL_COLOR: dict[str, str] = {
         "bright_red": "ansi_bright_red",
         "magenta1": "ansi_bright_magenta",
+        "yellow": "ansi_yellow",
+        "green": "ansi_green",
+        "cyan": "ansi_cyan",
+        "blue": "ansi_blue",
     }
 
     def _apply_border_color(self) -> None:
@@ -325,9 +331,10 @@ class AgentPanel(Widget):
         except NoMatches:
             return
         summary = self.done_summary
-        if summary.startswith("[done] "):
-            summary = summary[len("[done] ") :]
-        collapsible.title = f"[{self.panel_style}]{summary}[/]"
+        # Strip summarizer label prefixes like "[done] " or "[15s] "
+        summary = re.sub(r"^\[\w+\]\s+", "", summary)
+        # Escape Rich markup in the summary to prevent broken rendering
+        collapsible.title = f"[{self.panel_style}]{rich_escape(summary)}[/]"
         self.border_subtitle = self._build_footer()
         # Show the CollapsibleTitle now that we have content to toggle
         try:
@@ -378,7 +385,7 @@ class AgentPanel(Widget):
             rich_log = self.query_one(RichLog)
         except NoMatches:
             return
-        collapsible.title = f"[red][error] {msg}[/red]"
+        collapsible.title = f"[red][error] {rich_escape(msg)}[/red]"
         self.border_subtitle = self._build_footer()
         # Show the CollapsibleTitle for the error message
         try:

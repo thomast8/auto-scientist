@@ -300,9 +300,12 @@ class TestRunDebate:
     @pytest.mark.asyncio
     async def test_persona_rotation_across_iterations(self, base_kwargs):
         """Different iterations assign different models to the same persona."""
+        # Disable shuffle so persona_index is stable across calls,
+        # letting the rotation formula produce deterministic results.
         with (
             patch(OPENAI_PATH, new_callable=AsyncMock, return_value=_CR()),
             patch(GOOGLE_PATH, new_callable=AsyncMock, return_value=_CR()),
+            patch("auto_scientist.agents.critic.random.shuffle"),
         ):
             results_iter0 = await run_debate(**base_kwargs, iteration=0)
             results_iter1 = await run_debate(**base_kwargs, iteration=1)
