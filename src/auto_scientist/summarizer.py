@@ -10,11 +10,15 @@ import logging
 from collections.abc import Callable, Coroutine
 from typing import Any, TypeVar
 
-from openai import AsyncOpenAI
+from openai import AsyncOpenAI, AuthenticationError, BadRequestError
 
 T = TypeVar("T")
 
 logger = logging.getLogger(__name__)
+
+# Track persistent failures so we log them once instead of spamming.
+# Using a set (mutable container) avoids the need for `global` statements.
+_persistent_failure_logged: set[bool] = set()
 
 PROGRESS_PREFIX = (
     "Reply with ONE sentence, max 15 words. "
@@ -132,8 +136,13 @@ async def summarize_agent_output(
             f"Agent output:\n{output}",
             max_tokens=max_tokens,
         )
+    except (AuthenticationError, BadRequestError, ImportError, TypeError) as e:
+        if True not in _persistent_failure_logged:
+            logger.error(f"Summarizer permanently broken ({type(e).__name__}): {e}")
+            _persistent_failure_logged.add(True)
+        return ""
     except Exception as e:
-        logger.warning(f"Error summarizing {agent_name}: {e}")
+        logger.warning(f"Transient error summarizing {agent_name}: {e}")
         return ""
 
 
@@ -174,8 +183,13 @@ async def summarize_iteration(
             f"Agent summaries:\n{combined}",
             max_tokens=100,
         )
+    except (AuthenticationError, BadRequestError, ImportError, TypeError) as e:
+        if True not in _persistent_failure_logged:
+            logger.error(f"Summarizer permanently broken ({type(e).__name__}): {e}")
+            _persistent_failure_logged.add(True)
+        return ""
     except Exception as e:
-        logger.warning(f"Error generating iteration recap: {e}")
+        logger.warning(f"Transient error generating iteration recap: {e}")
         return ""
 
 
@@ -204,8 +218,13 @@ async def summarize_results(
             f"Results:\n{results_text}",
             max_tokens=150,
         )
+    except (AuthenticationError, BadRequestError, ImportError, TypeError) as e:
+        if True not in _persistent_failure_logged:
+            logger.error(f"Summarizer permanently broken ({type(e).__name__}): {e}")
+            _persistent_failure_logged.add(True)
+        return ""
     except Exception as e:
-        logger.warning(f"Error summarizing results: {e}")
+        logger.warning(f"Transient error summarizing results: {e}")
         return ""
 
 

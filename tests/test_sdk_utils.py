@@ -267,7 +267,7 @@ class TestCollectTextFromQuery:
             yield result_msg
 
         with patch("auto_scientist.sdk_utils.query", side_effect=fake_query):
-            raw = await collect_text_from_query("prompt", MagicMock())
+            raw, usage = await collect_text_from_query("prompt", MagicMock())
         assert raw == '{"answer": 42}'
 
     @pytest.mark.asyncio
@@ -288,7 +288,7 @@ class TestCollectTextFromQuery:
             yield result_msg
 
         with patch("auto_scientist.sdk_utils.query", side_effect=fake_query):
-            raw = await collect_text_from_query("prompt", MagicMock())
+            raw, usage = await collect_text_from_query("prompt", MagicMock())
         assert raw == '{"answer": 42}'
 
     @pytest.mark.asyncio
@@ -330,6 +330,26 @@ class TestCollectTextFromQuery:
         ):
             await collect_text_from_query("prompt", MagicMock(), message_buffer=buffer)
             mock_append.assert_called_once_with(text_block, buffer)
+
+    @pytest.mark.asyncio
+    async def test_returns_usage_dict(self):
+        """Usage dict from ResultMessage is returned as second element."""
+        from claude_code_sdk import ResultMessage
+
+        result_msg = MagicMock(spec=ResultMessage)
+        result_msg.result = "output"
+        result_msg.usage = {"input_tokens": 100, "output_tokens": 50}
+        result_msg.num_turns = 3
+        result_msg.total_cost_usd = 0.01
+
+        async def fake_query(**kwargs):
+            yield result_msg
+
+        with patch("auto_scientist.sdk_utils.query", side_effect=fake_query):
+            _text, usage = await collect_text_from_query("prompt", MagicMock())
+        assert usage["input_tokens"] == 100
+        assert usage["output_tokens"] == 50
+        assert usage["num_turns"] == 3
 
 
 # Valid report with all 10 sections

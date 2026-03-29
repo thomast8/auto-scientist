@@ -114,9 +114,7 @@ async def run_analyst(
             else "(no results file)"
         )
         plot_list = (
-            "\n".join(f"- {p}" for p in plot_paths)
-            if plot_paths
-            else "(no plots available)"
+            "\n".join(f"- {p}" for p in plot_paths) if plot_paths else "(no plots available)"
         )
         data_section = (
             f"<results>{results_content}</results>\n"
@@ -160,8 +158,11 @@ async def run_analyst(
         effective_prompt = user_prompt + correction_hint
 
         try:
-            raw = await collect_text_from_query(
-                effective_prompt, options, message_buffer, agent_name="Analyst",
+            raw, _usage = await collect_text_from_query(
+                effective_prompt,
+                options,
+                message_buffer,
+                agent_name="Analyst",
             )
         except Exception as e:
             if attempt == MAX_ATTEMPTS - 1:

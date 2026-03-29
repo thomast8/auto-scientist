@@ -108,10 +108,12 @@ def _sdk_mock(
 ) -> AsyncMock:
     """Create an AsyncMock for collect_text_from_query (SDK path).
 
-    Returns text directly (not AgentResult) and sets last_usage attribute.
+    Returns (text, usage) tuple matching the real function signature.
+    Also sets last_usage attribute for backward compat with orchestrator.
     """
-    mock = AsyncMock(return_value=text)
-    mock.last_usage = {"input_tokens": input_tokens, "output_tokens": output_tokens}
+    usage = {"input_tokens": input_tokens, "output_tokens": output_tokens}
+    mock = AsyncMock(return_value=(text, usage))
+    mock.last_usage = usage
     return mock
 
 
@@ -565,7 +567,7 @@ class TestCriticValidation:
         assert isinstance(co, CriticOutput)
         assert len(co.concerns) == 1
         assert "[SYNTHETIC - PARSE ERROR]" in co.concerns[0].claim
-        assert co.concerns[0].severity == "low"
+        assert co.concerns[0].severity == "high"
         assert co.concerns[0].category == "other"
 
 
@@ -899,14 +901,15 @@ class TestAnthropicSDKPath:
         critic = AgentModelConfig(provider="anthropic", model="claude-sonnet-4-6")
         valid_json = _valid_critic_json()
 
-        mock_sdk = AsyncMock(return_value=_pad(valid_json))
         # SDK splits input tokens across cache buckets
-        mock_sdk.last_usage = {
+        sdk_usage = {
             "input_tokens": 20,
             "cache_creation_input_tokens": 30,
             "cache_read_input_tokens": 50,
             "output_tokens": 45,
         }
+        mock_sdk = AsyncMock(return_value=(_pad(valid_json), sdk_usage))
+        mock_sdk.last_usage = sdk_usage
 
         with patch(SDK_PATH, mock_sdk):
             result = await run_single_critic_debate(
@@ -946,8 +949,9 @@ class TestAnthropicSDKPath:
         critic = AgentModelConfig(provider="openai", model="gpt-4o")
         scientist = AgentModelConfig(provider="anthropic", model="claude-sonnet-4-6")
 
-        mock_sdk = AsyncMock(return_value=_pad(_valid_defense_json()))
-        mock_sdk.last_usage = {"input_tokens": 80, "output_tokens": 40}
+        sdk_usage = {"input_tokens": 80, "output_tokens": 40}
+        mock_sdk = AsyncMock(return_value=(_pad(_valid_defense_json()), sdk_usage))
+        mock_sdk.last_usage = sdk_usage
 
         with (
             patch(OPENAI_PATH, new_callable=AsyncMock, return_value=_CR()),

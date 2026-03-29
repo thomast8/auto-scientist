@@ -54,6 +54,12 @@ logger = logging.getLogger(__name__)
 
 MAX_RETRIES = 1  # 1 retry = 2 total attempts
 
+# Exceptions worth retrying (transient network/rate-limit issues).
+# Non-retryable errors (ValueError, TypeError, ImportError, auth errors)
+# propagate immediately so the user gets a clear failure instead of a
+# misleading retry-then-fail cycle.
+_RETRYABLE_ERRORS = (ConnectionError, TimeoutError, OSError, RuntimeError)
+
 
 # ---------------------------------------------------------------------------
 # Low-level query helpers
@@ -100,8 +106,7 @@ async def _query_critic(
             max_turns=5,
             extra_args=extra_args,
         )
-        text = await collect_text_from_query(prompt, options, message_buffer)
-        usage: dict[str, Any] = getattr(collect_text_from_query, "last_usage", {})
+        text, usage = await collect_text_from_query(prompt, options, message_buffer)
         # SDK splits input tokens across cache buckets
         in_tok = (
             usage.get("input_tokens", 0)
@@ -148,9 +153,9 @@ async def _query_critic_structured(
                 response_schema=CriticOutput,
                 message_buffer=message_buffer,
             )
-        except Exception as e:
+        except _RETRYABLE_ERRORS as e:
             if attempt < MAX_RETRIES:
-                logger.warning(f"{label} error ({e}), retrying (attempt {attempt + 1})")
+                logger.warning(f"{label} transient error ({e}), retrying (attempt {attempt + 1})")
                 continue
             raise
 
@@ -176,7 +181,7 @@ async def _query_critic_structured(
                     concerns=[
                         Concern(
                             claim=f"[SYNTHETIC - PARSE ERROR] {raw}",
-                            severity="low",
+                            severity="high",
                             confidence="low",
                             category="other",
                         )
@@ -215,9 +220,9 @@ async def _query_scientist_structured(
                 response_schema=ScientistDefense,
                 message_buffer=message_buffer,
             )
-        except Exception as e:
+        except _RETRYABLE_ERRORS as e:
             if attempt < MAX_RETRIES:
-                logger.warning(f"{label} error ({e}), retrying (attempt {attempt + 1})")
+                logger.warning(f"{label} transient error ({e}), retrying (attempt {attempt + 1})")
                 continue
             raise
 

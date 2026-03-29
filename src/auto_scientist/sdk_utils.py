@@ -207,17 +207,16 @@ async def collect_text_from_query(
     options: ClaudeCodeOptions,
     message_buffer: list[str] | None = None,
     agent_name: str = "Agent",
-) -> str:
+) -> tuple[str, dict[str, Any]]:
     """Run an SDK query and collect the text response.
 
     Prefers ResultMessage.result; falls back to concatenated AssistantMessage
     TextBlocks. Raises RuntimeError if no text is produced.
 
-    Token usage from ResultMessage.usage is stored on the function-level
-    `last_usage` attribute for the caller to read after the call completes.
-
-    This extracts the common pattern shared by Analyst, Scientist, and
-    Scientist Revision agents.
+    Returns:
+        (text, usage) tuple. Usage dict contains token counts and cost info.
+        Also sets ``last_usage`` on the function object so the orchestrator
+        can read it after sequential agent phases (coder, ingestor).
     """
     result_text = ""
     assistant_texts: list[str] = []
@@ -242,10 +241,11 @@ async def collect_text_from_query(
     if not raw:
         raise RuntimeError(f"{agent_name} agent returned no output")
 
-    # Store usage on the function for the caller to read
+    # Also store on the function for callers that don't use the return value
+    # (orchestrator's _apply_sdk_usage reads this after sequential agent phases)
     collect_text_from_query.last_usage = usage  # type: ignore[attr-defined]
 
-    return raw
+    return raw, usage
 
 
 # Initialize the usage attribute

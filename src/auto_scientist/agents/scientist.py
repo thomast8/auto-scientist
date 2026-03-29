@@ -217,8 +217,11 @@ async def run_scientist(
         effective_prompt = user_prompt + correction_hint
 
         try:
-            raw = await collect_text_from_query(
-                effective_prompt, options, message_buffer, agent_name="Scientist",
+            raw, _usage = await collect_text_from_query(
+                effective_prompt,
+                options,
+                message_buffer,
+                agent_name="Scientist",
             )
         except Exception as e:
             if attempt == MAX_ATTEMPTS - 1:
@@ -274,9 +277,7 @@ async def run_scientist_revision(
     user_prompt = SCIENTIST_REVISION_USER.format(
         goal=goal or "(no goal specified)",
         domain_knowledge=domain_knowledge or "(no domain knowledge provided)",
-        analysis_json=(
-            json.dumps(analysis, indent=2) if analysis else "(no analysis)"
-        ),
+        analysis_json=(json.dumps(analysis, indent=2) if analysis else "(no analysis)"),
         notebook_content=notebook_content or "(empty notebook)",
         original_plan=json.dumps(original_plan, indent=2),
         concern_ledger=ledger_text,
@@ -304,8 +305,11 @@ async def run_scientist_revision(
         effective_prompt = user_prompt + correction_hint
 
         try:
-            raw = await collect_text_from_query(
-                effective_prompt, options, message_buffer, agent_name="Scientist revision",
+            raw, _usage = await collect_text_from_query(
+                effective_prompt,
+                options,
+                message_buffer,
+                agent_name="Scientist revision",
             )
         except Exception as e:
             if attempt == MAX_ATTEMPTS - 1:
