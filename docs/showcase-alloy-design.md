@@ -2,7 +2,7 @@
 
 **An autonomous investigation of what drives hardness in Fe-Cr-Ni-Mo-V alloys, completed in 80 minutes.**
 
-An LLM-driven system was given 300 historical alloy records, 100 batch measurements from two labs (one with corrupt data), a literature review, and a goal: *discover the relationships between alloy composition and material properties, find optimal compositions*. No human selected features, chose models, or cleaned data. Eighty minutes later, the system delivered a validated Random Forest model (nested CV R² = 0.80, external validation R² = 0.70), characterized nonlinear element-hardness relationships via ALE plots, proved the corrosion resistance column was synthetic, and produced a Pareto frontier of optimal compositions - all while navigating bad data, contradicting the literature, and correcting its own methodology three times.
+An LLM-driven system was given 300 historical alloy records, 100 batch measurements from two labs (one with corrupt data), a literature review, and a goal: *discover the relationships between alloy composition and material properties, find optimal compositions*. No human selected features, chose models, or cleaned data. Eighty minutes later, the system delivered a validated Random Forest model (nested CV R² = 0.80, external validation R² = 0.70), characterized nonlinear element-hardness relationships via ALE plots, proved the corrosion resistance column was synthetic, and produced a Pareto frontier of cost-optimized compositions - all while navigating bad data, contradicting the literature, and correcting its own methodology three times.
 
 ---
 
@@ -15,10 +15,10 @@ An Fe-based alloy system with five compositional variables (Fe, Cr, Ni, Mo, V we
 3. **Element spot prices**: Fe $1/kg, Cr $3.50, Ni $8, Mo $12, V $15.
 
 Four complications:
-1. **Corrupt data.** 13 negative hardness values, ~10 negative corrosion values, and Lab Beta's Rockwell C readings are off by 5x.
+1. **Corrupt data.** 13 negative hardness values, 14 negative corrosion values, and Lab Beta's Rockwell C readings are off by 5x.
 2. **Incompatible measurement scales.** Two labs, two hardness methods, two corrosion methods, no validated conversion.
 3. **A hidden trap.** The corrosion resistance column turns out not to be a physical measurement at all.
-4. **Cost confusion.** The cost_per_kg column ranges $131-573/kg, but material cost from spot prices is only $1.3-5.7/kg. The 100x gap is unexplained.
+4. **Cost confusion.** The cost_per_kg column ranges $131-573/kg, but the weighted-average element spot price is only $1.3-5.7/kg (per weight fraction). The 100x gap is unexplained.
 
 ```
 auto-scientist run -c domains/alloy_design/experiment.yaml
@@ -35,6 +35,8 @@ Auto-Scientist uses a multi-agent loop where each agent has a distinct role and 
 | **Scientist** | Plan experiments, define hypotheses | Analysis JSON, notebook | Code |
 | **Critics** | Challenge the plan from multiple angles | Plan, analysis, predictions | Code |
 | **Coder** | Implement and run experiments | Plan, previous script | Debate transcript |
+
+The Scientist never sees code. The Coder never sees the debate. The Analyst cannot recommend, only observe. These boundaries prevent confirmation bias: the entity that plans is not the one that evaluates, and the one that implements has no stake in the hypothesis.
 
 For this run, the Scientist was Claude Opus 4.6. The Critics were GPT-5.4-mini and Claude Sonnet 4.6. Everything else ran on Sonnet 4.6.
 
@@ -79,11 +81,11 @@ Both critiques landed. The Scientist accepted a one-shot Cr threshold test and r
 
 The Cr threshold hypothesis was definitively killed: permutation p = 0.954, delta-R² = 0.000. There is no threshold.
 
-But the real bombshell was the corrosion provenance test. An OLS regression of corrosion_resistance on the five raw weight percentages achieved R² = 0.84, with suspiciously near-integer coefficients (Ni: +2.76, V: -5.42, Mo: -4.35). **Corrosion resistance is a synthetic score computed from composition, not an independent physical measurement.** The Cr paradox dissolves: Cr has a small coefficient (+0.70) in the formula, not because it doesn't affect real corrosion, but because whoever designed the scoring formula didn't weight it heavily.
+But the real bombshell was the corrosion provenance test. An OLS regression of corrosion_resistance on the five raw weight percentages achieved R² = 0.84, with suggestively simple coefficients (Ni: +2.76, V: -5.42, Mo: -4.35). **Corrosion resistance is a synthetic score computed from composition, not an independent physical measurement.** The Cr paradox dissolves: Cr has a small coefficient (+0.70) in the formula, not because it doesn't affect real corrosion, but because whoever designed the scoring formula didn't weight it heavily.
 
 This finding collapsed half the investigation. Modeling corrosion became pointless. Optimizing the "hardness-corrosion tradeoff" became optimizing hardness against a formula.
 
-Meanwhile, hardness modeling was struggling. CLR main-effects OLS achieved CV R² = 0.30 with std = 0.50, and LASSO with quadratic terms improved to R² = 0.46 but with std = 0.47. Five quadratic terms survived regularization, confirming genuine nonlinearity, but the model was unstable.
+Meanwhile, hardness modeling was struggling. CLR main-effects OLS achieved CV R² = 0.297 with std = 0.50 (failing even the modest 0.30 threshold), and LASSO with quadratic terms improved to R² = 0.46 but with std = 0.47. Five quadratic terms survived regularization, confirming genuine nonlinearity, but the model was unstable.
 
 ### Iteration 2: Diagnosing Instability (24 min)
 
@@ -118,7 +120,7 @@ Cr showed a non-monotonic profile peaking at 49 HV/% in the 8-13% range. Fe was 
 
 External validation on 54 Lab Alpha samples passed: R² = 0.70, MAE = 87 HV, mean residual = +42 HV. The model generalizes.
 
-The optimization scan over 8,000 feasible Fe > 70% compositions produced a Pareto frontier. The highest-hardness composition: Fe 70.5%, Cr 15.5%, Mo 12.8%, V 0.9%, Ni 0.3%, with predicted hardness 2,619 HV (90% PI: 2,315-2,947 HV) at $294/kg material cost.
+The optimization scan over 8,000 feasible Fe > 70% compositions produced a Pareto frontier. The highest-hardness composition: Fe 70.5%, Cr 15.5%, Mo 12.8%, V 0.9%, Ni 0.3%, with predicted hardness 2,619 HV (90% PI: 2,315-2,947 HV).
 
 ### Iteration 4: The Stop (3 min)
 
@@ -138,19 +140,19 @@ The Scientist evaluated the evidence and stopped:
 
 **4. No element interactions matter.** Despite repeated literature citations of synergistic Cr+Mo effects, the 2D ALE spans only +/-25 HV across the joint space, compared to Mo's 1,556 HV main-effect range.
 
-**5. High hardness and low cost are mutually exclusive.** Zero compositions among 8,000 scanned achieved predicted hardness > 1,500 HV at material cost < $5/kg. High hardness requires Mo (expensive) and Cr (moderate); cheap alloys are high-Fe with low alloying.
+**5. High hardness and low cost are mutually exclusive.** High hardness requires Mo (expensive at $12/kg) and Cr (moderate at $3.50/kg); cheap alloys are high-Fe with low alloying. The optimization confirmed no composition achieves both high hardness and minimal alloying cost simultaneously.
 
-**6. The cost_per_kg variable encodes processing, not materials.** Material cost is $1.3-5.7/kg; cost_per_kg is $131-573/kg. The 100x gap represents processing specification that can't be decomposed without metadata.
+**6. The cost_per_kg variable encodes processing, not materials.** True material cost from spot prices is only a few dollars per kg; cost_per_kg ranges $131-573/kg. The ~100x gap represents processing specification that can't be decomposed without metadata.
 
 ### Optimal Compositions (Fe > 70%, maximize hardness/cost ratio)
 
-| Fe% | Cr% | Mo% | Predicted HV | 90% PI | Cost $/kg |
-|-----|-----|-----|-------------|--------|-----------|
-| 72.2 | 15.4 | 11.1 | 2,467 | 2,164-2,795 | $274 |
-| 70.5 | 15.5 | 12.8 | 2,619 | 2,315-2,947 | $294 |
-| 73.7 | 13.8 | 11.7 | 2,380 | 2,077-2,708 | $269 |
+| Fe% | Cr% | Mo% | Predicted HV | 90% PI | Cost index |
+|-----|-----|-----|-------------|--------|------------|
+| 72.2 | 15.4 | 11.1 | 2,467 | 2,164-2,795 | 274 |
+| 70.5 | 15.5 | 12.8 | 2,619 | 2,315-2,947 | 294 |
+| 73.7 | 13.8 | 11.7 | 2,380 | 2,077-2,708 | 269 |
 
-All top compositions share the same recipe: maximize Mo (11-13%), keep Cr in the 13-16% sweet spot, minimize Ni and V.
+Cost index is `sum(weight_percent * element_price)`, a relative ranking metric. The true material cost per kg is ~100x lower (e.g., $2.94/kg for the top composition). All top compositions share the same recipe: maximize Mo (11-13%), keep Cr in the 13-16% sweet spot, minimize Ni and V.
 
 ## Framework Behavior
 
@@ -166,7 +168,7 @@ All top compositions share the same recipe: maximize Mo (11-13%), keep Cr in the
 
 ### What Could Be Better
 
-**Three iterations spent on linear models before trying RF.** The system should have considered nonlinear models earlier. The v00 LASSO result (5 quadratic terms surviving, +0.17 R² improvement) was already strong evidence for nonlinearity, but the system spent v01 and half of v02 on linear fixes before pivoting.
+**Two iterations focused on linear approaches before the RF pivot.** The v01 LASSO result (5 quadratic terms surviving, +0.17 R² improvement) was already strong evidence for nonlinearity, but the system spent v01 on linear fixes and didn't try Random Forest until v02. The RF ran alongside Elastic Net as a comparison in v02, but could have been tried one iteration sooner.
 
 **The high-alloy regime (Fe < 70%) remains poorly understood.** Residual std of 392 HV versus 78 HV for conventional alloys. The system correctly identified this as a limitation and restricted optimization to Fe > 70%, but didn't attempt to collect or request process metadata that might explain the variance.
 
@@ -175,7 +177,7 @@ All top compositions share the same recipe: maximize Mo (11-13%), keep Cr in the
 | Metric | Value |
 |--------|-------|
 | Total wall time | 80 minutes |
-| Iterations | 4 (+ ingestion + report) |
+| Iterations | 4 productive + stop decision (+ ingestion + report) |
 | Input tokens | 3.9M |
 | Output tokens | 226K |
 | Experiment scripts written | 4 |
