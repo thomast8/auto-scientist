@@ -965,23 +965,6 @@ class TestQuitConfirmScreen:
 
 class TestThemeCycling:
     @pytest.mark.asyncio
-    async def test_ctrl_t_changes_theme(self):
-        class FakeOrch:
-            _live: PipelineLive | None = None
-
-            async def run(self):
-                pass
-
-        orch = FakeOrch()
-        app = PipelineApp(orch)
-        async with app.run_test() as pilot:
-            await pilot.pause()
-            initial_theme = app.theme
-            await pilot.press("ctrl+t")
-            await pilot.pause()
-            assert app.theme != initial_theme
-
-    @pytest.mark.asyncio
     async def test_saved_theme_is_restored(self, tmp_path):
         prefs_path = tmp_path / "preferences.json"
         prefs_path.write_text(json.dumps({"theme": "atom-one-light"}))

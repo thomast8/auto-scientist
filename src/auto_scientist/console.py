@@ -1067,7 +1067,6 @@ class PipelineApp(App):
     BINDINGS = [
         Binding("ctrl+o", "toggle_expand", "Expand/Collapse", show=True),
         Binding("ctrl+q", "quit", "Quit", show=True),
-        Binding("ctrl+t", "cycle_theme", "Theme", show=True),
         Binding(
             "enter",
             "open_focused_detail",
@@ -1272,23 +1271,10 @@ class PipelineApp(App):
     def watch_theme(self, theme_name: str) -> None:
         """Persist every theme change, regardless of how it was triggered.
 
-        Catches changes from Ctrl+T, the custom command palette, AND the
-        built-in Textual ThemeProvider (which otherwise bypasses persistence).
+        Catches changes from the custom command palette AND the built-in
+        Textual ThemeProvider (which otherwise bypasses persistence).
         """
         save_theme(theme_name)
-
-    def action_cycle_theme(self) -> None:
-        """Cycle through available themes."""
-        themes = sorted(self.available_themes)
-        if not themes:
-            return
-        current = self.theme or themes[0]
-        try:
-            idx = themes.index(current)
-            self.theme = themes[(idx + 1) % len(themes)]
-        except ValueError:
-            self.theme = themes[0]
-        self.notify(f"Theme: {self.theme}")
 
     def action_open_focused_detail(self) -> None:
         """Open detail view for the currently focused AgentPanel."""
