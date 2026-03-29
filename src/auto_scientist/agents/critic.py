@@ -66,6 +66,7 @@ async def _query_critic(
     *,
     system_prompt: str = "",
     response_schema: type[BaseModel] | None = None,
+    message_buffer: list[str] | None = None,
 ) -> AgentResult:
     """Dispatch a prompt to the appropriate provider with web search enabled."""
     # For direct-API providers, prepend system_prompt to the user prompt
@@ -99,7 +100,7 @@ async def _query_critic(
             max_turns=5,
             extra_args=extra_args,
         )
-        text = await collect_text_from_query(prompt, options)
+        text = await collect_text_from_query(prompt, options, message_buffer)
         usage: dict[str, Any] = getattr(collect_text_from_query, "last_usage", {})
         # SDK splits input tokens across cache buckets
         in_tok = (
@@ -145,6 +146,7 @@ async def _query_critic_structured(
                 effective_prompt,
                 system_prompt=system_prompt,
                 response_schema=CriticOutput,
+                message_buffer=message_buffer,
             )
         except Exception as e:
             if attempt < MAX_RETRIES:
@@ -211,6 +213,7 @@ async def _query_scientist_structured(
                 effective_prompt,
                 system_prompt=system_prompt,
                 response_schema=ScientistDefense,
+                message_buffer=message_buffer,
             )
         except Exception as e:
             if attempt < MAX_RETRIES:
