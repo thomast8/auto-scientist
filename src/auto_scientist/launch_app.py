@@ -717,10 +717,7 @@ class LaunchApp(App[ExperimentConfig | None]):
 
     @on(Select.Changed, "#domain-select")
     def _on_domain_changed(self, event: Select.Changed) -> None:
-        """When a domain is selected, load its experiment.yaml and fill the form.
-
-        Also sets the preset to a sensible default based on domain difficulty.
-        """
+        """When a domain is selected, load its experiment.yaml and fill the form."""
         if event.value == _CUSTOM:
             self._yaml_path = None
             return
