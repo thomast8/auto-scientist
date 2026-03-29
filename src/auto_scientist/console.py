@@ -45,6 +45,7 @@ from textual.widgets import (
 from textual.widgets._collapsible import CollapsibleTitle
 from textual.worker import Worker, WorkerState
 
+from auto_scientist.latex_to_unicode import latex_to_unicode
 from auto_scientist.preferences import load_theme, save_theme
 
 logger = logging.getLogger(__name__)
@@ -263,7 +264,7 @@ class AgentPanel(Widget):
         """Append a summary line. Thread-safe: routes DOM update to UI thread."""
         if self.done:
             return
-        cleaned = " ".join(text.split())
+        cleaned = latex_to_unicode(" ".join(text.split()))
         self.all_lines.append(cleaned)
         try:
             app = self.app
@@ -304,7 +305,7 @@ class AgentPanel(Widget):
             return
         self.done = True
         if done_summary:
-            self.done_summary = done_summary
+            self.done_summary = latex_to_unicode(done_summary)
         elif self.all_lines:
             self.done_summary = self.all_lines[-1]
         self._end_time = time.monotonic()
@@ -606,6 +607,7 @@ class IterationContainer(Vertical):
         # Mount recap summary text (before agent panels)
         first_panel = self._panels[0] if self._panels else None
         if summary_text:
+            summary_text = latex_to_unicode(summary_text)
             recap = Static(summary_text, classes="iteration-recap")
             if first_panel:
                 self.mount(recap, before=first_panel)
