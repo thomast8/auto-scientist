@@ -125,7 +125,7 @@ def reasoning_to_cc_extra_args(reasoning: ReasoningConfig) -> dict[str, str | No
     """
     effort = CC_EFFORT_MAP.get(reasoning.level)
     if effort:
-        return {"--effort": effort}
+        return {"effort": effort}
     return {}
 
 
