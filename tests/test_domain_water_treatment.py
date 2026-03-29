@@ -1,4 +1,4 @@
-"""Tests for the water treatment causal discovery toy problem."""
+"""Tests for the water treatment causal discovery domain."""
 
 import json
 from pathlib import Path
@@ -39,21 +39,35 @@ def test_scada_export_structure(tmp_path):
         "TIMESTAMP",
         "RAIN_MM",
         "TURB_NTU",
+        "ORG_LOAD_MGL",
         "CHEM_D_MGL",
         "FLOW_M3H",
         "RES_T_MIN",
         "FLOC_UM",
         "SETL_MH",
-        "OUT_CLR_NTU",
+        "OUT_CLR",
         "TEMP_C",
     }
     assert set(df.columns) == expected_codes
     assert len(df) == 2000
 
-    # ~3% missing values across the data columns (not timestamp)
+    # Some missing values (MCAR + MNAR on turbidity)
     data_cols = [c for c in df.columns if c != "TIMESTAMP"]
-    missing_frac = df[data_cols].isna().sum().sum() / (len(df) * len(data_cols))
-    assert 0.01 < missing_frac < 0.06
+    total_missing = df[data_cols].isna().sum().sum()
+    assert total_missing > 0
+
+
+def test_mnar_turbidity_censoring(tmp_path):
+    """Turbidity values above sensor ceiling are censored (MNAR)."""
+    _generate(tmp_path)
+    df = pd.read_csv(tmp_path / "data" / "scada_export.csv")
+
+    # All non-NaN turbidity values should be <= ceiling
+    turb_valid = df["TURB_NTU"].dropna()
+    assert turb_valid.max() <= 15.0
+
+    # Some turbidity values should be missing (censored)
+    assert df["TURB_NTU"].isna().sum() > 0
 
 
 def test_data_dictionary_structure(tmp_path):
@@ -68,11 +82,11 @@ def test_data_dictionary_structure(tmp_path):
     assert "code" in variables.columns
     assert "name" in variables.columns
     assert "unit" in variables.columns
-    assert len(variables) >= 9
+    assert len(variables) >= 10  # 10 observed variables
 
 
 def test_pilot_study_structure(tmp_path):
-    """Pilot study JSON has correct nested structure and fixed dose."""
+    """Pilot study JSON has correct structure with partial compliance."""
     _generate(tmp_path)
 
     with open(tmp_path / "data" / "pilot_study.json") as f:
@@ -89,14 +103,17 @@ def test_pilot_study_structure(tmp_path):
     first = measurements[0]
     assert "rainfall_mm" in first
     assert "chemical_dose" in first
+    assert "organic_load" in first
 
-    # Chemical dose should be fixed at 45.0
+    # Chemical dose should be approximately 45 (partial compliance, not exact)
     doses = [m["chemical_dose"] for m in measurements]
-    assert all(d == 45.0 for d in doses)
+    assert 40 < np.mean(doses) < 50
+    assert np.std(doses) > 1.0  # Non-trivial variance from compliance noise
+    assert np.std(doses) < 8.0  # But not wildly off target
 
 
 def test_ground_truth_completeness(tmp_path):
-    """Ground truth JSON contains all required scoring info."""
+    """Ground truth JSON contains all required fields and scoring weights sum to 1."""
     _generate(tmp_path)
 
     with open(tmp_path / "ground_truth.json") as f:
@@ -105,96 +122,120 @@ def test_ground_truth_completeness(tmp_path):
     assert gt["problem"] == "water_treatment"
     assert gt["type"] == "causal_discovery"
 
+    # Observed edges
     edges = gt["causal_graph"]["edges"]
-    assert len(edges) == 9
-    assert ["Temperature", "Floc_Size"] in edges
-    assert gt["causal_graph"]["confounders"] == ["Temperature"]
-    assert gt["causal_graph"]["colliders"] == ["Settling_Rate"]
+    assert len(edges) == 11
 
-    intervention = gt["causal_graph"]["intervention"]
-    assert intervention["variable"] == "Chemical_Dose"
-    assert intervention["fixed_value"] == 45.0
+    # Latent edges
+    latent_edges = gt["causal_graph"]["latent_edges"]
+    assert len(latent_edges) == 2
+    assert ["Source_Water_Quality", "Turbidity"] in latent_edges
+    assert ["Source_Water_Quality", "Organic_Load"] in latent_edges
 
+    # Confounders and colliders
+    assert gt["causal_graph"]["confounders"] == ["Source_Water_Quality"]
+    assert "Chemical_Dose" in gt["causal_graph"]["colliders"]
+    assert "Floc_Size" in gt["causal_graph"]["colliders"]
+
+    # Feedback loop
+    assert gt["causal_graph"]["feedback_loop"]["from"] == "Outlet_Clarity"
+    assert gt["causal_graph"]["feedback_loop"]["to"] == "Chemical_Dose"
+
+    # Nonlinearities documented
+    assert "Chemical_Dose_to_Floc_Size" in gt["nonlinearities"]
+    assert "Temperature_to_Floc_Size" in gt["nonlinearities"]
+    assert "Turbidity_to_Chemical_Dose" in gt["nonlinearities"]
+    assert "Floc_Residence_to_Settling" in gt["nonlinearities"]
+
+    # Challenges documented
+    assert "latent_confounder" in gt["challenges"]
+    assert "feedback_loop" in gt["challenges"]
+    assert "simpsons_paradox" in gt["challenges"]
+    assert "regime_change" in gt["challenges"]
+    assert "mnar_missingness" in gt["challenges"]
+    assert "rainfall_lag" in gt["challenges"]
+
+    # Scoring weights sum to 1
     weights = [v["weight"] for v in gt["scoring"].values()]
     assert abs(sum(weights) - 1.0) < 0.001
 
 
-def test_intervention_breaks_causal_link(tmp_path):
-    """In pilot study, Turbidity should NOT predict Chemical_Dose (link broken)."""
+def test_feedback_loop_detectable(tmp_path):
+    """Lagged outlet clarity correlates with chemical dose (operator feedback)."""
     _generate(tmp_path)
+    df = pd.read_csv(tmp_path / "data" / "scada_export.csv").dropna()
 
-    obs = pd.read_csv(tmp_path / "data" / "scada_export.csv")
-    obs_corr = obs["TURB_NTU"].corr(obs["CHEM_D_MGL"])
+    # Lag-1 correlation: clarity_{t-1} with dose_t
+    clarity_lag1 = df["OUT_CLR"].shift(1).dropna()
+    dose_aligned = df["CHEM_D_MGL"].iloc[1:]
+
+    # Align lengths
+    min_len = min(len(clarity_lag1), len(dose_aligned))
+    corr = np.corrcoef(clarity_lag1.iloc[:min_len], dose_aligned.iloc[:min_len])[0, 1]
+
+    # Negative correlation: low clarity -> higher dose
+    assert corr < -0.1
+
+
+def test_simpsons_paradox_present(tmp_path):
+    """Aggregate dose-clarity correlation is negative (confounded by water quality)."""
+    _generate(tmp_path)
+    df = pd.read_csv(tmp_path / "data" / "scada_export.csv").dropna()
+
+    # Aggregate correlation: dose vs clarity should be negative
+    # (bad water -> high dose AND low clarity)
+    aggregate_corr = df["CHEM_D_MGL"].corr(df["OUT_CLR"])
+    assert aggregate_corr < 0, (
+        f"Expected negative aggregate dose-clarity correlation, got {aggregate_corr:.3f}"
+    )
+
+
+def test_regime_change_detectable(tmp_path):
+    """Turbidity distribution shifts after regime change point."""
+    _generate(tmp_path)
+    df = pd.read_csv(tmp_path / "data" / "scada_export.csv")
+
+    # Split at regime change index (observation 1200)
+    before = df["TURB_NTU"].iloc[:1200].dropna()
+    after = df["TURB_NTU"].iloc[1200:].dropna()
+
+    # Mean turbidity should be higher after regime change
+    assert after.mean() > before.mean() + 1.0
+
+
+def test_rainfall_lag_structure(tmp_path):
+    """Lagged rainfall-turbidity correlation is stronger than contemporaneous."""
+    _generate(tmp_path)
+    df = pd.read_csv(tmp_path / "data" / "scada_export.csv").dropna()
+
+    # Contemporaneous
+    corr_0 = df["RAIN_MM"].corr(df["TURB_NTU"])
+
+    # Lag-2 (rainfall 2 hours earlier -> turbidity now)
+    rain_lag2 = df["RAIN_MM"].shift(2).dropna()
+    turb_aligned = df["TURB_NTU"].iloc[2:]
+    min_len = min(len(rain_lag2), len(turb_aligned))
+    corr_2 = np.corrcoef(rain_lag2.iloc[:min_len], turb_aligned.iloc[:min_len])[0, 1]
+
+    assert corr_2 > corr_0, (
+        f"Expected lag-2 correlation ({corr_2:.3f}) > contemporaneous ({corr_0:.3f})"
+    )
+
+
+def test_pilot_breaks_feedback_and_turbidity_link(tmp_path):
+    """In pilot, dose doesn't respond to turbidity or lagged clarity."""
+    _generate(tmp_path)
 
     with open(tmp_path / "data" / "pilot_study.json") as f:
         pilot = json.load(f)["measurements"]
-    pilot_df = pd.DataFrame(pilot)
-    pilot_corr = pilot_df["turbidity"].corr(pilot_df["chemical_dose"])
+    pdf = pd.DataFrame(pilot)
 
-    # Observational: Turbidity -> Chemical_Dose should show correlation
-    assert abs(obs_corr) > 0.3
+    # Dose-turbidity correlation should be weak (link broken by intervention)
+    dose_turb_corr = pdf["chemical_dose"].corr(pdf["turbidity"])
+    assert abs(dose_turb_corr) < 0.25
 
-    # Interventional: dose is constant so std=0, correlation is undefined (NaN).
-    # That's the correct signal: dose has no variance, so it can't correlate with anything.
-    assert np.isnan(pilot_corr) or abs(pilot_corr) < 0.1
-
-
-def test_temperature_confounder_independent(tmp_path):
-    """Temperature affects Floc_Size independently of Chemical_Dose path."""
-    _generate(tmp_path)
-
-    obs = pd.read_csv(tmp_path / "data" / "scada_export.csv").dropna()
-    temp_floc_corr = obs["TEMP_C"].corr(obs["FLOC_UM"])
-    assert abs(temp_floc_corr) > 0.2
-
-    with open(tmp_path / "data" / "pilot_study.json") as f:
-        pilot = json.load(f)["measurements"]
-    pilot_df = pd.DataFrame(pilot)
-    pilot_temp_floc = pilot_df["temperature"].corr(pilot_df["floc_size"])
-    assert abs(pilot_temp_floc) > 0.2
-
-
-def test_all_causal_edges_have_correct_sign(tmp_path):
-    """Every edge in the ground truth produces a same-sign correlation in observational data."""
-    _generate(tmp_path)
-
-    obs = pd.read_csv(tmp_path / "data" / "scada_export.csv").dropna()
-
-    with open(tmp_path / "ground_truth.json") as f:
-        gt = json.load(f)
-
-    # Map human-readable variable names to SCADA codes
-    code_map = {
-        "Rainfall": "RAIN_MM",
-        "Temperature": "TEMP_C",
-        "Turbidity": "TURB_NTU",
-        "Chemical_Dose": "CHEM_D_MGL",
-        "Flow_Rate": "FLOW_M3H",
-        "Residence_Time": "RES_T_MIN",
-        "Floc_Size": "FLOC_UM",
-        "Settling_Rate": "SETL_MH",
-        "Outlet_Clarity": "OUT_CLR_NTU",
-    }
-
-    # Expected sign from structural equation coefficients
-    expected_signs = {
-        ("Rainfall", "Turbidity"): 1,
-        ("Turbidity", "Chemical_Dose"): 1,
-        ("Rainfall", "Flow_Rate"): 1,
-        ("Flow_Rate", "Residence_Time"): -1,
-        ("Chemical_Dose", "Floc_Size"): 1,
-        ("Temperature", "Floc_Size"): 1,
-        ("Floc_Size", "Settling_Rate"): 1,
-        ("Residence_Time", "Settling_Rate"): 1,
-        ("Settling_Rate", "Outlet_Clarity"): 1,
-    }
-
-    for edge in gt["causal_graph"]["edges"]:
-        parent, child = edge
-        parent_code = code_map[parent]
-        child_code = code_map[child]
-        corr = obs[parent_code].corr(obs[child_code])
-        expected = expected_signs[(parent, child)]
-        assert corr * expected > 0, (
-            f"Edge {parent}->{child}: expected sign {expected}, got correlation {corr:.3f}"
-        )
+    # Dose-lagged_clarity correlation should be weak (feedback loop broken)
+    clarity_lag1 = pdf["outlet_clarity"].shift(1).dropna()
+    dose_aligned = pdf["chemical_dose"].iloc[1:]
+    dose_clarity_corr = clarity_lag1.corr(dose_aligned)
+    assert abs(dose_clarity_corr) < 0.25

@@ -4,13 +4,28 @@
 # ///
 """Generate synthetic dataset for the water treatment causal discovery domain.
 
-Hidden causal graph:
-    Rainfall -> Turbidity -> Chemical_Dose
-    Rainfall -> Flow_Rate -> Residence_Time
-    Chemical_Dose -> Floc_Size -> Settling_Rate
-    Residence_Time -> Settling_Rate
+Hidden causal graph (observed edges):
+    Rainfall -(lag 2h)-> Turbidity
+    Rainfall -> Flow_Rate
+    Turbidity -> Chemical_Dose  (piecewise: threshold at 8 NTU)
+    Outlet_Clarity_{t-1} -> Chemical_Dose  (operator feedback loop)
+    Flow_Rate -> Residence_Time
+    Chemical_Dose -> Floc_Size  (saturating: Michaelis-Menten)
+    Temperature -> Floc_Size  (quadratic: optimal ~18°C)
+    Organic_Load -> Floc_Size  (inhibitor)
+    Floc_Size * Residence_Time -> Settling_Rate  (interaction, not additive)
     Settling_Rate -> Outlet_Clarity
-    Temperature -> Floc_Size  (confounder)
+
+Latent confounder (NOT in SCADA export):
+    Source_Water_Quality -> Turbidity
+    Source_Water_Quality -> Organic_Load
+
+Additional challenges:
+    - Regime change at observation 1200 (upstream construction raises Source_Water_Quality)
+    - MNAR missingness: turbidity sensor saturates above 15 NTU
+    - Simpson's paradox: aggregate dose-clarity correlation is negative (confounded)
+    - Pilot study has partial compliance (dose drifts ±3 mg/L from target)
+    - Rainfall effect on turbidity is lagged by 2 hours
 
 Seed: 42 (reproducible)
 """
@@ -25,36 +40,35 @@ import pandas as pd
 SEED = 42
 N_OBS = 2000
 N_PILOT = 200
-MISSING_FRAC = 0.03
-FIXED_DOSE = 45.0
+MCAR_FRAC = 0.02  # Random missing (on top of MNAR)
+TURB_CEILING = 15.0  # Sensor saturation threshold for MNAR
+DOSE_TARGET = 45.0
+DOSE_COMPLIANCE_SIGMA = 3.0  # Partial compliance noise in pilot
 
-# Structural equation coefficients
-# Variable: {parent: coefficient}, intercept, noise_sigma
-EQUATIONS = {
-    "Rainfall": {"parents": {}, "intercept": 5.0, "noise_sigma": 3.0},
-    "Temperature": {"parents": {}, "intercept": 15.0, "noise_sigma": 4.0},
-    "Turbidity": {"parents": {"Rainfall": 0.8}, "intercept": 2.0, "noise_sigma": 1.5},
-    "Chemical_Dose": {"parents": {"Turbidity": 0.6}, "intercept": 10.0, "noise_sigma": 2.0},
-    "Flow_Rate": {"parents": {"Rainfall": 1.2}, "intercept": 50.0, "noise_sigma": 5.0},
-    "Residence_Time": {"parents": {"Flow_Rate": -0.3}, "intercept": 60.0, "noise_sigma": 3.0},
-    "Floc_Size": {
-        "parents": {"Chemical_Dose": 1.5, "Temperature": 0.8},
-        "intercept": 20.0,
-        "noise_sigma": 5.0,
-    },
-    "Settling_Rate": {
-        "parents": {"Floc_Size": 0.4, "Residence_Time": 0.2},
-        "intercept": 1.0,
-        "noise_sigma": 1.0,
-    },
-    "Outlet_Clarity": {"parents": {"Settling_Rate": 0.7}, "intercept": 0.5, "noise_sigma": 0.5},
-}
+# Regime change: upstream construction starts at observation 1200
+REGIME_CHANGE_IDX = 1200
+SWQ_BASELINE = 0.0
+SWQ_ELEVATED = 4.0
 
-# Topological order for generation
-TOPO_ORDER = [
+# Time lag
+RAINFALL_LAG = 2  # hours
+
+# Nonlinear parameters
+TEMP_OPTIMAL = 18.0
+DOSE_KM = 15.0  # Michaelis-Menten half-saturation
+DOSE_VMAX = 40.0  # Max floc contribution from dosing
+TURB_DOSE_THRESHOLD = 8.0  # Piecewise threshold for turbidity->dose
+
+# Feedback
+FEEDBACK_COEFF = -2.5  # Low clarity -> operator increases dose
+
+
+# Topological order (observed variables only, for SCADA output)
+OBSERVED_VARS = [
     "Rainfall",
     "Temperature",
     "Turbidity",
+    "Organic_Load",
     "Chemical_Dose",
     "Flow_Rate",
     "Residence_Time",
@@ -68,12 +82,13 @@ SCADA_CODES = {
     "Rainfall": ("RAIN_MM", "Rainfall", "mm"),
     "Temperature": ("TEMP_C", "Temperature", "°C"),
     "Turbidity": ("TURB_NTU", "Turbidity", "NTU"),
+    "Organic_Load": ("ORG_LOAD_MGL", "Organic Load", "mg/L"),
     "Chemical_Dose": ("CHEM_D_MGL", "Chemical Dose", "mg/L"),
     "Flow_Rate": ("FLOW_M3H", "Flow Rate", "m³/h"),
     "Residence_Time": ("RES_T_MIN", "Residence Time", "min"),
     "Floc_Size": ("FLOC_UM", "Floc Size", "µm"),
     "Settling_Rate": ("SETL_MH", "Settling Rate", "m/h"),
-    "Outlet_Clarity": ("OUT_CLR_NTU", "Outlet Clarity", "NTU"),
+    "Outlet_Clarity": ("OUT_CLR", "Outlet Clarity", "index"),
 }
 
 # Pilot study column mapping (snake_case)
@@ -81,6 +96,7 @@ PILOT_COLUMNS = {
     "Rainfall": "rainfall_mm",
     "Temperature": "temperature",
     "Turbidity": "turbidity",
+    "Organic_Load": "organic_load",
     "Chemical_Dose": "chemical_dose",
     "Flow_Rate": "flow_rate",
     "Residence_Time": "residence_time",
@@ -90,27 +106,109 @@ PILOT_COLUMNS = {
 }
 
 
-def _sample_from_graph(rng, n, fix_dose=False):
-    """Generate n samples from the structural equation model.
+def _sample_timeseries(rng, n, regime_change_idx, fix_dose=False):
+    """Generate n samples as a time series with lags, feedback, and nonlinearity.
 
-    If fix_dose is True, Chemical_Dose is fixed at FIXED_DOSE (interventional).
+    If fix_dose is True, Chemical_Dose is approximately fixed at DOSE_TARGET
+    with partial compliance noise (±DOSE_COMPLIANCE_SIGMA).
     """
-    data = {}
-    for var in TOPO_ORDER:
-        eq = EQUATIONS[var]
-        values = np.full(n, eq["intercept"])
-        for parent, coeff in eq["parents"].items():
-            values = values + coeff * data[parent]
-        values = values + rng.normal(0, eq["noise_sigma"], size=n)
+    # --- Exogenous variables (full arrays) ---
+    rainfall = np.maximum(0, rng.gamma(2, 3, size=n))
+    # Seasonal temperature (hourly resolution, 365*24 period)
+    hour = np.arange(n)
+    temperature = (
+        TEMP_OPTIMAL + 8 * np.sin(2 * np.pi * hour / (365 * 24)) + rng.normal(0, 2, size=n)
+    )
 
-        if fix_dose and var == "Chemical_Dose":
-            values = np.full(n, FIXED_DOSE)
+    # Source water quality (LATENT): regime change + noise
+    swq = np.where(np.arange(n) < regime_change_idx, SWQ_BASELINE, SWQ_ELEVATED)
+    swq = swq + rng.normal(0, 0.5, size=n)
 
-        data[var] = values
+    # --- Sequential generation for feedback/lags ---
+    turbidity = np.zeros(n)
+    organic_load = np.zeros(n)
+    flow_rate = np.zeros(n)
+    chemical_dose = np.zeros(n)
+    residence_time = np.zeros(n)
+    floc_size = np.zeros(n)
+    settling_rate = np.zeros(n)
+    outlet_clarity = np.zeros(n)
+
+    for t in range(n):
+        # Turbidity: lagged rainfall + latent source water quality
+        rain_lagged = rainfall[t - RAINFALL_LAG] if t >= RAINFALL_LAG else 0.0
+        turbidity[t] = max(
+            0.1,
+            2.0 + 0.8 * rain_lagged + 1.5 * swq[t] + rng.normal(0, 1.5),
+        )
+
+        # Organic load: driven by latent source water quality (confounder)
+        organic_load[t] = max(
+            0.1,
+            1.0 + 0.6 * swq[t] + rng.normal(0, 0.5),
+        )
+
+        # Flow rate: contemporaneous with rainfall
+        flow_rate[t] = max(10.0, 50 + 1.2 * rainfall[t] + rng.normal(0, 5))
+
+        # Chemical dose: piecewise turbidity response + feedback from clarity
+        if fix_dose:
+            chemical_dose[t] = max(
+                5.0,
+                DOSE_TARGET + rng.normal(0, DOSE_COMPLIANCE_SIGMA),
+            )
+        else:
+            clarity_prev = outlet_clarity[t - 1] if t > 0 else 5.0
+            # Piecewise: steeper response above threshold
+            if turbidity[t] <= TURB_DOSE_THRESHOLD:
+                turb_effect = 0.4 * turbidity[t]
+            else:
+                turb_effect = 0.4 * TURB_DOSE_THRESHOLD + 1.2 * (turbidity[t] - TURB_DOSE_THRESHOLD)
+            chemical_dose[t] = max(
+                5.0,
+                10 + turb_effect + FEEDBACK_COEFF * clarity_prev + rng.normal(0, 2),
+            )
+
+        # Residence time
+        residence_time[t] = max(5.0, 60 - 0.3 * flow_rate[t] + rng.normal(0, 3))
+
+        # Floc size: saturating dose + quadratic temperature + organic inhibition
+        dose_effect = DOSE_VMAX * chemical_dose[t] / (chemical_dose[t] + DOSE_KM)
+        temp_effect = -0.08 * (temperature[t] - TEMP_OPTIMAL) ** 2
+        organic_effect = -4.0 * organic_load[t]
+        floc_size[t] = max(
+            1.0,
+            20 + dose_effect + temp_effect + organic_effect + rng.normal(0, 5),
+        )
+
+        # Settling rate: interaction (not additive)
+        settling_rate[t] = max(
+            0.1,
+            1 + 0.01 * floc_size[t] * residence_time[t] + rng.normal(0, 1),
+        )
+
+        # Outlet clarity (higher = clearer water)
+        outlet_clarity[t] = max(
+            0.1,
+            0.5 + 0.7 * settling_rate[t] + rng.normal(0, 0.5),
+        )
+
+    data = {
+        "Rainfall": rainfall,
+        "Temperature": temperature,
+        "Turbidity": turbidity,
+        "Organic_Load": organic_load,
+        "Chemical_Dose": chemical_dose,
+        "Flow_Rate": flow_rate,
+        "Residence_Time": residence_time,
+        "Floc_Size": floc_size,
+        "Settling_Rate": settling_rate,
+        "Outlet_Clarity": outlet_clarity,
+    }
     return data
 
 
-def _inject_missing(rng, df, frac):
+def _inject_mcar(rng, df, frac):
     """Set ~frac of values to NaN randomly across data columns."""
     data_cols = [c for c in df.columns if c != "TIMESTAMP"]
     mask = rng.random((len(df), len(data_cols))) < frac
@@ -119,25 +217,40 @@ def _inject_missing(rng, df, frac):
     return df
 
 
+def _inject_mnar_turbidity(df, ceiling):
+    """Censor turbidity readings above sensor ceiling (MNAR)."""
+    turb_col = "TURB_NTU"
+    above = df[turb_col] > ceiling
+    df.loc[above, turb_col] = np.nan
+    return df, above.sum()
+
+
 def _write_scada_csv(data, rng, output_dir):
-    """Write observational data as SCADA export CSV."""
+    """Write observational data as SCADA export CSV with MCAR + MNAR missingness."""
     start = datetime(2024, 1, 1)
     timestamps = [start + timedelta(hours=i) for i in range(N_OBS)]
 
     rows = {"TIMESTAMP": [t.isoformat() for t in timestamps]}
-    for var in TOPO_ORDER:
+    for var in OBSERVED_VARS:
         code = SCADA_CODES[var][0]
         rows[code] = data[var]
 
     df = pd.DataFrame(rows)
-    df = _inject_missing(rng, df, MISSING_FRAC)
+
+    # MNAR: turbidity sensor saturation
+    df, n_censored = _inject_mnar_turbidity(df, TURB_CEILING)
+
+    # MCAR: random dropout across all columns
+    df = _inject_mcar(rng, df, MCAR_FRAC)
+
     df.to_csv(output_dir / "data" / "scada_export.csv", index=False)
+    return n_censored
 
 
 def _write_data_dictionary(output_dir):
     """Write Excel data dictionary with Variables and Notes sheets."""
     variables = []
-    for var in TOPO_ORDER:
+    for var in OBSERVED_VARS:
         code, name, unit = SCADA_CODES[var]
         variables.append({"code": code, "name": name, "unit": unit})
 
@@ -148,11 +261,16 @@ def _write_data_dictionary(output_dir):
                 "Sensor calibration",
                 "Data quality",
                 "Maintenance",
+                "Source water",
+                "Operations",
             ],
             "note": [
                 "All sensors calibrated quarterly. Last calibration: 2023-12-15.",
                 "SCADA system logs at 1-hour intervals. Occasional dropouts due to network issues.",
                 "Turbidity sensor replaced 2024-03-10 due to fouling. No data gap.",
+                "Upstream construction project began ~mid-2024. Possible impact on intake water.",
+                "Operators adjust chemical dosing based on incoming water "
+                "conditions and recent output quality.",
             ],
         }
     )
@@ -163,21 +281,28 @@ def _write_data_dictionary(output_dir):
 
 
 def _write_pilot_study(data, output_dir):
-    """Write interventional data as nested JSON with snake_case columns."""
+    """Write interventional data as nested JSON with partial compliance."""
     start = datetime(2024, 6, 1)
     measurements = []
     for i in range(N_PILOT):
         row = {"timestamp": int((start + timedelta(hours=i)).timestamp())}
-        for var in TOPO_ORDER:
+        for var in OBSERVED_VARS:
             row[PILOT_COLUMNS[var]] = round(float(data[var][i]), 4)
         measurements.append(row)
 
+    doses = [m["chemical_dose"] for m in measurements]
     payload = {
         "metadata": {
-            "protocol": "Chemical dose held constant at 45 mg/L",
+            "protocol": f"Chemical dose target {DOSE_TARGET} mg/L (manual control)",
             "start_date": "2024-06-01",
             "duration_hours": N_PILOT,
             "operator": "J. Smith",
+            "notes": (
+                "Operators instructed to hold dose at target. "
+                "Some drift expected due to manual valve adjustment."
+            ),
+            "actual_dose_mean": round(float(np.mean(doses)), 2),
+            "actual_dose_std": round(float(np.std(doses)), 2),
         },
         "measurements": measurements,
     }
@@ -186,8 +311,8 @@ def _write_pilot_study(data, output_dir):
         json.dump(payload, f, indent=2)
 
 
-def _write_ground_truth(output_dir):
-    """Write ground truth JSON with causal graph and scoring info."""
+def _write_ground_truth(n_censored, output_dir):
+    """Write ground truth JSON with causal graph, challenges, and scoring info."""
     gt = {
         "problem": "water_treatment",
         "type": "causal_discovery",
@@ -195,50 +320,133 @@ def _write_ground_truth(output_dir):
             "edges": [
                 ["Rainfall", "Turbidity"],
                 ["Turbidity", "Chemical_Dose"],
+                ["Outlet_Clarity_lag1", "Chemical_Dose"],
                 ["Rainfall", "Flow_Rate"],
                 ["Flow_Rate", "Residence_Time"],
                 ["Chemical_Dose", "Floc_Size"],
+                ["Temperature", "Floc_Size"],
+                ["Organic_Load", "Floc_Size"],
                 ["Floc_Size", "Settling_Rate"],
                 ["Residence_Time", "Settling_Rate"],
                 ["Settling_Rate", "Outlet_Clarity"],
-                ["Temperature", "Floc_Size"],
             ],
-            "confounders": ["Temperature"],
-            "colliders": ["Settling_Rate"],
-            "intervention": {
-                "variable": "Chemical_Dose",
-                "fixed_value": FIXED_DOSE,
-                "broken_edge": ["Turbidity", "Chemical_Dose"],
+            "latent_edges": [
+                ["Source_Water_Quality", "Turbidity"],
+                ["Source_Water_Quality", "Organic_Load"],
+            ],
+            "confounders": ["Source_Water_Quality"],
+            "colliders": ["Chemical_Dose", "Floc_Size", "Settling_Rate"],
+            "feedback_loop": {
+                "from": "Outlet_Clarity",
+                "to": "Chemical_Dose",
+                "lag": 1,
+                "mechanism": "Operator adjusts dose based on recent output quality",
             },
         },
-        "structural_equations": {
-            var: {
-                "parents": eq["parents"],
-                "intercept": eq["intercept"],
-                "noise_sigma": eq["noise_sigma"],
-            }
-            for var, eq in EQUATIONS.items()
+        "nonlinearities": {
+            "Chemical_Dose_to_Floc_Size": {
+                "type": "saturating",
+                "formula": f"Vmax * dose / (dose + Km), Vmax={DOSE_VMAX}, Km={DOSE_KM}",
+            },
+            "Temperature_to_Floc_Size": {
+                "type": "quadratic",
+                "formula": f"-0.08 * (T - {TEMP_OPTIMAL})^2",
+                "optimal": TEMP_OPTIMAL,
+            },
+            "Turbidity_to_Chemical_Dose": {
+                "type": "piecewise",
+                "formula": (
+                    f"0.4*T if T <= {TURB_DOSE_THRESHOLD}, "
+                    f"else 0.4*{TURB_DOSE_THRESHOLD} + 1.2*(T - {TURB_DOSE_THRESHOLD})"
+                ),
+                "threshold": TURB_DOSE_THRESHOLD,
+            },
+            "Floc_Residence_to_Settling": {
+                "type": "interaction",
+                "formula": "0.01 * Floc_Size * Residence_Time",
+            },
+        },
+        "challenges": {
+            "latent_confounder": {
+                "variable": "Source_Water_Quality",
+                "affects": ["Turbidity", "Organic_Load"],
+                "mechanism": "Unobserved intake water quality driven by upstream conditions",
+            },
+            "feedback_loop": {
+                "description": (
+                    "Chemical_Dose depends on lagged Outlet_Clarity (operator adjustment)"
+                ),
+                "creates": "Apparent cycle in contemporaneous correlations",
+            },
+            "simpsons_paradox": {
+                "description": (
+                    "Aggregate dose-clarity correlation is negative "
+                    "(both driven by bad water). "
+                    "True causal effect of dose on clarity is positive."
+                ),
+            },
+            "regime_change": {
+                "observation_index": REGIME_CHANGE_IDX,
+                "description": "Upstream construction raises source water quality degradation",
+                "shift": {"Source_Water_Quality": f"{SWQ_BASELINE} -> {SWQ_ELEVATED}"},
+            },
+            "mnar_missingness": {
+                "variable": "Turbidity",
+                "ceiling": TURB_CEILING,
+                "n_censored": int(n_censored),
+                "description": (
+                    "Sensor saturates above ceiling; high-turbidity events underrepresented"
+                ),
+            },
+            "rainfall_lag": {
+                "lag_hours": RAINFALL_LAG,
+                "description": "Rainfall affects turbidity with a 2-hour delay",
+            },
+            "pilot_partial_compliance": {
+                "target_dose": DOSE_TARGET,
+                "compliance_sigma": DOSE_COMPLIANCE_SIGMA,
+                "description": "Pilot study dose drifts ±3 mg/L from target",
+            },
+        },
+        "intervention": {
+            "variable": "Chemical_Dose",
+            "target_value": DOSE_TARGET,
+            "compliance_sigma": DOSE_COMPLIANCE_SIGMA,
+            "broken_edges": [
+                ["Turbidity", "Chemical_Dose"],
+                ["Outlet_Clarity_lag1", "Chemical_Dose"],
+            ],
         },
         "scoring": {
-            "edge_precision": {
-                "weight": 0.25,
-                "description": "Fraction of claimed edges that are true",
+            "edge_discovery": {
+                "weight": 0.15,
+                "description": "Precision and recall on observed causal edges",
             },
-            "edge_recall": {
-                "weight": 0.25,
-                "description": "Fraction of true edges discovered",
+            "nonlinearity_detection": {
+                "weight": 0.15,
+                "description": (
+                    "Identified saturating, quadratic, piecewise, or interaction effects"
+                ),
             },
-            "confounder_detection": {
+            "latent_confounder": {
                 "weight": 0.20,
-                "description": "Identified Temperature as confounder on Floc_Size",
+                "description": "Recognized unobserved common cause of Turbidity and Organic_Load",
             },
-            "intervention_usage": {
+            "feedback_loop": {
                 "weight": 0.15,
-                "description": "Used pilot study to validate causal claims",
+                "description": "Identified operator feedback from Outlet_Clarity to Chemical_Dose",
             },
-            "collider_detection": {
+            "simpsons_paradox": {
                 "weight": 0.15,
-                "description": "Identified Settling_Rate as having two independent causes",
+                "description": "Correctly resolved confounded dose-clarity relationship",
+            },
+            "regime_change": {
+                "weight": 0.10,
+                "description": "Detected distribution shift from upstream construction",
+            },
+            "mnar_detection": {
+                "weight": 0.10,
+                "description": "Noticed turbidity sensor censoring above ceiling",
             },
         },
     }
@@ -260,19 +468,19 @@ def generate(output_dir=None):
 
     rng = np.random.default_rng(SEED)
 
-    # Observational data
-    obs_data = _sample_from_graph(rng, N_OBS, fix_dose=False)
-    _write_scada_csv(obs_data, rng, output_dir)
+    # Observational data (time series with feedback)
+    obs_data = _sample_timeseries(rng, N_OBS, regime_change_idx=REGIME_CHANGE_IDX, fix_dose=False)
+    n_censored = _write_scada_csv(obs_data, rng, output_dir)
 
     # Data dictionary
     _write_data_dictionary(output_dir)
 
-    # Interventional pilot study
-    pilot_data = _sample_from_graph(rng, N_PILOT, fix_dose=True)
+    # Interventional pilot study (partial compliance, post-regime-change)
+    pilot_data = _sample_timeseries(rng, N_PILOT, regime_change_idx=0, fix_dose=True)
     _write_pilot_study(pilot_data, output_dir)
 
     # Ground truth
-    _write_ground_truth(output_dir)
+    _write_ground_truth(n_censored, output_dir)
 
     print(f"Water treatment data written to {output_dir / 'data'}")
 

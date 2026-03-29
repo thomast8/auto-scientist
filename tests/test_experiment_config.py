@@ -43,6 +43,43 @@ class TestExperimentConfigDefaults:
             ExperimentConfig(data="data.csv", goal="test", unknown_field="bad")
 
 
+class TestExperimentConfigDifficulty:
+    def test_default_is_none(self):
+        cfg = ExperimentConfig(data="data.csv", goal="test")
+        assert cfg.difficulty is None
+
+    @pytest.mark.parametrize("difficulty", ["easy", "medium", "hard", "expert"])
+    def test_valid_difficulty_accepted(self, difficulty):
+        cfg = ExperimentConfig(data="data.csv", goal="test", difficulty=difficulty)
+        assert cfg.difficulty == difficulty
+
+    @pytest.mark.parametrize("bad", ["super", "EASY", "", "normal"])
+    def test_invalid_difficulty_rejected(self, bad):
+        with pytest.raises(ValidationError):
+            ExperimentConfig(data="data.csv", goal="test", difficulty=bad)
+
+    def test_to_yaml_includes_difficulty_when_set(self, tmp_path):
+        cfg = ExperimentConfig(data="data.csv", goal="test", difficulty="hard")
+        out = tmp_path / "out.yaml"
+        cfg.to_yaml(out)
+        raw = yaml.safe_load(out.read_text())
+        assert raw["difficulty"] == "hard"
+
+    def test_to_yaml_omits_difficulty_when_none(self, tmp_path):
+        cfg = ExperimentConfig(data="data.csv", goal="test")
+        out = tmp_path / "out.yaml"
+        cfg.to_yaml(out)
+        raw = yaml.safe_load(out.read_text())
+        assert "difficulty" not in raw
+
+    def test_round_trip_with_difficulty(self, tmp_path):
+        cfg = ExperimentConfig(data="data.csv", goal="test", difficulty="expert")
+        out = tmp_path / "out.yaml"
+        cfg.to_yaml(out)
+        loaded = ExperimentConfig.from_yaml(out)
+        assert loaded.difficulty == "expert"
+
+
 class TestExperimentConfigPresetValidation:
     @pytest.mark.parametrize("preset", ["turbo", "fast", "default", "medium", "high", "max"])
     def test_valid_presets(self, preset):

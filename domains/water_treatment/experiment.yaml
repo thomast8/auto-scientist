@@ -1,9 +1,11 @@
 data: seed/data/
 goal: >
   Discover the causal relationships between variables in this water
-  treatment plant. Identify which factors drive outlet water clarity,
-  how chemical dosing relates to upstream conditions, and any confounding
-  variables. The data includes SCADA exports, a pilot study, and a
-  data dictionary.
-max_iterations: 5
-preset: default
+  treatment plant. The data includes SCADA time-series exports, a pilot
+  study with a dosing intervention, and a data dictionary. Identify
+  which factors drive outlet water clarity, how chemical dosing relates
+  to upstream conditions, and any confounding variables, feedback loops,
+  nonlinear effects, or distribution shifts.
+difficulty: hard
+max_iterations: 8
+preset: high
