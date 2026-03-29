@@ -21,7 +21,12 @@ from pydantic import ValidationError
 from auto_scientist.config import DomainConfig
 from auto_scientist.notebook import NOTEBOOK_FILENAME
 from auto_scientist.prompts.ingestor import INGESTOR_SYSTEM, INGESTOR_USER
-from auto_scientist.sdk_utils import append_block_to_buffer, collect_text_from_query, safe_query
+from auto_scientist.sdk_utils import (
+    append_block_to_buffer,
+    collect_text_from_query,
+    safe_query,
+    with_turn_budget,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -59,10 +64,11 @@ async def run_ingestor(
 
     mode = "interactive" if interactive else "autonomous"
 
+    max_turns = 30
     options = ClaudeCodeOptions(
-        system_prompt=INGESTOR_SYSTEM,
+        system_prompt=with_turn_budget(INGESTOR_SYSTEM, max_turns, tools),
         allowed_tools=tools,
-        max_turns=30,
+        max_turns=max_turns,
         permission_mode="acceptEdits",
         cwd=output_dir,
         model=model,
@@ -173,10 +179,13 @@ async def run_ingestor(
                         f"Ingestor attempt {attempt + 1}: invalid "
                         f"domain_config.json, resuming session to fix"
                     )
+                    clarification_max_turns = 10
                     options = ClaudeCodeOptions(
-                        system_prompt=INGESTOR_SYSTEM,
+                        system_prompt=with_turn_budget(
+                            INGESTOR_SYSTEM, clarification_max_turns, tools
+                        ),
                         allowed_tools=tools,
-                        max_turns=10,
+                        max_turns=clarification_max_turns,
                         permission_mode="acceptEdits",
                         cwd=output_dir,
                         model=model,

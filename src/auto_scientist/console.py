@@ -674,7 +674,7 @@ class IterationContainer(Vertical):
         self.border_subtitle = ""
         valid = {"red", "green", "yellow"}
         if style in valid:
-            self.styles.border = ("solid", style)
+            self.styles.border = ("round", style)
         if self._panels:
             self.collapse_iteration(summary_text)
 

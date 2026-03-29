@@ -202,6 +202,53 @@ def validate_json_output(
     return validated.model_dump()
 
 
+# Descriptions for deferred tools (not loaded by default in Claude Code).
+# Including these in the system prompt lets the model call them directly
+# without wasting a turn on ToolSearch.
+_DEFERRED_TOOL_DESCRIPTIONS: dict[str, str] = {
+    "WebSearch": (
+        "WebSearch(query: str) - Search the web. "
+        "Required param: query (string, min 2 chars). "
+        "Optional: allowed_domains (list[str]), blocked_domains (list[str])."
+    ),
+    "AskUserQuestion": ("AskUserQuestion(question: str) - Ask the user a clarifying question."),
+}
+
+
+def with_turn_budget(system_prompt: str, max_turns: int, tools: list[str] | None = None) -> str:
+    """Append turn budget and available tool descriptions to a system prompt.
+
+    Tells the model how many turns it has so it can plan tool usage
+    accordingly instead of spiraling into unbounded research loops.
+    Lists available tools so the model can call them directly without
+    wasting a turn on ToolSearch.
+    """
+    parts = [system_prompt]
+
+    if tools:
+        tool_lines = []
+        for tool in tools:
+            if tool in _DEFERRED_TOOL_DESCRIPTIONS:
+                tool_lines.append(f"  - {_DEFERRED_TOOL_DESCRIPTIONS[tool]}")
+            else:
+                tool_lines.append(f"  - {tool}")
+        tool_block = "\n".join(tool_lines)
+        parts.append(
+            f"\n<available_tools>\n"
+            f"Your available tools (call directly, do NOT use ToolSearch):\n"
+            f"{tool_block}\n"
+            f"</available_tools>"
+        )
+
+    parts.append(
+        f"\n<turn_budget>You have a budget of {max_turns} turns for this task. "
+        f"Each tool use consumes one turn. Plan your tool usage carefully "
+        f"and produce your final output within this budget.</turn_budget>"
+    )
+
+    return "".join(parts)
+
+
 async def collect_text_from_query(
     prompt: str,
     options: ClaudeCodeOptions,

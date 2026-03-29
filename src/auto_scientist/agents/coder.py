@@ -26,7 +26,11 @@ from auto_scientist.prompts.coder import (
     CODER_SYSTEM,
     CODER_USER,
 )
-from auto_scientist.sdk_utils import append_block_to_buffer, collect_text_from_query
+from auto_scientist.sdk_utils import (
+    append_block_to_buffer,
+    collect_text_from_query,
+    with_turn_budget,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -115,10 +119,12 @@ async def run_coder(
         data_files_section=data_files_section,
     )
 
+    max_turns = 50
+    allowed_tools = ["Read", "Write", "Edit", "Bash", "Glob", "Grep"]
     options = ClaudeCodeOptions(
-        system_prompt=system_prompt,
-        allowed_tools=["Read", "Write", "Edit", "Bash", "Glob", "Grep"],
-        max_turns=50,
+        system_prompt=with_turn_budget(system_prompt, max_turns, allowed_tools),
+        allowed_tools=allowed_tools,
+        max_turns=max_turns,
         permission_mode="acceptEdits",
         cwd=output_dir,
         model=model,

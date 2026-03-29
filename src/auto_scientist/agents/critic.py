@@ -48,6 +48,7 @@ from auto_scientist.sdk_utils import (
     OutputValidationError,
     collect_text_from_query,
     validate_json_output,
+    with_turn_budget,
 )
 
 logger = logging.getLogger(__name__)
@@ -99,11 +100,13 @@ async def _query_critic(
         extra_args: dict[str, str | None] = {"setting-sources": ""}
         if config.reasoning and config.reasoning.level != "off":
             extra_args.update(reasoning_to_cc_extra_args(config.reasoning))
+        max_turns = 2
+        allowed_tools = ["WebSearch"]
         options = ClaudeCodeOptions(
             model=config.model,
-            system_prompt=system_prompt,
-            allowed_tools=["WebSearch"],
-            max_turns=5,
+            system_prompt=with_turn_budget(system_prompt, max_turns, allowed_tools),
+            allowed_tools=allowed_tools,
+            max_turns=max_turns,
             extra_args=extra_args,
         )
         text, usage = await collect_text_from_query(prompt, options, message_buffer)

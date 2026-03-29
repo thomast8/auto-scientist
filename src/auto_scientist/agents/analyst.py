@@ -20,6 +20,7 @@ from auto_scientist.sdk_utils import (
     OutputValidationError,
     collect_text_from_query,
     validate_json_output,
+    with_turn_budget,
 )
 
 logger = logging.getLogger(__name__)
@@ -143,10 +144,12 @@ async def run_analyst(
     # The analyst always uses tools (Read for plot PNGs, Glob + Read for data
     # files on iteration 0). Use acceptEdits to avoid interactive permission
     # prompts when running as a sub-agent via the SDK.
+    max_turns = 30
+    allowed_tools = ["Read", "Glob"]
     options = ClaudeCodeOptions(
-        system_prompt=ANALYST_SYSTEM + json_instruction,
-        allowed_tools=["Read", "Glob"],
-        max_turns=30,
+        system_prompt=with_turn_budget(ANALYST_SYSTEM + json_instruction, max_turns, allowed_tools),
+        allowed_tools=allowed_tools,
+        max_turns=max_turns,
         permission_mode="acceptEdits",
         cwd=cwd,
         model=model,

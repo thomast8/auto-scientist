@@ -23,6 +23,7 @@ from auto_scientist.sdk_utils import (
     OutputValidationError,
     collect_text_from_query,
     validate_json_output,
+    with_turn_budget,
 )
 from auto_scientist.state import PredictionRecord
 
@@ -204,10 +205,13 @@ async def run_scientist(
         f"Schema:\n{json.dumps(SCIENTIST_PLAN_SCHEMA, indent=2)}"
     )
 
+    max_turns = 10
     options = ClaudeCodeOptions(
-        system_prompt=system_prompt + json_instruction,
+        system_prompt=with_turn_budget(
+            system_prompt + json_instruction, max_turns, SCIENTIST_TOOLS
+        ),
         allowed_tools=SCIENTIST_TOOLS,
-        max_turns=10,
+        max_turns=max_turns,
         model=model,
         extra_args={"setting-sources": ""},
     )
@@ -292,10 +296,13 @@ async def run_scientist_revision(
         f"Schema:\n{json.dumps(SCIENTIST_PLAN_SCHEMA, indent=2)}"
     )
 
+    max_turns = 10
     options = ClaudeCodeOptions(
-        system_prompt=SCIENTIST_REVISION_SYSTEM + json_instruction,
+        system_prompt=with_turn_budget(
+            SCIENTIST_REVISION_SYSTEM + json_instruction, max_turns, SCIENTIST_TOOLS
+        ),
         allowed_tools=SCIENTIST_TOOLS,
-        max_turns=10,
+        max_turns=max_turns,
         model=model,
         extra_args={"setting-sources": ""},
     )

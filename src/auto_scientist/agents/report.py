@@ -12,7 +12,12 @@ from pathlib import Path
 from claude_code_sdk import AssistantMessage, ClaudeCodeOptions, ResultMessage, TextBlock
 
 from auto_scientist.prompts.report import REPORT_SYSTEM, REPORT_USER
-from auto_scientist.sdk_utils import append_block_to_buffer, safe_query, validate_report_structure
+from auto_scientist.sdk_utils import (
+    append_block_to_buffer,
+    safe_query,
+    validate_report_structure,
+    with_turn_budget,
+)
 from auto_scientist.state import ExperimentState
 
 logger = logging.getLogger(__name__)
@@ -52,10 +57,12 @@ async def run_report(
         notebook_content=notebook_content,
     )
 
+    max_turns = 10
+    allowed_tools = ["Read", "Glob"]
     options = ClaudeCodeOptions(
-        system_prompt=REPORT_SYSTEM,
-        allowed_tools=["Read", "Glob"],
-        max_turns=10,
+        system_prompt=with_turn_budget(REPORT_SYSTEM, max_turns, allowed_tools),
+        allowed_tools=allowed_tools,
+        max_turns=max_turns,
         permission_mode="acceptEdits",
         cwd=output_dir,
         model=model,
@@ -92,7 +99,7 @@ async def run_report(
         # Strip any conversational preamble before the first markdown heading.
         heading_idx = full_text.find("\n# ")
         if heading_idx != -1:
-            full_text = full_text[heading_idx + 1:]
+            full_text = full_text[heading_idx + 1 :]
 
         full_text = full_text.strip()
 
@@ -130,10 +137,14 @@ async def run_report(
                     f"Report attempt {attempt + 1}: structural issues "
                     f"({len(structure_issues)} found), resuming session to fix"
                 )
+                retry_max_turns = 10
+                retry_allowed_tools = ["Read", "Glob"]
                 options = ClaudeCodeOptions(
-                    system_prompt=REPORT_SYSTEM,
-                    allowed_tools=["Read", "Glob"],
-                    max_turns=10,
+                    system_prompt=with_turn_budget(
+                        REPORT_SYSTEM, retry_max_turns, retry_allowed_tools
+                    ),
+                    allowed_tools=retry_allowed_tools,
+                    max_turns=retry_max_turns,
                     permission_mode="acceptEdits",
                     cwd=output_dir,
                     model=model,
@@ -149,9 +160,7 @@ async def run_report(
 
     # Return whatever we have, with a visible warning if incomplete
     if not full_text:
-        raise RuntimeError(
-            f"Report generation produced no output after {MAX_ATTEMPTS} attempts"
-        )
+        raise RuntimeError(f"Report generation produced no output after {MAX_ATTEMPTS} attempts")
 
     remaining = validate_report_structure(full_text)
     if remaining:
