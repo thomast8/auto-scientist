@@ -139,14 +139,14 @@ When symbolic regression produced a different (and worse) answer, the system did
 
 ### Model Configuration
 
-| Agent | Model | Provider |
-|-------|-------|----------|
-| Scientist | Claude Opus 4.6 | Anthropic |
-| Analyst | Claude Sonnet 4.6 | Anthropic |
-| Coder | Claude Sonnet 4.6 | Anthropic |
-| Critic 1 | GPT-5.4 | OpenAI |
-| Critic 2 | Claude Sonnet 4.6 | Anthropic |
-| Summarizer | GPT-5.4-nano | OpenAI |
+| Agent | Model | Provider | Reasoning |
+|-------|-------|----------|-----------|
+| Scientist | Claude Opus 4.6 | Anthropic | low |
+| Analyst | Claude Sonnet 4.6 | Anthropic | low |
+| Coder | Claude Sonnet 4.6 | Anthropic | low |
+| Critic 1 | GPT-5.4 | OpenAI | low |
+| Critic 2 | Claude Sonnet 4.6 | Anthropic | low |
+| Summarizer | GPT-5.4-nano | OpenAI | off |
 
 ## Model Comparison (Final)
 

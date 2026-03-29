@@ -1130,6 +1130,7 @@ class PipelineApp(App):
     #run-area {
         height: auto;
         border: round grey;
+        transition: border 300ms in_out_cubic;
     }
     #run-area > Static {
         width: 100%;
@@ -1188,7 +1189,9 @@ class PipelineApp(App):
             if bar is not None:
                 bar.finish()
 
+            run_area = self.query_one("#run-area")
             if event.state == WorkerState.ERROR:
+                run_area.styles.border = ("round", "red")
                 error = event.worker.error
                 error_msg = f"{type(error).__name__}: {error}" if error else "Unknown error"
                 self.notify(
@@ -1200,6 +1203,7 @@ class PipelineApp(App):
                     Text(f"\n{error_msg}", style="red"),
                 )
             else:
+                run_area.styles.border = ("round", "green")
                 self.notify(
                     "Pipeline complete!",
                     severity="information",

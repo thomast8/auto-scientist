@@ -187,14 +187,14 @@ Five features. Four decision levels. A physical interpretation that reads like a
 
 ### Model Configuration
 
-| Agent | Model | Provider |
-|-------|-------|----------|
-| Scientist | Claude Opus 4.6 | Anthropic |
-| Analyst | Claude Sonnet 4.6 | Anthropic |
-| Coder | Claude Sonnet 4.6 | Anthropic |
-| Critic 1 | GPT-5.4 | OpenAI |
-| Critic 2 | Claude Sonnet 4.6 | Anthropic |
-| Summarizer | GPT-5.4-nano | OpenAI |
+| Agent | Model | Provider | Reasoning |
+|-------|-------|----------|-----------|
+| Scientist | Claude Opus 4.6 | Anthropic | medium |
+| Analyst | Claude Sonnet 4.6 | Anthropic | medium |
+| Coder | Claude Sonnet 4.6 | Anthropic | medium |
+| Critic 1 | GPT-5.4 | OpenAI | medium |
+| Critic 2 | Claude Sonnet 4.6 | Anthropic | medium |
+| Summarizer | GPT-5.4-nano | OpenAI | off |
 
 ## Per-Class Results
 
