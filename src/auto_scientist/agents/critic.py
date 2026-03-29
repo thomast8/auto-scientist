@@ -117,6 +117,7 @@ async def _query_critic(
             text=text,
             input_tokens=in_tok,
             output_tokens=usage.get("output_tokens", 0),
+            thinking_tokens=usage.get("thinking_tokens", 0),
         )
     else:
         raise ValueError(f"Unknown critic provider: {config.provider!r}")
@@ -284,6 +285,7 @@ async def run_single_critic_debate(
     rounds: list[DebateRound] = []
     total_in = 0
     total_out = 0
+    total_think = 0
 
     # Round 1: initial critique (no defense context)
     critic_system, critic_user = _build_critic_prompt(
@@ -305,6 +307,7 @@ async def run_single_critic_debate(
     )
     total_in += critic_result.input_tokens
     total_out += critic_result.output_tokens
+    total_think += critic_result.thinking_tokens
     raw_transcript.append({"role": "critic", "content": critic_result.text})
     if message_buffer is not None:
         message_buffer.append(f"[Critic/{persona_name}] {critic_result.text}")
@@ -338,6 +341,7 @@ async def run_single_critic_debate(
             )
             total_in += sci_result.input_tokens
             total_out += sci_result.output_tokens
+            total_think += sci_result.thinking_tokens
             raw_transcript.append({"role": "scientist", "content": sci_result.text})
             if message_buffer is not None:
                 message_buffer.append(f"[Scientist] {sci_result.text}")
@@ -371,6 +375,7 @@ async def run_single_critic_debate(
             )
             total_in += critic_result.input_tokens
             total_out += critic_result.output_tokens
+            total_think += critic_result.thinking_tokens
             raw_transcript.append({"role": "critic", "content": critic_result.text})
             if message_buffer is not None:
                 message_buffer.append(f"[Critic/{persona_name}] {critic_result.text}")
@@ -385,6 +390,7 @@ async def run_single_critic_debate(
         raw_transcript=raw_transcript,
         input_tokens=total_in,
         output_tokens=total_out,
+        thinking_tokens=total_think,
     )
 
 

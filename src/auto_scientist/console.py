@@ -164,6 +164,7 @@ class AgentPanel(Widget):
         self.start_time = time.monotonic()
         self.input_tokens = 0
         self.output_tokens = 0
+        self.thinking_tokens = 0
         self.num_turns = 0
         self.done = False
         self.done_summary = ""
@@ -383,20 +384,23 @@ class AgentPanel(Widget):
         rich_log.write(Text(f"[error] {msg}", style="red"))
         self._apply_border_color()
 
-    def set_tokens(self, input_tokens: int, output_tokens: int) -> None:
+    def set_tokens(self, input_tokens: int, output_tokens: int, thinking_tokens: int = 0) -> None:
         """Set token usage metadata."""
         self.input_tokens = input_tokens
         self.output_tokens = output_tokens
+        self.thinking_tokens = thinking_tokens
 
     def set_stats(
         self,
         input_tokens: int = 0,
         output_tokens: int = 0,
+        thinking_tokens: int = 0,
         num_turns: int = 0,
     ) -> None:
         """Set rich usage stats from SDK ResultMessage or direct API calls."""
         self.input_tokens = input_tokens
         self.output_tokens = output_tokens
+        self.thinking_tokens = thinking_tokens
         self.num_turns = num_turns
 
     @property
@@ -409,7 +413,11 @@ class AgentPanel(Widget):
         """Build the footer subtitle string."""
         parts = [_format_elapsed(self.elapsed)]
         if self.input_tokens or self.output_tokens:
-            parts.append(f"{self.input_tokens:,} in / {self.output_tokens:,} out")
+            tok = f"{self.input_tokens:,} in"
+            if self.thinking_tokens:
+                tok += f" / {self.thinking_tokens:,} think"
+            tok += f" / {self.output_tokens:,} out"
+            parts.append(tok)
         if self.num_turns:
             parts.append(f"{self.num_turns} {'turn' if self.num_turns == 1 else 'turns'}")
         return " | ".join(parts)
@@ -439,6 +447,7 @@ class MetricsBar(Widget):
         self.phase = ""
         self.total_input_tokens = 0
         self.total_output_tokens = 0
+        self.total_thinking_tokens = 0
         self.total_turns = 0
         self.scores: list[float] = []
         self.finished: bool = False
@@ -468,6 +477,7 @@ class MetricsBar(Widget):
         """Accumulate a completed agent's stats into the running totals."""
         self.total_input_tokens += panel.input_tokens
         self.total_output_tokens += panel.output_tokens
+        self.total_thinking_tokens += panel.thinking_tokens
         self.total_turns += panel.num_turns
 
     def render(self) -> Text:
@@ -484,7 +494,10 @@ class MetricsBar(Widget):
 
         total_tokens = self.total_input_tokens + self.total_output_tokens
         if total_tokens > 0:
-            tokens = f"{self.total_input_tokens:,} in / {self.total_output_tokens:,} out"
+            tokens = f"{self.total_input_tokens:,} in"
+            if self.total_thinking_tokens:
+                tokens += f" / {self.total_thinking_tokens:,} think"
+            tokens += f" / {self.total_output_tokens:,} out"
             line.append(f" | {tokens}", style="dim")
         if self.total_turns:
             label = "turn" if self.total_turns == 1 else "turns"
@@ -592,13 +605,18 @@ class IterationContainer(Vertical):
         total_elapsed = sum(p.elapsed for p in self._panels)
         total_in = sum(p.input_tokens for p in self._panels)
         total_out = sum(p.output_tokens for p in self._panels)
+        total_think = sum(p.thinking_tokens for p in self._panels)
         total_turns = sum(p.num_turns for p in self._panels)
 
         # Build aggregated subtitle: "4m 32s | 1,200 in / 800 out | 5 turns"
         parts: list[str] = []
         parts.append(_format_elapsed(total_elapsed))
         if total_in or total_out:
-            parts.append(f"{total_in:,} in / {total_out:,} out")
+            tok = f"{total_in:,} in"
+            if total_think:
+                tok += f" / {total_think:,} think"
+            tok += f" / {total_out:,} out"
+            parts.append(tok)
         if total_turns:
             label = "turn" if total_turns == 1 else "turns"
             parts.append(f"{total_turns} {label}")
@@ -1045,6 +1063,7 @@ class PipelineLive:
                 # Pre-set metadata so _build_footer() works
                 panel.input_tokens = p.get("input_tokens", 0)
                 panel.output_tokens = p.get("output_tokens", 0)
+                panel.thinking_tokens = p.get("thinking_tokens", 0)
                 panel.num_turns = p.get("num_turns", 0)
                 # Populate saved summary lines so the panel is expandable
                 for line in p.get("lines", []):

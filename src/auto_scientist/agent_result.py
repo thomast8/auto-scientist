@@ -15,3 +15,4 @@ class AgentResult:
     text: str
     input_tokens: int = 0
     output_tokens: int = 0
+    thinking_tokens: int = 0

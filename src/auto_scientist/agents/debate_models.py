@@ -101,6 +101,7 @@ class DebateResult(BaseModel):
     raw_transcript: list[dict[str, str]]
     input_tokens: int = 0
     output_tokens: int = 0
+    thinking_tokens: int = 0
 
 
 # JSON schema dicts for prompt injection (mirrors the Pydantic models).

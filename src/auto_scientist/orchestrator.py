@@ -726,6 +726,7 @@ class Orchestrator:
                     done_summary=p.done_summary,
                     input_tokens=p.input_tokens,
                     output_tokens=p.output_tokens,
+                    thinking_tokens=p.thinking_tokens,
                     num_turns=p.num_turns,
                     elapsed_seconds=p.elapsed,
                     lines=list(p.all_lines),
@@ -885,6 +886,7 @@ class Orchestrator:
         panel.set_stats(
             input_tokens=in_tok,
             output_tokens=usage.get("output_tokens", 0),
+            thinking_tokens=usage.get("thinking_tokens", 0),
             num_turns=usage.get("num_turns", 0),
         )
 
@@ -1227,6 +1229,7 @@ class Orchestrator:
             panel.set_stats(
                 input_tokens=result.input_tokens,
                 output_tokens=result.output_tokens,
+                thinking_tokens=result.thinking_tokens,
                 num_turns=len(result.raw_transcript),
             )
             # Flush collector entries before collapsing
