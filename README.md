@@ -344,6 +344,10 @@ uv run pytest tests/test_cli.py -v
 uv run ruff check src/ tests/
 ```
 
+## Case Study
+
+See [Classifying Alien Minerals](docs/showcase-alien-minerals.md) for a detailed walkthrough of an end-to-end autonomous investigation - how the system explored, failed, recovered, and delivered interpretable classification rules in under an hour.
+
 ## Architecture
 
 See [docs/architecture.md](docs/architecture.md) for the full specification, or open [docs/pipeline-visualizer.html](docs/pipeline-visualizer.html) for an interactive diagram of the pipeline.
