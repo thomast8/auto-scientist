@@ -18,6 +18,7 @@ import json
 import logging
 from typing import Any
 
+from claude_code_sdk import ClaudeCodeOptions
 from pydantic import BaseModel
 
 from auto_scientist.agent_result import AgentResult
@@ -30,8 +31,7 @@ from auto_scientist.agents.debate_models import (
     DebateRound,
     ScientistDefense,
 )
-from auto_scientist.model_config import AgentModelConfig
-from auto_scientist.models.anthropic_client import query_anthropic
+from auto_scientist.model_config import AgentModelConfig, reasoning_to_cc_extra_args
 from auto_scientist.models.google_client import query_google
 from auto_scientist.models.openai_client import query_openai
 from auto_scientist.prompts.critic import (
@@ -44,7 +44,11 @@ from auto_scientist.prompts.critic import (
     SCIENTIST_DEBATE_USER,
     get_model_index_for_debate,
 )
-from auto_scientist.sdk_utils import OutputValidationError, validate_json_output
+from auto_scientist.sdk_utils import (
+    OutputValidationError,
+    collect_text_from_query,
+    validate_json_output,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -60,13 +64,18 @@ async def _query_critic(
     config: AgentModelConfig,
     prompt: str,
     *,
+    system_prompt: str = "",
     response_schema: type[BaseModel] | None = None,
 ) -> AgentResult:
     """Dispatch a prompt to the appropriate provider with web search enabled."""
+    # For direct-API providers, prepend system_prompt to the user prompt
+    # (these APIs accept a single prompt string).
+    effective_prompt = f"{system_prompt}\n\n{prompt}" if system_prompt else prompt
+
     if config.provider == "openai":
         return await query_openai(
             config.model,
-            prompt,
+            effective_prompt,
             web_search=True,
             reasoning=config.reasoning,
             response_schema=response_schema,
@@ -74,18 +83,34 @@ async def _query_critic(
     elif config.provider == "google":
         return await query_google(
             config.model,
-            prompt,
+            effective_prompt,
             web_search=True,
             reasoning=config.reasoning,
             response_schema=response_schema,
         )
     elif config.provider == "anthropic":
-        return await query_anthropic(
-            config.model,
-            prompt,
-            web_search=True,
-            reasoning=config.reasoning,
-            response_schema=response_schema,
+        extra_args: dict[str, str | None] = {"setting-sources": ""}
+        if config.reasoning and config.reasoning.level != "off":
+            extra_args.update(reasoning_to_cc_extra_args(config.reasoning))
+        options = ClaudeCodeOptions(
+            model=config.model,
+            system_prompt=system_prompt,
+            allowed_tools=["WebSearch"],
+            max_turns=5,
+            extra_args=extra_args,
+        )
+        text = await collect_text_from_query(prompt, options)
+        usage: dict[str, Any] = getattr(collect_text_from_query, "last_usage", {})
+        # SDK splits input tokens across cache buckets
+        in_tok = (
+            usage.get("input_tokens", 0)
+            + usage.get("cache_creation_input_tokens", 0)
+            + usage.get("cache_read_input_tokens", 0)
+        )
+        return AgentResult(
+            text=text,
+            input_tokens=in_tok,
+            output_tokens=usage.get("output_tokens", 0),
         )
     else:
         raise ValueError(f"Unknown critic provider: {config.provider!r}")
@@ -100,6 +125,7 @@ async def _query_critic_structured(
     config: AgentModelConfig,
     prompt: str,
     *,
+    system_prompt: str = "",
     label: str = "",
     message_buffer: list[str] | None = None,
 ) -> tuple[CriticOutput, AgentResult]:
@@ -117,6 +143,7 @@ async def _query_critic_structured(
             result = await _query_critic(
                 config,
                 effective_prompt,
+                system_prompt=system_prompt,
                 response_schema=CriticOutput,
             )
         except Exception as e:
@@ -178,11 +205,11 @@ async def _query_scientist_structured(
 
     for attempt in range(MAX_RETRIES + 1):
         effective_prompt = prompt + correction_hint
-        full_prompt = f"{system_prompt}\n\n{effective_prompt}"
         try:
             result = await _query_critic(
                 config,
-                full_prompt,
+                effective_prompt,
+                system_prompt=system_prompt,
                 response_schema=ScientistDefense,
             )
         except Exception as e:
@@ -251,7 +278,7 @@ async def run_single_critic_debate(
     total_out = 0
 
     # Round 1: initial critique (no defense context)
-    critic_prompt = _build_critic_prompt(
+    critic_system, critic_user = _build_critic_prompt(
         plan,
         notebook_content,
         domain_knowledge,
@@ -263,7 +290,8 @@ async def run_single_critic_debate(
     )
     critic_output, critic_result = await _query_critic_structured(
         config,
-        critic_prompt,
+        critic_user,
+        system_prompt=critic_system,
         label=f"Critic ({persona_name}, {label}) round 1",
         message_buffer=message_buffer,
     )
@@ -315,7 +343,7 @@ async def run_single_critic_debate(
             )
 
             # Stateless: critic gets the defense but not their own prior critique
-            critic_prompt = _build_critic_prompt(
+            critic_system, critic_user = _build_critic_prompt(
                 plan,
                 notebook_content,
                 domain_knowledge,
@@ -328,7 +356,8 @@ async def run_single_critic_debate(
             )
             critic_output, critic_result = await _query_critic_structured(
                 config,
-                critic_prompt,
+                critic_user,
+                system_prompt=critic_system,
                 label=f"Critic ({persona_name}, {label}) round {round_num + 1}",
                 message_buffer=message_buffer,
             )
@@ -354,6 +383,42 @@ async def run_single_critic_debate(
 # ---------------------------------------------------------------------------
 # Top-level debate orchestrator
 # ---------------------------------------------------------------------------
+
+# Delay between launching non-SDK (direct API) critics to spread rate limit load
+_STAGGER_DELAY_SECONDS = 2.0
+
+
+async def _staggered_debate(
+    *,
+    delay: float,
+    config: AgentModelConfig,
+    plan: dict[str, Any],
+    notebook_content: str,
+    domain_knowledge: str = "",
+    max_rounds: int = 1,
+    scientist_config: AgentModelConfig | None = None,
+    message_buffer: list[str] | None = None,
+    persona: dict[str, str] | None = None,
+    analysis_json: str = "",
+    prediction_history: str = "",
+    goal: str = "",
+) -> DebateResult:
+    """Wrapper that adds a startup delay before running a debate."""
+    if delay > 0:
+        await asyncio.sleep(delay)
+    return await run_single_critic_debate(
+        config=config,
+        plan=plan,
+        notebook_content=notebook_content,
+        domain_knowledge=domain_knowledge,
+        max_rounds=max_rounds,
+        scientist_config=scientist_config,
+        message_buffer=message_buffer,
+        persona=persona,
+        analysis_json=analysis_json,
+        prediction_history=prediction_history,
+        goal=goal,
+    )
 
 
 async def run_debate(
@@ -402,6 +467,10 @@ async def run_debate(
 
     active_personas = [p for p in PERSONAS if iteration > 0 or p["name"] in ITERATION_0_PERSONAS]
 
+    # Track how many non-SDK critics per provider have been launched
+    # to assign incremental stagger delays
+    provider_launch_count: dict[str, int] = {}
+
     tasks = []
     for persona_index, persona in enumerate(active_personas):
         model_index = get_model_index_for_debate(
@@ -419,8 +488,18 @@ async def run_debate(
         else:
             buf = message_buffer
 
+        # SDK (Anthropic) critics launch immediately; non-SDK critics
+        # get staggered delays to spread rate limit load per provider
+        if config.provider != "anthropic":
+            count = provider_launch_count.get(config.provider, 0)
+            delay = count * _STAGGER_DELAY_SECONDS
+            provider_launch_count[config.provider] = count + 1
+        else:
+            delay = 0.0
+
         tasks.append(
-            run_single_critic_debate(
+            _staggered_debate(
+                delay=delay,
                 config=config,
                 plan=plan,
                 notebook_content=notebook_content,
@@ -469,8 +548,8 @@ def _build_critic_prompt(
     analysis_json: str = "",
     prediction_history: str = "",
     goal: str = "",
-) -> str:
-    """Build the prompt sent to critic models.
+) -> tuple[str, str]:
+    """Build the (system, user) prompt pair sent to critic models.
 
     For round 1, scientist_defense is empty.
     For round 2+, it contains the scientist's response to the previous critique.
@@ -478,6 +557,9 @@ def _build_critic_prompt(
 
     persona_instructions overrides the default instructions block when provided
     (used by the Trajectory Critic which needs arc-focused instructions).
+
+    Returns:
+        (system_prompt, user_prompt) tuple.
     """
     defense_section = ""
     if scientist_defense:
@@ -500,7 +582,7 @@ def _build_critic_prompt(
         plan_json=json.dumps(plan, indent=2),
         scientist_defense=defense_section,
     )
-    return f"{system}\n\n{user}"
+    return system, user
 
 
 def _build_scientist_debate_user_prompt(

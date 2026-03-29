@@ -84,9 +84,7 @@ def append_block_to_buffer(block: Any, buffer: list[str]) -> None:
         logger.debug(entry)
 
 
-async def safe_query(
-    prompt: str, options: ClaudeCodeOptions
-) -> AsyncIterator[Message]:
+async def safe_query(prompt: str, options: ClaudeCodeOptions) -> AsyncIterator[Message]:
     """Wrap claude_code_sdk.query, filtering out None (unknown message types)."""
     logger.debug(
         f"SDK query start: model={options.model}, "
@@ -102,6 +100,7 @@ async def safe_query(
 # Output validation and retry
 # ---------------------------------------------------------------------------
 
+
 class OutputValidationError(Exception):
     """Raised when an agent's output fails JSON parsing or schema validation."""
 
@@ -114,9 +113,7 @@ class OutputValidationError(Exception):
         self.raw_output = raw_output
         self.validation_error = validation_error
         self.agent_name = agent_name
-        super().__init__(
-            f"{agent_name} output validation failed: {validation_error}"
-        )
+        super().__init__(f"{agent_name} output validation failed: {validation_error}")
 
     def correction_prompt(self) -> str:
         """Format a correction hint for the LLM to fix its output."""
@@ -133,12 +130,29 @@ class OutputValidationError(Exception):
 
 
 def _strip_markdown_fencing(raw: str) -> str:
-    """Remove markdown code fences from a string."""
+    """Remove markdown code fences and leading prose from a string.
+
+    Handles several messy-output patterns:
+    - ```json ... ``` fencing
+    - Leading prose before the JSON object/array
+    - Multiple fenced blocks (extracts the first)
+    """
     raw = raw.strip()
+
+    # Strip ``` fences (possibly with language tag)
     if raw.startswith("```"):
         lines = raw.split("\n")
         lines = [line for line in lines if not line.strip().startswith("```")]
-        raw = "\n".join(lines)
+        raw = "\n".join(lines).strip()
+
+    # If the string doesn't start with { or [, try to find the first JSON
+    # object/array start. Models sometimes prepend prose like "Here is my output:"
+    if raw and raw[0] not in "{[":
+        for i, ch in enumerate(raw):
+            if ch in "{[":
+                raw = raw[i:]
+                break
+
     return raw
 
 
@@ -151,20 +165,27 @@ def validate_json_output(
 
     Returns model_dump() dict on success.
     Raises OutputValidationError on JSON parse or schema validation failure.
+
+    Uses raw_decode() to extract the first JSON object, tolerating
+    trailing text that models sometimes append after the JSON.
     """
     cleaned = _strip_markdown_fencing(raw)
     try:
-        parsed = json.loads(cleaned)
+        parsed, _ = json.JSONDecoder().raw_decode(cleaned)
     except json.JSONDecodeError as e:
         raise OutputValidationError(
-            raw_output=raw, validation_error=e, agent_name=agent_name,
+            raw_output=raw,
+            validation_error=e,
+            agent_name=agent_name,
         ) from e
 
     try:
         validated = model_cls.model_validate(parsed)
     except ValidationError as e:
         raise OutputValidationError(
-            raw_output=raw, validation_error=e, agent_name=agent_name,
+            raw_output=raw,
+            validation_error=e,
+            agent_name=agent_name,
         ) from e
 
     return validated.model_dump()
@@ -280,9 +301,7 @@ def validate_report_structure(text: str) -> list[str]:
                     break
             section = "\n".join(lines[line_num + 1 : end])
             if "|" not in section:
-                issues.append(
-                    "Version Comparison Table section missing markdown table"
-                )
+                issues.append("Version Comparison Table section missing markdown table")
             break
 
     return issues

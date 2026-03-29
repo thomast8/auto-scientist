@@ -357,6 +357,12 @@ hypotheses, and an overall assessment.
 
 Use web search to check the literature for prior work and verify scientific claims.
 </task>
+
+<recap>
+CRITICAL: Your entire response must be a single JSON object matching the schema
+in the output_format section. Do not include any text before or after the JSON.
+No markdown fencing. No explanations. Just the raw JSON object.
+</recap>
 """
 
 SCIENTIST_DEBATE_SYSTEM = """\
@@ -428,4 +434,10 @@ Respond to the critic's structured feedback. For each concern, provide a
 verdict (accepted, rejected, or partially_accepted) with reasoning. Output
 your response as structured JSON.
 </task>
+
+<recap>
+CRITICAL: Your entire response must be a single JSON object matching the schema
+in the output_format section. Do not include any text before or after the JSON.
+No markdown fencing. No explanations. Just the raw JSON object.
+</recap>
 """

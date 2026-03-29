@@ -15,10 +15,10 @@ from auto_scientist.agents.critic import (
 from auto_scientist.agents.debate_models import CriticOutput, DebateResult, ScientistDefense
 from auto_scientist.model_config import AgentModelConfig, ReasoningConfig
 
-# Mock paths for the direct API calls used by both critic and scientist
+# Mock paths for direct API calls (OpenAI/Google) and SDK (Anthropic)
 OPENAI_PATH = "auto_scientist.agents.critic.query_openai"
 GOOGLE_PATH = "auto_scientist.agents.critic.query_google"
-ANTHROPIC_PATH = "auto_scientist.agents.critic.query_anthropic"
+SDK_PATH = "auto_scientist.agents.critic.collect_text_from_query"
 
 
 def _valid_critic_json(
@@ -101,6 +101,37 @@ _CR = _structured_critic_result  # critic result
 _DR = _structured_defense_result  # defense result
 
 
+def _sdk_mock(
+    text: str = "",
+    input_tokens: int = 10,
+    output_tokens: int = 5,
+) -> AsyncMock:
+    """Create an AsyncMock for collect_text_from_query (SDK path).
+
+    Returns text directly (not AgentResult) and sets last_usage attribute.
+    """
+    mock = AsyncMock(return_value=text)
+    mock.last_usage = {"input_tokens": input_tokens, "output_tokens": output_tokens}
+    return mock
+
+
+def _sdk_critic_mock(**kwargs) -> AsyncMock:
+    """SDK mock returning valid CriticOutput JSON."""
+    return _sdk_mock(text=_pad(_valid_critic_json(**kwargs)))
+
+
+def _sdk_defense_mock(**kwargs) -> AsyncMock:
+    """SDK mock returning valid ScientistDefense JSON."""
+    return _sdk_mock(text=_pad(_valid_defense_json(**kwargs)))
+
+
+@pytest.fixture(autouse=True)
+def _no_stagger_delay():
+    """Disable stagger delays in tests to keep them fast."""
+    with patch("auto_scientist.agents.critic._STAGGER_DELAY_SECONDS", 0.0):
+        yield
+
+
 @pytest.fixture
 def plan():
     return {
@@ -146,45 +177,50 @@ def base_kwargs(plan, two_critics):
 
 
 class TestBuildCriticPrompt:
-    def test_includes_plan_json(self):
+    def test_returns_tuple(self):
+        result = _build_critic_prompt({"h": "p"}, "", "")
+        assert isinstance(result, tuple)
+        assert len(result) == 2
+
+    def test_includes_plan_json_in_user(self):
         plan = {"hypothesis": "test plan"}
-        prompt = _build_critic_prompt(plan, "", "")
-        assert "test plan" in prompt
-        assert "<plan>" in prompt
+        _system, user = _build_critic_prompt(plan, "", "")
+        assert "test plan" in user
+        assert "<plan>" in user
 
     def test_empty_defense_no_tag(self):
-        prompt = _build_critic_prompt({"h": "p"}, "", "", scientist_defense="")
-        assert "<scientist_defense>" not in prompt
+        _system, user = _build_critic_prompt({"h": "p"}, "", "", scientist_defense="")
+        assert "<scientist_defense>" not in user
 
     def test_with_defense_includes_tag(self):
-        prompt = _build_critic_prompt(
+        _system, user = _build_critic_prompt(
             {"h": "p"},
             "",
             "",
             scientist_defense="I disagree because...",
         )
-        assert "<scientist_defense>" in prompt
-        assert "I disagree because..." in prompt
+        assert "<scientist_defense>" in user
+        assert "I disagree because..." in user
 
     def test_fallback_for_empty_values(self):
-        prompt = _build_critic_prompt({"h": "p"}, "", "")
-        assert "(empty)" in prompt or "(none provided)" in prompt
+        _system, user = _build_critic_prompt({"h": "p"}, "", "")
+        assert "(empty)" in user or "(none provided)" in user
 
     def test_persona_injected_into_system(self):
         persona = "<persona>\nYou are the Methodologist.\n</persona>"
-        prompt = _build_critic_prompt({"h": "p"}, "", "", persona_text=persona)
-        assert "<persona>" in prompt
-        assert "Methodologist" in prompt
+        system, _user = _build_critic_prompt({"h": "p"}, "", "", persona_text=persona)
+        assert "<persona>" in system
+        assert "Methodologist" in system
 
     def test_output_format_in_system(self):
-        prompt = _build_critic_prompt({"h": "p"}, "", "")
-        assert "<output_format>" in prompt
-        assert "concerns" in prompt
-        assert "severity" in prompt
+        system, _user = _build_critic_prompt({"h": "p"}, "", "")
+        assert "<output_format>" in system
+        assert "concerns" in system
+        assert "severity" in system
 
     def test_no_persona_leaves_empty(self):
-        prompt = _build_critic_prompt({"h": "p"}, "", "")
-        assert "<persona>" not in prompt
+        system, _user = _build_critic_prompt({"h": "p"}, "", "")
+        assert "<persona>" not in system
 
 
 class TestRunDebate:
@@ -277,17 +313,18 @@ class TestRunDebate:
     @pytest.mark.asyncio
     async def test_single_round_no_scientist_defense(self, base_kwargs):
         """With max_rounds=1, no scientist defense is produced."""
+        mock_sdk = _sdk_defense_mock()
         with (
             patch(OPENAI_PATH, new_callable=AsyncMock, return_value=_CR()),
             patch(GOOGLE_PATH, new_callable=AsyncMock, return_value=_CR()),
-            patch(ANTHROPIC_PATH, new_callable=AsyncMock) as mock_anthropic,
+            patch(SDK_PATH, mock_sdk),
         ):
             results = await run_debate(**base_kwargs, max_rounds=1)
 
         for r in results:
             assert r.rounds[0].scientist_defense is None
-        # Anthropic (scientist) should not be called in single-round mode
-        mock_anthropic.assert_not_called()
+        # SDK (scientist) should not be called in single-round mode
+        mock_sdk.assert_not_called()
 
     @pytest.mark.asyncio
     async def test_two_rounds_has_scientist_defense(self, base_kwargs):
@@ -295,7 +332,7 @@ class TestRunDebate:
         with (
             patch(OPENAI_PATH, new_callable=AsyncMock, return_value=_CR()),
             patch(GOOGLE_PATH, new_callable=AsyncMock, return_value=_CR()),
-            patch(ANTHROPIC_PATH, new_callable=AsyncMock, return_value=_DR()),
+            patch(SDK_PATH, _sdk_defense_mock()),
         ):
             results = await run_debate(**base_kwargs, max_rounds=2)
 
@@ -346,16 +383,19 @@ class TestRunDebate:
 
     @pytest.mark.asyncio
     async def test_web_search_enabled_for_scientist(self, base_kwargs):
-        """Scientist direct API calls pass web_search=True."""
+        """Scientist SDK calls include WebSearch in allowed_tools."""
+        mock_sdk = _sdk_defense_mock()
         with (
             patch(OPENAI_PATH, new_callable=AsyncMock, return_value=_CR()),
             patch(GOOGLE_PATH, new_callable=AsyncMock, return_value=_CR()),
-            patch(ANTHROPIC_PATH, new_callable=AsyncMock, return_value=_DR()) as mock_anthropic,
+            patch(SDK_PATH, mock_sdk),
         ):
             await run_debate(**base_kwargs, max_rounds=2)
 
-        for call in mock_anthropic.call_args_list:
-            assert call.kwargs.get("web_search") is True
+        # Verify ClaudeCodeOptions passed to collect_text_from_query has WebSearch
+        for call in mock_sdk.call_args_list:
+            options = call[0][1]  # second positional arg is ClaudeCodeOptions
+            assert "WebSearch" in options.allowed_tools
 
     @pytest.mark.asyncio
     async def test_unknown_provider_raises_when_all_fail(self, plan):
@@ -372,11 +412,7 @@ class TestRunDebate:
     @pytest.mark.asyncio
     async def test_anthropic_critic_dispatches_correctly(self, plan):
         critic = AgentModelConfig(provider="anthropic", model="claude-sonnet-4-6")
-        with patch(
-            ANTHROPIC_PATH,
-            new_callable=AsyncMock,
-            return_value=_CR(overall="Anthropic critique"),
-        ):
+        with patch(SDK_PATH, _sdk_critic_mock(overall="Anthropic critique")):
             result = await run_debate(
                 critic_configs=[critic],
                 plan=plan,
@@ -418,7 +454,7 @@ class TestRunDebate:
         with (
             patch(OPENAI_PATH, new_callable=AsyncMock, return_value=_CR()),
             patch(GOOGLE_PATH, new_callable=AsyncMock, return_value=_CR()),
-            patch(ANTHROPIC_PATH, new_callable=AsyncMock, return_value=_DR()),
+            patch(SDK_PATH, _sdk_defense_mock()),
         ):
             results = await run_debate(**base_kwargs, max_rounds=2)
 
@@ -540,7 +576,7 @@ class TestScientistDefenseValidation:
         critic = AgentModelConfig(provider="openai", model="gpt-4o")
         with (
             patch(OPENAI_PATH, new_callable=AsyncMock, return_value=_CR()),
-            patch(ANTHROPIC_PATH, new_callable=AsyncMock, return_value=_DR()),
+            patch(SDK_PATH, _sdk_defense_mock()),
         ):
             result = await run_single_critic_debate(
                 config=critic,
@@ -561,9 +597,8 @@ class TestScientistDefenseValidation:
         with (
             patch(OPENAI_PATH, new_callable=AsyncMock, return_value=_CR()),
             patch(
-                ANTHROPIC_PATH,
-                new_callable=AsyncMock,
-                return_value=_critic_result("Not JSON, just a prose defense."),
+                SDK_PATH,
+                _sdk_mock(text=_pad("Not JSON, just a prose defense.")),
             ),
         ):
             result = await run_single_critic_debate(
@@ -580,32 +615,32 @@ class TestScientistDefenseValidation:
 
 class TestBuildCriticPromptContext:
     def test_analysis_json_included(self):
-        prompt = _build_critic_prompt(
+        _system, user = _build_critic_prompt(
             {"h": "p"},
             "",
             "",
             analysis_json='{"key_metrics": {"rmse": 0.52}}',
         )
-        assert "<analysis>" in prompt
-        assert "rmse" in prompt
+        assert "<analysis>" in user
+        assert "rmse" in user
 
     def test_prediction_history_included(self):
-        prompt = _build_critic_prompt(
+        _system, user = _build_critic_prompt(
             {"h": "p"},
             "",
             "",
             prediction_history="[1.0] CONFIRMED: polynomial fits well",
         )
-        assert "<prediction_history>" in prompt
-        assert "polynomial fits well" in prompt
+        assert "<prediction_history>" in user
+        assert "polynomial fits well" in user
 
     def test_empty_analysis_shows_fallback(self):
-        prompt = _build_critic_prompt({"h": "p"}, "", "")
-        assert "(no analysis yet)" in prompt
+        _system, user = _build_critic_prompt({"h": "p"}, "", "")
+        assert "(no analysis yet)" in user
 
     def test_empty_prediction_history_shows_fallback(self):
-        prompt = _build_critic_prompt({"h": "p"}, "", "")
-        assert "(no prediction history yet)" in prompt
+        _system, user = _build_critic_prompt({"h": "p"}, "", "")
+        assert "(no prediction history yet)" in user
 
 
 class TestBuildScientistDebatePromptContext:
@@ -697,10 +732,11 @@ class TestRunDebateWithContext:
     @pytest.mark.asyncio
     async def test_analysis_in_scientist_debate_prompt(self, plan, two_critics):
         """Scientist debate defense prompt includes analysis and prediction history."""
+        mock_sdk = _sdk_defense_mock()
         with (
             patch(OPENAI_PATH, new_callable=AsyncMock, return_value=_CR()),
             patch(GOOGLE_PATH, new_callable=AsyncMock, return_value=_CR()),
-            patch(ANTHROPIC_PATH, new_callable=AsyncMock, return_value=_DR()) as mock_anthropic,
+            patch(SDK_PATH, mock_sdk),
         ):
             await run_debate(
                 critic_configs=two_critics,
@@ -711,7 +747,8 @@ class TestRunDebateWithContext:
                 prediction_history="[2.0] REFUTED: linear model",
             )
 
-        scientist_prompt = mock_anthropic.call_args_list[0][0][1]
+        # First positional arg to collect_text_from_query is the prompt
+        scientist_prompt = mock_sdk.call_args_list[0][0][0]
         assert "<analysis>" in scientist_prompt
         assert "r2" in scientist_prompt
         assert "<prediction_history>" in scientist_prompt
@@ -809,16 +846,13 @@ class TestResponseSchemaPassthrough:
         assert mock_openai.call_args.kwargs.get("response_schema") is CriticOutput
 
     @pytest.mark.asyncio
-    async def test_scientist_defense_passes_response_schema(self, plan):
-        """Scientist defense passes response_schema=ScientistDefense to provider."""
+    async def test_scientist_defense_uses_sdk_with_correct_model(self, plan):
+        """Scientist defense (Anthropic) uses SDK with correct model in options."""
         critic = AgentModelConfig(provider="openai", model="gpt-4o")
+        mock_sdk = _sdk_defense_mock()
         with (
             patch(OPENAI_PATH, new_callable=AsyncMock, return_value=_CR()),
-            patch(
-                ANTHROPIC_PATH,
-                new_callable=AsyncMock,
-                return_value=_DR(),
-            ) as mock_anthropic,
+            patch(SDK_PATH, mock_sdk),
         ):
             await run_single_critic_debate(
                 config=critic,
@@ -827,21 +861,23 @@ class TestResponseSchemaPassthrough:
                 max_rounds=2,
             )
 
-        assert mock_anthropic.call_args.kwargs.get("response_schema") is ScientistDefense
+        # Verify ClaudeCodeOptions has the default scientist model
+        options = mock_sdk.call_args[0][1]
+        assert options.model == "claude-sonnet-4-6"
 
 
 class TestGoalInPrompts:
     """Verify that the goal placeholder is present and populated in critic/debate prompts."""
 
     def test_goal_in_critic_prompt(self):
-        prompt = _build_critic_prompt(
+        _system, user = _build_critic_prompt(
             {"hypothesis": "test"},
             "",
             "",
             goal="discover causal relationships",
         )
-        assert "discover causal relationships" in prompt
-        assert "<goal>" in prompt
+        assert "discover causal relationships" in user
+        assert "<goal>" in user
 
     def test_goal_in_scientist_debate_prompt(self):
         prompt = _build_scientist_debate_user_prompt(
@@ -852,3 +888,53 @@ class TestGoalInPrompts:
         )
         assert "optimize alloy compositions" in prompt
         assert "<goal>" in prompt
+
+
+class TestAnthropicSDKPath:
+    """Verify Anthropic critics use Claude Code SDK instead of direct API."""
+
+    @pytest.mark.asyncio
+    async def test_anthropic_critic_uses_sdk(self, plan):
+        """Anthropic critics call collect_text_from_query, not query_anthropic."""
+        critic = AgentModelConfig(provider="anthropic", model="claude-sonnet-4-6")
+        valid_json = _valid_critic_json()
+
+        mock_sdk = AsyncMock(return_value=_pad(valid_json))
+        mock_sdk.last_usage = {"input_tokens": 100, "output_tokens": 50}
+
+        with patch(SDK_PATH, mock_sdk):
+            result = await run_single_critic_debate(
+                config=critic,
+                plan=plan,
+                notebook_content="",
+                max_rounds=1,
+            )
+
+        mock_sdk.assert_called()
+        assert isinstance(result, DebateResult)
+        assert result.input_tokens == 100
+        assert result.output_tokens == 50
+
+    @pytest.mark.asyncio
+    async def test_anthropic_scientist_defense_uses_sdk(self, plan):
+        """Scientist-in-debate with Anthropic config uses SDK too."""
+        critic = AgentModelConfig(provider="openai", model="gpt-4o")
+        scientist = AgentModelConfig(provider="anthropic", model="claude-sonnet-4-6")
+
+        mock_sdk = AsyncMock(return_value=_pad(_valid_defense_json()))
+        mock_sdk.last_usage = {"input_tokens": 80, "output_tokens": 40}
+
+        with (
+            patch(OPENAI_PATH, new_callable=AsyncMock, return_value=_CR()),
+            patch(SDK_PATH, mock_sdk),
+        ):
+            result = await run_single_critic_debate(
+                config=critic,
+                plan=plan,
+                notebook_content="",
+                max_rounds=2,
+                scientist_config=scientist,
+            )
+
+        mock_sdk.assert_called()
+        assert result.rounds[0].scientist_defense is not None
