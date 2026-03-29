@@ -697,7 +697,7 @@ class TestPipelineApp:
         orch = FakeOrch()
         app = PipelineApp(orch)
         async with app.run_test():
-            assert app.query_one("#main-scroll") is not None
+            assert app.query_one("#run-area") is not None
             assert app.query_one(MetricsBar) is not None
 
     @pytest.mark.asyncio

@@ -1032,7 +1032,7 @@ class PipelineLive:
 
         def _do_mount():
             container = IterationContainer(iter_title=title)
-            self._app.query_one("#main-scroll").mount(container)
+            self._app.query_one("#run-area").mount(container)
 
             for p in panels:
                 panel = AgentPanel(
@@ -1096,11 +1096,11 @@ class PipelineApp(App):
     #banner-area {
         height: auto;
     }
-    #main-scroll {
-        height: 1fr;
+    #run-area {
+        height: auto;
         border: round grey;
     }
-    #main-scroll > Static {
+    #run-area > Static {
         width: 100%;
     }
     """
@@ -1115,10 +1115,10 @@ class PipelineApp(App):
     def compose(self) -> ComposeResult:
         yield Header()
         yield MetricsBar()
-        with Vertical(id="outer-container") as outer:
+        with VerticalScroll(id="outer-container") as outer:
             outer.border_title = "Auto-Scientist"
             yield Vertical(id="banner-area")
-            with VerticalScroll(id="main-scroll") as run:
+            with Vertical(id="run-area") as run:
                 run.border_title = "Run"
                 pass
         yield Footer()
@@ -1208,13 +1208,13 @@ class PipelineApp(App):
 
     def _is_near_bottom(self) -> bool:
         """Check if the scroll view is at or near the bottom."""
-        scroll = self.query_one("#main-scroll", VerticalScroll)
+        scroll = self.query_one("#outer-container", VerticalScroll)
         return scroll.scroll_offset.y >= scroll.max_scroll_y - 2
 
     def _scroll_to_end(self) -> None:
         """Scroll to the bottom of the main scroll area."""
         self.call_after_refresh(
-            self.query_one("#main-scroll").scroll_end,
+            self.query_one("#outer-container").scroll_end,
             animate=False,
         )
 
@@ -1332,7 +1332,7 @@ class PipelineApp(App):
 
     def _scroll_to(self, direction: str) -> None:
         """Scroll the main area to top or bottom."""
-        scroll = self.query_one("#main-scroll", VerticalScroll)
+        scroll = self.query_one("#outer-container", VerticalScroll)
         if direction == "top":
             scroll.scroll_home(animate=False)
         else:
@@ -1364,7 +1364,7 @@ class PipelineApp(App):
     def _mount_panel(self, panel: AgentPanel) -> None:
         """Mount a panel into the current iteration container or scroll."""
         near_bottom = self._is_near_bottom()
-        target = self._live._current_iteration or self.query_one("#main-scroll")
+        target = self._live._current_iteration or self.query_one("#run-area")
         target.mount(panel)
         if isinstance(target, IterationContainer):
             target.add_panel(panel)
@@ -1372,9 +1372,9 @@ class PipelineApp(App):
             self._scroll_to_end()
 
     def _mount_iteration(self, container: IterationContainer) -> None:
-        """Mount an iteration container into the main scroll."""
+        """Mount an iteration container into the run area."""
         near_bottom = self._is_near_bottom()
-        self.query_one("#main-scroll").mount(container)
+        self.query_one("#run-area").mount(container)
         if near_bottom:
             self._scroll_to_end()
 
@@ -1385,6 +1385,6 @@ class PipelineApp(App):
     def _mount_static(self, renderable: RenderableType) -> None:
         """Mount a Rich renderable as a Static widget."""
         near_bottom = self._is_near_bottom()
-        self.query_one("#main-scroll").mount(Static(renderable))
+        self.query_one("#run-area").mount(Static(renderable))
         if near_bottom:
             self._scroll_to_end()
