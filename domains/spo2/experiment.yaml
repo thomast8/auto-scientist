@@ -4,5 +4,6 @@ goal: >
   approach: sensor calibration (latent SaO2 + gamma kernel) then
   physiology (Severinghaus ODC). Single subject, 5 breath-holds at
   different lung volumes.
+difficulty: expert
 max_iterations: 10
-preset: default
+preset: max

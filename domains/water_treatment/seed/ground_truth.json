@@ -12,6 +12,10 @@
         "Chemical_Dose"
       ],
       [
+        "Outlet_Clarity_lag1",
+        "Chemical_Dose"
+      ],
+      [
         "Rainfall",
         "Flow_Rate"
       ],
@@ -21,6 +25,14 @@
       ],
       [
         "Chemical_Dose",
+        "Floc_Size"
+      ],
+      [
+        "Temperature",
+        "Floc_Size"
+      ],
+      [
+        "Organic_Load",
         "Floc_Size"
       ],
       [
@@ -34,110 +46,135 @@
       [
         "Settling_Rate",
         "Outlet_Clarity"
+      ]
+    ],
+    "latent_edges": [
+      [
+        "Source_Water_Quality",
+        "Turbidity"
       ],
       [
-        "Temperature",
-        "Floc_Size"
+        "Source_Water_Quality",
+        "Organic_Load"
       ]
     ],
     "confounders": [
-      "Temperature"
+      "Source_Water_Quality"
     ],
     "colliders": [
+      "Chemical_Dose",
+      "Floc_Size",
       "Settling_Rate"
     ],
-    "intervention": {
-      "variable": "Chemical_Dose",
-      "fixed_value": 45.0,
-      "broken_edge": [
+    "feedback_loop": {
+      "from": "Outlet_Clarity",
+      "to": "Chemical_Dose",
+      "lag": 1,
+      "mechanism": "Operator adjusts dose based on recent output quality"
+    }
+  },
+  "nonlinearities": {
+    "Chemical_Dose_to_Floc_Size": {
+      "type": "saturating",
+      "formula": "Vmax * dose / (dose + Km), Vmax=40.0, Km=15.0"
+    },
+    "Temperature_to_Floc_Size": {
+      "type": "quadratic",
+      "formula": "-0.08 * (T - 18.0)^2",
+      "optimal": 18.0
+    },
+    "Turbidity_to_Chemical_Dose": {
+      "type": "piecewise",
+      "formula": "0.4*T if T <= 8.0, else 0.4*8.0 + 1.2*(T - 8.0)",
+      "threshold": 8.0
+    },
+    "Floc_Residence_to_Settling": {
+      "type": "interaction",
+      "formula": "0.01 * Floc_Size * Residence_Time"
+    }
+  },
+  "challenges": {
+    "latent_confounder": {
+      "variable": "Source_Water_Quality",
+      "affects": [
+        "Turbidity",
+        "Organic_Load"
+      ],
+      "mechanism": "Unobserved intake water quality driven by upstream conditions"
+    },
+    "feedback_loop": {
+      "description": "Chemical_Dose depends on lagged Outlet_Clarity (operator adjustment)",
+      "creates": "Apparent cycle in contemporaneous correlations"
+    },
+    "simpsons_paradox": {
+      "description": "Aggregate dose-clarity correlation is negative (both driven by bad water). True causal effect of dose on clarity is positive."
+    },
+    "regime_change": {
+      "observation_index": 1200,
+      "description": "Upstream construction raises source water quality degradation",
+      "shift": {
+        "Source_Water_Quality": "0.0 -> 4.0"
+      }
+    },
+    "mnar_missingness": {
+      "variable": "Turbidity",
+      "ceiling": 15.0,
+      "n_censored": 240,
+      "description": "Sensor saturates above ceiling; high-turbidity events underrepresented"
+    },
+    "rainfall_lag": {
+      "lag_hours": 2,
+      "description": "Rainfall affects turbidity with a 2-hour delay"
+    },
+    "pilot_partial_compliance": {
+      "target_dose": 45.0,
+      "compliance_sigma": 3.0,
+      "description": "Pilot study dose drifts \u00b13 mg/L from target"
+    }
+  },
+  "intervention": {
+    "variable": "Chemical_Dose",
+    "target_value": 45.0,
+    "compliance_sigma": 3.0,
+    "broken_edges": [
+      [
         "Turbidity",
         "Chemical_Dose"
+      ],
+      [
+        "Outlet_Clarity_lag1",
+        "Chemical_Dose"
       ]
-    }
-  },
-  "structural_equations": {
-    "Rainfall": {
-      "parents": {},
-      "intercept": 5.0,
-      "noise_sigma": 3.0
-    },
-    "Temperature": {
-      "parents": {},
-      "intercept": 15.0,
-      "noise_sigma": 4.0
-    },
-    "Turbidity": {
-      "parents": {
-        "Rainfall": 0.8
-      },
-      "intercept": 2.0,
-      "noise_sigma": 1.5
-    },
-    "Chemical_Dose": {
-      "parents": {
-        "Turbidity": 0.6
-      },
-      "intercept": 10.0,
-      "noise_sigma": 2.0
-    },
-    "Flow_Rate": {
-      "parents": {
-        "Rainfall": 1.2
-      },
-      "intercept": 50.0,
-      "noise_sigma": 5.0
-    },
-    "Residence_Time": {
-      "parents": {
-        "Flow_Rate": -0.3
-      },
-      "intercept": 60.0,
-      "noise_sigma": 3.0
-    },
-    "Floc_Size": {
-      "parents": {
-        "Chemical_Dose": 1.5,
-        "Temperature": 0.8
-      },
-      "intercept": 20.0,
-      "noise_sigma": 5.0
-    },
-    "Settling_Rate": {
-      "parents": {
-        "Floc_Size": 0.4,
-        "Residence_Time": 0.2
-      },
-      "intercept": 1.0,
-      "noise_sigma": 1.0
-    },
-    "Outlet_Clarity": {
-      "parents": {
-        "Settling_Rate": 0.7
-      },
-      "intercept": 0.5,
-      "noise_sigma": 0.5
-    }
+    ]
   },
   "scoring": {
-    "edge_precision": {
-      "weight": 0.25,
-      "description": "Fraction of claimed edges that are true"
+    "edge_discovery": {
+      "weight": 0.15,
+      "description": "Precision and recall on observed causal edges"
     },
-    "edge_recall": {
-      "weight": 0.25,
-      "description": "Fraction of true edges discovered"
+    "nonlinearity_detection": {
+      "weight": 0.15,
+      "description": "Identified saturating, quadratic, piecewise, or interaction effects"
     },
-    "confounder_detection": {
+    "latent_confounder": {
       "weight": 0.2,
-      "description": "Identified Temperature as confounder on Floc_Size"
+      "description": "Recognized unobserved common cause of Turbidity and Organic_Load"
     },
-    "intervention_usage": {
+    "feedback_loop": {
       "weight": 0.15,
-      "description": "Used pilot study to validate causal claims"
+      "description": "Identified operator feedback from Outlet_Clarity to Chemical_Dose"
     },
-    "collider_detection": {
+    "simpsons_paradox": {
       "weight": 0.15,
-      "description": "Identified Settling_Rate as having two independent causes"
+      "description": "Correctly resolved confounded dose-clarity relationship"
+    },
+    "regime_change": {
+      "weight": 0.1,
+      "description": "Detected distribution shift from upstream construction"
+    },
+    "mnar_detection": {
+      "weight": 0.1,
+      "description": "Noticed turbidity sensor censoring above ceiling"
     }
   }
 }

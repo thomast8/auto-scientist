@@ -5,6 +5,7 @@ and optional per-agent model overrides. Replaces long multiline CLI commands.
 """
 
 from pathlib import Path
+from typing import Literal
 
 import yaml
 from pydantic import BaseModel, ConfigDict, Field, ValidationError, field_validator
@@ -39,6 +40,9 @@ class ExperimentConfig(BaseModel):
     data: str = Field(min_length=1)
     goal: str = Field(min_length=1)
 
+    # Optional metadata
+    difficulty: Literal["easy", "medium", "hard", "expert"] | None = None
+
     # Optional with defaults
     max_iterations: int = Field(default=20, ge=1)
     preset: str = "default"
@@ -57,9 +61,7 @@ class ExperimentConfig(BaseModel):
     @classmethod
     def _validate_preset(cls, v: str) -> str:
         if v not in BUILTIN_PRESETS:
-            raise ValueError(
-                f"Unknown preset: {v!r}. Available: {list(BUILTIN_PRESETS)}"
-            )
+            raise ValueError(f"Unknown preset: {v!r}. Available: {list(BUILTIN_PRESETS)}")
         return v
 
     @field_validator("models", mode="before")
@@ -88,9 +90,7 @@ class ExperimentConfig(BaseModel):
         if raw is None:
             raise ValueError(f"Empty config file: {path}")
         if not isinstance(raw, dict):
-            raise ValueError(
-                f"Expected a YAML mapping in {path}, got {type(raw).__name__}"
-            )
+            raise ValueError(f"Expected a YAML mapping in {path}, got {type(raw).__name__}")
 
         try:
             return cls.model_validate(raw)

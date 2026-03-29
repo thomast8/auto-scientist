@@ -93,35 +93,29 @@ ALL_MODELS: list[tuple[str, str]] = [
 # Sentinel for "no domain selected" in the domain picker
 _CUSTOM = "__custom__"
 
-DOMAIN_DIFFICULTY: dict[str, tuple[str, int, str]] = {
-    "toy_function": ("easy", 0, "fast"),
-    "alien_minerals": ("medium", 1, "default"),
-    "alloy_design": ("medium", 2, "default"),
-    "water_treatment": ("hard", 3, "high"),
-    "spo2": ("hard", 4, "high"),
-}
+_DIFFICULTY_ORDER = {"easy": 0, "medium": 1, "hard": 2, "expert": 3}
 
 
 def _discover_domains() -> list[tuple[str, str]]:
     """Find domains that have experiment.yaml files, return (label, yaml_path) pairs.
 
-    Sorted by difficulty (easy to hard).
+    Reads difficulty from each domain's experiment.yaml and sorts by difficulty.
     """
     domains_dir = Path("domains")
     if not domains_dir.is_dir():
         return []
     results = []
-    for candidate in domains_dir.iterdir():
+    for candidate in sorted(domains_dir.iterdir()):
         yaml_path = candidate / "experiment.yaml"
         if yaml_path.is_file() and candidate.name != "example_template":
             name = candidate.name.replace("_", " ").title()
-            diff_info = DOMAIN_DIFFICULTY.get(candidate.name)
-            if diff_info:
-                label = f"{name} ({diff_info[0]})"
-                sort_key = diff_info[1]
-            else:
-                label = name
-                sort_key = 99
+            try:
+                cfg = ExperimentConfig.from_yaml(yaml_path)
+                difficulty = cfg.difficulty or "medium"
+            except (ValueError, OSError):
+                difficulty = "medium"
+            label = f"{name} ({difficulty})"
+            sort_key = _DIFFICULTY_ORDER.get(difficulty, 99)
             results.append((sort_key, label, str(yaml_path)))
     results.sort(key=lambda x: x[0])
     return [(label, path) for _, label, path in results]
@@ -741,12 +735,6 @@ class LaunchApp(App[ExperimentConfig | None]):
         except (ValueError, OSError) as e:
             self._show_error(f"Failed to load {yaml_path}: {e}")
             return
-
-        # Pick preset from difficulty mapping if the YAML uses the default preset
-        domain_name = yaml_path.parent.name
-        diff_info = DOMAIN_DIFFICULTY.get(domain_name)
-        if diff_info and cfg.preset == "default":
-            cfg.preset = diff_info[2]
 
         self._yaml_path = yaml_path
         # Resolve data path relative to the YAML file for display

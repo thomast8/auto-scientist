@@ -66,8 +66,8 @@ auto-scientist run -c domains/alien_minerals/experiment.yaml
 | `toy_function` | Easy | Discover the hidden mathematical function from noisy x/y data |
 | `alien_minerals` | Medium | Classify 6 alien mineral types from physical/chemical properties |
 | `alloy_design` | Medium | Discover composition-property relationships in metal alloys |
-| `water_treatment` | Hard | Causal relationships in water treatment plant SCADA data |
-| `spo2` | Hard | SpO2 dynamics during breath-holds (sensor calibration + physiology) |
+| `water_treatment` | Hard | Causal discovery with latent confounders, feedback loops, nonlinearity, regime changes, and MNAR missingness |
+| `spo2` | Expert | SpO2 dynamics during breath-holds (nonlinear physiology, latent variables, domain expertise) |
 
 Each domain is a directory under `domains/` with an `experiment.yaml`, seed data, and optional domain-specific prompts. Adding a new domain means copying the template and filling in your data path and goal.
 

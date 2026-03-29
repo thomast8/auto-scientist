@@ -4,5 +4,6 @@ goal: >
   and material properties (hardness, corrosion resistance). Identify
   element interactions and find optimal compositions that maximize
   hardness and corrosion resistance while minimizing cost.
+difficulty: medium
 max_iterations: 5
 preset: default
