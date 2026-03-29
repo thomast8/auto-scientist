@@ -900,7 +900,13 @@ class TestAnthropicSDKPath:
         valid_json = _valid_critic_json()
 
         mock_sdk = AsyncMock(return_value=_pad(valid_json))
-        mock_sdk.last_usage = {"input_tokens": 100, "output_tokens": 50}
+        # SDK splits input tokens across cache buckets
+        mock_sdk.last_usage = {
+            "input_tokens": 20,
+            "cache_creation_input_tokens": 30,
+            "cache_read_input_tokens": 50,
+            "output_tokens": 45,
+        }
 
         with patch(SDK_PATH, mock_sdk):
             result = await run_single_critic_debate(
@@ -912,8 +918,27 @@ class TestAnthropicSDKPath:
 
         mock_sdk.assert_called()
         assert isinstance(result, DebateResult)
+        # Token count sums all cache buckets: 20 + 30 + 50 = 100
         assert result.input_tokens == 100
-        assert result.output_tokens == 50
+        assert result.output_tokens == 45
+
+    @pytest.mark.asyncio
+    async def test_anthropic_sdk_passes_system_prompt(self, plan):
+        """Anthropic SDK path passes system_prompt to ClaudeCodeOptions."""
+        critic = AgentModelConfig(provider="anthropic", model="claude-sonnet-4-6")
+        mock_sdk = _sdk_critic_mock()
+
+        with patch(SDK_PATH, mock_sdk):
+            await run_single_critic_debate(
+                config=critic,
+                plan=plan,
+                notebook_content="",
+                max_rounds=1,
+            )
+
+        options = mock_sdk.call_args[0][1]
+        assert options.system_prompt
+        assert "<output_format>" in options.system_prompt
 
     @pytest.mark.asyncio
     async def test_anthropic_scientist_defense_uses_sdk(self, plan):

@@ -150,6 +150,11 @@ def _strip_markdown_fencing(raw: str) -> str:
     if raw and raw[0] not in "{[":
         for i, ch in enumerate(raw):
             if ch in "{[":
+                discarded = raw[:i]
+                logger.warning(
+                    f"Stripped {len(discarded)} chars of leading prose before JSON: "
+                    f"{discarded[:100]!r}"
+                )
                 raw = raw[i:]
                 break
 
@@ -171,7 +176,13 @@ def validate_json_output(
     """
     cleaned = _strip_markdown_fencing(raw)
     try:
-        parsed, _ = json.JSONDecoder().raw_decode(cleaned)
+        parsed, end_idx = json.JSONDecoder().raw_decode(cleaned)
+        trailing = cleaned[end_idx:].strip()
+        if trailing:
+            logger.warning(
+                f"{agent_name}: raw_decode ignored {len(trailing)} chars of trailing content: "
+                f"{trailing[:200]!r}"
+            )
     except json.JSONDecodeError as e:
         raise OutputValidationError(
             raw_output=raw,
