@@ -168,7 +168,7 @@ The clean-constant model wins on every axis: lowest BIC, fewest parameters, and 
 auto-scientist run -c domains/toy_function/experiment.yaml
 ```
 
-The config uses `preset: fast` and `max_iterations: 3` by default, but this run used the `default` preset (Opus scientist, GPT-5.4 + Sonnet critics). Exact numbers will vary across runs due to LLM sampling and train/test split randomness, but the structural finding (quadratic + sine, constants near 0.3/2.5/1.5) should reproduce consistently.
+The config uses `preset: fast` and `max_iterations: 3` by default, but this run used the `default` preset (Opus scientist, GPT-5.4-mini + Sonnet critics). Exact numbers will vary across runs due to LLM sampling and train/test split randomness, but the structural finding (quadratic + sine, constants near 0.3/2.5/1.5) should reproduce consistently.
 
 ## What This Demonstrates
 

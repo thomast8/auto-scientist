@@ -163,7 +163,7 @@ class TestBuiltinPresets:
         mc = ModelConfig.builtin_preset("default")
         assert len(mc.critics) == 2
         assert mc.critics[0].provider == "openai"
-        assert mc.critics[0].model == "gpt-5.4"
+        assert mc.critics[0].model == "gpt-5.4-mini"
         assert mc.critics[1].provider == "anthropic"
         assert mc.critics[1].model == "claude-sonnet-4-6"
 

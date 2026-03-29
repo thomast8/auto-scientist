@@ -68,7 +68,7 @@ BUILTIN_PRESETS: dict[str, dict] = {
         "summarizer": {"provider": "openai", "model": "gpt-5.4-nano", "reasoning": "off"},
         "critics": [
             {"provider": "openai", "model": "gpt-5.4-mini", "reasoning": "low"},
-            {"provider": "anthropic", "model": "claude-haiku-4-5-20251001", "reasoning": "off"},
+            {"provider": "anthropic", "model": "claude-haiku-4-5-20251001", "reasoning": "low"},
         ],
     },
     # Balanced quality/cost
@@ -77,7 +77,7 @@ BUILTIN_PRESETS: dict[str, dict] = {
         "scientist": {"model": "claude-opus-4-6", "reasoning": "medium"},
         "summarizer": {"provider": "openai", "model": "gpt-5.4-nano", "reasoning": "off"},
         "critics": [
-            {"provider": "openai", "model": "gpt-5.4", "reasoning": "medium"},
+            {"provider": "openai", "model": "gpt-5.4-mini", "reasoning": "medium"},
             {"provider": "anthropic", "model": "claude-sonnet-4-6", "reasoning": "medium"},
         ],
     },
@@ -89,7 +89,7 @@ BUILTIN_PRESETS: dict[str, dict] = {
         "summarizer": {"provider": "openai", "model": "gpt-5.4-nano", "reasoning": "off"},
         "critics": [
             {"provider": "openai", "model": "gpt-5.4", "reasoning": "high"},
-            {"provider": "anthropic", "model": "claude-sonnet-4-6", "reasoning": "high"},
+            {"provider": "anthropic", "model": "claude-opus-4-6", "reasoning": "high"},
         ],
     },
     # Best quality, but coder/ingestor/report stay on Sonnet (they're high-volume)
@@ -102,7 +102,7 @@ BUILTIN_PRESETS: dict[str, dict] = {
         "summarizer": {"provider": "openai", "model": "gpt-5.4-mini", "reasoning": "off"},
         "critics": [
             {"provider": "openai", "model": "gpt-5.4", "reasoning": "max"},
-            {"provider": "anthropic", "model": "claude-sonnet-4-6", "reasoning": "max"},
+            {"provider": "anthropic", "model": "claude-opus-4-6", "reasoning": "max"},
         ],
     },
 }
