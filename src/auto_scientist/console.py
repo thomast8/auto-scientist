@@ -14,6 +14,7 @@ Provides:
 from __future__ import annotations
 
 import asyncio
+import contextlib
 import logging
 import re
 import subprocess
@@ -1423,3 +1424,107 @@ class PipelineApp(App):
         self.query_one("#run-area").mount(Static(renderable))
         if near_bottom:
             self._scroll_to_end()
+
+
+class ShowApp(App):
+    """Read-only viewer for a completed run's TUI panels."""
+
+    BINDINGS = [
+        Binding("ctrl+o", "toggle_expand", "Expand/Collapse", show=True),
+        Binding("ctrl+q", "quit", "Quit", show=True),
+        Binding("enter", "open_focused_detail", "Detail", show=False),
+    ]
+
+    DEFAULT_CSS = PipelineApp.DEFAULT_CSS
+
+    def __init__(self, manifest_records: list, run_title: str = "Run") -> None:
+        super().__init__()
+        self._manifest_records = manifest_records
+        self._run_title = run_title
+
+    def compose(self) -> ComposeResult:
+        yield Header()
+        with VerticalScroll(id="outer-container") as outer:
+            outer.border_title = "Auto-Scientist"
+            with Vertical(id="run-area") as run:
+                run.border_title = self._run_title
+                pass
+        yield Footer()
+
+    def on_mount(self) -> None:
+        saved_theme = load_theme()
+        if saved_theme in self.available_themes:
+            self.theme = saved_theme
+        self.title = f"Auto-Scientist — {self._run_title}"
+
+        run_area = self.query_one("#run-area")
+        for record in self._manifest_records:
+            container = IterationContainer(iter_title=record.title)
+            run_area.mount(container)
+            for p in record.panels:
+                panel = AgentPanel(name=p.name, model=p.model, style=p.style)
+                container.mount(panel)
+                container.add_panel(panel)
+                panel.input_tokens = p.input_tokens
+                panel.output_tokens = p.output_tokens
+                panel.thinking_tokens = p.thinking_tokens
+                panel.num_turns = p.num_turns
+                for line in p.lines:
+                    panel.all_lines.append(line)
+                    panel._write_to_richlog(line)
+                panel.complete(p.done_summary)
+                panel._apply_complete_dom()
+                panel._end_time = panel.start_time + p.elapsed_seconds
+            container.set_result(record.result_text, record.result_style, record.summary)
+
+        run_area.styles.border = ("round", "green")
+
+    def action_toggle_expand(self) -> None:
+        """Toggle expanded state on all panels and iteration containers."""
+        panels = list(self.query(AgentPanel))
+        containers = list(self.query(IterationContainer))
+        if not panels and not containers:
+            return
+        collapsing = True
+        if panels:
+            with contextlib.suppress(NoMatches):
+                collapsing = not panels[0].query_one(Collapsible).collapsed
+        for panel in panels:
+            try:
+                c = panel.query_one(Collapsible)
+            except NoMatches:
+                continue
+            object.__setattr__(c, "scroll_visible", lambda *a, **kw: None)
+            c.collapsed = collapsing
+            object.__delattr__(c, "scroll_visible")
+        for container in containers:
+            if not container._panels:
+                continue
+            if (collapsing and not container._is_collapsed) or (
+                not collapsing and container._is_collapsed
+            ):
+                container.toggle_iteration()
+
+    async def action_quit(self) -> None:
+        self.exit()
+
+    def action_open_focused_detail(self) -> None:
+        focused = self.focused
+        if focused is None:
+            return
+        widget: Widget | None = focused
+        while widget is not None:
+            if isinstance(widget, AgentPanel):
+                self.push_screen(
+                    AgentDetailScreen(
+                        panel_name=widget.panel_name,
+                        model=widget.model,
+                        stats=widget._build_footer(),
+                        lines=list(widget.all_lines),
+                    )
+                )
+                return
+            widget = widget.parent  # type: ignore[assignment]
+
+    def watch_theme(self, theme_name: str) -> None:
+        save_theme(theme_name)

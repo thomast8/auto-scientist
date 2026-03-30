@@ -6,7 +6,7 @@ import os
 import shutil
 from collections.abc import Callable
 from pathlib import Path
-from typing import Any
+from typing import Any, Literal
 
 from rich.panel import Panel
 from rich.rule import Rule
@@ -351,7 +351,7 @@ class Orchestrator:
             self._live.start(log_path=self.output_dir / "console.log")
             self._live.mount_banner(self._build_startup_banner())
 
-        # Restore previous iterations from manifest (for replay / resume)
+        # Restore previous iterations from manifest (for fork / resume)
         self._restore_iterations_from_manifest()
 
         try:
@@ -738,9 +738,19 @@ class Orchestrator:
                     lines=list(p.all_lines),
                 )
             )
+        iteration_key: int | Literal["ingestion", "report"]
+        if isinstance(title, int):
+            iteration_key = self.state.iteration
+            display_title = f"Iteration {title}"
+        elif title == "Report":
+            iteration_key = "report"
+            display_title = "Report"
+        else:
+            iteration_key = "ingestion"
+            display_title = str(title)
         return IterationRecord(
-            iteration="ingestion" if isinstance(title, str) else self.state.iteration,
-            title=f"Iteration {title}" if isinstance(title, int) else str(title),
+            iteration=iteration_key,
+            title=display_title,
             result_text=result_text,
             result_style=result_style,
             summary=summary,
@@ -762,7 +772,7 @@ class Orchestrator:
         """Mount collapsed iteration panels from a saved manifest.
 
         Called at startup to show previous iterations in the TUI when
-        resuming or replaying. Silently skips if no manifest exists.
+        resuming or forking. Silently skips if no manifest exists.
         """
         manifest_path = self.output_dir / MANIFEST_FILENAME
         records = load_manifest(manifest_path)

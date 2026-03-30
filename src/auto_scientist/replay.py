@@ -1,4 +1,4 @@
-"""Rewind a saved run directory to a target iteration for replay."""
+"""Rewind a saved run directory to a target iteration for resumption."""
 
 from __future__ import annotations
 
@@ -107,18 +107,19 @@ def _reconstruct_domain_knowledge(run_dir: Path, target_iteration: int) -> str:
 def rewind_run(run_dir: Path, target_iteration: int) -> ExperimentState:
     """Rewind a run directory in-place to the given iteration.
 
-    The caller is responsible for copying the source run directory first.
-    This function modifies run_dir so that the orchestrator will begin
-    from iteration target_iteration.  For target_iteration > 0, state
-    reflects completion through iteration target_iteration - 1.  For
-    target_iteration = 0, state reflects completion of the ingestion
-    phase only.
+    The caller is responsible for copying the source run directory first
+    (when forking). This function can also be called in-place for resume.
 
-    When target_iteration equals state.iteration (extend mode), all
-    iterations are preserved and report-phase artifacts plus run-wide
-    logs are removed.  The analyst buffer at the target iteration is
-    kept in extend mode, as it typically contains prediction resolution
-    context from the report phase.
+    **Rewind mode** (target_iteration < state.iteration): discards
+    iterations from target_iteration onward. The orchestrator will begin
+    fresh at target_iteration.
+
+    **Extend mode** (target_iteration == state.iteration): preserves all
+    completed iterations, strips report-phase artifacts, and bumps
+    state.iteration past any iteration that already has a manifest record
+    (so the TUI doesn't show a duplicate). The analyst buffer at
+    target_iteration is kept in extend mode (it contains prediction
+    resolution context from the report phase).
 
     Returns the rewound ExperimentState.
     """
@@ -144,20 +145,36 @@ def rewind_run(run_dir: Path, target_iteration: int) -> ExperimentState:
     if old_base is None:
         logger.warning("Could not detect original output dir; path rewriting skipped")
     new_base = str(run_dir.resolve())
-    original_iteration = state.iteration
+    extending = target_iteration == state.iteration
+
+    # --- Compute effective iteration ---
+    # In extend mode, bump past any iteration that already has a manifest
+    # record (e.g. scientist stopped at iteration 3, manifest has it,
+    # so we resume from iteration 4).
+    effective_iteration = target_iteration
+    if extending:
+        manifest_path_check = run_dir / MANIFEST_FILENAME
+        if manifest_path_check.exists():
+            records_check = load_manifest(manifest_path_check)
+            max_recorded = max(
+                (r.iteration for r in records_check if isinstance(r.iteration, int)),
+                default=-1,
+            )
+            if isinstance(max_recorded, int) and max_recorded >= target_iteration:
+                effective_iteration = max_recorded + 1
 
     # --- Trim state fields ---
     state.phase = "iteration"
-    state.iteration = target_iteration
-    state.versions = state.versions[:target_iteration]
+    state.iteration = effective_iteration
+    state.versions = state.versions[:effective_iteration]
     state.prediction_history = [
-        p for p in state.prediction_history if p.iteration_prescribed < target_iteration
+        p for p in state.prediction_history if p.iteration_prescribed < effective_iteration
     ]
     state.consecutive_failures = 0
     state.dead_ends = []
 
     # --- Reconstruct domain_knowledge ---
-    state.domain_knowledge = _reconstruct_domain_knowledge(run_dir, target_iteration)
+    state.domain_knowledge = _reconstruct_domain_knowledge(run_dir, effective_iteration)
 
     # --- Rewrite paths ---
     if old_base:
@@ -168,22 +185,18 @@ def rewind_run(run_dir: Path, target_iteration: int) -> ExperimentState:
             v.results_path = _rewrite_path(v.results_path, old_base, new_base)
 
     # --- Truncate lab notebook ---
-    allowed_versions = {"ingestion"} | {f"v{i:02d}" for i in range(target_iteration)}
+    allowed_versions = {"ingestion"} | {f"v{i:02d}" for i in range(effective_iteration)}
     _truncate_notebook(run_dir / NOTEBOOK_FILENAME, allowed_versions)
 
-    # --- Delete version directories at or beyond target ---
+    # --- Delete version directories at or beyond effective iteration ---
     for child in sorted(run_dir.iterdir()):
         if not child.is_dir():
             continue
         m = _VERSION_DIR_RE.match(child.name)
-        if m and int(m.group(1)) >= target_iteration:
+        if m and int(m.group(1)) >= effective_iteration:
             shutil.rmtree(child)
 
-    # --- Delete buffers at or beyond target ---
-    # In extend mode (target == original iteration), keep the analyst buffer
-    # at target_iteration: it was produced by _resolve_final_predictions during
-    # the report phase and contains useful prediction resolution context.
-    extending = target_iteration == original_iteration
+    # --- Delete buffers at or beyond effective iteration ---
     buffers_dir = run_dir / "buffers"
     if buffers_dir.is_dir():
         for buf_file in sorted(buffers_dir.iterdir()):
@@ -196,11 +209,10 @@ def rewind_run(run_dir: Path, target_iteration: int) -> ExperimentState:
             if not m:
                 continue
             buf_iter = int(m.group(1))
-            if buf_iter > target_iteration:
-                buf_file.unlink()
-            elif buf_iter == target_iteration:
-                # In extend mode, keep the report-phase analyst buffer
-                if extending and name.startswith("analyst_"):
+            if buf_iter >= effective_iteration:
+                # In extend mode, keep the analyst buffer at target_iteration
+                # (produced by _resolve_final_predictions during report phase)
+                if extending and name.startswith("analyst_") and buf_iter == target_iteration:
                     continue
                 buf_file.unlink()
 
@@ -217,9 +229,17 @@ def rewind_run(run_dir: Path, target_iteration: int) -> ExperimentState:
         kept = [
             r
             for r in records
-            if r.iteration == "ingestion"
-            or (isinstance(r.iteration, int) and r.iteration < target_iteration)
+            if (
+                r.iteration == "ingestion"
+                # Guard against old manifests where report was tagged as "ingestion"
+                and r.title != "Report"
+            )
+            or (isinstance(r.iteration, int) and r.iteration < effective_iteration)
         ]
+        # Normalize the last iteration's border to green
+        if kept and kept[-1].iteration != "ingestion":
+            kept[-1].result_style = "green"
+            kept[-1].result_text = "done"
         save_manifest(kept, manifest_path)
 
     # --- Save rewound state ---

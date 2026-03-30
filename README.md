@@ -151,31 +151,31 @@ auto-scientist run -c domains/spo2/experiment.yaml --max-iterations 5 --preset f
 auto-scientist run -c domains/spo2/experiment.yaml --schedule "22:00-06:00"
 ```
 
-### Resume, Replay, and Status
+### Resume and Status
 
 State is persisted after every phase transition. Kill and resume without data loss.
 
 ```bash
 # Resume a crashed or paused run from where it left off
-auto-scientist resume --state experiments/state.json
+auto-scientist resume --from experiments/runs/my-run
 
 # Resume with a different model config
-auto-scientist resume --state experiments/state.json --preset high
+auto-scientist resume --from experiments/runs/my-run --preset high
 
-# Replay: fork a saved run from a specific iteration (new output dir, original untouched)
-auto-scientist replay --from experiments/runs/my-run --at-iteration 1 --max-iterations 10
+# Fork: copy to new directory, resume from a specific iteration (original untouched)
+auto-scientist resume --from experiments/runs/my-run --fork --resume-from 3
 
-# Replay without --at-iteration: continue from where it stopped with more iterations
-auto-scientist replay --from experiments/runs/my-run --max-iterations 10
+# Fork without --resume-from: continue from where it stopped with more iterations
+auto-scientist resume --from experiments/runs/my-run --fork --max-iterations 20
 
-# Same, but with different models
-auto-scientist replay --from experiments/runs/my-run --max-iterations 10 --preset fast
+# View a completed run in the TUI (read-only)
+auto-scientist show --from experiments/runs/my-run
 
-# Check progress of any run
-auto-scientist status --state experiments/state.json
+# Check progress of any run (text summary)
+auto-scientist status --from experiments/runs/my-run
 ```
 
-`resume` picks up in-place from the last saved phase. `replay` copies the run to a new directory and never touches the original. With `--at-iteration`, it rewinds to that iteration and re-runs from there (useful for testing prompt changes or alternative paths). Without `--at-iteration`, it continues from where the run stopped with a fresh iteration budget (useful when the Scientist stopped too early or you want more iterations).
+Without `--fork`, resume picks up in-place from the last saved phase. With `--fork`, it copies the run to a new directory (original untouched). Add `--resume-from N` to rewind to iteration N in the copy (keeps iterations 0 through N-1).
 
 ## Configuration
 
@@ -240,26 +240,15 @@ All core agents (analyst, scientist, coder, ingestor, report) run through the [C
 
 ### `auto-scientist resume`
 
-Resume a paused or crashed run in-place from the last saved phase.
+Resume a paused, crashed, or completed run. By default resumes in-place. With `--fork`, copies to a new directory first.
 
 | Flag | Default | Description |
 |------|---------|-------------|
-| `--state <path>` | *(required)* | Path to `state.json` |
-| `--config <path>` | | Override saved model config with `models.toml` |
-| `--preset <name>` | | Override saved preset |
-| `--no-summaries` | | Disable agent progress summaries |
-| `-v, --verbose` | | Debug logging |
-
-### `auto-scientist replay`
-
-Fork a saved run, rewind to a specific iteration, and continue from there. The original run is never modified.
-
-| Flag | Default | Description |
-|------|---------|-------------|
-| `--from <path>` | *(required)* | Path to a saved run directory |
-| `--at-iteration <int>` | *(current)* | Iteration to rewind to (0-based). Omit to extend from current iteration |
-| `--max-iterations <int>` | `20` | Maximum iterations for the replayed run |
-| `--output-dir <path>` | *(auto)* | Output directory (default: auto-generated suffix) |
+| `--from <path>` | *(required)* | Path to run directory (or `state.json`) |
+| `--fork` | | Copy to new directory before resuming (original untouched) |
+| `--resume-from <int>` | *(current)* | Resume from this iteration (keeps all prior). Requires `--fork` |
+| `--output-dir <path>` | *(auto)* | Output directory for fork (default: auto-generated). Requires `--fork` |
+| `--max-iterations <int>` | `20` | Maximum iteration count |
 | `-c, --config <path>` | | Override model config |
 | `--preset <name>` | | Override preset |
 | `--debate-rounds <int>` | `1` | Debate rounds per persona |
@@ -267,11 +256,19 @@ Fork a saved run, rewind to a specific iteration, and continue from there. The o
 | `--no-summaries` | | Disable agent progress summaries |
 | `-v, --verbose` | | Debug logging |
 
+### `auto-scientist show`
+
+Display a completed run in the interactive TUI (read-only). All iteration panels are expandable/collapsible.
+
+| Flag | Description |
+|------|-------------|
+| `--from <path>` | *(required)* Path to run directory (or `state.json`) |
+
 ### `auto-scientist status`
 
 | Flag | Description |
 |------|-------------|
-| `--state <path>` | *(required)* Path to `state.json` |
+| `--from <path>` | *(required)* Path to run directory (or `state.json`) |
 
 ## Output Structure
 
