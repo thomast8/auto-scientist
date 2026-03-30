@@ -24,6 +24,7 @@ from collections.abc import Callable
 from functools import partial
 from io import TextIOWrapper
 from pathlib import Path
+from typing import Literal
 
 from rich.console import Console, RenderableType
 from rich.markup import escape as rich_escape
@@ -158,11 +159,19 @@ class AgentPanel(Widget):
     }
     """
 
-    def __init__(self, name: str, model: str, style: str = "cyan", description: str = "") -> None:
+    def __init__(
+        self,
+        name: str,
+        model: str,
+        style: str = "cyan",
+        description: str = "",
+        restored: bool = False,
+    ) -> None:
         super().__init__()
         self._panel_name = name
         self.model = model
         self.panel_style = style
+        self._is_restored = restored
         self.all_lines: list[str] = []
         self.start_time = time.monotonic()
         self.input_tokens = 0
@@ -191,7 +200,8 @@ class AgentPanel(Widget):
         self._refresh_timer = self.set_interval(1, self._tick)
         self._dot_count = 0
         self._apply_border_color()
-        self.border_title = f"{self._panel_name} ({self.model})"
+        restored_suffix = " (restored)" if self._is_restored else ""
+        self.border_title = f"{self._panel_name} ({self.model}){restored_suffix}"
         self.border_subtitle = self._build_footer()
 
     # Rich markup color names that need translation for Textual CSS styles.color
@@ -218,7 +228,8 @@ class AgentPanel(Widget):
             title_widget.styles.color = css_color
         except NoMatches:
             pass
-        self.styles.border = ("round", css_color)
+        border_type: Literal["dashed", "round"] = "dashed" if self._is_restored else "round"
+        self.styles.border = (border_type, css_color)
         self.styles.border_title_color = css_color
         self.styles.border_subtitle_color = css_color
 
@@ -580,10 +591,12 @@ class IterationContainer(Vertical):
     }
     """
 
-    def __init__(self, iter_title: str) -> None:
+    def __init__(self, iter_title: str, restored: bool = False) -> None:
         super().__init__()
         self._iter_title = iter_title
-        self.border_title = iter_title
+        self._is_restored = restored
+        restored_suffix = " (restored)" if restored else ""
+        self.border_title = f"{iter_title}{restored_suffix}"
         self._in_progress = True
         self._spinner_index = 0
         self._panels: list[AgentPanel] = []
@@ -591,13 +604,16 @@ class IterationContainer(Vertical):
 
     def on_mount(self) -> None:
         self._spinner_timer = self.set_interval(1 / 10, self._tick_spinner)
+        if self._is_restored:
+            self.styles.border = ("dashed", "grey")
 
     def _tick_spinner(self) -> None:
         if not self._in_progress:
             self._spinner_timer.stop()
             return
         char = self.SPINNER_CHARS[self._spinner_index % len(self.SPINNER_CHARS)]
-        self.border_title = f"{char} {self._iter_title}"
+        restored_suffix = " (restored)" if self._is_restored else ""
+        self.border_title = f"{char} {self._iter_title}{restored_suffix}"
         self._spinner_index += 1
 
     def add_panel(self, panel: AgentPanel) -> None:
@@ -683,11 +699,13 @@ class IterationContainer(Vertical):
     def set_result(self, text: str, style: str, summary_text: str = "") -> None:
         """Set the iteration result as border subtitle and collapse."""
         self._in_progress = False
-        self.border_title = self._iter_title
+        restored_suffix = " (restored)" if self._is_restored else ""
+        self.border_title = f"{self._iter_title}{restored_suffix}"
         self.border_subtitle = ""
         valid = {"red", "green", "yellow"}
         if style in valid:
-            self.styles.border = ("round", style)
+            border_type: Literal["dashed", "round"] = "dashed" if self._is_restored else "round"
+            self.styles.border = (border_type, style)
         if self._panels:
             self.collapse_iteration(summary_text)
 
@@ -943,6 +961,7 @@ class PipelineLive:
             name=panel_data["name"],
             model=panel_data["model"],
             style=panel_data.get("style", "cyan"),
+            restored=True,
         )
 
         self._panels.append(panel)
@@ -1102,7 +1121,7 @@ class PipelineLive:
             return
 
         def _do_mount():
-            container = IterationContainer(iter_title=title)
+            container = IterationContainer(iter_title=title, restored=True)
             self._app.query_one("#run-area").mount(container)
 
             for p in panels:
@@ -1110,6 +1129,7 @@ class PipelineLive:
                     name=p["name"],
                     model=p["model"],
                     style=p.get("style", "cyan"),
+                    restored=True,
                 )
                 container.mount(panel)
                 container.add_panel(panel)
