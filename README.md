@@ -72,7 +72,21 @@ Each domain is a directory under `domains/` with an `experiment.yaml`, seed data
 
 ## Examples
 
-### Alien Minerals Classification
+### Toy Function Discovery (Easy)
+
+Given 200 noisy (x, y) points and zero hints, the system recovered the exact generating formula in two iterations. Full writeup: [docs/showcase-toy-function.md](docs/showcase-toy-function.md).
+
+It screened polynomials and trig composites, identified a phase ambiguity in the cosine fit, reparameterized to sine, proved the clean constants (0.3, 2.5, 1.5) are preferred over free parameters by BIC, and confirmed residual whiteness with Fisher's g-test. Critics caught test-set leakage and goal drift before they could corrupt the results.
+
+| Metric | Value |
+|--------|-------|
+| Wall time | 39 minutes |
+| Iterations | 2 |
+| Discovered formula | y = 0.3x² + 2.5·sin(1.5x) |
+| Parameter accuracy | within 1.5% |
+| Test R² | 0.959 (ceiling: 0.978) |
+
+### Alien Minerals Classification (Medium)
 
 The system classified six alien mineral types from nine physical measurements, noisy labels, and calibration artifacts. Full writeup: [docs/showcase-alien-minerals.md](docs/showcase-alien-minerals.md).
 
@@ -86,7 +100,7 @@ It went down a dead end (a hand-crafted hierarchy that dropped F1 from 0.92 to 0
 | Unanimous specimens misclassified | 0 / 475 |
 | Features in final rules | 5 of 12 |
 
-### Alloy Composition-Property Relationships
+### Alloy Composition-Property Relationships (Medium)
 
 The system investigated what drives hardness in Fe-Cr-Ni-Mo-V alloys, navigating corrupt lab data, a synthetic corrosion column, and literature-contradicting results. Full writeup: [docs/showcase-alloy-design.md](docs/showcase-alloy-design.md).
 
@@ -100,19 +114,18 @@ It discovered that molybdenum is the dominant nonlinear hardness driver (101 HV/
 | External validation R² | 0.70 |
 | Testable predictions | 17 (47% confirmed, 47% refuted) |
 
-### Toy Function Discovery
+### Water Treatment Causal Discovery (Hard)
 
-Given 200 noisy (x, y) points and zero hints, the system recovered the exact generating formula in two iterations. Full writeup: [docs/showcase-toy-function.md](docs/showcase-toy-function.md).
+The system discovered the causal structure of a water treatment plant from 2,200 hours of time-series data, resolving a Simpson's paradox where chemical dose appeared to harm the process it was meant to help. Full writeup: [docs/showcase-water-treatment.md](docs/showcase-water-treatment.md).
 
-It screened polynomials and trig composites, identified a phase ambiguity in the cosine fit, reparameterized to sine, proved the clean constants (0.3, 2.5, 1.5) are preferred over free parameters by BIC, and confirmed residual whiteness with Fisher's g-test. Critics caught test-set leakage and goal drift before they could corrupt the results.
+It proved that dose has zero direct effect on outlet clarity (fully mediated through floc formation), discovered operators respond to output quality rather than input turbidity, identified temperature as an uncompensated floc inhibitor, and assembled a complete 12-edge causal graph. The stop gate forced an extra iteration that produced the investigation's most operationally relevant finding.
 
 | Metric | Value |
 |--------|-------|
-| Wall time | 39 minutes |
-| Iterations | 2 |
-| Discovered formula | y = 0.3x² + 2.5·sin(1.5x) |
-| Parameter accuracy | within 1.5% |
-| Test R² | 0.959 (ceiling: 0.978) |
+| Wall time | 106 minutes |
+| Iterations | 4 |
+| Variables placed | 10/10 |
+| Testable predictions | 18 (44% confirmed, 44% refuted) |
 
 ## Usage
 
