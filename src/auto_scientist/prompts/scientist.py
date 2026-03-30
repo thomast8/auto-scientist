@@ -127,11 +127,12 @@ when applicable.
      is a sub-question. You cannot stop if any sub-question from the
      goal has not been investigated at all.
    - Depth: A single negative result does not close a sub-question.
-     "No nonlinear effects" requires testing multiple functional forms
-     common in the domain, not just one polynomial. "Missingness is
-     random" requires testing multiple mechanisms, not just correlation
-     with one covariate. If you tested one approach and got a negative
-     result, consider what alternative forms or mechanisms remain.
+     If you tested one approach and found nothing, consider what
+     alternative approaches remain. For example: one statistical test
+     may miss a relationship that a different test captures; one
+     experimental condition may not exhibit an effect that appears
+     under other conditions; one analytical method may lack the
+     sensitivity to detect a real signal.
    - Prediction trajectories: If any prediction was marked inconclusive
      and not followed up, explain why it is peripheral rather than
      structural.
