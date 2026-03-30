@@ -14,11 +14,9 @@ from pydantic import BaseModel
 
 from auto_scientist.agents.debate_models import (
     CRITIC_OUTPUT_SCHEMA,
-    SCIENTIST_DEFENSE_SCHEMA,
     CriticOutput,
     DebateResult,
     DebateRound,
-    ScientistDefense,
 )
 from auto_scientist.agents.scientist import SCIENTIST_PLAN_SCHEMA
 from auto_scientist.model_config import AgentModelConfig
@@ -31,8 +29,6 @@ from auto_scientist.prompts.stop_gate import (
     STOP_PERSONAS,
     STOP_REVISION_SYSTEM,
     STOP_REVISION_USER,
-    STOP_SCIENTIST_DEBATE_SYSTEM,
-    STOP_SCIENTIST_DEBATE_USER,
 )
 from auto_scientist.schemas import CompletenessAssessmentOutput, ScientistPlanOutput
 from auto_scientist.sdk_utils import (
@@ -145,34 +141,23 @@ async def _query_stop_agent(
     label: str,
     message_buffer: list[str] | None = None,
 ) -> tuple[Any, Any]:
-    """Query a stop gate agent (critic or scientist) via Claude Code SDK.
+    """Query a stop gate agent (critic or scientist) via provider-aware dispatch.
 
+    Uses direct API clients for OpenAI/Google, Claude Code SDK for Anthropic.
     Returns (validated_model_instance, result_obj with text/token counts).
     """
-    from auto_scientist.model_config import reasoning_to_cc_extra_args
-
-    extra_args: dict[str, str | None] = {"setting-sources": ""}
-    extra_args.update(reasoning_to_cc_extra_args(config.reasoning))
-
-    max_turns = 10
-    tools = ["WebSearch"]
-    options = ClaudeCodeOptions(
-        system_prompt=with_turn_budget(system_prompt, max_turns, tools),
-        allowed_tools=tools,
-        max_turns=max_turns,
-        model=config.model,
-        extra_args=extra_args,
-    )
+    from auto_scientist.agents.critic import _query_critic
 
     correction_hint = ""
     for attempt in range(MAX_ATTEMPTS):
         effective_prompt = user_prompt + correction_hint
         try:
-            raw, usage = await collect_text_from_query(
+            result = await _query_critic(
+                config,
                 effective_prompt,
-                options,
-                message_buffer,
-                agent_name=label,
+                system_prompt=system_prompt,
+                response_schema=output_model,
+                message_buffer=message_buffer,
             )
         except Exception as e:
             if attempt == MAX_ATTEMPTS - 1:
@@ -181,18 +166,8 @@ async def _query_stop_agent(
             continue
 
         try:
-            parsed = validate_json_output(raw, output_model, label)
-            result_obj = type(
-                "Result",
-                (),
-                {
-                    "text": raw,
-                    "input_tokens": usage.get("input_tokens", 0),
-                    "output_tokens": usage.get("output_tokens", 0),
-                    "thinking_tokens": usage.get("thinking_tokens", 0),
-                },
-            )()
-            return output_model.model_validate(parsed), result_obj
+            parsed = validate_json_output(result.text, output_model, label)
+            return output_model.model_validate(parsed), result
         except OutputValidationError as e:
             if attempt == MAX_ATTEMPTS - 1:
                 raise
@@ -208,31 +183,25 @@ async def run_single_stop_debate(
     completeness_assessment: dict[str, Any],
     notebook_content: str,
     domain_knowledge: str = "",
-    scientist_config: AgentModelConfig | None = None,
     message_buffer: list[str] | None = None,
     persona: dict[str, str] | None = None,
     analysis_json: str = "",
     prediction_history: str = "",
     goal: str = "",
 ) -> DebateResult:
-    """Run a single-round stop debate between one critic persona and the scientist."""
-    if scientist_config is None:
-        scientist_config = AgentModelConfig(model="claude-sonnet-4-6")
+    """Run a single critic persona's challenge of the stop decision.
 
+    Critic-only (no scientist defense). The scientist responds once via
+    run_scientist_stop_revision after all critics have challenged.
+    """
     persona = persona or {"name": "Generic", "system_text": ""}
     persona_name = persona["name"]
     persona_text = persona["system_text"]
     persona_instructions = persona.get("instructions", "")
 
     label = f"{config.provider}:{config.model}"
-    raw_transcript: list[dict[str, str]] = []
-    total_in = 0
-    total_out = 0
-    total_think = 0
-
     assessment_json = json.dumps(completeness_assessment, indent=2)
 
-    # Build critic prompt
     critic_system = STOP_CRITIC_SYSTEM_BASE.format(
         persona_text=persona_text,
         persona_instructions=persona_instructions or "",
@@ -248,7 +217,6 @@ async def run_single_stop_debate(
         completeness_assessment=assessment_json,
     )
 
-    # Round 1: Critic challenges the stop
     critic_output, critic_result = await _query_stop_agent(
         config,
         critic_user,
@@ -257,50 +225,17 @@ async def run_single_stop_debate(
         label=f"Stop Critic ({persona_name}, {label})",
         message_buffer=message_buffer,
     )
-    total_in += critic_result.input_tokens
-    total_out += critic_result.output_tokens
-    total_think += critic_result.thinking_tokens
-    raw_transcript.append({"role": "critic", "content": critic_result.text})
 
-    # Round 2: Scientist defends
-    scientist_system = STOP_SCIENTIST_DEBATE_SYSTEM.format(
-        scientist_defense_schema=json.dumps(SCIENTIST_DEFENSE_SCHEMA, indent=2),
-    )
-    scientist_user = STOP_SCIENTIST_DEBATE_USER.format(
-        goal=goal,
-        domain_knowledge=domain_knowledge,
-        notebook_content=notebook_content,
-        analysis_json=analysis_json,
-        prediction_history=prediction_history,
-        completeness_assessment=assessment_json,
-        stop_reason=stop_reason,
-        critique=critic_result.text,
-        critic_persona=persona_name,
-    )
-
-    scientist_defense, sci_result = await _query_stop_agent(
-        scientist_config,
-        scientist_user,
-        system_prompt=scientist_system,
-        output_model=ScientistDefense,
-        label=f"Stop Scientist ({persona_name})",
-        message_buffer=message_buffer,
-    )
-    total_in += sci_result.input_tokens
-    total_out += sci_result.output_tokens
-    total_think += sci_result.thinking_tokens
-    raw_transcript.append({"role": "scientist", "content": sci_result.text})
-
-    rounds = [DebateRound(critic_output=critic_output, scientist_defense=scientist_defense)]
+    rounds = [DebateRound(critic_output=critic_output)]
 
     return DebateResult(
         persona=persona_name,
         critic_model=label,
         rounds=rounds,
-        raw_transcript=raw_transcript,
-        input_tokens=total_in,
-        output_tokens=total_out,
-        thinking_tokens=total_think,
+        raw_transcript=[{"role": "critic", "content": critic_result.text}],
+        input_tokens=critic_result.input_tokens,
+        output_tokens=critic_result.output_tokens,
+        thinking_tokens=critic_result.thinking_tokens,
     )
 
 
@@ -310,7 +245,6 @@ async def run_stop_debate(
     completeness_assessment: dict[str, Any],
     notebook_content: str,
     domain_knowledge: str = "",
-    scientist_config: AgentModelConfig | None = None,
     message_buffers: dict[str, list[str]] | None = None,
     analysis_json: str = "",
     prediction_history: str = "",
@@ -336,7 +270,6 @@ async def run_stop_debate(
                 completeness_assessment=completeness_assessment,
                 notebook_content=notebook_content,
                 domain_knowledge=domain_knowledge,
-                scientist_config=scientist_config,
                 message_buffer=buffer,
                 persona=persona,
                 analysis_json=analysis_json,

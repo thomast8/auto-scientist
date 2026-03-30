@@ -1224,7 +1224,6 @@ class Orchestrator:
         from auto_scientist.agents.stop_gate import (
             run_completeness_assessment,
             run_scientist_stop_revision,
-            run_stop_debate,
         )
         from auto_scientist.prompts.stop_gate import STOP_PERSONAS
 
@@ -1273,12 +1272,16 @@ class Orchestrator:
         # --- Step 3b: Stop Debate ---
         if not self.model_config.critics:
             self._live.log("STOP DEBATE: skipped (no critics configured)")
-            debate_results = []
+            debate_results: list = []
         else:
+            import asyncio
+            import contextlib
+
+            from auto_scientist.agents.stop_gate import run_single_stop_debate
+
+            analysis_json = json.dumps(analysis, indent=2) if analysis else ""
             from auto_scientist.agents.scientist import _format_predictions_for_prompt
 
-            scientist_cfg = self.model_config.resolve("scientist")
-            analysis_json = json.dumps(analysis, indent=2) if analysis else ""
             prediction_history = _format_predictions_for_prompt(
                 self.state.prediction_history,
             )
@@ -1289,10 +1292,12 @@ class Orchestrator:
             # Create per-persona buffers and panels
             stop_buffers: dict[str, list[str]] = {}
             stop_panels: dict[str, AgentPanel] = {}
-            for persona in STOP_PERSONAS:
+            collectors: dict[str, list[tuple[str, str, str]]] = {}
+            for i, persona in enumerate(STOP_PERSONAS):
                 name = persona["name"]
                 stop_buffers[name] = []
-                config_idx = STOP_PERSONAS.index(persona) % len(self.model_config.critics)
+                collectors[name] = []
+                config_idx = i % len(self.model_config.critics)
                 critic_cfg = self.model_config.critics[config_idx]
                 critic_label = f"{critic_cfg.provider}:{critic_cfg.model}"
                 stop_panel = AgentPanel(
@@ -1303,49 +1308,113 @@ class Orchestrator:
                 stop_panels[name] = stop_panel
                 self._live.add_panel(stop_panel)
 
-            try:
-                debate_results = await run_stop_debate(
-                    critic_configs=self.model_config.critics,
-                    stop_reason=stop_reason,
-                    completeness_assessment=assessment,
-                    notebook_content=notebook_content,
-                    domain_knowledge=self.state.domain_knowledge,
-                    scientist_config=scientist_cfg,
-                    message_buffers=stop_buffers,
-                    analysis_json=analysis_json,
-                    prediction_history=prediction_history,
-                    goal=self.state.goal,
-                )
-                self._live.log(f"STOP DEBATE: received {len(debate_results)} critique(s)")
+            seen: dict[str, int] = {p["name"]: 0 for p in STOP_PERSONAS}
 
-                # Collapse panels with stats from results
-                for result in debate_results:
-                    if hasattr(result, "persona") and result.persona in stop_panels:
-                        p = stop_panels[result.persona]
-                        p.set_stats(
-                            input_tokens=result.input_tokens,
-                            output_tokens=result.output_tokens,
-                            thinking_tokens=result.thinking_tokens,
-                            num_turns=len(result.raw_transcript),
-                        )
-                        self._collapse(p, f"{len(result.rounds)} round(s)")
-                # Collapse any panels without matching results
-                for p in stop_panels.values():
-                    if not p.done:
-                        self._live.collapse_panel(p, "no result")
-            except Exception as e:
-                logger.exception(f"Stop debate error: {e}")
-                self._live.log(f"STOP DEBATE: failed - {e}")
-                for p in stop_panels.values():
-                    if not p.done:
-                        p.error(str(e))
-                        self._live.collapse_panel(p)
-                return None  # Gate failed, don't proceed with sham debate
+            def _flush_collectors():
+                for name in seen:
+                    entries = collectors[name]
+                    for _agent_name, summary, time_label in entries[seen[name] :]:
+                        stop_panels[name].add_line(f"[{time_label}] {summary}")
+                    seen[name] = len(entries)
+                self._live.refresh()
+
+            async def _drain_loop():
+                while True:
+                    await asyncio.sleep(0.5)
+                    _flush_collectors()
+
+            def _collapse_persona(name, result):
+                panel = stop_panels[name]
+                panel.set_stats(
+                    input_tokens=result.input_tokens,
+                    output_tokens=result.output_tokens,
+                    thinking_tokens=result.thinking_tokens,
+                    num_turns=len(result.raw_transcript),
+                )
+                # Flush remaining summary entries
+                entries = collectors[name]
+                for _n, summary, time_label in entries[seen[name] :]:
+                    panel.add_line(f"[{time_label}] {summary}")
+                seen[name] = len(entries)
+
+                assessment_text = ""
+                if result.rounds:
+                    assessment_text = result.rounds[-1].critic_output.overall_assessment
+                done_summary = (
+                    assessment_text[:200] + "..." if len(assessment_text) > 200 else assessment_text
+                )
+                self._live.collapse_panel(panel, done_summary or f"{len(result.rounds)} round(s)")
+
+            async def _summarized_stop_debate(persona_index, persona):
+                name = persona["name"]
+                config_idx = persona_index % len(self.model_config.critics)
+                config = self.model_config.critics[config_idx]
+                stop_buffers.setdefault(name, [])
+
+                async def coro(buf):
+                    return await run_single_stop_debate(
+                        config=config,
+                        stop_reason=stop_reason,
+                        completeness_assessment=assessment,
+                        notebook_content=notebook_content,
+                        domain_knowledge=self.state.domain_knowledge,
+                        message_buffer=buf,
+                        persona=persona,
+                        analysis_json=analysis_json,
+                        prediction_history=prediction_history,
+                        goal=self.state.goal,
+                    )
+
+                try:
+                    result = await run_with_summaries(
+                        coro,
+                        f"Stop Debate: {name}",
+                        self._summary_model,
+                        stop_buffers[name],
+                        label_prefix="",
+                        summary_collector=collectors[name],
+                    )
+                    _collapse_persona(name, result)
+                    return result
+                except Exception as e:
+                    stop_panels[name].error(str(e))
+                    self._live.collapse_panel(stop_panels[name])
+                    raise
+
+            drain_task = asyncio.create_task(_drain_loop())
+            try:
+                tasks = [
+                    _summarized_stop_debate(i, persona) for i, persona in enumerate(STOP_PERSONAS)
+                ]
+                raw_results = await asyncio.gather(*tasks, return_exceptions=True)
             finally:
-                for label, buf in stop_buffers.items():
-                    clean = label.replace(":", "_").replace("/", "_").replace(" ", "_")
-                    safe_name = f"stop_debate_{clean}"
-                    self._persist_buffer(safe_name, buf)
+                drain_task.cancel()
+                with contextlib.suppress(asyncio.CancelledError):
+                    await drain_task
+
+            debate_results = []
+            for persona, result in zip(STOP_PERSONAS, raw_results, strict=True):
+                name = persona["name"]
+                if isinstance(result, BaseException):
+                    logger.error(
+                        f"Stop debate failed for {name}: {result}",
+                        exc_info=result,
+                    )
+                    if not stop_panels[name].done:
+                        stop_panels[name].error(str(result))
+                        self._live.collapse_panel(stop_panels[name])
+                else:
+                    debate_results.append(result)
+
+            if not debate_results and raw_results:
+                self._live.log("STOP DEBATE: all debates failed")
+                return None
+
+            self._live.log(f"STOP DEBATE: received {len(debate_results)} critique(s)")
+
+            for label, buf in stop_buffers.items():
+                clean = label.replace(":", "_").replace("/", "_").replace(" ", "_")
+                self._persist_buffer(f"stop_debate_{clean}", buf)
 
         # Build concern ledger and persist stop debate
         concern_ledger: list[dict[str, Any]] = []
