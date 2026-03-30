@@ -163,9 +163,12 @@ auto-scientist resume --from experiments/runs/my-run
 auto-scientist resume --from experiments/runs/my-run --preset high
 
 # Fork: copy to new directory, resume from a specific iteration (original untouched)
-auto-scientist resume --from experiments/runs/my-run --fork --resume-from 3
+auto-scientist resume --from experiments/runs/my-run --fork --from-iteration 3
 
-# Fork without --resume-from: continue from where it stopped with more iterations
+# Fork and resume from a specific agent within that iteration
+auto-scientist resume --from experiments/runs/my-run --fork --from-iteration 3 --from-agent scientist
+
+# Fork without --from-iteration: continue from where it stopped with more iterations
 auto-scientist resume --from experiments/runs/my-run --fork --max-iterations 20
 
 # View a completed run in the TUI (read-only)
@@ -175,7 +178,7 @@ auto-scientist show --from experiments/runs/my-run
 auto-scientist status --from experiments/runs/my-run
 ```
 
-Without `--fork`, resume picks up in-place from the last saved phase. With `--fork`, it copies the run to a new directory (original untouched). Add `--resume-from N` to rewind to iteration N in the copy (keeps iterations 0 through N-1).
+Without `--fork`, resume picks up in-place from the last saved phase. With `--fork`, it copies the run to a new directory (original untouched). Add `--from-iteration N` to rewind to iteration N in the copy (keeps iterations 0 through N-1). Add `--from-agent` to resume from a specific agent within an iteration (earlier agents' artifacts are loaded from disk and shown with dashed borders in the TUI).
 
 ## Configuration
 
@@ -245,7 +248,8 @@ Resume a paused, crashed, or completed run. By default resumes in-place. With `-
 |------|---------|-------------|
 | `--from <path>` | *(required)* | Path to run directory (or `state.json`) |
 | `--fork` | | Copy to new directory before resuming (original untouched) |
-| `--resume-from <int>` | *(current)* | Resume from this iteration (keeps all prior). Requires `--fork` |
+| `--from-iteration <int>` | *(current)* | Resume from this iteration (keeps all prior). Alias: `--resume-from`. Requires `--fork` |
+| `--from-agent <name>` | | Resume from this agent (`analyst`, `scientist`, `debate`, `coder`) within the target iteration. Requires `--fork` |
 | `--output-dir <path>` | *(auto)* | Output directory for fork (default: auto-generated). Requires `--fork` |
 | `--max-iterations <int>` | `20` | Maximum iteration count |
 | `-c, --config <path>` | | Override model config |

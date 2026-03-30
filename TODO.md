@@ -8,7 +8,7 @@
 
 ## Completed
 
-- [x] Checkpoint fork: `auto-scientist resume --from <run> --fork --resume-from N` copies a saved run, keeps iterations 0 through N-1, and re-runs from iteration N. Also supports in-place resume of completed runs. Iteration manifests persist per-panel TUI metadata (tokens, timing, summaries) so forks/resumes can reconstruct collapsed panels for preserved iterations. - 2026-03-28
+- [x] Resume and fork: `auto-scientist resume --from <run> --fork --from-iteration N` copies a saved run, keeps iterations 0 through N-1, and re-runs from iteration N. `--from-agent` enables sub-iteration granularity (e.g. resume from scientist within iteration 3). Restored-from-disk agents/iterations show dashed borders and "(restored)" labels in the TUI. Also supports in-place resume of completed runs. - 2026-03-30
 - [x] Agent output validation + retry: Pydantic models for Analyst/Scientist JSON outputs, validation + retry (3 attempts) for JSON agents, syntax check + retry for Coder, data/content validation + retry for Ingestor/Report, provider-native structured output (Anthropic tool_use, OpenAI json_schema, Google response_schema) with direct API path for Scientist - 2026-03-22
 - [x] Retrospective notebook entries: Scientist reflects on investigation arc (breakthroughs, dead ends, diagnostic indicators) alongside forward-looking plans; synthesis module removed (redundant with 1M context windows + self-compressing retrospective entries) - 2026-03-18
 - [x] Debate restructuring: Scientist replaces Defender, critique flows back to Scientist for revision, compressed history removed - 2026-03-17

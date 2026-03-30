@@ -367,7 +367,10 @@ auto-scientist run \
 auto-scientist resume --from experiments/runs/my-run
 
 # Fork a run and resume from iteration 3
-auto-scientist resume --from experiments/runs/my-run --fork --resume-from 3
+auto-scientist resume --from experiments/runs/my-run --fork --from-iteration 3
+
+# Fork and resume from the scientist agent within iteration 3
+auto-scientist resume --from experiments/runs/my-run --fork --from-iteration 3 --from-agent scientist
 
 # Check progress
 auto-scientist status --from experiments/runs/my-run
