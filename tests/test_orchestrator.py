@@ -826,6 +826,12 @@ class TestRunIteration:
         (tmp_path / "results.txt").write_text("data")
 
         plan = {"should_stop": True, "stop_reason": "goal reached"}
+        # Stop gate returns a plan that still says should_stop=True (stop upheld)
+        stop_gate_result = {
+            "should_stop": True,
+            "stop_reason": "goal reached (validated by stop gate)",
+            "notebook_entry": "Stop upheld",
+        }
 
         with (
             patch.object(
@@ -839,6 +845,12 @@ class TestRunIteration:
                 "_run_scientist_plan",
                 new_callable=AsyncMock,
                 return_value=plan,
+            ),
+            patch.object(
+                orchestrator,
+                "_run_stop_gate",
+                new_callable=AsyncMock,
+                return_value=stop_gate_result,
             ),
         ):
             await orchestrator._run_iteration_body()
@@ -961,11 +973,22 @@ class TestRunIteration:
         (tmp_path / "results.txt").write_text("data")
 
         plan = {"should_stop": True, "stop_reason": "criteria met"}
+        stop_gate_result = {
+            "should_stop": True,
+            "stop_reason": "criteria met (validated)",
+            "notebook_entry": "Stop upheld",
+        }
 
         with (
             patch.object(orchestrator, "_run_analyst", new_callable=AsyncMock, return_value={}),
             patch.object(
                 orchestrator, "_run_scientist_plan", new_callable=AsyncMock, return_value=plan
+            ),
+            patch.object(
+                orchestrator,
+                "_run_stop_gate",
+                new_callable=AsyncMock,
+                return_value=stop_gate_result,
             ),
         ):
             await orchestrator._run_iteration_body()

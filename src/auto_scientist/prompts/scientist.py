@@ -120,22 +120,28 @@ when applicable.
    afterthought; it is one of the most important decisions you make.
 
    Set should_stop=true when the core question is answered and the
-   findings are validated. Convergence means:
-   - Recent predictions are consistently confirmed with no structural
-     issues remaining
-   - Performance is stable across validation methods (CV and holdout
-     agree, parameters are consistent across folds)
-   - All sub-problems are performing reasonably, not just the
-     aggregate (a high overall score can mask a broken sub-problem)
-   - Remaining open questions are peripheral (edge cases, alternative
-     formulations, minor refinements) rather than structural (broken
-     sub-problems, untested core hypotheses)
+   findings are validated. Before stopping, verify:
+
+   - Coverage: Decompose the goal into its constituent sub-questions.
+     Each aspect of the goal that could be independently investigated
+     is a sub-question. You cannot stop if any sub-question from the
+     goal has not been investigated at all.
+   - Depth: A single negative result does not close a sub-question.
+     "No nonlinear effects" requires testing multiple functional forms
+     common in the domain, not just one polynomial. "Missingness is
+     random" requires testing multiple mechanisms, not just correlation
+     with one covariate. If you tested one approach and got a negative
+     result, consider what alternative forms or mechanisms remain.
+   - Prediction trajectories: If any prediction was marked inconclusive
+     and not followed up, explain why it is peripheral rather than
+     structural.
 
    Do not confuse convergence with perfection. There are always more
    questions to investigate: edge cases, alternative feature choices,
    parameter sensitivity. The investigation ends when the core
-   question is answered, not when all possible questions are
-   exhausted. Document remaining peripheral questions as future work.
+   question is answered with adequate depth, not when all possible
+   questions are exhausted. Document remaining peripheral questions
+   as future work.
 
    If stagnation persists after structural changes (fundamentally
    different approaches yield no improvement), stop and report what
@@ -598,6 +604,115 @@ diurnal patterns, and wind corridor effects are documented \
 as future work. These would refine the rules for specific \
 deployment contexts but do not change the core finding.",
   "testable_predictions": []
+}}
+</output>
+</example>
+
+<example>
+<input>
+Domain: causal discovery in an industrial process
+Goal: Identify the causal relationships between variables, including
+  confounders, feedback loops, nonlinear effects, and distribution
+  shifts.
+Analysis: 8 of 11 causal edges identified, feedback loop confirmed,
+  confounding-by-indication resolved, regime shift detected.
+  Nonlinearity: quadratic dose-response test refuted (p=0.19).
+  Missingness: tested against one covariate, p=0.54, declared MCAR.
+Previous: v00 EDA, v01 stratified analysis + Granger tests,
+  v02 feedback loop + directionality tests
+Notebook: Three iterations of progressively deeper causal analysis.
+  Core process chain identified and validated. Key finding: dose
+  effect is confounded by indication. Open: nonlinear effects tested
+  with one functional form only; missingness tested against one
+  variable only; temperature effects not quantified; 3 of 11 edges
+  not yet confirmed.
+Prediction history: 14 predictions. 7 confirmed, 4 refuted,
+  2 inconclusive (not followed up), 1 pending.
+</input>
+<reasoning>
+The investigation has answered the core questions (causal edges,
+confounders, feedback loops) but the goal explicitly asks about
+nonlinear effects and distribution shifts. Nonlinearity was tested
+with only one functional form (quadratic), and a negative result
+from one test does not close the sub-question. Saturating,
+piecewise, and interaction effects are standard in industrial
+processes and were not explored. Missingness was declared random
+after testing one covariate, but sensor censoring and ceiling
+effects were not checked. Two predictions remain inconclusive
+without follow-up. Coverage is partial, not complete.
+</reasoning>
+<output>
+{{
+  "hypothesis": "Nonlinear dose-response follows a saturating \
+(Michaelis-Menten) rather than polynomial form, and missingness \
+in the turbidity sensor reflects ceiling censoring rather than \
+random dropout.",
+  "strategy": "incremental",
+  "changes": [
+    {{
+      "what": "Test saturating and piecewise dose-response models",
+      "why": "Only quadratic was tested; saturating and piecewise \
+forms are standard in chemical dosing processes",
+      "how": "Fit Michaelis-Menten (Vmax*dose/(Km+dose)) and \
+piecewise linear with automatic breakpoint detection",
+      "priority": 1
+    }},
+    {{
+      "what": "Check for sensor censoring in turbidity measurements",
+      "why": "Missingness declared MCAR after one test; ceiling \
+effects are a known failure mode for turbidity sensors",
+      "how": "Check if all non-null turbidity values fall below a \
+threshold; plot missingness rate vs time-of-day and vs other \
+variables",
+      "priority": 1
+    }},
+    {{
+      "what": "Quantify temperature effects on reaction kinetics",
+      "why": "Temperature is mentioned in the goal context but was \
+only used as a control variable, never as a primary driver",
+      "how": "Partial correlations and interaction terms between \
+temperature and the process chain variables",
+      "priority": 2
+    }}
+  ],
+  "expected_impact": "Close the nonlinearity and missingness \
+sub-questions with multiple lines of evidence.",
+  "should_stop": false,
+  "stop_reason": null,
+  "notebook_entry": "Coverage gaps identified\\n\\nv02 completed \
+the core causal analysis: 8/11 edges identified, feedback loop \
+confirmed, confounding resolved. However, the goal explicitly \
+asks about nonlinear effects and distribution shifts. Only one \
+functional form was tested for nonlinearity (quadratic, refuted). \
+Missingness was declared random after one covariate test. Two \
+predictions remain inconclusive.\\n\\nNext: test saturating and \
+piecewise dose-response, check for sensor censoring, quantify \
+temperature effects.",
+  "testable_predictions": [
+    {{
+      "prediction": "A Michaelis-Menten model will fit the dose-floc \
+relationship significantly better than linear (F-test p < 0.05) \
+within the high-turbidity stratum",
+      "diagnostic": "Fit Vmax*dose/(Km+dose) to the high-turb \
+stratum data, compare AIC with linear model",
+      "if_confirmed": "The dose-response is saturating, not absent. \
+Estimate the optimal dose from the fitted curve",
+      "if_refuted": "The dose-floc relationship is genuinely linear \
+in this stratum; nonlinearity can be closed as a sub-question",
+      "follows_from": null
+    }},
+    {{
+      "prediction": "Turbidity values are censored above a ceiling \
+(no non-null values above a threshold, with excess mass near it)",
+      "diagnostic": "Histogram of turb_ntu; check max value vs \
+sensor specification; compare null rate in top decile vs bottom",
+      "if_confirmed": "Missingness is MNAR (not MCAR); high-turbidity \
+events are underrepresented. Revise all analyses that assumed MCAR",
+      "if_refuted": "Missingness is consistent with MCAR after this \
+additional check; close the missingness sub-question",
+      "follows_from": null
+    }}
+  ]
 }}
 </output>
 </example>

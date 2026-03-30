@@ -78,6 +78,7 @@ class TestConstants:
             "Report",
             "Critic",
             "Debate",
+            "Assessor",
             "Results",
         }
         assert set(AGENT_STYLES.keys()) == expected
@@ -91,6 +92,9 @@ class TestConstants:
             "REVISE",
             "IMPLEMENT",
             "REPORT",
+            "ASSESS",
+            "STOP_DEBATE",
+            "STOP_REVISE",
         }
         assert set(PHASE_STYLES.keys()) == expected
 

@@ -11,7 +11,7 @@ cause validation failures.
 
 from typing import Any, Literal
 
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 
 class PredictionOutcome(BaseModel):
@@ -87,3 +87,31 @@ class ScientistPlanOutput(BaseModel):
     stop_reason: str | None
     notebook_entry: str
     testable_predictions: list[HypothesisPrediction] = Field(default_factory=list)
+
+
+class SubQuestionAssessment(BaseModel):
+    """Assessment of a single sub-question extracted from the investigation goal."""
+
+    model_config = ConfigDict(extra="ignore")
+
+    question: str = Field(min_length=1)
+    coverage: Literal["thorough", "shallow", "unexplored"]
+    evidence: list[str] = Field(default_factory=list)
+    gaps: list[str] = Field(default_factory=list)
+
+
+class CompletenessAssessmentOutput(BaseModel):
+    """Validated output from the completeness assessment agent."""
+
+    model_config = ConfigDict(extra="ignore")
+
+    sub_questions: list[SubQuestionAssessment] = Field(min_length=1)
+    overall_coverage: Literal["thorough", "partial", "incomplete"]
+    recommendation: Literal["stop", "continue"]
+
+    @model_validator(mode="after")
+    def recommendation_matches_coverage(self) -> "CompletenessAssessmentOutput":
+        """Coerce recommendation to 'continue' if coverage is not thorough."""
+        if self.recommendation == "stop" and self.overall_coverage != "thorough":
+            self.recommendation = "continue"
+        return self

@@ -67,6 +67,7 @@ AGENT_STYLES = {
     "Report": "blue",
     "Critic": "yellow",
     "Debate": "yellow",
+    "Assessor": "blue",
     "Results": "dim",
 }
 
@@ -79,6 +80,7 @@ AGENT_DESCRIPTIONS: dict[str, str] = {
     "Revision": "Revising the experiment plan based on critique feedback...",
     "Coder": "Implementing the experiment plan as a Python script and running it...",
     "Report": "Generating a comprehensive summary report of all findings...",
+    "Assessor": "Evaluating investigation completeness against the stated goal...",
 }
 
 # Maps orchestrator phase names to colors (matches the active agent)
@@ -90,6 +92,9 @@ PHASE_STYLES = {
     "REVISE": "cyan",
     "IMPLEMENT": "magenta1",
     "REPORT": "blue",
+    "ASSESS": "blue",
+    "STOP_DEBATE": "yellow",
+    "STOP_REVISE": "cyan",
 }
 
 

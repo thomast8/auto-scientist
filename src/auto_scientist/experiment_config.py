@@ -28,6 +28,7 @@ class ExperimentModelsConfig(BaseModel):
     ingestor: AgentModelConfig | None = None
     report: AgentModelConfig | None = None
     summarizer: AgentModelConfig | None = None
+    assessor: AgentModelConfig | None = None
     critics: list[AgentModelConfig] = []
 
 
