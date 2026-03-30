@@ -466,3 +466,31 @@ class TestCompletenessAssessmentOutput:
             }
         )
         assert c.recommendation == "stop"
+
+    def test_recommendation_coerced_when_incomplete(self):
+        """LLM says stop but coverage is 'incomplete' -> recommendation coerced to continue."""
+        c = CompletenessAssessmentOutput.model_validate(
+            {
+                "sub_questions": [
+                    {
+                        "question": "What causes outlet turbidity?",
+                        "coverage": "unexplored",
+                        "evidence": [],
+                        "gaps": ["never measured"],
+                    }
+                ],
+                "overall_coverage": "incomplete",
+                "recommendation": "stop",
+            }
+        )
+        # 'incomplete' is not 'thorough', so recommendation must be coerced to 'continue'
+        assert c.recommendation == "continue"
+
+    def test_sub_question_defaults_evidence_and_gaps_to_empty_lists(self):
+        """Omitting evidence and gaps produces empty lists, not validation errors."""
+        s = SubQuestionAssessment(
+            question="Does temperature affect catalyst lifetime?",
+            coverage="shallow",
+        )
+        assert s.evidence == []
+        assert s.gaps == []

@@ -1219,7 +1219,8 @@ class Orchestrator:
 
         Returns the revised plan dict. If should_stop is still true, the stop
         is upheld. If should_stop is false, the plan contains a real experiment.
-        Returns None if the gate encounters an error (stop is upheld by default).
+        Returns None if the gate encounters an error (stop is NOT upheld;
+        investigation continues as a safety measure).
         """
         from auto_scientist.agents.stop_gate import (
             run_completeness_assessment,
@@ -1263,9 +1264,10 @@ class Orchestrator:
             self._persist_artifact(version_dir, "completeness_assessment.json", assessment)
         except Exception as e:
             logger.exception(f"Completeness assessment error: {e}")
+            logger.error("Assessment failure aborts stop gate. Debate and revision skipped.")
             panel.error(str(e))
             self._live.collapse_panel(panel)
-            return None  # Error -> default to upholding stop
+            return None  # Error -> stop not validated, investigation continues
         finally:
             self._persist_buffer("completeness_assessment", buffer)
 
@@ -1282,7 +1284,7 @@ class Orchestrator:
             analysis_json = json.dumps(analysis, indent=2) if analysis else ""
             from auto_scientist.agents.scientist import _format_predictions_for_prompt
 
-            prediction_history = _format_predictions_for_prompt(
+            prediction_history_text = _format_predictions_for_prompt(
                 self.state.prediction_history,
             )
             notebook_content = self._notebook_content()
@@ -1361,7 +1363,7 @@ class Orchestrator:
                         message_buffer=buf,
                         persona=persona,
                         analysis_json=analysis_json,
-                        prediction_history=prediction_history,
+                        prediction_history=prediction_history_text,
                         goal=self.state.goal,
                     )
 
@@ -1406,15 +1408,23 @@ class Orchestrator:
                 else:
                     debate_results.append(result)
 
-            if not debate_results and raw_results:
-                self._live.log("STOP DEBATE: all debates failed")
-                return None
-
-            self._live.log(f"STOP DEBATE: received {len(debate_results)} critique(s)")
-
+            # Persist buffers regardless of success/failure for debugging
             for label, buf in stop_buffers.items():
                 clean = label.replace(":", "_").replace("/", "_").replace(" ", "_")
                 self._persist_buffer(f"stop_debate_{clean}", buf)
+
+            if not debate_results and raw_results:
+                failed_msgs = [str(r) for r in raw_results if isinstance(r, BaseException)]
+                logger.error(
+                    f"All {len(raw_results)} stop debates failed. "
+                    f"Stop gate returning None. Errors: {failed_msgs}"
+                )
+                self._live.log(
+                    f"STOP DEBATE: all {len(raw_results)} debates failed, stop gate cannot validate"
+                )
+                return None
+
+            self._live.log(f"STOP DEBATE: received {len(debate_results)} critique(s)")
 
         # Build concern ledger and persist stop debate
         concern_ledger: list[dict[str, Any]] = []
@@ -1518,7 +1528,7 @@ class Orchestrator:
             logger.exception(f"Stop revision error: {e}")
             revision_panel.error(str(e))
             self._live.collapse_panel(revision_panel)
-            return None  # Error -> default to upholding stop
+            return None  # Error -> stop not validated, investigation continues
         finally:
             self._persist_buffer("stop_revision", revision_buffer)
 

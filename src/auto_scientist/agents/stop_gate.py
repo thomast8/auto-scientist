@@ -26,7 +26,6 @@ from auto_scientist.prompts.stop_gate import (
     ASSESSMENT_USER,
     STOP_CRITIC_SYSTEM_BASE,
     STOP_CRITIC_USER,
-    STOP_PERSONAS,
     STOP_REVISION_SYSTEM,
     STOP_REVISION_USER,
 )
@@ -125,7 +124,7 @@ async def run_completeness_assessment(
             correction_hint = f"\n\n{e.correction_prompt()}"
             logger.warning(f"Assessment attempt {attempt + 1} failed, retrying: {e}")
 
-    raise RuntimeError("Completeness Assessment: exhausted retries")  # unreachable
+    raise RuntimeError("Completeness Assessment: exhausted retries")  # safety net
 
 
 # ---------------------------------------------------------------------------
@@ -174,7 +173,7 @@ async def _query_stop_agent(
             correction_hint = f"\n\n{e.correction_prompt()}"
             logger.warning(f"{label} attempt {attempt + 1} failed, retrying: {e}")
 
-    raise RuntimeError(f"{label}: exhausted retries")  # unreachable
+    raise RuntimeError(f"{label}: exhausted retries")  # safety net
 
 
 async def run_single_stop_debate(
@@ -237,76 +236,6 @@ async def run_single_stop_debate(
         output_tokens=critic_result.output_tokens,
         thinking_tokens=critic_result.thinking_tokens,
     )
-
-
-async def run_stop_debate(
-    critic_configs: list[AgentModelConfig],
-    stop_reason: str,
-    completeness_assessment: dict[str, Any],
-    notebook_content: str,
-    domain_knowledge: str = "",
-    message_buffers: dict[str, list[str]] | None = None,
-    analysis_json: str = "",
-    prediction_history: str = "",
-    goal: str = "",
-) -> list[DebateResult]:
-    """Run stop debates with all stop personas in parallel.
-
-    Each persona gets a model from critic_configs via index-based assignment.
-    """
-    import asyncio
-
-    if not critic_configs:
-        return []
-
-    tasks = []
-    for i, persona in enumerate(STOP_PERSONAS):
-        config = critic_configs[i % len(critic_configs)]
-        buffer = (message_buffers or {}).get(persona["name"])
-        tasks.append(
-            run_single_stop_debate(
-                config=config,
-                stop_reason=stop_reason,
-                completeness_assessment=completeness_assessment,
-                notebook_content=notebook_content,
-                domain_knowledge=domain_knowledge,
-                message_buffer=buffer,
-                persona=persona,
-                analysis_json=analysis_json,
-                prediction_history=prediction_history,
-                goal=goal,
-            )
-        )
-
-    results = await asyncio.gather(*tasks, return_exceptions=True)
-
-    debate_results = []
-    for persona, result in zip(STOP_PERSONAS, results, strict=True):
-        if isinstance(result, BaseException):
-            logger.error(
-                f"Stop debate failed for {persona['name']}: {result}",
-                exc_info=result,
-            )
-        else:
-            debate_results.append(result)
-
-    if not debate_results:
-        failed_msgs = [str(r) for r in results if isinstance(r, BaseException)]
-        raise RuntimeError(
-            f"All {len(results)} stop debates failed. "
-            f"Check API keys and network connectivity. Errors: {failed_msgs}"
-        )
-
-    if len(debate_results) < len(results):
-        lost = [
-            STOP_PERSONAS[i]["name"] for i, r in enumerate(results) if isinstance(r, BaseException)
-        ]
-        logger.warning(
-            f"Stop debate: {len(debate_results)}/{len(results)} succeeded. "
-            f"Lost perspectives: {lost}"
-        )
-
-    return debate_results
 
 
 # ---------------------------------------------------------------------------
@@ -390,4 +319,4 @@ async def run_scientist_stop_revision(
             correction_hint = f"\n\n{e.correction_prompt()}"
             logger.warning(f"Stop revision attempt {attempt + 1} failed, retrying: {e}")
 
-    raise RuntimeError("Stop Revision: exhausted retries")  # unreachable
+    raise RuntimeError("Stop Revision: exhausted retries")  # safety net
