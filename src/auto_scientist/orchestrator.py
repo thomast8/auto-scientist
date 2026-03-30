@@ -226,6 +226,8 @@ class Orchestrator:
         max_consecutive_failures: int = 5,
         debate_rounds: int = 1,
         verbose: bool = False,
+        skip_to_agent: str | None = None,
+        restored_panels: list[dict] | None = None,
     ):
         self.state = state
         self.data_path = data_path.resolve() if data_path else data_path
@@ -240,6 +242,8 @@ class Orchestrator:
         self._live: PipelineLive = PipelineLive()
         self.pause_requested: bool = False
         self.skip_to_report: bool = False
+        self._skip_to_agent: str | None = skip_to_agent
+        self._restored_panels: list[dict] | None = restored_panels
 
     def _validate_prerequisites(self) -> None:
         """Validate directories, API keys, and config before starting.
@@ -520,6 +524,8 @@ class Orchestrator:
 
     async def _run_iteration_body(self) -> None:
         """Run one iteration of the pipeline (inlined, not _run_iteration)."""
+        from auto_scientist.resume import AGENT_ORDER
+
         logger.info(f"=== Iteration {self.state.iteration} start ===")
         self._live.start_iteration(self.state.iteration)
         self._live.update_status(iteration=self.state.iteration)
@@ -527,26 +533,44 @@ class Orchestrator:
         version = f"v{self.state.iteration:02d}"
         version_dir = self.output_dir / version
 
+        # Consume skip_to_agent (only applies to the first iteration after resume)
+        skip_to = self._skip_to_agent
+        self._skip_to_agent = None
+        skip_idx = AGENT_ORDER.index(skip_to) if skip_to else 0
+
+        # Mount TUI panels for agents loaded from disk (with full original stats)
+        if self._restored_panels:
+            for panel_data in self._restored_panels:
+                self._live.mount_restored_panel(panel_data)
+            self._restored_panels = None
+
         # Step 1: Analyst observes latest results (or raw data on iteration 0)
-        analysis = await self._run_analyst()
+        if skip_idx > 0:
+            analysis = self._load_analyst_from_disk(version_dir)
+        else:
+            analysis = await self._run_analyst()
 
         if analysis is None:
             await self._fail_iteration("failed (analyst error)")
             return
 
-        # Persist analysis for audit trail
-        self._persist_artifact(version_dir, "analysis.json", analysis)
+        if skip_idx == 0:
+            # Persist analysis for audit trail
+            self._persist_artifact(version_dir, "analysis.json", analysis)
 
-        # Apply domain_knowledge from Analyst if present
-        if analysis.get("domain_knowledge"):
-            self.state.domain_knowledge = analysis["domain_knowledge"]
-            logger.info("Domain knowledge updated from Analyst")
+            # Apply domain_knowledge from Analyst if present
+            if analysis.get("domain_knowledge"):
+                self.state.domain_knowledge = analysis["domain_knowledge"]
+                logger.info("Domain knowledge updated from Analyst")
 
-        # Resolve any pending prediction outcomes from the Analyst
-        self._resolve_prediction_outcomes(analysis)
+            # Resolve any pending prediction outcomes from the Analyst
+            self._resolve_prediction_outcomes(analysis)
 
         # Step 2: Scientist plans next iteration
-        plan = await self._run_scientist_plan(analysis)
+        if skip_idx > 1:
+            plan = self._load_scientist_plan_from_disk(version_dir)
+        else:
+            plan = await self._run_scientist_plan(analysis)
 
         if plan is None:
             await self._fail_iteration("failed (scientist error)")
@@ -554,7 +578,8 @@ class Orchestrator:
 
         # Step 3: Check if Scientist recommends stopping
         if plan and plan.get("should_stop"):
-            self._persist_artifact(version_dir, "plan.json", plan)
+            if skip_idx <= 1:
+                self._persist_artifact(version_dir, "plan.json", plan)
             logger.info(f"Scientist stop: {plan.get('stop_reason', 'unknown')}")
             self.state.phase = "report"
             iter_summary = await self._generate_iteration_summary()
@@ -565,35 +590,41 @@ class Orchestrator:
             return
 
         # Step 4: Debate (subset personas on iteration 0, all on iteration 1+)
-        debate_result = await self._run_debate(plan, analysis)
-        revised_plan = await self._run_scientist_revision(plan, debate_result, analysis)
-        final_plan = revised_plan or plan
+        if skip_idx > 2:
+            final_plan = self._load_final_plan_from_disk(version_dir)
+            if final_plan is None:
+                await self._fail_iteration("failed (could not load plan from disk)")
+                return
+        else:
+            debate_result = await self._run_debate(plan, analysis)
+            revised_plan = await self._run_scientist_revision(plan, debate_result, analysis)
+            final_plan = revised_plan or plan
 
-        # Persist debate transcript with original plan for context
-        if debate_result:
-            from auto_scientist.agents.debate_models import DebateResult
+            # Persist debate transcript with original plan for context
+            if debate_result:
+                from auto_scientist.agents.debate_models import DebateResult
 
-            serialized_results = [
-                r.model_dump() if isinstance(r, DebateResult) else r for r in debate_result
-            ]
-            concern_ledger = self._build_concern_ledger(debate_result)
-            self._persist_artifact(
-                version_dir,
-                "debate.json",
-                {
-                    "original_plan": plan,
-                    "debate_results": serialized_results,
-                    "concern_ledger": concern_ledger,
-                },
-            )
+                serialized_results = [
+                    r.model_dump() if isinstance(r, DebateResult) else r for r in debate_result
+                ]
+                concern_ledger = self._build_concern_ledger(debate_result)
+                self._persist_artifact(
+                    version_dir,
+                    "debate.json",
+                    {
+                        "original_plan": plan,
+                        "debate_results": serialized_results,
+                        "concern_ledger": concern_ledger,
+                    },
+                )
 
-        # Apply prediction updates from the final plan (after debate revision)
-        if final_plan:
-            self._apply_prediction_updates(final_plan)
+            # Apply prediction updates from the final plan (after debate revision)
+            if final_plan:
+                self._apply_prediction_updates(final_plan)
 
-        # Persist the final plan (post-debate revision if applicable)
-        if final_plan:
-            self._persist_artifact(version_dir, "plan.json", final_plan)
+            # Persist the final plan (post-debate revision if applicable)
+            if final_plan:
+                self._persist_artifact(version_dir, "plan.json", final_plan)
 
         # Step 5: Coder implements and runs the plan
         new_script = await self._run_coder(final_plan)
@@ -925,6 +956,67 @@ class Orchestrator:
         """Save a structured JSON artifact to a version directory."""
         version_dir.mkdir(parents=True, exist_ok=True)
         (version_dir / filename).write_text(json.dumps(data, indent=2))
+
+    def _load_analyst_from_disk(self, version_dir: Path) -> dict[str, Any] | None:
+        """Load analyst output from disk and replay state side-effects."""
+        analysis_path = version_dir / "analysis.json"
+        if not analysis_path.exists():
+            logger.error(f"Cannot load analyst output: {analysis_path} not found")
+            return None
+        try:
+            analysis: dict[str, Any] = json.loads(analysis_path.read_text())
+        except (json.JSONDecodeError, OSError) as e:
+            logger.error(f"Cannot load analyst output: {e}")
+            return None
+
+        # Replay side-effects
+        if analysis.get("domain_knowledge"):
+            self.state.domain_knowledge = analysis["domain_knowledge"]
+            logger.info("Domain knowledge restored from disk")
+        self._resolve_prediction_outcomes(analysis)
+
+        logger.info(f"Loaded analyst output from {analysis_path}")
+        return analysis
+
+    def _load_scientist_plan_from_disk(self, version_dir: Path) -> dict[str, Any] | None:
+        """Load scientist plan from disk.
+
+        When resuming from debate, rewind_run has already restored the
+        pre-debate plan in plan.json.
+        """
+        plan_path = version_dir / "plan.json"
+        if not plan_path.exists():
+            logger.error(f"Cannot load scientist plan: {plan_path} not found")
+            return None
+        try:
+            plan: dict[str, Any] = json.loads(plan_path.read_text())
+        except (json.JSONDecodeError, OSError) as e:
+            logger.error(f"Cannot load scientist plan: {e}")
+            return None
+
+        logger.info(f"Loaded scientist plan from {plan_path}")
+        return plan
+
+    def _load_final_plan_from_disk(self, version_dir: Path) -> dict[str, Any] | None:
+        """Load the final (post-debate) plan from disk and replay prediction updates.
+
+        Used when resuming from coder: the plan on disk is the post-debate
+        revision, so we also replay _apply_prediction_updates.
+        """
+        plan_path = version_dir / "plan.json"
+        if not plan_path.exists():
+            logger.error(f"Cannot load final plan: {plan_path} not found")
+            return None
+        try:
+            plan: dict[str, Any] = json.loads(plan_path.read_text())
+        except (json.JSONDecodeError, OSError) as e:
+            logger.error(f"Cannot load final plan: {e}")
+            return None
+
+        self._apply_prediction_updates(plan)
+
+        logger.info(f"Loaded final plan from {plan_path}")
+        return plan
 
     def _notebook_content(self) -> str:
         """Return notebook content."""

@@ -349,12 +349,22 @@ def run(
     help="Copy to a new directory before resuming (original untouched)",
 )
 @click.option(
+    "--from-iteration",
     "--resume-from",
-    "--at-iteration",
-    "resume_from",
+    "from_iteration",
     default=None,
     type=click.IntRange(min=0),
-    help=("Resume from this iteration (keeps all prior iterations intact). Requires --fork."),
+    help="Resume from this iteration (keeps all prior iterations intact). Requires --fork.",
+)
+@click.option(
+    "--from-agent",
+    "from_agent",
+    default=None,
+    type=click.Choice(["analyst", "scientist", "debate", "coder"], case_sensitive=False),
+    help=(
+        "Resume from this agent within the target iteration "
+        "(earlier agents loaded from disk). Requires --fork."
+    ),
 )
 @click.option("--max-iterations", default=20, type=int, help="Maximum iteration count")
 @click.option(
@@ -390,7 +400,8 @@ def run(
 def resume(
     source: str,
     fork: bool,
-    resume_from: int | None,
+    from_iteration: int | None,
+    from_agent: str | None,
     max_iterations: int,
     output_dir: str | None,
     config_path: str | None,
@@ -402,23 +413,32 @@ def resume(
     """Resume a previously paused or crashed run.
 
     By default, resumes in-place. With --fork, copies to a new directory
-    first (original untouched). With --fork --resume-from N, rewinds to
+    first (original untouched). With --fork --from-iteration N, rewinds to
     iteration N in the copy (keeps iterations 0 through N-1).
+
+    Use --from-agent to resume from a specific agent within an iteration,
+    loading earlier agents' artifacts from disk.
 
     Examples:
 
       auto-scientist resume --from experiments/runs/my-run
       auto-scientist resume --from experiments/runs/my-run --fork
-      auto-scientist resume --from experiments/runs/my-run --fork --resume-from 3
+      auto-scientist resume --from experiments/runs/my-run --fork --from-iteration 3
+      auto-scientist resume --from runs/my-run --fork --from-iteration 3 --from-agent scientist
+      auto-scientist resume --from runs/my-run --fork --from-agent coder
     """
     import shutil
 
-    from auto_scientist.replay import rewind_run
+    from auto_scientist.resume import rewind_run
 
     # Validate flag combinations
-    if resume_from is not None and not fork:
+    if from_iteration is not None and not fork:
         raise click.UsageError(
-            "--resume-from requires --fork (rewinding in-place would destroy data)"
+            "--from-iteration requires --fork (rewinding in-place would destroy data)"
+        )
+    if from_agent is not None and not fork:
+        raise click.UsageError(
+            "--from-agent requires --fork (modifying artifacts in-place would destroy data)"
         )
     if output_dir is not None and not fork:
         raise click.UsageError("--output-dir requires --fork")
@@ -442,9 +462,9 @@ def resume(
 
         # Rewind handles everything: phase reset, report stripping, green
         # border, iteration bump (extend mode), artifact cleanup
-        target = resume_from if resume_from is not None else source_state.iteration
+        target = from_iteration if from_iteration is not None else source_state.iteration
         try:
-            state = rewind_run(run_dir, target)
+            result = rewind_run(run_dir, target, from_agent=from_agent)
         except ValueError as e:
             shutil.rmtree(run_dir, ignore_errors=True)
             raise click.UsageError(str(e)) from None
@@ -452,13 +472,19 @@ def resume(
             shutil.rmtree(run_dir, ignore_errors=True)
             raise click.ClickException(f"Failed to rewind run: {e}") from None
 
+        state = result.state
+        from_agent = result.from_agent  # may have been normalized
+        restored_panels = result.restored_panels
+
+        agent_info = f", from agent '{from_agent}'" if from_agent else ""
         console.print(
-            f"Resuming from iteration {state.iteration} "
+            f"Resuming from iteration {state.iteration}{agent_info} "
             f"({len(state.versions)} prior iterations preserved)"
         )
     else:
         run_dir = src
         state = source_state
+        restored_panels = None
 
         if state.phase in ("stopped", "report"):
             raise click.UsageError(
@@ -488,6 +514,8 @@ def resume(
         model_config=model_config,
         debate_rounds=debate_rounds,
         verbose=verbose,
+        skip_to_agent=from_agent if fork else None,
+        restored_panels=restored_panels,
     )
 
     _run_orchestrator(orchestrator)

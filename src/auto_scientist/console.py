@@ -931,6 +931,46 @@ class PipelineLive:
         if self._app is not None:
             self._app.call_from_thread(self._app._mount_panel, panel)
 
+    def mount_restored_panel(self, panel_data: dict) -> None:
+        """Mount a pre-built collapsed panel into the current iteration.
+
+        Used when resuming from a specific agent: panels for agents that were
+        loaded from disk are shown with their original stats and content.
+        *panel_data* has the same shape as entries in ``mount_restored_iteration``'s
+        *panels* list (name, model, style, done_summary, tokens, etc.).
+        """
+        panel = AgentPanel(
+            name=panel_data["name"],
+            model=panel_data["model"],
+            style=panel_data.get("style", "cyan"),
+        )
+
+        self._panels.append(panel)
+        if self._app is not None:
+
+            def _do_mount():
+                self._app._mount_panel(panel)
+                # Pre-set metadata so _build_footer() works
+                panel.input_tokens = panel_data.get("input_tokens", 0)
+                panel.output_tokens = panel_data.get("output_tokens", 0)
+                panel.thinking_tokens = panel_data.get("thinking_tokens", 0)
+                panel.num_turns = panel_data.get("num_turns", 0)
+                for line in panel_data.get("lines", []):
+                    panel.all_lines.append(line)
+                    panel._write_to_richlog(line)
+                panel.complete(panel_data.get("done_summary", ""))
+                panel._apply_complete_dom()
+                # Override _end_time AFTER complete() so saved elapsed is preserved
+                panel._end_time = panel.start_time + panel_data.get("elapsed_seconds", 0)
+
+            self._app.call_from_thread(_do_mount)
+
+        if self._file_console is not None:
+            self._file_console.print(
+                f"[{panel.panel_name}] {panel_data.get('done_summary', '')} "
+                f"(restored from previous run)"
+            )
+
     def collapse_panel(
         self,
         panel: AgentPanel,
