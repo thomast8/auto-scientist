@@ -234,7 +234,6 @@ All core agents (analyst, scientist, coder, ingestor, report) run through the [C
 | `--output-dir <path>` | `experiments` | Output directory |
 | `--schedule <window>` | | Time window, e.g. `"22:00-06:00"` |
 | `--interactive` | `false` | Human-in-the-loop mode |
-| `--no-stream` | | Disable live token streaming |
 | `--no-summaries` | | Disable agent progress summaries |
 | `-v, --verbose` | | Debug logging |
 
@@ -252,7 +251,6 @@ Resume a paused, crashed, or completed run. By default resumes in-place. With `-
 | `-c, --config <path>` | | Override model config |
 | `--preset <name>` | | Override preset |
 | `--debate-rounds <int>` | `1` | Debate rounds per persona |
-| `--no-stream` | | Disable live token streaming |
 | `--no-summaries` | | Disable agent progress summaries |
 | `-v, --verbose` | | Debug logging |
 
