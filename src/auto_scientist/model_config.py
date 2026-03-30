@@ -86,6 +86,7 @@ BUILTIN_PRESETS: dict[str, dict] = {
         "defaults": {"model": "claude-sonnet-4-6", "reasoning": "high"},
         "analyst": {"model": "claude-opus-4-6", "reasoning": "medium"},
         "scientist": {"model": "claude-opus-4-6", "reasoning": "high"},
+        "assessor": {"model": "claude-opus-4-6", "reasoning": "medium"},
         "summarizer": {"provider": "openai", "model": "gpt-5.4-nano", "reasoning": "off"},
         "critics": [
             {"provider": "openai", "model": "gpt-5.4", "reasoning": "high"},
@@ -141,6 +142,7 @@ class ModelConfig(BaseModel):
     ingestor: AgentModelConfig | None = None
     report: AgentModelConfig | None = None
     summarizer: AgentModelConfig | None = None
+    assessor: AgentModelConfig | None = None
     critics: list[AgentModelConfig] = []
 
     _AGENT_FIELDS: ClassVar[set[str]] = {
@@ -150,6 +152,7 @@ class ModelConfig(BaseModel):
         "ingestor",
         "report",
         "summarizer",
+        "assessor",
     }
 
     def resolve(self, agent: str) -> AgentModelConfig:

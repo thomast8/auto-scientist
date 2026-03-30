@@ -6,15 +6,18 @@ from pydantic import ValidationError
 from auto_scientist.schemas import (
     AnalystOutput,
     CoderRunResult,
+    CompletenessAssessmentOutput,
     HypothesisPrediction,
     PlanChange,
     PredictionOutcome,
     ScientistPlanOutput,
+    SubQuestionAssessment,
 )
 
 # ---------------------------------------------------------------------------
 # AnalystOutput
 # ---------------------------------------------------------------------------
+
 
 class TestAnalystOutput:
     @pytest.fixture
@@ -64,6 +67,7 @@ class TestAnalystOutput:
 # CoderRunResult
 # ---------------------------------------------------------------------------
 
+
 class TestCoderRunResult:
     def test_valid_success(self):
         r = CoderRunResult(success=True, return_code=0, timed_out=False, error=None, attempts=1)
@@ -106,6 +110,7 @@ class TestCoderRunResult:
 # PlanChange
 # ---------------------------------------------------------------------------
 
+
 class TestPlanChange:
     def test_valid(self):
         c = PlanChange(
@@ -121,6 +126,7 @@ class TestPlanChange:
 # ---------------------------------------------------------------------------
 # ScientistPlanOutput
 # ---------------------------------------------------------------------------
+
 
 class TestScientistPlanOutput:
     @pytest.fixture
@@ -185,6 +191,7 @@ class TestScientistPlanOutput:
 # HypothesisPrediction
 # ---------------------------------------------------------------------------
 
+
 class TestHypothesisPrediction:
     def test_valid(self):
         p = HypothesisPrediction(
@@ -207,8 +214,11 @@ class TestHypothesisPrediction:
 
     def test_extra_fields_ignored(self):
         p = HypothesisPrediction(
-            prediction="test", diagnostic="test",
-            if_confirmed="ok", if_refuted="nope", extra_field="ignored",
+            prediction="test",
+            diagnostic="test",
+            if_confirmed="ok",
+            if_refuted="nope",
+            extra_field="ignored",
         )
         assert not hasattr(p, "extra_field")
 
@@ -217,11 +227,14 @@ class TestHypothesisPrediction:
 # PredictionOutcome
 # ---------------------------------------------------------------------------
 
+
 class TestPredictionOutcome:
     def test_valid_outcomes(self):
         for outcome in ("confirmed", "refuted", "inconclusive"):
             p = PredictionOutcome(
-                prediction="test", outcome=outcome, evidence="measured 0.5",
+                prediction="test",
+                outcome=outcome,
+                evidence="measured 0.5",
             )
             assert p.outcome == outcome
 
@@ -231,7 +244,10 @@ class TestPredictionOutcome:
 
     def test_extra_fields_ignored(self):
         p = PredictionOutcome(
-            prediction="test", outcome="confirmed", evidence="ok", bonus="nope",
+            prediction="test",
+            outcome="confirmed",
+            evidence="ok",
+            bonus="nope",
         )
         assert not hasattr(p, "bonus")
 
@@ -239,6 +255,7 @@ class TestPredictionOutcome:
 # ---------------------------------------------------------------------------
 # ScientistPlanOutput - testable_predictions
 # ---------------------------------------------------------------------------
+
 
 class TestScientistPlanOutputPredictions:
     @pytest.fixture
@@ -288,6 +305,7 @@ class TestScientistPlanOutputPredictions:
 # AnalystOutput - prediction_outcomes
 # ---------------------------------------------------------------------------
 
+
 class TestAnalystOutputPredictions:
     @pytest.fixture
     def minimal_analysis(self):
@@ -313,3 +331,166 @@ class TestAnalystOutputPredictions:
         a = AnalystOutput.model_validate(minimal_analysis)
         assert len(a.prediction_outcomes) == 1
         assert a.prediction_outcomes[0].outcome == "confirmed"
+
+
+# ---------------------------------------------------------------------------
+# SubQuestionAssessment
+# ---------------------------------------------------------------------------
+
+
+class TestSubQuestionAssessment:
+    def test_valid(self):
+        s = SubQuestionAssessment(
+            question="What factors drive outlet clarity?",
+            coverage="thorough",
+            evidence=["setl_mh R²=0.94"],
+            gaps=[],
+        )
+        assert s.coverage == "thorough"
+
+    def test_invalid_coverage(self):
+        with pytest.raises(ValidationError):
+            SubQuestionAssessment(
+                question="test",
+                coverage="unknown",
+                evidence=[],
+                gaps=[],
+            )
+
+    def test_empty_question_rejected(self):
+        with pytest.raises(ValidationError):
+            SubQuestionAssessment(
+                question="",
+                coverage="shallow",
+                evidence=[],
+                gaps=[],
+            )
+
+    def test_extra_fields_ignored(self):
+        s = SubQuestionAssessment(
+            question="test",
+            coverage="shallow",
+            evidence=[],
+            gaps=[],
+            extra="ignored",
+        )
+        assert "extra" not in s.model_dump()
+
+
+# ---------------------------------------------------------------------------
+# CompletenessAssessmentOutput
+# ---------------------------------------------------------------------------
+
+
+class TestCompletenessAssessmentOutput:
+    @pytest.fixture
+    def valid_assessment(self):
+        return {
+            "sub_questions": [
+                {
+                    "question": "What factors drive outlet clarity?",
+                    "coverage": "thorough",
+                    "evidence": ["setl_mh R²=0.94", "variance decomposition"],
+                    "gaps": [],
+                },
+                {
+                    "question": "Are there nonlinear effects?",
+                    "coverage": "shallow",
+                    "evidence": ["quadratic test refuted"],
+                    "gaps": ["Only one functional form tested"],
+                },
+            ],
+            "overall_coverage": "partial",
+            "recommendation": "continue",
+        }
+
+    def test_valid(self, valid_assessment):
+        c = CompletenessAssessmentOutput.model_validate(valid_assessment)
+        assert len(c.sub_questions) == 2
+        assert c.overall_coverage == "partial"
+        assert c.recommendation == "continue"
+
+    def test_invalid_overall_coverage(self, valid_assessment):
+        valid_assessment["overall_coverage"] = "unknown"
+        with pytest.raises(ValidationError):
+            CompletenessAssessmentOutput.model_validate(valid_assessment)
+
+    def test_invalid_recommendation(self, valid_assessment):
+        valid_assessment["recommendation"] = "maybe"
+        with pytest.raises(ValidationError):
+            CompletenessAssessmentOutput.model_validate(valid_assessment)
+
+    def test_extra_fields_ignored(self, valid_assessment):
+        valid_assessment["extra"] = "should be dropped"
+        c = CompletenessAssessmentOutput.model_validate(valid_assessment)
+        assert "extra" not in c.model_dump()
+
+    def test_model_dump_roundtrip(self, valid_assessment):
+        c = CompletenessAssessmentOutput.model_validate(valid_assessment)
+        d = c.model_dump()
+        assert isinstance(d, dict)
+        assert d["sub_questions"][0]["coverage"] == "thorough"
+        assert d["sub_questions"][1]["gaps"] == ["Only one functional form tested"]
+
+    def test_empty_sub_questions_rejected(self):
+        with pytest.raises(ValidationError):
+            CompletenessAssessmentOutput.model_validate(
+                {
+                    "sub_questions": [],
+                    "overall_coverage": "incomplete",
+                    "recommendation": "continue",
+                }
+            )
+
+    def test_recommendation_coerced_when_coverage_not_thorough(self):
+        """LLM says stop but coverage is partial -> coerced to continue."""
+        c = CompletenessAssessmentOutput.model_validate(
+            {
+                "sub_questions": [
+                    {"question": "test", "coverage": "shallow", "evidence": [], "gaps": ["gap"]},
+                ],
+                "overall_coverage": "partial",
+                "recommendation": "stop",
+            }
+        )
+        assert c.recommendation == "continue"
+
+    def test_recommendation_stop_allowed_when_thorough(self):
+        c = CompletenessAssessmentOutput.model_validate(
+            {
+                "sub_questions": [
+                    {"question": "test", "coverage": "thorough", "evidence": ["solid"], "gaps": []},
+                ],
+                "overall_coverage": "thorough",
+                "recommendation": "stop",
+            }
+        )
+        assert c.recommendation == "stop"
+
+    def test_recommendation_coerced_when_incomplete(self):
+        """LLM says stop but coverage is 'incomplete' -> recommendation coerced to continue."""
+        c = CompletenessAssessmentOutput.model_validate(
+            {
+                "sub_questions": [
+                    {
+                        "question": "What causes outlet turbidity?",
+                        "coverage": "unexplored",
+                        "evidence": [],
+                        "gaps": ["never measured"],
+                    }
+                ],
+                "overall_coverage": "incomplete",
+                "recommendation": "stop",
+            }
+        )
+        # 'incomplete' is not 'thorough', so recommendation must be coerced to 'continue'
+        assert c.recommendation == "continue"
+
+    def test_sub_question_defaults_evidence_and_gaps_to_empty_lists(self):
+        """Omitting evidence and gaps produces empty lists, not validation errors."""
+        s = SubQuestionAssessment(
+            question="Does temperature affect catalyst lifetime?",
+            coverage="shallow",
+        )
+        assert s.evidence == []
+        assert s.gaps == []

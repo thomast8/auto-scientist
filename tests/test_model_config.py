@@ -97,9 +97,22 @@ class TestModelConfigResolve:
 
     def test_resolve_all_agent_fields(self):
         mc = ModelConfig(defaults=AgentModelConfig(model="claude-sonnet-4-6"))
-        for agent in ["analyst", "scientist", "coder", "ingestor", "report", "summarizer"]:
+        agents = ["analyst", "scientist", "coder", "ingestor", "report", "summarizer", "assessor"]
+        for agent in agents:
             cfg = mc.resolve(agent)
             assert cfg.model == "claude-sonnet-4-6"
+
+    def test_resolve_assessor_returns_override(self):
+        mc = ModelConfig(
+            defaults=AgentModelConfig(model="claude-sonnet-4-6"),
+            assessor=AgentModelConfig(
+                model="claude-opus-4-6",
+                reasoning=ReasoningConfig(level="medium"),
+            ),
+        )
+        cfg = mc.resolve("assessor")
+        assert cfg.model == "claude-opus-4-6"
+        assert cfg.reasoning.level == "medium"
 
 
 class TestReasoningToCCExtraArgs:
@@ -155,7 +168,7 @@ class TestBuiltinPresets:
 
     def test_turbo_preset_all_agents_use_haiku_with_off_reasoning(self):
         mc = ModelConfig.builtin_preset("turbo")
-        for agent in ["analyst", "scientist", "coder", "ingestor", "report"]:
+        for agent in ["analyst", "scientist", "coder", "ingestor", "report", "assessor"]:
             cfg = mc.resolve(agent)
             assert cfg.model == "claude-haiku-4-5-20251001"
             assert cfg.reasoning.level == "off"
@@ -175,6 +188,17 @@ class TestBuiltinPresets:
         assert default.defaults.model == medium.defaults.model
         assert default.defaults.reasoning.level == medium.defaults.reasoning.level
         assert default.resolve("scientist").model == medium.resolve("scientist").model
+
+    def test_high_preset_assessor(self):
+        mc = ModelConfig.builtin_preset("high")
+        cfg = mc.resolve("assessor")
+        assert cfg.model == "claude-opus-4-6"
+        assert cfg.reasoning.level == "medium"
+
+    def test_default_preset_assessor_falls_back_to_defaults(self):
+        mc = ModelConfig.builtin_preset("default")
+        cfg = mc.resolve("assessor")
+        assert cfg.model == mc.defaults.model
 
     def test_nonexistent_preset_raises(self):
         with pytest.raises(ValueError, match="Unknown preset"):

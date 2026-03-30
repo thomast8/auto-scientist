@@ -826,6 +826,12 @@ class TestRunIteration:
         (tmp_path / "results.txt").write_text("data")
 
         plan = {"should_stop": True, "stop_reason": "goal reached"}
+        # Stop gate returns a plan that still says should_stop=True (stop upheld)
+        stop_gate_result = {
+            "should_stop": True,
+            "stop_reason": "goal reached (validated by stop gate)",
+            "notebook_entry": "Stop upheld",
+        }
 
         with (
             patch.object(
@@ -839,6 +845,12 @@ class TestRunIteration:
                 "_run_scientist_plan",
                 new_callable=AsyncMock,
                 return_value=plan,
+            ),
+            patch.object(
+                orchestrator,
+                "_run_stop_gate",
+                new_callable=AsyncMock,
+                return_value=stop_gate_result,
             ),
         ):
             await orchestrator._run_iteration_body()
@@ -961,11 +973,22 @@ class TestRunIteration:
         (tmp_path / "results.txt").write_text("data")
 
         plan = {"should_stop": True, "stop_reason": "criteria met"}
+        stop_gate_result = {
+            "should_stop": True,
+            "stop_reason": "criteria met (validated)",
+            "notebook_entry": "Stop upheld",
+        }
 
         with (
             patch.object(orchestrator, "_run_analyst", new_callable=AsyncMock, return_value={}),
             patch.object(
                 orchestrator, "_run_scientist_plan", new_callable=AsyncMock, return_value=plan
+            ),
+            patch.object(
+                orchestrator,
+                "_run_stop_gate",
+                new_callable=AsyncMock,
+                return_value=stop_gate_result,
             ),
         ):
             await orchestrator._run_iteration_body()
@@ -1078,6 +1101,124 @@ class TestRunIteration:
         # Iteration completed and state advanced
         assert orchestrator.state.iteration == 1
         assert len(orchestrator.state.versions) == 1
+
+    @pytest.mark.asyncio
+    async def test_stop_gate_returns_none_continues_investigation(self, orchestrator, tmp_path):
+        """When _run_stop_gate returns None (error), investigation does not stop."""
+        orchestrator.output_dir.mkdir(parents=True, exist_ok=True)
+        orchestrator.state.phase = "iteration"
+        orchestrator.state.iteration = 0
+
+        plan = {"should_stop": True, "stop_reason": "seemed done"}
+        script_path = tmp_path / "experiments" / "v00" / "experiment.py"
+        script_path.parent.mkdir(parents=True, exist_ok=True)
+        script_path.write_text("print('hi')")
+        run_result = RunResult(success=True, stdout="ok", return_code=0)
+
+        with (
+            patch.object(orchestrator, "_run_analyst", new_callable=AsyncMock, return_value={}),
+            patch.object(
+                orchestrator, "_run_scientist_plan", new_callable=AsyncMock, return_value=plan
+            ),
+            patch.object(
+                orchestrator,
+                "_run_stop_gate",
+                new_callable=AsyncMock,
+                return_value=None,  # gate crashed
+            ),
+            patch.object(orchestrator, "_run_debate", new_callable=AsyncMock, return_value=None),
+            patch.object(
+                orchestrator,
+                "_run_scientist_revision",
+                new_callable=AsyncMock,
+                return_value=None,
+            ),
+            patch.object(
+                orchestrator, "_run_coder", new_callable=AsyncMock, return_value=script_path
+            ),
+            patch.object(orchestrator, "_read_run_result", return_value=run_result),
+        ):
+            await orchestrator._run_iteration_body()
+
+        # Phase must NOT become "report" when the stop gate returns None
+        assert orchestrator.state.phase != "report"
+
+    @pytest.mark.asyncio
+    async def test_stop_gate_withdraws_stop_continues_to_debate(self, orchestrator, tmp_path):
+        """When stop gate returns should_stop=False, the revised plan goes through debate."""
+        orchestrator.output_dir.mkdir(parents=True, exist_ok=True)
+        orchestrator.state.phase = "iteration"
+        orchestrator.state.iteration = 1
+        orchestrator.state.versions = [
+            VersionEntry(
+                version="v00",
+                iteration=0,
+                script_path="/tmp/s.py",
+                results_path=str(tmp_path / "results.txt"),
+            ),
+        ]
+        (tmp_path / "results.txt").write_text("data")
+
+        original_plan = {"should_stop": True, "stop_reason": "thought we were done"}
+        revised_plan = {
+            "should_stop": False,
+            "hypothesis": "Nonlinear effects not yet tested",
+            "strategy": "incremental",
+            "changes": [
+                {
+                    "what": "add polynomial",
+                    "why": "test nonlinearity",
+                    "how": "degree=2",
+                    "priority": 1,
+                }
+            ],
+            "expected_impact": "Higher R²",
+            "stop_reason": None,
+            "notebook_entry": "## Stop withdrawn\nContinuing.",
+        }
+        script_path = tmp_path / "experiments" / "v01" / "experiment.py"
+        script_path.parent.mkdir(parents=True, exist_ok=True)
+        script_path.write_text("print('hi')")
+        run_result = RunResult(success=True, stdout="ok", return_code=0)
+
+        with (
+            patch.object(orchestrator, "_run_analyst", new_callable=AsyncMock, return_value={}),
+            patch.object(
+                orchestrator,
+                "_run_scientist_plan",
+                new_callable=AsyncMock,
+                return_value=original_plan,
+            ),
+            patch.object(
+                orchestrator,
+                "_run_stop_gate",
+                new_callable=AsyncMock,
+                return_value=revised_plan,
+            ),
+            patch.object(
+                orchestrator, "_run_debate", new_callable=AsyncMock, return_value=None
+            ) as mock_debate,
+            patch.object(
+                orchestrator,
+                "_run_scientist_revision",
+                new_callable=AsyncMock,
+                return_value=None,
+            ),
+            patch.object(
+                orchestrator, "_run_coder", new_callable=AsyncMock, return_value=script_path
+            ),
+            patch.object(orchestrator, "_read_run_result", return_value=run_result),
+        ):
+            await orchestrator._run_iteration_body()
+
+        # Debate must have been called with the revised (stop-withdrawn) plan
+        mock_debate.assert_called_once()
+        debate_plan_arg = mock_debate.call_args[0][0]
+        assert debate_plan_arg["should_stop"] is False
+        assert debate_plan_arg["hypothesis"] == "Nonlinear effects not yet tested"
+
+        # Phase must NOT become "report"
+        assert orchestrator.state.phase != "report"
 
 
 class TestRunAnalystInitial:

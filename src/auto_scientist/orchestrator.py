@@ -576,18 +576,37 @@ class Orchestrator:
             await self._fail_iteration("failed (scientist error)")
             return
 
-        # Step 3: Check if Scientist recommends stopping
+        # Step 3: Stop gate (if Scientist recommends stopping)
         if plan and plan.get("should_stop"):
-            if skip_idx <= 1:
-                self._persist_artifact(version_dir, "plan.json", plan)
-            logger.info(f"Scientist stop: {plan.get('stop_reason', 'unknown')}")
-            self.state.phase = "report"
-            iter_summary = await self._generate_iteration_summary()
-            stop_label = f"stopped: {plan.get('stop_reason', 'unknown')}"
-            self._save_iteration_manifest(self.state.iteration, stop_label, "yellow", iter_summary)
-            self._live.end_iteration(stop_label, "yellow", iter_summary)
-            self._live.flush_completed()
-            return
+            revised_stop_plan = await self._run_stop_gate(plan, analysis, version_dir)
+
+            if revised_stop_plan is None:
+                # Gate crashed - cannot validate the stop, continue investigating
+                logger.error(
+                    "Stop gate failed to produce a verdict. "
+                    "Treating as 'stop not validated' and continuing investigation."
+                )
+                self._live.log(
+                    "STOP GATE: error during validation - stop proposal NOT upheld, continuing"
+                )
+                plan["should_stop"] = False
+            elif revised_stop_plan.get("should_stop"):
+                # Stop upheld after the gate
+                stop_msg = revised_stop_plan.get("stop_reason", "unknown")
+                logger.info(f"Scientist stop upheld: {stop_msg}")
+                self.state.phase = "report"
+                iter_summary = await self._generate_iteration_summary()
+                stop_label = f"stopped: {revised_stop_plan.get('stop_reason', 'unknown')}"
+                self._save_iteration_manifest(
+                    self.state.iteration, stop_label, "yellow", iter_summary
+                )
+                self._live.end_iteration(stop_label, "yellow", iter_summary)
+                self._live.flush_completed()
+                return
+            else:
+                # Stop withdrawn - use the new plan and fall through to normal debate
+                logger.info("Scientist withdrew stop after stop gate, continuing")
+                plan = revised_stop_plan
 
         # Step 4: Debate (subset personas on iteration 0, all on iteration 1+)
         if skip_idx > 2:
@@ -1189,6 +1208,329 @@ class Orchestrator:
             return None
         finally:
             self._persist_buffer("scientist", buffer)
+
+    async def _run_stop_gate(
+        self,
+        plan: dict,
+        analysis: dict | None,
+        version_dir: Path,
+    ) -> dict[str, Any] | None:
+        """Run the stop gate: assessment, stop debate, and stop revision.
+
+        Returns the revised plan dict. If should_stop is still true, the stop
+        is upheld. If should_stop is false, the plan contains a real experiment.
+        Returns None if the gate encounters an error (stop is NOT upheld;
+        investigation continues as a safety measure).
+        """
+        from auto_scientist.agents.stop_gate import (
+            run_completeness_assessment,
+            run_scientist_stop_revision,
+        )
+        from auto_scientist.prompts.stop_gate import STOP_PERSONAS
+
+        stop_reason = plan.get("stop_reason", "unknown")
+        version = f"v{self.state.iteration:02d}"
+        notebook_path = self.output_dir / NOTEBOOK_FILENAME
+
+        # --- Step 3a: Completeness Assessment ---
+        cfg = self.model_config.resolve("assessor")
+        panel = AgentPanel(
+            name="Assessor", model=cfg.model, style=AGENT_STYLES.get("Assessor", "blue")
+        )
+        self._live.add_panel(panel)
+        self._live.update_status(phase="ASSESS")
+
+        buffer: list[str] = []
+        try:
+
+            async def _assess_coro(buf):
+                return await run_completeness_assessment(
+                    goal=self.state.goal,
+                    stop_reason=stop_reason,
+                    notebook_path=notebook_path,
+                    domain_knowledge=self.state.domain_knowledge,
+                    prediction_history=self.state.prediction_history,
+                    model=cfg.model,
+                    message_buffer=buf,
+                )
+
+            assessment: dict[str, Any] = await self._with_summaries(
+                _assess_coro,
+                "Completeness Assessment",
+                buffer,
+                panel=panel,
+            )
+            self._collapse(panel, f"coverage={assessment.get('overall_coverage', '?')}")
+            self._persist_artifact(version_dir, "completeness_assessment.json", assessment)
+        except Exception as e:
+            logger.exception(f"Completeness assessment error: {e}")
+            logger.error("Assessment failure aborts stop gate. Debate and revision skipped.")
+            panel.error(str(e))
+            self._live.collapse_panel(panel)
+            return None  # Error -> stop not validated, investigation continues
+        finally:
+            self._persist_buffer("completeness_assessment", buffer)
+
+        # --- Step 3b: Stop Debate ---
+        if not self.model_config.critics:
+            self._live.log("STOP DEBATE: skipped (no critics configured)")
+            debate_results: list = []
+        else:
+            import asyncio
+            import contextlib
+
+            from auto_scientist.agents.stop_gate import run_single_stop_debate
+
+            analysis_json = json.dumps(analysis, indent=2) if analysis else ""
+            from auto_scientist.agents.scientist import _format_predictions_for_prompt
+
+            prediction_history_text = _format_predictions_for_prompt(
+                self.state.prediction_history,
+            )
+            notebook_content = self._notebook_content()
+
+            self._live.update_status(phase="STOP_DEBATE")
+
+            # Create per-persona buffers and panels
+            stop_buffers: dict[str, list[str]] = {}
+            stop_panels: dict[str, AgentPanel] = {}
+            collectors: dict[str, list[tuple[str, str, str]]] = {}
+            for i, persona in enumerate(STOP_PERSONAS):
+                name = persona["name"]
+                stop_buffers[name] = []
+                collectors[name] = []
+                config_idx = i % len(self.model_config.critics)
+                critic_cfg = self.model_config.critics[config_idx]
+                critic_label = f"{critic_cfg.provider}:{critic_cfg.model}"
+                stop_panel = AgentPanel(
+                    name=f"Critic/{name}",
+                    model=critic_label,
+                    style=AGENT_STYLES.get("Critic", "yellow"),
+                )
+                stop_panels[name] = stop_panel
+                self._live.add_panel(stop_panel)
+
+            seen: dict[str, int] = {p["name"]: 0 for p in STOP_PERSONAS}
+
+            def _flush_collectors():
+                for name in seen:
+                    entries = collectors[name]
+                    for _agent_name, summary, time_label in entries[seen[name] :]:
+                        stop_panels[name].add_line(f"[{time_label}] {summary}")
+                    seen[name] = len(entries)
+                self._live.refresh()
+
+            async def _drain_loop():
+                while True:
+                    await asyncio.sleep(0.5)
+                    _flush_collectors()
+
+            def _collapse_persona(name, result):
+                panel = stop_panels[name]
+                panel.set_stats(
+                    input_tokens=result.input_tokens,
+                    output_tokens=result.output_tokens,
+                    thinking_tokens=result.thinking_tokens,
+                    num_turns=len(result.raw_transcript),
+                )
+                # Flush remaining summary entries
+                entries = collectors[name]
+                for _n, summary, time_label in entries[seen[name] :]:
+                    panel.add_line(f"[{time_label}] {summary}")
+                seen[name] = len(entries)
+
+                assessment_text = ""
+                if result.rounds:
+                    assessment_text = result.rounds[-1].critic_output.overall_assessment
+                done_summary = (
+                    assessment_text[:200] + "..." if len(assessment_text) > 200 else assessment_text
+                )
+                self._live.collapse_panel(panel, done_summary or f"{len(result.rounds)} round(s)")
+
+            async def _summarized_stop_debate(persona_index, persona):
+                name = persona["name"]
+                config_idx = persona_index % len(self.model_config.critics)
+                config = self.model_config.critics[config_idx]
+                stop_buffers.setdefault(name, [])
+
+                async def coro(buf):
+                    return await run_single_stop_debate(
+                        config=config,
+                        stop_reason=stop_reason,
+                        completeness_assessment=assessment,
+                        notebook_content=notebook_content,
+                        domain_knowledge=self.state.domain_knowledge,
+                        message_buffer=buf,
+                        persona=persona,
+                        analysis_json=analysis_json,
+                        prediction_history=prediction_history_text,
+                        goal=self.state.goal,
+                    )
+
+                try:
+                    result = await run_with_summaries(
+                        coro,
+                        f"Stop Debate: {name}",
+                        self._summary_model,
+                        stop_buffers[name],
+                        label_prefix="",
+                        summary_collector=collectors[name],
+                    )
+                    _collapse_persona(name, result)
+                    return result
+                except Exception as e:
+                    stop_panels[name].error(str(e))
+                    self._live.collapse_panel(stop_panels[name])
+                    raise
+
+            drain_task = asyncio.create_task(_drain_loop())
+            try:
+                tasks = [
+                    _summarized_stop_debate(i, persona) for i, persona in enumerate(STOP_PERSONAS)
+                ]
+                raw_results = await asyncio.gather(*tasks, return_exceptions=True)
+            finally:
+                drain_task.cancel()
+                with contextlib.suppress(asyncio.CancelledError):
+                    await drain_task
+
+            debate_results = []
+            for persona, result in zip(STOP_PERSONAS, raw_results, strict=True):
+                name = persona["name"]
+                if isinstance(result, BaseException):
+                    logger.error(
+                        f"Stop debate failed for {name}: {result}",
+                        exc_info=result,
+                    )
+                    if not stop_panels[name].done:
+                        stop_panels[name].error(str(result))
+                        self._live.collapse_panel(stop_panels[name])
+                else:
+                    debate_results.append(result)
+
+            # Persist buffers regardless of success/failure for debugging
+            for label, buf in stop_buffers.items():
+                clean = label.replace(":", "_").replace("/", "_").replace(" ", "_")
+                self._persist_buffer(f"stop_debate_{clean}", buf)
+
+            if not debate_results and raw_results:
+                failed_msgs = [str(r) for r in raw_results if isinstance(r, BaseException)]
+                logger.error(
+                    f"All {len(raw_results)} stop debates failed. "
+                    f"Stop gate returning None. Errors: {failed_msgs}"
+                )
+                self._live.log(
+                    f"STOP DEBATE: all {len(raw_results)} debates failed, stop gate cannot validate"
+                )
+                return None
+
+            self._live.log(f"STOP DEBATE: received {len(debate_results)} critique(s)")
+
+        # Build concern ledger and persist stop debate
+        concern_ledger: list[dict[str, Any]] = []
+        if debate_results:
+            from auto_scientist.agents.debate_models import DebateResult
+
+            serialized = [
+                r.model_dump() if isinstance(r, DebateResult) else r for r in debate_results
+            ]
+            concern_ledger = self._build_concern_ledger(debate_results)
+            self._persist_artifact(
+                version_dir,
+                "stop_debate.json",
+                {
+                    "assessment": assessment,
+                    "debate_results": serialized,
+                    "concern_ledger": concern_ledger,
+                },
+            )
+
+        # --- Step 3c: Scientist Stop Revision ---
+        self._live.update_status(phase="STOP_REVISE")
+        revision_cfg = self.model_config.resolve("scientist")
+        revision_panel = AgentPanel(
+            name="Stop Revision",
+            model=revision_cfg.model,
+            style=AGENT_STYLES.get("Scientist", "cyan"),
+        )
+        self._live.add_panel(revision_panel)
+
+        revision_buffer: list[str] = []
+        try:
+
+            async def _revision_coro(buf):
+                return await run_scientist_stop_revision(
+                    stop_reason=stop_reason,
+                    completeness_assessment=assessment,
+                    concern_ledger=concern_ledger,
+                    analysis=analysis or {},
+                    notebook_path=notebook_path,
+                    version=version,
+                    domain_knowledge=self.state.domain_knowledge,
+                    prediction_history=self.state.prediction_history,
+                    model=revision_cfg.model,
+                    message_buffer=buf,
+                    goal=self.state.goal,
+                )
+
+            revised: dict[str, Any] = await self._with_summaries(
+                _revision_coro,
+                "Stop Revision",
+                revision_buffer,
+                panel=revision_panel,
+            )
+
+            # Write notebook entry
+            if revised.get("notebook_entry"):
+                append_entry(notebook_path, revised["notebook_entry"], version, "stop_revision")
+
+            # If stop was withdrawn, write a stop-gate notebook entry
+            if not revised.get("should_stop"):
+                gap_names = [
+                    sq["question"]
+                    for sq in assessment.get("sub_questions", [])
+                    if sq.get("coverage") in ("shallow", "unexplored")
+                ]
+                gaps_str = ", ".join(gap_names) or "N/A"
+                hyp = revised.get("hypothesis", "N/A")
+                it = self.state.iteration
+                gate_entry = (
+                    f"Stop proposal withdrawn\n\n"
+                    f"The Scientist proposed stopping at iteration {it}. "
+                    f"The completeness assessment identified gaps in: "
+                    f"{gaps_str}.\n\n"
+                    f"The stop debate challenged these gaps. The Scientist "
+                    f"withdrew the stop and proposed investigating: "
+                    f"{hyp}.\n\n"
+                    f"These gaps must be addressed before stopping can be "
+                    f"reconsidered."
+                )
+                append_entry(notebook_path, gate_entry, version, "stop_gate")
+
+            # Apply prediction updates only if stop is upheld (the withdrawn
+            # path falls through to normal debate which handles predictions)
+            if revised.get("should_stop"):
+                self._apply_prediction_updates(revised)
+
+            self._collapse(
+                revision_panel,
+                f"should_stop={revised.get('should_stop', '?')}",
+            )
+
+            # Persist as stop_revision_plan.json (plan.json will be written by
+            # the normal flow on the withdrawn path, or here on the upheld path)
+            self._persist_artifact(version_dir, "stop_revision_plan.json", revised)
+            if revised.get("should_stop"):
+                self._persist_artifact(version_dir, "plan.json", revised)
+
+            return revised
+        except Exception as e:
+            logger.exception(f"Stop revision error: {e}")
+            revision_panel.error(str(e))
+            self._live.collapse_panel(revision_panel)
+            return None  # Error -> stop not validated, investigation continues
+        finally:
+            self._persist_buffer("stop_revision", revision_buffer)
 
     async def _run_debate(
         self,
