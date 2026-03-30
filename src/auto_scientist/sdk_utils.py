@@ -10,6 +10,7 @@ Also provides output validation and retry utilities for agent output parsing.
 
 import json
 import logging
+import os
 from collections.abc import AsyncIterator
 from typing import Any
 
@@ -85,7 +86,22 @@ def append_block_to_buffer(block: Any, buffer: list[str]) -> None:
 
 
 async def safe_query(prompt: str, options: ClaudeCodeOptions) -> AsyncIterator[Message]:
-    """Wrap claude_code_sdk.query, filtering out None (unknown message types)."""
+    """Wrap claude_code_sdk.query, filtering out None (unknown message types).
+
+    Strips ANTHROPIC_API_KEY from the subprocess environment so SDK agents use
+    the Claude Code subscription (Max plan) instead of direct API billing.  The
+    key is still available in the parent process for direct Anthropic client
+    calls (e.g. anthropic_client.py).
+    """
+    if "ANTHROPIC_API_KEY" not in options.env and os.environ.get("ANTHROPIC_API_KEY"):
+        options = ClaudeCodeOptions(
+            **{
+                field: getattr(options, field)
+                for field in options.__dataclass_fields__
+                if field != "env"
+            },
+            env={**options.env, "ANTHROPIC_API_KEY": ""},
+        )
     logger.debug(
         f"SDK query start: model={options.model}, "
         f"max_turns={options.max_turns}, "
