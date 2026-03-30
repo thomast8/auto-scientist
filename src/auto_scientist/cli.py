@@ -155,7 +155,6 @@ def _run_from_experiment_config(exp_config: ExperimentConfig, data_path: Path) -
         model_config=model_config,
         interactive=exp_config.interactive,
         debate_rounds=exp_config.debate_rounds,
-        stream=exp_config.stream,
         verbose=exp_config.verbose,
     )
 
@@ -228,11 +227,6 @@ def cli(ctx: click.Context, config_path: str | None):
     help="Output directory for experiment runs",
 )
 @click.option(
-    "--no-stream",
-    is_flag=True,
-    help="Disable live token streaming during debate phase",
-)
-@click.option(
     "-v",
     "--verbose",
     is_flag=True,
@@ -251,7 +245,6 @@ def run(
     interactive: bool,
     debate_rounds: int,
     output_dir: str,
-    no_stream: bool,
     verbose: bool,
 ):
     """Run autonomous scientific investigation from raw data."""
@@ -278,8 +271,6 @@ def run(
             exp_config.schedule = schedule
         if ctx.get_parameter_source("interactive") == _cli:
             exp_config.interactive = interactive
-        if ctx.get_parameter_source("no_stream") == _cli:
-            exp_config.stream = not no_stream
         if ctx.get_parameter_source("verbose") == _cli:
             exp_config.verbose = verbose
         if ctx.get_parameter_source("no_summaries") == _cli and no_summaries:
@@ -337,7 +328,6 @@ def run(
         model_config=model_config,
         interactive=interactive,
         debate_rounds=debate_rounds,
-        stream=not no_stream,
         verbose=verbose,
     )
 
@@ -392,11 +382,6 @@ def run(
     help="Number of critic-scientist debate rounds per persona",
 )
 @click.option(
-    "--no-stream",
-    is_flag=True,
-    help="Disable live token streaming during debate phase",
-)
-@click.option(
     "-v",
     "--verbose",
     is_flag=True,
@@ -412,7 +397,6 @@ def resume(
     preset: str | None,
     no_summaries: bool,
     debate_rounds: int,
-    no_stream: bool,
     verbose: bool,
 ):
     """Resume a previously paused or crashed run.
@@ -503,7 +487,6 @@ def resume(
         max_iterations=max_iterations,
         model_config=model_config,
         debate_rounds=debate_rounds,
-        stream=not no_stream,
         verbose=verbose,
     )
 

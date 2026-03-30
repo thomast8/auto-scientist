@@ -225,7 +225,6 @@ class Orchestrator:
         interactive: bool = False,
         max_consecutive_failures: int = 5,
         debate_rounds: int = 1,
-        stream: bool = True,
         verbose: bool = False,
     ):
         self.state = state
@@ -237,7 +236,6 @@ class Orchestrator:
         self.max_consecutive_failures = max_consecutive_failures
         self.debate_rounds = debate_rounds
         self.config: DomainConfig | None = None
-        self.stream = stream
         self.verbose = verbose
         self._live: PipelineLive = PipelineLive()
         self.pause_requested: bool = False
