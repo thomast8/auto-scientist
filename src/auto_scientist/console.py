@@ -1171,6 +1171,8 @@ class PipelineLive:
 class PipelineApp(App):
     """Textual app that runs the orchestrator and displays the dashboard."""
 
+    ALLOW_SELECT = True
+
     COMMANDS = App.COMMANDS | {PipelineCommandProvider}
 
     BINDINGS = [
@@ -1493,6 +1495,8 @@ class PipelineApp(App):
 
 class ShowApp(App):
     """Read-only viewer for a completed run's TUI panels."""
+
+    ALLOW_SELECT = True
 
     BINDINGS = [
         Binding("ctrl+o", "toggle_expand", "Expand/Collapse", show=True),
