@@ -303,11 +303,12 @@ def rewind_run(
     extending = target_iteration == state.iteration
 
     # --- Compute effective iteration ---
-    # In extend mode, bump past any iteration that already has a manifest
-    # record (e.g. scientist stopped at iteration 3, manifest has it,
-    # so we resume from iteration 4).
+    # In extend mode (target == current), bump past any iteration that
+    # already has a manifest record so we don't create duplicates.
+    # But when from_agent is set, the user wants to re-run *within* that
+    # iteration, so skip the bump entirely.
     effective_iteration = target_iteration
-    if extending:
+    if extending and not from_agent:
         manifest_path_check = run_dir / MANIFEST_FILENAME
         if manifest_path_check.exists():
             records_check = load_manifest(manifest_path_check)

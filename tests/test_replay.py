@@ -431,6 +431,19 @@ class TestExtendRun:
         rewind_run(run_dir, 3)
         assert not (buffers / "scientist_03.txt").exists()
 
+    def test_from_agent_in_extend_mode_skips_bump(self, run_dir):
+        """--from-agent at current iteration should NOT bump effective_iteration.
+
+        Without from_agent, extend mode bumps past existing manifest records.
+        With from_agent, we want to re-run within the target iteration, so the
+        bump must be skipped.
+        """
+        result = rewind_run(run_dir, 3, from_agent="scientist")
+        assert result.state.iteration == 3
+        assert result.from_agent == "scientist"
+        # analysis.json should be preserved (analyst ran before scientist)
+        assert (run_dir / "v02" / "analysis.json").exists()
+
 
 class TestRewindWithoutManifest:
     def test_missing_manifest_is_fine(self, run_dir):

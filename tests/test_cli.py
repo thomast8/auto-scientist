@@ -5,7 +5,7 @@ from unittest.mock import MagicMock, patch
 import yaml
 from click.testing import CliRunner
 
-from auto_scientist.cli import _next_output_dir, cli
+from auto_scientist.cli import _next_output_dir, _resolve_source, cli
 from auto_scientist.experiment_config import ExperimentConfig
 from auto_scientist.model_config import ModelConfig
 from auto_scientist.state import ExperimentState
@@ -346,6 +346,97 @@ class TestResumeCommand:
         assert result.exit_code == 0
         loaded_mc = mock_orch.call_args.kwargs["model_config"]
         assert loaded_mc.defaults.model == "claude-haiku-4-5-20251001"
+
+
+class TestResolveSource:
+    def test_directory_with_state_json(self, tmp_path):
+        state = ExperimentState(domain="auto", goal="g", phase="iteration")
+        (tmp_path / "state.json").write_text(state.model_dump_json())
+
+        run_dir, loaded = _resolve_source(str(tmp_path))
+        assert run_dir == tmp_path
+        assert loaded.domain == "auto"
+
+    def test_direct_state_json_path(self, tmp_path):
+        state = ExperimentState(domain="auto", goal="g", phase="iteration")
+        state_path = tmp_path / "state.json"
+        state_path.write_text(state.model_dump_json())
+
+        run_dir, loaded = _resolve_source(str(state_path))
+        assert run_dir == tmp_path
+        assert loaded.goal == "g"
+
+    def test_missing_state_json_raises(self, tmp_path):
+        import click
+        import pytest
+
+        with pytest.raises(click.UsageError, match="No state.json found"):
+            _resolve_source(str(tmp_path))
+
+
+class TestResumeFlagValidation:
+    """Tests for --fork-required guards that protect against data destruction."""
+
+    def _make_run(self, tmp_path):
+        state = ExperimentState(domain="auto", goal="g", phase="iteration")
+        state.save(tmp_path / "state.json")
+        return tmp_path
+
+    def test_from_iteration_without_fork_rejected(self, tmp_path):
+        self._make_run(tmp_path)
+        runner = CliRunner()
+        result = runner.invoke(cli, ["resume", "--from", str(tmp_path), "--from-iteration", "1"])
+        assert result.exit_code != 0
+        assert "--from-iteration requires --fork" in result.output
+
+    def test_from_agent_without_fork_rejected(self, tmp_path):
+        self._make_run(tmp_path)
+        runner = CliRunner()
+        result = runner.invoke(
+            cli, ["resume", "--from", str(tmp_path), "--from-agent", "scientist"]
+        )
+        assert result.exit_code != 0
+        assert "--from-agent requires --fork" in result.output
+
+    def test_output_dir_without_fork_rejected(self, tmp_path):
+        self._make_run(tmp_path)
+        runner = CliRunner()
+        result = runner.invoke(cli, ["resume", "--from", str(tmp_path), "--output-dir", "/tmp/out"])
+        assert result.exit_code != 0
+        assert "--output-dir requires --fork" in result.output
+
+    def test_completed_run_without_fork_rejected(self, tmp_path):
+        state = ExperimentState(domain="auto", goal="g", phase="stopped")
+        state.save(tmp_path / "state.json")
+
+        runner = CliRunner()
+        result = runner.invoke(cli, ["resume", "--from", str(tmp_path)])
+        assert result.exit_code != 0
+        assert "--fork" in result.output
+
+    def test_report_phase_without_fork_rejected(self, tmp_path):
+        state = ExperimentState(domain="auto", goal="g", phase="report")
+        state.save(tmp_path / "state.json")
+
+        runner = CliRunner()
+        result = runner.invoke(cli, ["resume", "--from", str(tmp_path)])
+        assert result.exit_code != 0
+        assert "--fork" in result.output
+
+    def test_from_alias_works(self, tmp_path):
+        """The --from alias resolves identically to --state."""
+        state = ExperimentState(domain="auto", goal="g", phase="iteration")
+        state.save(tmp_path / "state.json")
+
+        runner = CliRunner()
+        with (
+            patch("auto_scientist.cli.PipelineApp"),
+            patch("auto_scientist.cli.Orchestrator") as mock_orch,
+        ):
+            result = runner.invoke(cli, ["resume", "--from", str(tmp_path)])
+
+        assert result.exit_code == 0
+        assert mock_orch.call_args.kwargs["state"].domain == "auto"
 
 
 class TestYamlConfig:
