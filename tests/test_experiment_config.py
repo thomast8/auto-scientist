@@ -33,7 +33,6 @@ class TestExperimentConfigDefaults:
         assert cfg.output_dir == "experiments/runs"
         assert cfg.schedule is None
         assert cfg.interactive is False
-        assert cfg.stream is True
         assert cfg.verbose is False
         assert cfg.summaries is True
         assert cfg.models is None

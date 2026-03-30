@@ -14,6 +14,7 @@ Provides:
 from __future__ import annotations
 
 import asyncio
+import contextlib
 import logging
 import re
 import subprocess
@@ -23,6 +24,7 @@ from collections.abc import Callable
 from functools import partial
 from io import TextIOWrapper
 from pathlib import Path
+from typing import Literal
 
 from rich.console import Console, RenderableType
 from rich.markup import escape as rich_escape
@@ -157,11 +159,19 @@ class AgentPanel(Widget):
     }
     """
 
-    def __init__(self, name: str, model: str, style: str = "cyan", description: str = "") -> None:
+    def __init__(
+        self,
+        name: str,
+        model: str,
+        style: str = "cyan",
+        description: str = "",
+        restored: bool = False,
+    ) -> None:
         super().__init__()
         self._panel_name = name
         self.model = model
         self.panel_style = style
+        self._is_restored = restored
         self.all_lines: list[str] = []
         self.start_time = time.monotonic()
         self.input_tokens = 0
@@ -190,7 +200,8 @@ class AgentPanel(Widget):
         self._refresh_timer = self.set_interval(1, self._tick)
         self._dot_count = 0
         self._apply_border_color()
-        self.border_title = f"{self._panel_name} ({self.model})"
+        restored_suffix = " (restored)" if self._is_restored else ""
+        self.border_title = f"{self._panel_name} ({self.model}){restored_suffix}"
         self.border_subtitle = self._build_footer()
 
     # Rich markup color names that need translation for Textual CSS styles.color
@@ -217,7 +228,8 @@ class AgentPanel(Widget):
             title_widget.styles.color = css_color
         except NoMatches:
             pass
-        self.styles.border = ("round", css_color)
+        border_type: Literal["dashed", "round"] = "dashed" if self._is_restored else "round"
+        self.styles.border = (border_type, css_color)
         self.styles.border_title_color = css_color
         self.styles.border_subtitle_color = css_color
 
@@ -579,10 +591,12 @@ class IterationContainer(Vertical):
     }
     """
 
-    def __init__(self, iter_title: str) -> None:
+    def __init__(self, iter_title: str, restored: bool = False) -> None:
         super().__init__()
         self._iter_title = iter_title
-        self.border_title = iter_title
+        self._is_restored = restored
+        restored_suffix = " (restored)" if restored else ""
+        self.border_title = f"{iter_title}{restored_suffix}"
         self._in_progress = True
         self._spinner_index = 0
         self._panels: list[AgentPanel] = []
@@ -590,13 +604,16 @@ class IterationContainer(Vertical):
 
     def on_mount(self) -> None:
         self._spinner_timer = self.set_interval(1 / 10, self._tick_spinner)
+        if self._is_restored:
+            self.styles.border = ("dashed", "grey")
 
     def _tick_spinner(self) -> None:
         if not self._in_progress:
             self._spinner_timer.stop()
             return
         char = self.SPINNER_CHARS[self._spinner_index % len(self.SPINNER_CHARS)]
-        self.border_title = f"{char} {self._iter_title}"
+        restored_suffix = " (restored)" if self._is_restored else ""
+        self.border_title = f"{char} {self._iter_title}{restored_suffix}"
         self._spinner_index += 1
 
     def add_panel(self, panel: AgentPanel) -> None:
@@ -682,11 +699,13 @@ class IterationContainer(Vertical):
     def set_result(self, text: str, style: str, summary_text: str = "") -> None:
         """Set the iteration result as border subtitle and collapse."""
         self._in_progress = False
-        self.border_title = self._iter_title
+        restored_suffix = " (restored)" if self._is_restored else ""
+        self.border_title = f"{self._iter_title}{restored_suffix}"
         self.border_subtitle = ""
         valid = {"red", "green", "yellow"}
         if style in valid:
-            self.styles.border = ("round", style)
+            border_type: Literal["dashed", "round"] = "dashed" if self._is_restored else "round"
+            self.styles.border = (border_type, style)
         if self._panels:
             self.collapse_iteration(summary_text)
 
@@ -930,6 +949,47 @@ class PipelineLive:
         if self._app is not None:
             self._app.call_from_thread(self._app._mount_panel, panel)
 
+    def mount_restored_panel(self, panel_data: dict) -> None:
+        """Mount a pre-built collapsed panel into the current iteration.
+
+        Used when resuming from a specific agent: panels for agents that were
+        loaded from disk are shown with their original stats and content.
+        *panel_data* has the same shape as entries in ``mount_restored_iteration``'s
+        *panels* list (name, model, style, done_summary, tokens, etc.).
+        """
+        panel = AgentPanel(
+            name=panel_data["name"],
+            model=panel_data["model"],
+            style=panel_data.get("style", "cyan"),
+            restored=True,
+        )
+
+        self._panels.append(panel)
+        if self._app is not None:
+
+            def _do_mount():
+                self._app._mount_panel(panel)
+                # Pre-set metadata so _build_footer() works
+                panel.input_tokens = panel_data.get("input_tokens", 0)
+                panel.output_tokens = panel_data.get("output_tokens", 0)
+                panel.thinking_tokens = panel_data.get("thinking_tokens", 0)
+                panel.num_turns = panel_data.get("num_turns", 0)
+                for line in panel_data.get("lines", []):
+                    panel.all_lines.append(line)
+                    panel._write_to_richlog(line)
+                panel.complete(panel_data.get("done_summary", ""))
+                panel._apply_complete_dom()
+                # Override _end_time AFTER complete() so saved elapsed is preserved
+                panel._end_time = panel.start_time + panel_data.get("elapsed_seconds", 0)
+
+            self._app.call_from_thread(_do_mount)
+
+        if self._file_console is not None:
+            self._file_console.print(
+                f"[{panel.panel_name}] {panel_data.get('done_summary', '')} "
+                f"(restored from previous run)"
+            )
+
     def collapse_panel(
         self,
         panel: AgentPanel,
@@ -1061,7 +1121,7 @@ class PipelineLive:
             return
 
         def _do_mount():
-            container = IterationContainer(iter_title=title)
+            container = IterationContainer(iter_title=title, restored=True)
             self._app.query_one("#run-area").mount(container)
 
             for p in panels:
@@ -1069,6 +1129,7 @@ class PipelineLive:
                     name=p["name"],
                     model=p["model"],
                     style=p.get("style", "cyan"),
+                    restored=True,
                 )
                 container.mount(panel)
                 container.add_panel(panel)
@@ -1423,3 +1484,107 @@ class PipelineApp(App):
         self.query_one("#run-area").mount(Static(renderable))
         if near_bottom:
             self._scroll_to_end()
+
+
+class ShowApp(App):
+    """Read-only viewer for a completed run's TUI panels."""
+
+    BINDINGS = [
+        Binding("ctrl+o", "toggle_expand", "Expand/Collapse", show=True),
+        Binding("ctrl+q", "quit", "Quit", show=True),
+        Binding("enter", "open_focused_detail", "Detail", show=False),
+    ]
+
+    DEFAULT_CSS = PipelineApp.DEFAULT_CSS
+
+    def __init__(self, manifest_records: list, run_title: str = "Run") -> None:
+        super().__init__()
+        self._manifest_records = manifest_records
+        self._run_title = run_title
+
+    def compose(self) -> ComposeResult:
+        yield Header()
+        with VerticalScroll(id="outer-container") as outer:
+            outer.border_title = "Auto-Scientist"
+            with Vertical(id="run-area") as run:
+                run.border_title = self._run_title
+                pass
+        yield Footer()
+
+    def on_mount(self) -> None:
+        saved_theme = load_theme()
+        if saved_theme in self.available_themes:
+            self.theme = saved_theme
+        self.title = f"Auto-Scientist — {self._run_title}"
+
+        run_area = self.query_one("#run-area")
+        for record in self._manifest_records:
+            container = IterationContainer(iter_title=record.title)
+            run_area.mount(container)
+            for p in record.panels:
+                panel = AgentPanel(name=p.name, model=p.model, style=p.style)
+                container.mount(panel)
+                container.add_panel(panel)
+                panel.input_tokens = p.input_tokens
+                panel.output_tokens = p.output_tokens
+                panel.thinking_tokens = p.thinking_tokens
+                panel.num_turns = p.num_turns
+                for line in p.lines:
+                    panel.all_lines.append(line)
+                    panel._write_to_richlog(line)
+                panel.complete(p.done_summary)
+                panel._apply_complete_dom()
+                panel._end_time = panel.start_time + p.elapsed_seconds
+            container.set_result(record.result_text, record.result_style, record.summary)
+
+        run_area.styles.border = ("round", "green")
+
+    def action_toggle_expand(self) -> None:
+        """Toggle expanded state on all panels and iteration containers."""
+        panels = list(self.query(AgentPanel))
+        containers = list(self.query(IterationContainer))
+        if not panels and not containers:
+            return
+        collapsing = True
+        if panels:
+            with contextlib.suppress(NoMatches):
+                collapsing = not panels[0].query_one(Collapsible).collapsed
+        for panel in panels:
+            try:
+                c = panel.query_one(Collapsible)
+            except NoMatches:
+                continue
+            object.__setattr__(c, "scroll_visible", lambda *a, **kw: None)
+            c.collapsed = collapsing
+            object.__delattr__(c, "scroll_visible")
+        for container in containers:
+            if not container._panels:
+                continue
+            if (collapsing and not container._is_collapsed) or (
+                not collapsing and container._is_collapsed
+            ):
+                container.toggle_iteration()
+
+    async def action_quit(self) -> None:
+        self.exit()
+
+    def action_open_focused_detail(self) -> None:
+        focused = self.focused
+        if focused is None:
+            return
+        widget: Widget | None = focused
+        while widget is not None:
+            if isinstance(widget, AgentPanel):
+                self.push_screen(
+                    AgentDetailScreen(
+                        panel_name=widget.panel_name,
+                        model=widget.model,
+                        stats=widget._build_footer(),
+                        lines=list(widget.all_lines),
+                    )
+                )
+                return
+            widget = widget.parent  # type: ignore[assignment]
+
+    def watch_theme(self, theme_name: str) -> None:
+        save_theme(theme_name)

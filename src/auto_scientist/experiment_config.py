@@ -50,7 +50,6 @@ class ExperimentConfig(BaseModel):
     output_dir: str = "experiments/runs"
     schedule: str | None = None
     interactive: bool = False
-    stream: bool = True
     verbose: bool = False
     summaries: bool = True
 

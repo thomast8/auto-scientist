@@ -65,6 +65,22 @@ def _run_orchestrator(orchestrator: Orchestrator) -> None:
         raise click.ClickException("\n".join(parts)) from None
 
 
+def _resolve_source(source: str) -> tuple[Path, ExperimentState]:
+    """Resolve a --from argument to (run_directory, loaded_state).
+
+    Accepts either a run directory or a path to state.json directly.
+    """
+    source_path = Path(source)
+    if source_path.is_dir():
+        state_path = source_path / "state.json"
+    else:
+        state_path = source_path
+        source_path = state_path.parent
+    if not state_path.exists():
+        raise click.UsageError(f"No state.json found at {state_path}")
+    return source_path, ExperimentState.load(state_path)
+
+
 def _next_output_dir(base: Path) -> Path:
     """If *base* already contains a state.json, return base_001, base_002, etc."""
     if not (base / "state.json").exists():
@@ -139,7 +155,6 @@ def _run_from_experiment_config(exp_config: ExperimentConfig, data_path: Path) -
         model_config=model_config,
         interactive=exp_config.interactive,
         debate_rounds=exp_config.debate_rounds,
-        stream=exp_config.stream,
         verbose=exp_config.verbose,
     )
 
@@ -212,11 +227,6 @@ def cli(ctx: click.Context, config_path: str | None):
     help="Output directory for experiment runs",
 )
 @click.option(
-    "--no-stream",
-    is_flag=True,
-    help="Disable live token streaming during debate phase",
-)
-@click.option(
     "-v",
     "--verbose",
     is_flag=True,
@@ -235,7 +245,6 @@ def run(
     interactive: bool,
     debate_rounds: int,
     output_dir: str,
-    no_stream: bool,
     verbose: bool,
 ):
     """Run autonomous scientific investigation from raw data."""
@@ -262,8 +271,6 @@ def run(
             exp_config.schedule = schedule
         if ctx.get_parameter_source("interactive") == _cli:
             exp_config.interactive = interactive
-        if ctx.get_parameter_source("no_stream") == _cli:
-            exp_config.stream = not no_stream
         if ctx.get_parameter_source("verbose") == _cli:
             exp_config.verbose = verbose
         if ctx.get_parameter_source("no_summaries") == _cli and no_summaries:
@@ -321,66 +328,6 @@ def run(
         model_config=model_config,
         interactive=interactive,
         debate_rounds=debate_rounds,
-        stream=not no_stream,
-        verbose=verbose,
-    )
-
-    _run_orchestrator(orchestrator)
-
-
-@cli.command()
-@click.option(
-    "--state",
-    required=True,
-    type=click.Path(exists=True),
-    help="Path to state.json for resumption",
-)
-@click.option(
-    "--config",
-    "config_path",
-    default=None,
-    type=click.Path(exists=True),
-    help="Path to models.toml config file (overrides saved config)",
-)
-@click.option(
-    "--preset", default=None, help="Named preset: turbo, fast, default (medium), high, max"
-)
-@click.option("--no-summaries", is_flag=True, help="Disable periodic agent summaries")
-@click.option(
-    "-v",
-    "--verbose",
-    is_flag=True,
-    help="Show debug log messages on console (always written to debug.log).",
-)
-def resume(
-    state: str,
-    config_path: str | None,
-    preset: str | None,
-    no_summaries: bool,
-    verbose: bool,
-):
-    """Resume a previously paused or crashed run."""
-    loaded_state = ExperimentState.load(Path(state))
-    output_dir = Path(state).parent
-
-    if config_path or preset:
-        model_config = _resolve_model_config(config_path, preset, no_summaries)
-    else:
-        saved_mc = output_dir / "model_config.json"
-        if saved_mc.exists():
-            model_config = ModelConfig.model_validate_json(saved_mc.read_text())
-        else:
-            model_config = ModelConfig.builtin_preset("default")
-        if no_summaries:
-            model_config.summarizer = None
-
-    data_path = Path(loaded_state.data_path) if loaded_state.data_path else None
-
-    orchestrator = Orchestrator(
-        state=loaded_state,
-        data_path=data_path,
-        output_dir=output_dir,
-        model_config=model_config,
         verbose=verbose,
     )
 
@@ -390,18 +337,33 @@ def resume(
 @cli.command()
 @click.option(
     "--from",
-    "source_dir",
+    "--state",
+    "source",
     required=True,
     type=click.Path(exists=True),
-    help="Path to a saved run directory containing state.json",
+    help="Path to run directory (or state.json)",
 )
 @click.option(
-    "--at-iteration",
+    "--fork",
+    is_flag=True,
+    help="Copy to a new directory before resuming (original untouched)",
+)
+@click.option(
+    "--from-iteration",
+    "--resume-from",
+    "from_iteration",
     default=None,
     type=click.IntRange(min=0),
+    help="Resume from this iteration (keeps all prior iterations intact). Requires --fork.",
+)
+@click.option(
+    "--from-agent",
+    "from_agent",
+    default=None,
+    type=click.Choice(["analyst", "scientist", "debate", "coder"], case_sensitive=False),
     help=(
-        "Iteration to rewind to (0-based). "
-        "Omit to continue from the current iteration (extend mode)."
+        "Resume from this agent within the target iteration "
+        "(earlier agents loaded from disk). Requires --fork."
     ),
 )
 @click.option("--max-iterations", default=20, type=int, help="Maximum iteration count")
@@ -409,7 +371,7 @@ def resume(
     "--output-dir",
     default=None,
     type=click.Path(),
-    help="Output directory for the replayed run (default: auto-generated)",
+    help="Output directory for forked run (default: auto-generated). Requires --fork.",
 )
 @click.option(
     "--config",
@@ -430,90 +392,111 @@ def resume(
     help="Number of critic-scientist debate rounds per persona",
 )
 @click.option(
-    "--no-stream",
-    is_flag=True,
-    help="Disable live token streaming during debate phase",
-)
-@click.option(
     "-v",
     "--verbose",
     is_flag=True,
     help="Show debug log messages on console (always written to debug.log).",
 )
-def replay(
-    source_dir: str,
-    at_iteration: int | None,
+def resume(
+    source: str,
+    fork: bool,
+    from_iteration: int | None,
+    from_agent: str | None,
     max_iterations: int,
     output_dir: str | None,
     config_path: str | None,
     preset: str | None,
     no_summaries: bool,
     debate_rounds: int,
-    no_stream: bool,
     verbose: bool,
 ):
-    """Replay a saved run from a specific iteration.
+    """Resume a previously paused or crashed run.
 
-    Copies a saved run directory, rewinds it to the target iteration, and
-    continues the investigation from there. Useful for testing prompt changes,
-    different model configs, or alternative investigation paths.
+    By default, resumes in-place. With --fork, copies to a new directory
+    first (original untouched). With --fork --from-iteration N, rewinds to
+    iteration N in the copy (keeps iterations 0 through N-1).
 
-    Example:
+    Use --from-agent to resume from a specific agent within an iteration,
+    loading earlier agents' artifacts from disk.
 
-      auto-scientist replay --from runs/my-run --at-iteration 1 --max-iterations 5
+    Examples:
+
+      auto-scientist resume --from experiments/runs/my-run
+      auto-scientist resume --from experiments/runs/my-run --fork
+      auto-scientist resume --from experiments/runs/my-run --fork --from-iteration 3
+      auto-scientist resume --from runs/my-run --fork --from-iteration 3 --from-agent scientist
+      auto-scientist resume --from runs/my-run --fork --from-agent coder
     """
     import shutil
 
-    from auto_scientist.replay import rewind_run
+    from auto_scientist.resume import rewind_run
 
-    src = Path(source_dir)
-    if not (src / "state.json").exists():
-        raise click.UsageError(f"No state.json found in {source_dir}")
+    # Validate flag combinations
+    if from_iteration is not None and not fork:
+        raise click.UsageError(
+            "--from-iteration requires --fork (rewinding in-place would destroy data)"
+        )
+    if from_agent is not None and not fork:
+        raise click.UsageError(
+            "--from-agent requires --fork (modifying artifacts in-place would destroy data)"
+        )
+    if output_dir is not None and not fork:
+        raise click.UsageError("--output-dir requires --fork")
 
-    # Default to the current iteration (extend mode)
-    if at_iteration is None:
+    src, source_state = _resolve_source(source)
+
+    if fork:
+        # Determine output directory
+        if output_dir is None:
+            run_dir = _next_output_dir(Path("experiments/runs") / src.name)
+        else:
+            run_dir = _next_output_dir(Path(output_dir))
+
+        console.print(f"Forking {src} -> {run_dir}")
         try:
-            source_state = ExperimentState.load(src / "state.json")
+            shutil.copytree(src, run_dir)
+        except (shutil.Error, OSError) as e:
+            if run_dir.exists():
+                shutil.rmtree(run_dir, ignore_errors=True)
+            raise click.ClickException(f"Failed to copy {src} to {run_dir}: {e}") from None
+
+        # Rewind handles everything: phase reset, report stripping, green
+        # border, iteration bump (extend mode), artifact cleanup
+        target = from_iteration if from_iteration is not None else source_state.iteration
+        try:
+            result = rewind_run(run_dir, target, from_agent=from_agent)
+        except ValueError as e:
+            shutil.rmtree(run_dir, ignore_errors=True)
+            raise click.UsageError(str(e)) from None
         except Exception as e:
-            raise click.UsageError(
-                f"Could not read state.json in {source_dir}: {e}\n"
-                "The file may be corrupt. Try specifying --at-iteration explicitly."
-            ) from None
-        at_iteration = source_state.iteration
+            shutil.rmtree(run_dir, ignore_errors=True)
+            raise click.ClickException(f"Failed to rewind run: {e}") from None
 
-    # Determine output directory
-    if output_dir is None:
-        output_path = _next_output_dir(Path("experiments/runs") / src.name)
+        state = result.state
+        from_agent = result.from_agent  # may have been normalized
+        restored_panels = result.restored_panels
+
+        agent_info = f", from agent '{from_agent}'" if from_agent else ""
+        console.print(
+            f"Resuming from iteration {state.iteration}{agent_info} "
+            f"({len(state.versions)} prior iterations preserved)"
+        )
     else:
-        output_path = _next_output_dir(Path(output_dir))
+        run_dir = src
+        state = source_state
+        restored_panels = None
 
-    console.print(f"Copying {src} -> {output_path}")
-    try:
-        shutil.copytree(src, output_path)
-    except (shutil.Error, OSError) as e:
-        if output_path.exists():
-            shutil.rmtree(output_path, ignore_errors=True)
-        raise click.ClickException(f"Failed to copy {src} to {output_path}: {e}") from None
-
-    # Rewind the copied directory
-    try:
-        rewound_state = rewind_run(output_path, at_iteration)
-    except ValueError as e:
-        shutil.rmtree(output_path, ignore_errors=True)
-        raise click.UsageError(str(e)) from None
-    except Exception as e:
-        shutil.rmtree(output_path, ignore_errors=True)
-        raise click.ClickException(f"Failed to rewind run: {e}") from None
-
-    console.print(
-        f"Rewound to iteration {at_iteration} ({len(rewound_state.versions)} versions preserved)"
-    )
+        if state.phase in ("stopped", "report"):
+            raise click.UsageError(
+                "This run has already completed. Use --fork to continue "
+                "from a copy (the original run is preserved)."
+            )
 
     # Resolve model config
     if config_path or preset:
         model_config = _resolve_model_config(config_path, preset, no_summaries)
     else:
-        saved_mc = output_path / "model_config.json"
+        saved_mc = run_dir / "model_config.json"
         if saved_mc.exists():
             model_config = ModelConfig.model_validate_json(saved_mc.read_text())
         else:
@@ -521,17 +504,18 @@ def replay(
         if no_summaries:
             model_config.summarizer = None
 
-    data_path = Path(rewound_state.data_path) if rewound_state.data_path else None
+    data_path = Path(state.data_path) if state.data_path else None
 
     orchestrator = Orchestrator(
-        state=rewound_state,
+        state=state,
         data_path=data_path,
-        output_dir=output_path,
+        output_dir=run_dir,
         max_iterations=max_iterations,
         model_config=model_config,
         debate_rounds=debate_rounds,
-        stream=not no_stream,
         verbose=verbose,
+        skip_to_agent=from_agent if fork else None,
+        restored_panels=restored_panels,
     )
 
     _run_orchestrator(orchestrator)
@@ -539,19 +523,55 @@ def replay(
 
 @cli.command()
 @click.option(
+    "--from",
     "--state",
+    "source",
     required=True,
     type=click.Path(exists=True),
-    help="Path to state.json to inspect",
+    help="Path to run directory (or state.json)",
 )
-def status(state: str):
-    """Check progress of an experiment run."""
-    loaded_state = ExperimentState.load(Path(state))
+def status(source: str):
+    """Check progress of an experiment run.
+
+    Examples:
+
+      auto-scientist status --from experiments/runs/my-run
+    """
+    _, loaded_state = _resolve_source(source)
     click.echo(f"Domain:     {loaded_state.domain}")
     click.echo(f"Phase:      {loaded_state.phase}")
     click.echo(f"Iteration:  {loaded_state.iteration}")
     click.echo(f"Versions:   {len(loaded_state.versions)}")
     click.echo(f"Dead ends:  {len(loaded_state.dead_ends)}")
+
+
+@cli.command()
+@click.option(
+    "--from",
+    "--state",
+    "source",
+    required=True,
+    type=click.Path(exists=True),
+    help="Path to run directory (or state.json)",
+)
+def show(source: str):
+    """Display a completed run in the TUI (read-only).
+
+    Examples:
+
+      auto-scientist show --from experiments/runs/my-run
+    """
+    from auto_scientist.console import ShowApp
+    from auto_scientist.iteration_manifest import MANIFEST_FILENAME, load_manifest
+
+    run_dir, _ = _resolve_source(source)
+    records = load_manifest(run_dir / MANIFEST_FILENAME)
+    if not records:
+        raise click.ClickException(
+            f"No iteration manifest found in {run_dir}. This run may predate manifest tracking."
+        )
+    app = ShowApp(records, run_title=run_dir.name)
+    app.run()
 
 
 if __name__ == "__main__":

@@ -1,4 +1,4 @@
-"""Per-iteration TUI metadata, persisted for replay reconstruction."""
+"""Per-iteration TUI metadata, persisted for fork/resume reconstruction."""
 
 from __future__ import annotations
 
@@ -32,7 +32,7 @@ class PanelRecord(BaseModel):
 class IterationRecord(BaseModel):
     """Snapshot of one completed iteration's TUI state."""
 
-    iteration: int | Literal["ingestion"]
+    iteration: int | Literal["ingestion", "report"]
     title: str
     result_text: str = "done"
     result_style: str = "green"

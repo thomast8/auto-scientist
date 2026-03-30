@@ -5,7 +5,7 @@ from unittest.mock import MagicMock, patch
 import yaml
 from click.testing import CliRunner
 
-from auto_scientist.cli import _next_output_dir, cli
+from auto_scientist.cli import _next_output_dir, _resolve_source, cli
 from auto_scientist.experiment_config import ExperimentConfig
 from auto_scientist.model_config import ModelConfig
 from auto_scientist.state import ExperimentState
@@ -14,7 +14,9 @@ from auto_scientist.state import ExperimentState
 class TestStatusCommand:
     def test_displays_state_info(self, tmp_path):
         state = ExperimentState(
-            domain="auto", goal="test", phase="iteration",
+            domain="auto",
+            goal="test",
+            phase="iteration",
             iteration=5,
         )
         state_path = tmp_path / "state.json"
@@ -38,9 +40,16 @@ class TestRunCommand:
         data_file.write_text("a,b\n1,2\n")
 
         runner = CliRunner()
-        result = runner.invoke(cli, [
-            "run", "--data", str(data_file), "--goal", "test goal",
-        ])
+        result = runner.invoke(
+            cli,
+            [
+                "run",
+                "--data",
+                str(data_file),
+                "--goal",
+                "test goal",
+            ],
+        )
 
         assert result.exit_code == 0
         mock_orch.assert_called_once()
@@ -74,10 +83,18 @@ class TestRunCommandPresets:
         data_file.write_text("a,b\n1,2\n")
 
         runner = CliRunner()
-        result = runner.invoke(cli, [
-            "run", "--data", str(data_file), "--goal", "test",
-            "--preset", "fast",
-        ])
+        result = runner.invoke(
+            cli,
+            [
+                "run",
+                "--data",
+                str(data_file),
+                "--goal",
+                "test",
+                "--preset",
+                "fast",
+            ],
+        )
 
         assert result.exit_code == 0
         mc = mock_orch.call_args.kwargs["model_config"]
@@ -92,10 +109,18 @@ class TestRunCommandPresets:
         config_file.write_text('[defaults]\nmodel = "claude-opus-4-6"\n')
 
         runner = CliRunner()
-        result = runner.invoke(cli, [
-            "run", "--data", str(data_file), "--goal", "test",
-            "--config", str(config_file),
-        ])
+        result = runner.invoke(
+            cli,
+            [
+                "run",
+                "--data",
+                str(data_file),
+                "--goal",
+                "test",
+                "--config",
+                str(config_file),
+            ],
+        )
 
         assert result.exit_code == 0
         mc = mock_orch.call_args.kwargs["model_config"]
@@ -110,10 +135,20 @@ class TestRunCommandPresets:
         config_file.write_text('[defaults]\nmodel = "claude-sonnet-4-6"\n')
 
         runner = CliRunner()
-        result = runner.invoke(cli, [
-            "run", "--data", str(data_file), "--goal", "test",
-            "--config", str(config_file), "--preset", "fast",
-        ])
+        result = runner.invoke(
+            cli,
+            [
+                "run",
+                "--data",
+                str(data_file),
+                "--goal",
+                "test",
+                "--config",
+                str(config_file),
+                "--preset",
+                "fast",
+            ],
+        )
 
         assert result.exit_code != 0
 
@@ -124,10 +159,17 @@ class TestRunCommandPresets:
         data_file.write_text("a,b\n1,2\n")
 
         runner = CliRunner()
-        result = runner.invoke(cli, [
-            "run", "--data", str(data_file), "--goal", "test",
-            "--no-summaries",
-        ])
+        result = runner.invoke(
+            cli,
+            [
+                "run",
+                "--data",
+                str(data_file),
+                "--goal",
+                "test",
+                "--no-summaries",
+            ],
+        )
 
         assert result.exit_code == 0
         mc = mock_orch.call_args.kwargs["model_config"]
@@ -140,9 +182,16 @@ class TestRunCommandPresets:
         data_file.write_text("a,b\n1,2\n")
 
         runner = CliRunner()
-        result = runner.invoke(cli, [
-            "run", "--data", str(data_file), "--goal", "test",
-        ])
+        result = runner.invoke(
+            cli,
+            [
+                "run",
+                "--data",
+                str(data_file),
+                "--goal",
+                "test",
+            ],
+        )
 
         assert result.exit_code == 0
         mc = mock_orch.call_args.kwargs["model_config"]
@@ -201,10 +250,18 @@ class TestRunCommandOptions:
         data_file.write_text("a,b\n1,2\n")
 
         runner = CliRunner()
-        runner.invoke(cli, [
-            "run", "--data", str(data_file), "--goal", "test",
-            "--max-iterations", "10",
-        ])
+        runner.invoke(
+            cli,
+            [
+                "run",
+                "--data",
+                str(data_file),
+                "--goal",
+                "test",
+                "--max-iterations",
+                "10",
+            ],
+        )
         call_kwargs = mock_orch.call_args.kwargs
         assert call_kwargs["max_iterations"] == 10
 
@@ -215,10 +272,18 @@ class TestRunCommandOptions:
         data_file.write_text("a,b\n1,2\n")
 
         runner = CliRunner()
-        runner.invoke(cli, [
-            "run", "--data", str(data_file), "--goal", "test",
-            "--schedule", "22:00-06:00",
-        ])
+        runner.invoke(
+            cli,
+            [
+                "run",
+                "--data",
+                str(data_file),
+                "--goal",
+                "test",
+                "--schedule",
+                "22:00-06:00",
+            ],
+        )
         call_kwargs = mock_orch.call_args.kwargs
         assert call_kwargs["state"].schedule == "22:00-06:00"
 
@@ -229,26 +294,20 @@ class TestRunCommandOptions:
         data_file.write_text("a,b\n1,2\n")
 
         runner = CliRunner()
-        runner.invoke(cli, [
-            "run", "--data", str(data_file), "--goal", "test",
-            "--debate-rounds", "3",
-        ])
+        runner.invoke(
+            cli,
+            [
+                "run",
+                "--data",
+                str(data_file),
+                "--goal",
+                "test",
+                "--debate-rounds",
+                "3",
+            ],
+        )
         call_kwargs = mock_orch.call_args.kwargs
         assert call_kwargs["debate_rounds"] == 3
-
-    @patch("auto_scientist.cli.PipelineApp")
-    @patch("auto_scientist.cli.Orchestrator")
-    def test_no_stream_flag(self, mock_orch, mock_app_cls, tmp_path):
-        data_file = tmp_path / "data.csv"
-        data_file.write_text("a,b\n1,2\n")
-
-        runner = CliRunner()
-        runner.invoke(cli, [
-            "run", "--data", str(data_file), "--goal", "test",
-            "--no-stream",
-        ])
-        call_kwargs = mock_orch.call_args.kwargs
-        assert call_kwargs["stream"] is False
 
 
 class TestResumeCommand:
@@ -289,6 +348,97 @@ class TestResumeCommand:
         assert loaded_mc.defaults.model == "claude-haiku-4-5-20251001"
 
 
+class TestResolveSource:
+    def test_directory_with_state_json(self, tmp_path):
+        state = ExperimentState(domain="auto", goal="g", phase="iteration")
+        (tmp_path / "state.json").write_text(state.model_dump_json())
+
+        run_dir, loaded = _resolve_source(str(tmp_path))
+        assert run_dir == tmp_path
+        assert loaded.domain == "auto"
+
+    def test_direct_state_json_path(self, tmp_path):
+        state = ExperimentState(domain="auto", goal="g", phase="iteration")
+        state_path = tmp_path / "state.json"
+        state_path.write_text(state.model_dump_json())
+
+        run_dir, loaded = _resolve_source(str(state_path))
+        assert run_dir == tmp_path
+        assert loaded.goal == "g"
+
+    def test_missing_state_json_raises(self, tmp_path):
+        import click
+        import pytest
+
+        with pytest.raises(click.UsageError, match="No state.json found"):
+            _resolve_source(str(tmp_path))
+
+
+class TestResumeFlagValidation:
+    """Tests for --fork-required guards that protect against data destruction."""
+
+    def _make_run(self, tmp_path):
+        state = ExperimentState(domain="auto", goal="g", phase="iteration")
+        state.save(tmp_path / "state.json")
+        return tmp_path
+
+    def test_from_iteration_without_fork_rejected(self, tmp_path):
+        self._make_run(tmp_path)
+        runner = CliRunner()
+        result = runner.invoke(cli, ["resume", "--from", str(tmp_path), "--from-iteration", "1"])
+        assert result.exit_code != 0
+        assert "--from-iteration requires --fork" in result.output
+
+    def test_from_agent_without_fork_rejected(self, tmp_path):
+        self._make_run(tmp_path)
+        runner = CliRunner()
+        result = runner.invoke(
+            cli, ["resume", "--from", str(tmp_path), "--from-agent", "scientist"]
+        )
+        assert result.exit_code != 0
+        assert "--from-agent requires --fork" in result.output
+
+    def test_output_dir_without_fork_rejected(self, tmp_path):
+        self._make_run(tmp_path)
+        runner = CliRunner()
+        result = runner.invoke(cli, ["resume", "--from", str(tmp_path), "--output-dir", "/tmp/out"])
+        assert result.exit_code != 0
+        assert "--output-dir requires --fork" in result.output
+
+    def test_completed_run_without_fork_rejected(self, tmp_path):
+        state = ExperimentState(domain="auto", goal="g", phase="stopped")
+        state.save(tmp_path / "state.json")
+
+        runner = CliRunner()
+        result = runner.invoke(cli, ["resume", "--from", str(tmp_path)])
+        assert result.exit_code != 0
+        assert "--fork" in result.output
+
+    def test_report_phase_without_fork_rejected(self, tmp_path):
+        state = ExperimentState(domain="auto", goal="g", phase="report")
+        state.save(tmp_path / "state.json")
+
+        runner = CliRunner()
+        result = runner.invoke(cli, ["resume", "--from", str(tmp_path)])
+        assert result.exit_code != 0
+        assert "--fork" in result.output
+
+    def test_from_alias_works(self, tmp_path):
+        """The --from alias resolves identically to --state."""
+        state = ExperimentState(domain="auto", goal="g", phase="iteration")
+        state.save(tmp_path / "state.json")
+
+        runner = CliRunner()
+        with (
+            patch("auto_scientist.cli.PipelineApp"),
+            patch("auto_scientist.cli.Orchestrator") as mock_orch,
+        ):
+            result = runner.invoke(cli, ["resume", "--from", str(tmp_path)])
+
+        assert result.exit_code == 0
+        assert mock_orch.call_args.kwargs["state"].domain == "auto"
+
+
 class TestYamlConfig:
     @patch("auto_scientist.cli.PipelineApp")
     @patch("auto_scientist.cli.Orchestrator")
@@ -296,12 +446,16 @@ class TestYamlConfig:
         data_file = tmp_path / "data.csv"
         data_file.write_text("a,b\n1,2\n")
         yaml_file = tmp_path / "experiment.yaml"
-        yaml_file.write_text(yaml.dump({
-            "data": str(data_file),
-            "goal": "yaml goal",
-            "max_iterations": 10,
-            "preset": "fast",
-        }))
+        yaml_file.write_text(
+            yaml.dump(
+                {
+                    "data": str(data_file),
+                    "goal": "yaml goal",
+                    "max_iterations": 10,
+                    "preset": "fast",
+                }
+            )
+        )
 
         runner = CliRunner()
         result = runner.invoke(cli, ["run", "-c", str(yaml_file)])
@@ -337,16 +491,27 @@ class TestYamlConfig:
         data_file = tmp_path / "data.csv"
         data_file.write_text("a,b\n1,2\n")
         yaml_file = tmp_path / "experiment.yaml"
-        yaml_file.write_text(yaml.dump({
-            "data": str(data_file),
-            "goal": "test",
-            "preset": "default",
-        }))
+        yaml_file.write_text(
+            yaml.dump(
+                {
+                    "data": str(data_file),
+                    "goal": "test",
+                    "preset": "default",
+                }
+            )
+        )
 
         runner = CliRunner()
-        result = runner.invoke(cli, [
-            "run", "-c", str(yaml_file), "--preset", "fast",
-        ])
+        result = runner.invoke(
+            cli,
+            [
+                "run",
+                "-c",
+                str(yaml_file),
+                "--preset",
+                "fast",
+            ],
+        )
 
         assert result.exit_code == 0, result.output
         mc = mock_orch.call_args.kwargs["model_config"]
@@ -359,16 +524,27 @@ class TestYamlConfig:
         data_file = tmp_path / "data.csv"
         data_file.write_text("a,b\n1,2\n")
         yaml_file = tmp_path / "experiment.yaml"
-        yaml_file.write_text(yaml.dump({
-            "data": str(data_file),
-            "goal": "test",
-            "max_iterations": 10,
-        }))
+        yaml_file.write_text(
+            yaml.dump(
+                {
+                    "data": str(data_file),
+                    "goal": "test",
+                    "max_iterations": 10,
+                }
+            )
+        )
 
         runner = CliRunner()
-        result = runner.invoke(cli, [
-            "run", "-c", str(yaml_file), "--max-iterations", "30",
-        ])
+        result = runner.invoke(
+            cli,
+            [
+                "run",
+                "-c",
+                str(yaml_file),
+                "--max-iterations",
+                "30",
+            ],
+        )
 
         assert result.exit_code == 0, result.output
         assert mock_orch.call_args.kwargs["max_iterations"] == 30
@@ -383,10 +559,20 @@ class TestYamlConfig:
         config_file.write_text('[defaults]\nmodel = "claude-sonnet-4-6"\n')
 
         runner = CliRunner()
-        result = runner.invoke(cli, [
-            "run", "--data", str(data_file), "--goal", "test",
-            "--config", str(config_file), "--preset", "fast",
-        ])
+        result = runner.invoke(
+            cli,
+            [
+                "run",
+                "--data",
+                str(data_file),
+                "--goal",
+                "test",
+                "--config",
+                str(config_file),
+                "--preset",
+                "fast",
+            ],
+        )
 
         assert result.exit_code != 0
 
@@ -396,14 +582,18 @@ class TestYamlConfig:
         data_file = tmp_path / "data.csv"
         data_file.write_text("a,b\n1,2\n")
         yaml_file = tmp_path / "experiment.yaml"
-        yaml_file.write_text(yaml.dump({
-            "data": str(data_file),
-            "goal": "test",
-            "preset": "fast",
-            "models": {
-                "scientist": {"model": "claude-opus-4-6", "reasoning": "high"},
-            },
-        }))
+        yaml_file.write_text(
+            yaml.dump(
+                {
+                    "data": str(data_file),
+                    "goal": "test",
+                    "preset": "fast",
+                    "models": {
+                        "scientist": {"model": "claude-opus-4-6", "reasoning": "high"},
+                    },
+                }
+            )
+        )
 
         runner = CliRunner()
         result = runner.invoke(cli, ["run", "-c", str(yaml_file)])
@@ -425,10 +615,18 @@ class TestYamlConfig:
         config_file.write_text('[defaults]\nmodel = "claude-opus-4-6"\n')
 
         runner = CliRunner()
-        result = runner.invoke(cli, [
-            "run", "--data", str(data_file), "--goal", "test",
-            "-c", str(config_file),
-        ])
+        result = runner.invoke(
+            cli,
+            [
+                "run",
+                "--data",
+                str(data_file),
+                "--goal",
+                "test",
+                "-c",
+                str(config_file),
+            ],
+        )
 
         assert result.exit_code == 0, result.output
         mc = mock_orch.call_args.kwargs["model_config"]
@@ -482,9 +680,16 @@ class TestBareCommand:
         data_file.write_text("a,b\n1,2\n")
 
         runner = CliRunner()
-        result = runner.invoke(cli, [
-            "run", "--data", str(data_file), "--goal", "direct run",
-        ])
+        result = runner.invoke(
+            cli,
+            [
+                "run",
+                "--data",
+                str(data_file),
+                "--goal",
+                "direct run",
+            ],
+        )
 
         assert result.exit_code == 0
         assert mock_orch.call_args.kwargs["state"].goal == "direct run"

@@ -364,10 +364,16 @@ auto-scientist run \
   --schedule "22:00-06:00"
 
 # Resume after crash, pause, or overnight stop
-auto-scientist resume --state experiments/state.json
+auto-scientist resume --from experiments/runs/my-run
+
+# Fork a run and resume from iteration 3
+auto-scientist resume --from experiments/runs/my-run --fork --from-iteration 3
+
+# Fork and resume from the scientist agent within iteration 3
+auto-scientist resume --from experiments/runs/my-run --fork --from-iteration 3 --from-agent scientist
 
 # Check progress
-auto-scientist status --state experiments/state.json
+auto-scientist status --from experiments/runs/my-run
 
 # Interactive mode
 auto-scientist run --data ./data.csv --goal "..." --interactive
