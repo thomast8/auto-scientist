@@ -81,6 +81,7 @@ AGENT_DESCRIPTIONS: dict[str, str] = {
     "Coder": "Implementing the experiment plan as a Python script and running it...",
     "Report": "Generating a comprehensive summary report of all findings...",
     "Assessor": "Evaluating investigation completeness against the stated goal...",
+    "Stop Revision": "Deciding whether to uphold or withdraw the stop proposal...",
 }
 
 # Maps orchestrator phase names to colors (matches the active agent)

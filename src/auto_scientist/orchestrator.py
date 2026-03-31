@@ -875,7 +875,6 @@ class Orchestrator:
         agent_name: str,
         message_buffer: list[str],
         panel: AgentPanel | None = None,
-        interval: int | float = 15,
     ) -> Any:
         """Wrap an agent call in run_with_summaries if enabled.
 
@@ -913,7 +912,6 @@ class Orchestrator:
                     agent_name,
                     self._summary_model,
                     message_buffer,
-                    interval=interval,
                     summary_collector=summary_collector,
                 )
                 self._apply_sdk_usage(panel)
@@ -932,7 +930,6 @@ class Orchestrator:
             agent_name,
             self._summary_model,
             message_buffer,
-            interval=interval,
         )
 
     def _collapse(self, panel: AgentPanel, fallback: str = "") -> None:
@@ -1487,7 +1484,6 @@ class Orchestrator:
                 "Stop Revision",
                 revision_buffer,
                 panel=revision_panel,
-                interval=5,
             )
 
             # Write notebook entry
