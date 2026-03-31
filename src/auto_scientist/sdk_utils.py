@@ -94,6 +94,10 @@ async def safe_query(prompt: str, options: ClaudeCodeOptions) -> AsyncIterator[M
     calls (e.g. anthropic_client.py).
     """
     if "ANTHROPIC_API_KEY" not in options.env and os.environ.get("ANTHROPIC_API_KEY"):
+        logger.info(
+            "Stripping ANTHROPIC_API_KEY from SDK subprocess env "
+            "(using Claude Code subscription instead of direct API billing)"
+        )
         options = ClaudeCodeOptions(
             **{
                 field: getattr(options, field)

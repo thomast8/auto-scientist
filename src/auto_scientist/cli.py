@@ -578,11 +578,15 @@ def status(source: str):
         "coder": "experiment.py",
     }
     version_re = re.compile(r"^v(\d+)$")
-    version_dirs = sorted(
-        (int(m.group(1)), child)
-        for child in run_dir.iterdir()
-        if child.is_dir() and (m := version_re.match(child.name))
-    )
+    try:
+        version_dirs = sorted(
+            (int(m.group(1)), child)
+            for child in run_dir.iterdir()
+            if child.is_dir() and (m := version_re.match(child.name))
+        )
+    except OSError as e:
+        click.echo(f"\n(Could not scan iteration directories: {e})")
+        return
     if version_dirs:
         click.echo()
         click.echo("Iterations on disk:")
@@ -599,18 +603,21 @@ def status(source: str):
         # Show stop reason if the scientist wants to stop
         plan_path = last_vdir / "plan.json"
         if plan_path.exists():
-            plan = json.loads(plan_path.read_text())
-            if plan.get("should_stop"):
-                stop_reason = plan.get("stop_reason", "unknown")
-                click.echo(f"\nStop requested: {stop_reason}")
+            try:
+                plan = json.loads(plan_path.read_text())
+                if plan.get("should_stop"):
+                    stop_reason = plan.get("stop_reason", "unknown")
+                    click.echo(f"\nStop requested: {stop_reason}")
+            except (json.JSONDecodeError, OSError) as e:
+                click.echo(f"\n(Could not read {plan_path.name}: {e})")
 
         # Resume suggestion
-        click.echo()
-        click.echo("Resume examples:")
         all_agents = list(agent_artifacts.keys())
         present = {a for a in all_agents if (last_vdir / agent_artifacts[a]).exists()}
         next_agent = next((a for a in all_agents if a not in present), None)
         if next_agent:
+            click.echo()
+            click.echo("Resume examples:")
             click.echo(
                 f"  auto-scientist resume --from {run_dir} --fork "
                 f"--from-iteration {last_idx} --from-agent {next_agent}"

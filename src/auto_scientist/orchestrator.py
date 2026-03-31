@@ -209,7 +209,7 @@ def _check_model_exists(provider: str, model: str) -> str | None:
 
 def _truncate_summary(text: str, limit: int = 300) -> str:
     """Truncate text at a word boundary, avoiding mid-word cuts."""
-    if not text or len(text) <= limit:
+    if len(text) <= limit:
         return text
     truncated = text[:limit].rsplit(" ", 1)[0]
     return f"{truncated}..."

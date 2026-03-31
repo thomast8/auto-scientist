@@ -93,8 +93,8 @@ def _build_panels_from_buffers(
             for agent in agents_to_restore:
                 cfg = mc.resolve(agent)
                 model_names[agent] = cfg.model
-        except Exception:
-            pass
+        except (json.JSONDecodeError, OSError, KeyError, ValueError) as e:
+            logger.warning(f"Could not load model config from {config_path}: {e}")
 
     # Map agents to their buffer file prefix and panel display name
     agent_panel_info = {
@@ -110,6 +110,8 @@ def _build_panels_from_buffers(
     for agent in agents_to_restore:
         info = agent_panel_info.get(agent)
         if not info:
+            # debate and coder panels are too complex to reconstruct from artifacts
+            logger.debug(f"Skipping panel reconstruction for '{agent}' (not supported)")
             continue
 
         # Read buffer content for summary
@@ -128,8 +130,8 @@ def _build_panels_from_buffers(
                     ds = analysis.get("data_summary", "")
                     if ds:
                         done_summary = ds[:300]
-                except (json.JSONDecodeError, OSError):
-                    pass
+                except (json.JSONDecodeError, OSError) as e:
+                    logger.warning(f"Could not read {artifact} for panel summary: {e}")
         elif agent == "scientist":
             artifact = version_dir / "plan.json"
             if artifact.exists():
@@ -145,8 +147,8 @@ def _build_panels_from_buffers(
                             hyp = plan["hypothesis"]
                             parts.append(hyp[:200])
                     done_summary = ", ".join(parts) if parts else ""
-                except (json.JSONDecodeError, OSError):
-                    pass
+                except (json.JSONDecodeError, OSError) as e:
+                    logger.warning(f"Could not read {artifact} for panel summary: {e}")
 
         if not done_summary and lines:
             done_summary = lines[-1][:300]
@@ -422,6 +424,24 @@ def rewind_run(
             if isinstance(max_recorded, int) and max_recorded >= target_iteration:
                 effective_iteration = max_recorded + 1
 
+    # --- Validate version dir exists when resuming from a specific agent ---
+    # Must happen before state mutations so we don't corrupt state on error.
+    if from_agent:
+        target_version_dir = run_dir / f"v{effective_iteration:02d}"
+        if not target_version_dir.exists():
+            existing = sorted(
+                int(m.group(1))
+                for child in run_dir.iterdir()
+                if child.is_dir() and (m := _VERSION_DIR_RE.match(child.name))
+            )
+            max_existing = existing[-1] if existing else -1
+            raise ValueError(
+                f"Cannot resume from '{from_agent}' at iteration {effective_iteration}: "
+                f"directory '{target_version_dir.name}/' does not exist. "
+                f"The run has iterations up to v{max_existing:02d}. "
+                f"Did you mean --from-iteration {max_existing}?"
+            )
+
     # --- Trim state fields ---
     state.phase = "iteration"
     state.iteration = effective_iteration
@@ -481,23 +501,6 @@ def rewind_run(
             f"v{effective_iteration:02d}",
             from_agent,
         )
-
-    # --- Validate version dir exists when resuming from a specific agent ---
-    if from_agent:
-        target_version_dir = run_dir / f"v{effective_iteration:02d}"
-        if not target_version_dir.exists():
-            existing = sorted(
-                int(m.group(1))
-                for child in run_dir.iterdir()
-                if child.is_dir() and (m := _VERSION_DIR_RE.match(child.name))
-            )
-            max_existing = existing[-1] if existing else -1
-            raise ValueError(
-                f"Cannot resume from '{from_agent}' at iteration {effective_iteration}: "
-                f"directory '{target_version_dir.name}/' does not exist. "
-                f"The run has iterations up to v{max_existing:02d}. "
-                f"Did you mean --from-iteration {max_existing}?"
-            )
 
     # --- Delete version directories ---
     for child in sorted(run_dir.iterdir()):
