@@ -15,7 +15,7 @@ class TestStatusCommand:
     def test_displays_state_info(self, tmp_path):
         state = ExperimentState(
             domain="auto",
-            goal="test",
+            goal="test goal",
             phase="iteration",
             iteration=5,
         )
@@ -26,10 +26,170 @@ class TestStatusCommand:
         result = runner.invoke(cli, ["status", "--state", str(state_path)])
 
         assert result.exit_code == 0
-        assert "auto" in result.output
-        assert "iteration" in result.output
-        assert "5" in result.output
-        assert "5" in result.output
+        assert "Domain:     auto" in result.output
+        assert "Goal:       test goal" in result.output
+        assert "Phase:      iteration" in result.output
+        assert "Iteration:  5" in result.output
+
+    def test_shows_run_dir_and_data_path(self, tmp_path):
+        state = ExperimentState(
+            domain="auto",
+            goal="test",
+            phase="iteration",
+            iteration=1,
+            data_path="/some/data/dir",
+        )
+        state.save(tmp_path / "state.json")
+
+        runner = CliRunner()
+        result = runner.invoke(cli, ["status", "--from", str(tmp_path)])
+
+        assert result.exit_code == 0
+        assert f"Run dir:    {tmp_path}" in result.output
+        assert "Data:       /some/data/dir" in result.output
+
+    def test_data_path_hidden_when_absent(self, tmp_path):
+        state = ExperimentState(domain="auto", goal="test", phase="iteration", iteration=1)
+        state.save(tmp_path / "state.json")
+
+        runner = CliRunner()
+        result = runner.invoke(cli, ["status", "--from", str(tmp_path)])
+
+        assert result.exit_code == 0
+        assert "Data:" not in result.output
+
+    def test_long_goal_truncated(self, tmp_path):
+        long_goal = "x" * 100
+        state = ExperimentState(domain="auto", goal=long_goal, phase="iteration", iteration=1)
+        state.save(tmp_path / "state.json")
+
+        runner = CliRunner()
+        result = runner.invoke(cli, ["status", "--from", str(tmp_path)])
+
+        assert result.exit_code == 0
+        assert "x" * 72 + "..." in result.output
+
+    def test_no_versions_line(self, tmp_path):
+        """Status should not show a confusing 'Versions' count."""
+        state = ExperimentState(domain="auto", goal="test", phase="iteration", iteration=2)
+        state.save(tmp_path / "state.json")
+
+        runner = CliRunner()
+        result = runner.invoke(cli, ["status", "--from", str(tmp_path)])
+
+        assert result.exit_code == 0
+        assert "Versions" not in result.output
+
+    def test_run_status_summary(self, tmp_path):
+        """Shows completed/failed counts from version entries."""
+        from auto_scientist.state import VersionEntry
+
+        state = ExperimentState(domain="auto", goal="test", phase="iteration", iteration=3)
+        state.versions = [
+            VersionEntry(version="v00", iteration=0, script_path="s", status="completed"),
+            VersionEntry(version="v01", iteration=1, script_path="s", status="completed"),
+            VersionEntry(version="v02", iteration=2, script_path="s", status="failed"),
+        ]
+        state.save(tmp_path / "state.json")
+
+        runner = CliRunner()
+        result = runner.invoke(cli, ["status", "--from", str(tmp_path)])
+
+        assert result.exit_code == 0
+        assert "Runs:" in result.output
+        assert "2 completed" in result.output
+        assert "1 failed" in result.output
+
+    def test_dead_ends_hidden_when_zero(self, tmp_path):
+        state = ExperimentState(domain="auto", goal="test", phase="iteration", iteration=1)
+        state.save(tmp_path / "state.json")
+
+        runner = CliRunner()
+        result = runner.invoke(cli, ["status", "--from", str(tmp_path)])
+
+        assert result.exit_code == 0
+        assert "Dead ends" not in result.output
+
+    def test_dead_ends_shown_when_present(self, tmp_path):
+        state = ExperimentState(
+            domain="auto",
+            goal="test",
+            phase="iteration",
+            iteration=2,
+            dead_ends=["Tried polynomial fit, R^2 < 0.5"],
+        )
+        state.save(tmp_path / "state.json")
+
+        runner = CliRunner()
+        result = runner.invoke(cli, ["status", "--from", str(tmp_path)])
+
+        assert result.exit_code == 0
+        assert "Dead ends:  1" in result.output
+
+    def test_iterations_on_disk(self, tmp_path):
+        """Shows per-iteration agent artifacts."""
+        state = ExperimentState(domain="auto", goal="test", phase="iteration", iteration=2)
+        state.save(tmp_path / "state.json")
+
+        v00 = tmp_path / "v00"
+        v00.mkdir()
+        (v00 / "analysis.json").write_text("{}")
+        (v00 / "plan.json").write_text('{"hypothesis": "explore data"}')
+        (v00 / "debate.json").write_text("{}")
+        (v00 / "experiment.py").write_text("")
+
+        v01 = tmp_path / "v01"
+        v01.mkdir()
+        (v01 / "analysis.json").write_text("{}")
+        (v01 / "plan.json").write_text('{"hypothesis": "test quadratic"}')
+
+        runner = CliRunner()
+        result = runner.invoke(cli, ["status", "--from", str(tmp_path)])
+
+        assert result.exit_code == 0
+        assert "analyst, scientist, debate, coder" in result.output
+        assert "analyst, scientist" in result.output
+
+    def test_stop_reason_shown(self, tmp_path):
+        import json
+
+        state = ExperimentState(domain="auto", goal="test", phase="iteration", iteration=1)
+        state.save(tmp_path / "state.json")
+
+        v00 = tmp_path / "v00"
+        v00.mkdir()
+        (v00 / "analysis.json").write_text("{}")
+        (v00 / "plan.json").write_text(
+            json.dumps(
+                {
+                    "hypothesis": "Done",
+                    "should_stop": True,
+                    "stop_reason": "All criteria met",
+                }
+            )
+        )
+
+        runner = CliRunner()
+        result = runner.invoke(cli, ["status", "--from", str(tmp_path)])
+
+        assert result.exit_code == 0
+        assert "Stop requested: All criteria met" in result.output
+
+    def test_resume_suggests_next_unrun_agent(self, tmp_path):
+        """Resume example should suggest the first agent that hasn't run yet."""
+        state = ExperimentState(domain="auto", goal="test", phase="iteration", iteration=2)
+        state.save(tmp_path / "state.json")
+
+        v01 = tmp_path / "v01"
+        v01.mkdir()
+        (v01 / "analysis.json").write_text("{}")
+        (v01 / "plan.json").write_text('{"hypothesis": "h"}')
+
+        runner = CliRunner()
+        result = runner.invoke(cli, ["status", "--from", str(tmp_path)])
+
+        assert result.exit_code == 0
+        assert "--from-agent debate" in result.output
 
 
 class TestRunCommand:
