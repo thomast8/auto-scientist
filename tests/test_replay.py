@@ -431,18 +431,15 @@ class TestExtendRun:
         rewind_run(run_dir, 3)
         assert not (buffers / "scientist_03.txt").exists()
 
-    def test_from_agent_in_extend_mode_skips_bump(self, run_dir):
-        """--from-agent at current iteration should NOT bump effective_iteration.
+    def test_from_agent_in_extend_mode_errors_when_version_dir_missing(self, run_dir):
+        """--from-agent at current iteration should error if version dir doesn't exist.
 
-        Without from_agent, extend mode bumps past existing manifest records.
-        With from_agent, we want to re-run within the target iteration, so the
-        bump must be skipped.
+        If the iteration hasn't started yet (no version dir), there are no
+        prior agent artifacts to load from, so we raise rather than silently
+        changing behavior.
         """
-        result = rewind_run(run_dir, 3, from_agent="scientist")
-        assert result.state.iteration == 3
-        assert result.from_agent == "scientist"
-        # analysis.json should be preserved (analyst ran before scientist)
-        assert (run_dir / "v02" / "analysis.json").exists()
+        with pytest.raises(ValueError, match="v03.*does not exist"):
+            rewind_run(run_dir, 3, from_agent="scientist")
 
 
 class TestRewindWithoutManifest:

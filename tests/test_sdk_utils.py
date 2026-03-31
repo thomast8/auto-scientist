@@ -67,48 +67,71 @@ class TestTolerantParseMessage:
 class TestSafeQuery:
     @pytest.mark.asyncio
     async def test_yields_non_none_messages(self):
+        from claude_code_sdk import ClaudeCodeOptions
+
         msg1, msg2 = MagicMock(), MagicMock()
 
         async def fake_query(**kwargs):
             for item in [msg1, None, msg2]:
                 yield item
 
-        with patch("auto_scientist.sdk_utils.query", side_effect=fake_query):
-            results = [m async for m in safe_query(prompt="hi", options=MagicMock())]
+        opts = ClaudeCodeOptions()
+        with (
+            patch("auto_scientist.sdk_utils.query", side_effect=fake_query),
+            patch.dict("os.environ", {"ANTHROPIC_API_KEY": ""}, clear=False),
+        ):
+            results = [m async for m in safe_query(prompt="hi", options=opts)]
 
         assert results == [msg1, msg2]
 
     @pytest.mark.asyncio
     async def test_empty_stream_yields_nothing(self):
+        from claude_code_sdk import ClaudeCodeOptions
+
         async def fake_query(**kwargs):
             return
             yield  # noqa: RET504 - make it an async generator
 
-        with patch("auto_scientist.sdk_utils.query", side_effect=fake_query):
-            results = [m async for m in safe_query(prompt="hi", options=MagicMock())]
+        opts = ClaudeCodeOptions()
+        with (
+            patch("auto_scientist.sdk_utils.query", side_effect=fake_query),
+            patch.dict("os.environ", {"ANTHROPIC_API_KEY": ""}, clear=False),
+        ):
+            results = [m async for m in safe_query(prompt="hi", options=opts)]
 
         assert results == []
 
     @pytest.mark.asyncio
     async def test_all_none_yields_nothing(self):
+        from claude_code_sdk import ClaudeCodeOptions
+
         async def fake_query(**kwargs):
             yield None
             yield None
 
-        with patch("auto_scientist.sdk_utils.query", side_effect=fake_query):
-            results = [m async for m in safe_query(prompt="hi", options=MagicMock())]
+        opts = ClaudeCodeOptions()
+        with (
+            patch("auto_scientist.sdk_utils.query", side_effect=fake_query),
+            patch.dict("os.environ", {"ANTHROPIC_API_KEY": ""}, clear=False),
+        ):
+            results = [m async for m in safe_query(prompt="hi", options=opts)]
 
         assert results == []
 
     @pytest.mark.asyncio
     async def test_passes_prompt_and_options(self):
-        opts = MagicMock()
+        from claude_code_sdk import ClaudeCodeOptions
+
+        opts = ClaudeCodeOptions()
 
         async def fake_query(**kwargs):
             return
             yield  # noqa: RET504
 
-        with patch("auto_scientist.sdk_utils.query", side_effect=fake_query) as mock_q:
+        with (
+            patch("auto_scientist.sdk_utils.query", side_effect=fake_query) as mock_q,
+            patch.dict("os.environ", {"ANTHROPIC_API_KEY": ""}, clear=False),
+        ):
             async for _ in safe_query(prompt="test prompt", options=opts):
                 pass
 

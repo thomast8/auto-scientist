@@ -448,7 +448,7 @@ def resume(
     if fork:
         # Determine output directory
         if output_dir is None:
-            run_dir = _next_output_dir(Path("experiments/runs") / src.name)
+            run_dir = _next_output_dir(src)
         else:
             run_dir = _next_output_dir(Path(output_dir))
 
@@ -533,16 +533,95 @@ def resume(
 def status(source: str):
     """Check progress of an experiment run.
 
+    Shows iteration layout and which agents have artifacts on disk,
+    so you know what --from-iteration and --from-agent values are valid
+    for the resume command.
+
     Examples:
 
       auto-scientist status --from experiments/runs/my-run
     """
-    _, loaded_state = _resolve_source(source)
+    import json
+    import re
+
+    run_dir, loaded_state = _resolve_source(source)
+
+    # Truncate goal to a single display line
+    goal = loaded_state.goal
+    max_goal = 72
+    goal_display = f"{goal[:max_goal]}..." if len(goal) > max_goal else goal
+
     click.echo(f"Domain:     {loaded_state.domain}")
+    click.echo(f"Goal:       {goal_display}")
     click.echo(f"Phase:      {loaded_state.phase}")
     click.echo(f"Iteration:  {loaded_state.iteration}")
-    click.echo(f"Versions:   {len(loaded_state.versions)}")
-    click.echo(f"Dead ends:  {len(loaded_state.dead_ends)}")
+    click.echo(f"Run dir:    {run_dir}")
+    if loaded_state.data_path:
+        click.echo(f"Data:       {loaded_state.data_path}")
+
+    # Version status summary (completed/failed/crashed)
+    if loaded_state.versions:
+        counts: dict[str, int] = {}
+        for v in loaded_state.versions:
+            counts[v.status] = counts.get(v.status, 0) + 1
+        parts = [f"{n} {s}" for s, n in counts.items()]
+        click.echo(f"Runs:       {', '.join(parts)}")
+
+    if loaded_state.dead_ends:
+        click.echo(f"Dead ends:  {len(loaded_state.dead_ends)}")
+
+    # Show per-iteration agent artifacts
+    agent_artifacts = {
+        "analyst": "analysis.json",
+        "scientist": "plan.json",
+        "debate": "debate.json",
+        "coder": "experiment.py",
+    }
+    version_re = re.compile(r"^v(\d+)$")
+    try:
+        version_dirs = sorted(
+            (int(m.group(1)), child)
+            for child in run_dir.iterdir()
+            if child.is_dir() and (m := version_re.match(child.name))
+        )
+    except OSError as e:
+        click.echo(f"\n(Could not scan iteration directories: {e})")
+        return
+    if version_dirs:
+        click.echo()
+        click.echo("Iterations on disk:")
+        for idx, vdir in version_dirs:
+            agents_present = []
+            for agent, artifact in agent_artifacts.items():
+                if (vdir / artifact).exists():
+                    agents_present.append(agent)
+            agents_str = ", ".join(agents_present) if agents_present else "(empty)"
+            click.echo(f"  v{idx:02d} (--from-iteration {idx}): {agents_str}")
+
+        last_idx, last_vdir = version_dirs[-1]
+
+        # Show stop reason if the scientist wants to stop
+        plan_path = last_vdir / "plan.json"
+        if plan_path.exists():
+            try:
+                plan = json.loads(plan_path.read_text())
+                if plan.get("should_stop"):
+                    stop_reason = plan.get("stop_reason", "unknown")
+                    click.echo(f"\nStop requested: {stop_reason}")
+            except (json.JSONDecodeError, OSError) as e:
+                click.echo(f"\n(Could not read {plan_path.name}: {e})")
+
+        # Resume suggestion
+        all_agents = list(agent_artifacts.keys())
+        present = {a for a in all_agents if (last_vdir / agent_artifacts[a]).exists()}
+        next_agent = next((a for a in all_agents if a not in present), None)
+        if next_agent:
+            click.echo()
+            click.echo("Resume examples:")
+            click.echo(
+                f"  auto-scientist resume --from {run_dir} --fork "
+                f"--from-iteration {last_idx} --from-agent {next_agent}"
+            )
 
 
 @cli.command()

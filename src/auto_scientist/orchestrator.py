@@ -207,6 +207,14 @@ def _check_model_exists(provider: str, model: str) -> str | None:
     return None  # unknown provider, skip validation
 
 
+def _truncate_summary(text: str, limit: int = 300) -> str:
+    """Truncate text at a word boundary, avoiding mid-word cuts."""
+    if len(text) <= limit:
+        return text
+    truncated = text[:limit].rsplit(" ", 1)[0]
+    return f"{truncated}..."
+
+
 class Orchestrator:
     """Drives the Ingestion -> Iteration -> Report pipeline.
 
@@ -1342,9 +1350,7 @@ class Orchestrator:
                 assessment_text = ""
                 if result.rounds:
                     assessment_text = result.rounds[-1].critic_output.overall_assessment
-                done_summary = (
-                    assessment_text[:200] + "..." if len(assessment_text) > 200 else assessment_text
-                )
+                done_summary = _truncate_summary(assessment_text)
                 self._live.collapse_panel(panel, done_summary or f"{len(result.rounds)} round(s)")
 
             async def _summarized_stop_debate(persona_index, persona):
@@ -1694,7 +1700,7 @@ class Orchestrator:
                 assessment = ""
                 if result.rounds:
                     assessment = result.rounds[-1].critic_output.overall_assessment
-                done_summary = assessment[:200] + "..." if len(assessment) > 200 else assessment
+                done_summary = _truncate_summary(assessment)
             self._live.collapse_panel(panel, done_summary or "Debate complete")
 
         async def _summarized_debate(persona_index, persona):

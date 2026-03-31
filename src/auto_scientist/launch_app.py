@@ -281,6 +281,8 @@ class BrowseScreen(ModalScreen[str | None]):
 class LaunchApp(App[ExperimentConfig | None]):
     """TUI form for configuring and launching an experiment."""
 
+    ALLOW_SELECT = True
+
     CSS = """
     Screen {
         align-horizontal: center;
