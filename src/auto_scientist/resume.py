@@ -66,6 +66,109 @@ class RewindResult:
     restored_panels: list[dict] | None = None
 
 
+def _build_panels_from_buffers(
+    run_dir: Path,
+    iteration: int,
+    from_agent: str,
+    model_config_path: Path | None = None,
+) -> list[dict]:
+    """Build restored panel records from buffer files for agents before from_agent.
+
+    When the manifest doesn't have panel records for the current iteration
+    (because it never completed), this reconstructs minimal panel data from
+    the buffer files and artifact files on disk.
+    """
+    agent_idx = AGENT_ORDER.index(from_agent)
+    agents_to_restore = AGENT_ORDER[:agent_idx]
+
+    # Load model config to get agent model names
+    model_names: dict[str, str] = {}
+    config_path = model_config_path or (run_dir / "model_config.json")
+    if config_path.exists():
+        try:
+            from auto_scientist.model_config import ModelConfig
+
+            raw = json.loads(config_path.read_text())
+            mc = ModelConfig._from_dict(raw)
+            for agent in agents_to_restore:
+                cfg = mc.resolve(agent)
+                model_names[agent] = cfg.model
+        except Exception:
+            pass
+
+    # Map agents to their buffer file prefix and panel display name
+    agent_panel_info = {
+        "analyst": {"panel_name": "Analyst", "style": "green", "buffer_prefix": "analyst_"},
+        "scientist": {"panel_name": "Scientist", "style": "cyan", "buffer_prefix": "scientist_"},
+    }
+
+    panels: list[dict] = []
+    version_tag = f"{iteration:02d}"
+    buffers_dir = run_dir / "buffers"
+    version_dir = run_dir / f"v{version_tag}"
+
+    for agent in agents_to_restore:
+        info = agent_panel_info.get(agent)
+        if not info:
+            continue
+
+        # Read buffer content for summary
+        buf_path = buffers_dir / f"{info['buffer_prefix']}{version_tag}.txt"
+        lines: list[str] = []
+        if buf_path.exists():
+            lines = buf_path.read_text().splitlines()
+
+        # Build a meaningful done_summary from the artifact
+        done_summary = ""
+        if agent == "analyst":
+            artifact = version_dir / "analysis.json"
+            if artifact.exists():
+                try:
+                    analysis = json.loads(artifact.read_text())
+                    ds = analysis.get("data_summary", "")
+                    if ds:
+                        done_summary = ds[:300]
+                except (json.JSONDecodeError, OSError):
+                    pass
+        elif agent == "scientist":
+            artifact = version_dir / "plan.json"
+            if artifact.exists():
+                try:
+                    plan = json.loads(artifact.read_text())
+                    parts = []
+                    if plan.get("should_stop"):
+                        parts.append(f"should_stop=True: {plan.get('stop_reason', '')}")
+                    else:
+                        if plan.get("strategy"):
+                            parts.append(f"strategy={plan['strategy']}")
+                        if plan.get("hypothesis"):
+                            hyp = plan["hypothesis"]
+                            parts.append(hyp[:200])
+                    done_summary = ", ".join(parts) if parts else ""
+                except (json.JSONDecodeError, OSError):
+                    pass
+
+        if not done_summary and lines:
+            done_summary = lines[-1][:300]
+
+        panels.append(
+            {
+                "name": info["panel_name"],
+                "model": model_names.get(agent, "unknown"),
+                "style": info["style"],
+                "done_summary": done_summary or f"{agent} loaded from disk",
+                "input_tokens": 0,
+                "output_tokens": 0,
+                "thinking_tokens": 0,
+                "num_turns": 0,
+                "elapsed_seconds": 0,
+                "lines": [],
+            }
+        )
+
+    return panels
+
+
 def _detect_old_output_dir(state: ExperimentState) -> str | None:
     """Infer the original output directory from paths stored in state."""
     if state.config_path:
@@ -379,6 +482,23 @@ def rewind_run(
             from_agent,
         )
 
+    # --- Validate version dir exists when resuming from a specific agent ---
+    if from_agent:
+        target_version_dir = run_dir / f"v{effective_iteration:02d}"
+        if not target_version_dir.exists():
+            existing = sorted(
+                int(m.group(1))
+                for child in run_dir.iterdir()
+                if child.is_dir() and (m := _VERSION_DIR_RE.match(child.name))
+            )
+            max_existing = existing[-1] if existing else -1
+            raise ValueError(
+                f"Cannot resume from '{from_agent}' at iteration {effective_iteration}: "
+                f"directory '{target_version_dir.name}/' does not exist. "
+                f"The run has iterations up to v{max_existing:02d}. "
+                f"Did you mean --from-iteration {max_existing}?"
+            )
+
     # --- Delete version directories ---
     for child in sorted(run_dir.iterdir()):
         if not child.is_dir():
@@ -464,6 +584,13 @@ def rewind_run(
                         < agent_idx
                     ]
                     break
+
+            # If the manifest didn't have records for this iteration
+            # (it never completed), build panels from buffer/artifact files
+            if not restored_panels:
+                restored_panels = _build_panels_from_buffers(
+                    run_dir, effective_iteration, from_agent
+                )
 
         kept = [
             r

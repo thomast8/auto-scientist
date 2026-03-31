@@ -75,6 +75,22 @@ SUMMARY_PROMPTS: dict[str, str] = {
         "Summarize this report output in first person. "
         "Focus on: what key findings and results are being documented."
     ),
+    "Completeness Assessment": (
+        "Summarize this completeness assessment output in first person. "
+        "Focus on: what coverage gaps were identified, "
+        "which sub-questions remain shallow or unexplored."
+    ),
+    "Stop Debate": (
+        "Summarize this stop debate output in first person. "
+        "Messages are prefixed [Critic] or [Scientist]. "
+        "Do not prefix with 'Critic:' since the panel already identifies who this is. "
+        "Focus on: whether continuing or stopping is being advocated and the key reasons."
+    ),
+    "Stop Revision": (
+        "Summarize this stop revision output in first person. "
+        "Focus on: whether the stop decision was upheld or withdrawn, "
+        "and what gaps or next steps were identified."
+    ),
 }
 
 

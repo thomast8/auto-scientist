@@ -16,8 +16,17 @@ from auto_scientist.summarizer import (
 class TestSummaryPrompts:
     def test_all_agent_types_present(self):
         expected = {
-            "Ingestor", "Analyst", "Scientist", "Scientist Revision",
-            "Debate", "Coder", "Results", "Report",
+            "Ingestor",
+            "Analyst",
+            "Scientist",
+            "Scientist Revision",
+            "Debate",
+            "Coder",
+            "Results",
+            "Report",
+            "Completeness Assessment",
+            "Stop Debate",
+            "Stop Revision",
         }
         assert set(SUMMARY_PROMPTS.keys()) == expected
 
@@ -194,7 +203,11 @@ class TestRunWithSummaries:
             return_value="progress",
         ):
             result = await run_with_summaries(
-                slow_coro, "Analyst", "gpt-4o-mini", buf, interval=0.2,
+                slow_coro,
+                "Analyst",
+                "gpt-4o-mini",
+                buf,
+                interval=0.2,
                 summary_collector=collector,
             )
             assert result == "done"
@@ -218,7 +231,11 @@ class TestRunWithSummaries:
             return_value="summary",
         ):
             result = await run_with_summaries(
-                slow_coro, "Coder", "gpt-4o-mini", buf, interval=0.1,
+                slow_coro,
+                "Coder",
+                "gpt-4o-mini",
+                buf,
+                interval=0.1,
                 summary_collector=collector,
             )
             assert result == 42
@@ -242,11 +259,14 @@ class TestRunWithSummaries:
             ) as mock_summarize,
         ):
             await run_with_summaries(
-                empty_coro, "Analyst", "gpt-4o-mini", buf, interval=0.1,
+                empty_coro,
+                "Analyst",
+                "gpt-4o-mini",
+                buf,
+                interval=0.1,
             )
             periodic_calls = [
-                c for c in mock_summarize.call_args_list
-                if c[1].get("progress") is True
+                c for c in mock_summarize.call_args_list if c[1].get("progress") is True
             ]
             assert len(periodic_calls) == 0
 
@@ -278,7 +298,11 @@ class TestRunWithSummaries:
             ),
         ):
             await run_with_summaries(
-                staged_coro, "Analyst", "gpt-4o-mini", buf, interval=0.1,
+                staged_coro,
+                "Analyst",
+                "gpt-4o-mini",
+                buf,
+                interval=0.1,
             )
             # Only 1 progress call (when "first" appeared), stale polls are skipped
             assert progress_calls == 1
@@ -300,7 +324,11 @@ class TestRunWithSummaries:
             pytest.raises(ValueError, match="boom"),
         ):
             await run_with_summaries(
-                failing_coro, "Coder", "gpt-4o-mini", buf, interval=100,
+                failing_coro,
+                "Coder",
+                "gpt-4o-mini",
+                buf,
+                interval=100,
             )
 
     @pytest.mark.asyncio
@@ -320,7 +348,11 @@ class TestRunWithSummaries:
             ),
         ):
             result = await run_with_summaries(
-                coro, "Analyst", "gpt-4o-mini", buf, interval=100,
+                coro,
+                "Analyst",
+                "gpt-4o-mini",
+                buf,
+                interval=100,
             )
             assert result == "result"
 
@@ -350,14 +382,16 @@ class TestRunWithSummaries:
             ),
         ):
             await run_with_summaries(
-                long_coro, "Coder", "gpt-4o-mini", buf, interval=0.1,
+                long_coro,
+                "Coder",
+                "gpt-4o-mini",
+                buf,
+                interval=0.1,
             )
 
         # With 0.1s base interval and 2.0s runtime, without backoff we'd get ~20 polls.
         # With backoff (0.1, 0.2, 0.4, 0.8, 1.6) we expect around 4-5 polls.
-        assert len(poll_times) <= 8, (
-            f"Expected backoff to reduce polls, got {len(poll_times)}"
-        )
+        assert len(poll_times) <= 8, f"Expected backoff to reduce polls, got {len(poll_times)}"
 
     @pytest.mark.asyncio
     async def test_backoff_resets_on_new_content(self):
@@ -390,7 +424,11 @@ class TestRunWithSummaries:
             ),
         ):
             await run_with_summaries(
-                staged_coro, "Coder", "gpt-4o-mini", buf, interval=0.1,
+                staged_coro,
+                "Coder",
+                "gpt-4o-mini",
+                buf,
+                interval=0.1,
             )
 
         # Phase 1: 1 poll. Phase 2: ~10 polls at 0.1s interval over 1.0s.

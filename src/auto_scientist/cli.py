@@ -533,16 +533,56 @@ def resume(
 def status(source: str):
     """Check progress of an experiment run.
 
+    Shows iteration layout and which agents have artifacts on disk,
+    so you know what --from-iteration and --from-agent values are valid
+    for the resume command.
+
     Examples:
 
       auto-scientist status --from experiments/runs/my-run
     """
-    _, loaded_state = _resolve_source(source)
+    import re
+
+    run_dir, loaded_state = _resolve_source(source)
     click.echo(f"Domain:     {loaded_state.domain}")
     click.echo(f"Phase:      {loaded_state.phase}")
     click.echo(f"Iteration:  {loaded_state.iteration}")
     click.echo(f"Versions:   {len(loaded_state.versions)}")
     click.echo(f"Dead ends:  {len(loaded_state.dead_ends)}")
+
+    # Show per-iteration agent artifacts
+    agent_artifacts = {
+        "analyst": "analysis.json",
+        "scientist": "plan.json",
+        "debate": "debate.json",
+        "coder": "experiment.py",
+    }
+    version_re = re.compile(r"^v(\d+)$")
+    version_dirs = sorted(
+        (int(m.group(1)), child)
+        for child in run_dir.iterdir()
+        if child.is_dir() and (m := version_re.match(child.name))
+    )
+    if version_dirs:
+        click.echo()
+        click.echo("Iterations on disk:")
+        for idx, vdir in version_dirs:
+            agents_present = []
+            for agent, artifact in agent_artifacts.items():
+                if (vdir / artifact).exists():
+                    agents_present.append(agent)
+            agents_str = ", ".join(agents_present) if agents_present else "(empty)"
+            click.echo(f"  v{idx:02d} (--from-iteration {idx}): {agents_str}")
+        click.echo()
+        click.echo("Resume examples:")
+        last_idx = version_dirs[-1][0]
+        last_agents = [a for a, f in agent_artifacts.items() if (version_dirs[-1][1] / f).exists()]
+        if len(last_agents) > 1:
+            resumable = last_agents[1]  # first agent after analyst
+            click.echo(
+                f"  auto-scientist resume --from {run_dir} --fork "
+                f"--from-iteration {last_idx} --from-agent {resumable}"
+            )
 
 
 @cli.command()
