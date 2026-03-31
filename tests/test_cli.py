@@ -599,6 +599,31 @@ class TestResumeFlagValidation:
         assert mock_orch.call_args.kwargs["state"].domain == "auto"
 
 
+class TestForkDestination:
+    """Fork default destination should be adjacent to source, not CWD-relative."""
+
+    @patch("auto_scientist.cli.PipelineApp")
+    @patch("auto_scientist.cli.Orchestrator")
+    def test_fork_places_output_adjacent_to_source(self, mock_orch, mock_app_cls, tmp_path):
+        """When --output-dir is not given, fork goes next to the source run."""
+        source_dir = tmp_path / "remote" / "experiments" / "runs" / "my_run"
+        source_dir.mkdir(parents=True)
+        state = ExperimentState(domain="auto", goal="g", phase="iteration", iteration=1)
+        state.save(source_dir / "state.json")
+
+        runner = CliRunner()
+        result = runner.invoke(
+            cli,
+            ["resume", "--from", str(source_dir), "--fork", "--from-iteration", "0"],
+        )
+
+        assert result.exit_code == 0
+        # Fork should be in the same parent directory as the source
+        fork_dir = mock_orch.call_args.kwargs["output_dir"]
+        assert fork_dir.parent == source_dir.parent
+        assert fork_dir.name == "my_run_001"
+
+
 class TestYamlConfig:
     @patch("auto_scientist.cli.PipelineApp")
     @patch("auto_scientist.cli.Orchestrator")

@@ -448,7 +448,7 @@ def resume(
     if fork:
         # Determine output directory
         if output_dir is None:
-            run_dir = _next_output_dir(Path("experiments/runs") / src.name)
+            run_dir = _next_output_dir(src)
         else:
             run_dir = _next_output_dir(Path(output_dir))
 
