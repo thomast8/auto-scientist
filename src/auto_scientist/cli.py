@@ -1,6 +1,7 @@
 """CLI entry point: run, resume, status commands."""
 
 from pathlib import Path
+from typing import Literal, cast
 
 import click
 from dotenv import load_dotenv
@@ -42,12 +43,11 @@ def _run_orchestrator(orchestrator: Orchestrator) -> None:
                 parts.append(
                     "    Fix: check the model ID at https://ai.google.dev/gemini-api/docs/models"
                 )
-            elif "require provider 'anthropic'" in issue:
+            elif "require provider" in issue and "SDK" in issue:
                 parts.append(f"  - {issue}")
                 parts.append(
-                    "    Fix: SDK agents (analyst, scientist, coder, ingestor, report) must use "
-                    "Anthropic models (claude-*). Use non-Anthropic models only for critics "
-                    "and summarizer."
+                    "    Fix: SDK agents must use 'anthropic' or 'openai' provider. "
+                    "Use --provider to switch, or override per-agent in YAML config."
                 )
             elif "authentication failed" in issue.lower() or "API_KEY" in issue:
                 parts.append(f"  - {issue}")
@@ -102,16 +102,29 @@ def _resolve_model_config(
     config_path: str | None,
     preset: str | None,
     no_summaries: bool = False,
+    provider: str | None = None,
 ) -> ModelConfig:
     """Resolve ModelConfig from CLI flags (TOML configs only)."""
     if config_path and preset:
         raise click.UsageError("--config and --preset are mutually exclusive")
+
+    # Resolve preset name, applying provider variant if applicable
+    preset_name = preset or "default"
+    if provider and provider != "anthropic":
+        variant = f"{preset_name}-{provider}"
+        from auto_scientist.model_config import BUILTIN_PRESETS
+
+        if variant in BUILTIN_PRESETS:
+            preset_name = variant
+
     if config_path:
         model_config = ModelConfig.from_toml(Path(config_path))
-    elif preset:
-        model_config = ModelConfig.builtin_preset(preset)
     else:
-        model_config = ModelConfig.builtin_preset("default")
+        model_config = ModelConfig.builtin_preset(preset_name)
+
+    # If provider variant didn't exist, override defaults.provider
+    if provider and provider != "anthropic" and not preset_name.endswith(f"-{provider}"):
+        model_config.defaults = model_config.defaults.model_copy(update={"provider": provider})
 
     if no_summaries:
         model_config.summarizer = None
@@ -220,6 +233,13 @@ def cli(ctx: click.Context, config_path: str | None):
     help="Output directory for experiment runs",
 )
 @click.option(
+    "--provider",
+    "-p",
+    default=None,
+    type=click.Choice(["anthropic", "openai"], case_sensitive=False),
+    help="Default provider for SDK agents: anthropic (default) or openai (uses Codex CLI).",
+)
+@click.option(
     "-v",
     "--verbose",
     is_flag=True,
@@ -237,6 +257,7 @@ def run(
     schedule: str | None,
     interactive: bool,
     output_dir: str,
+    provider: str | None,
     verbose: bool,
 ):
     """Run autonomous scientific investigation from raw data."""
@@ -265,6 +286,8 @@ def run(
             exp_config.verbose = verbose
         if ctx.get_parameter_source("no_summaries") == _cli and no_summaries:
             exp_config.summaries = False
+        if ctx.get_parameter_source("provider") == _cli and provider is not None:
+            exp_config.provider = cast("Literal['anthropic', 'openai']", provider)
 
         # Override data/goal only if explicitly provided on CLI
         data_cli_override = ctx.get_parameter_source("data") == _cli
@@ -291,7 +314,7 @@ def run(
     if not Path(data).exists():
         raise click.UsageError(f"Path '{data}' does not exist.")
 
-    model_config = _resolve_model_config(config_path, preset, no_summaries)
+    model_config = _resolve_model_config(config_path, preset, no_summaries, provider)
 
     data_abs = str(Path(data).resolve())
 
