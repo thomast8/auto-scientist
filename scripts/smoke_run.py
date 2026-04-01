@@ -290,7 +290,7 @@ def _make_report_mock():
 
 
 def _cr(text: str, inp: int = 100, out: int = 50) -> AgentResult:
-    """Build a padded AgentResult for critic/defense mock responses."""
+    """Build a padded AgentResult for critic mock responses."""
     return AgentResult(text=_pad(text), input_tokens=inp, output_tokens=out)
 
 
@@ -310,15 +310,6 @@ google_critic_responses = [
     _cr("Google R4: Positive about bootstrap approach.", 80, 40),
     _cr("Google R5: Final assessment, approach is reasonable.", 80, 40),
     _cr("Google R6: All major concerns resolved.", 80, 40),
-]
-
-anthropic_defense_responses = [
-    _cr("Scientist: Valid points, will add R2 threshold.", 90, 45),
-    _cr("Scientist: Agreed on confounders, adding residuals.", 90, 45),
-    _cr("Scientist: Adding cross-validation for generalization.", 90, 45),
-    _cr("Scientist: Bootstrap intervals quantify uncertainty.", 90, 45),
-    _cr("Scientist: Statistical power via sample size analysis.", 90, 45),
-    _cr("Scientist: All critiques incorporated into plan.", 90, 45),
 ]
 
 # ---------------------------------------------------------------------------
@@ -417,10 +408,6 @@ async def run_smoke(output_dir: Path) -> None:
         patch(
             "auto_scientist.agents.critic.query_google",
             side_effect=_make_delayed_side_effect(1.5, google_critic_responses),
-        ),
-        patch(
-            "auto_scientist.agents.critic.query_anthropic",
-            side_effect=_make_delayed_side_effect(0.4, anthropic_defense_responses),
         ),
         # Summarizer LLM mock - varied responses so panels accumulate
         # multiple lines (tests expand/compact toggle)

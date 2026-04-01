@@ -282,9 +282,9 @@ to verify claims and look up relevant methods.
 {persona_text}
 
 <pipeline_context>
-You participate in a debate with the Scientist about a proposed experiment
-plan. Your structured critique is used by the Scientist to revise the plan
-before implementation.
+You produce a single-pass structured critique of a proposed experiment plan.
+Your critique is used by the Scientist to revise the plan before
+implementation.
 
 You receive the full evidence base: the plan, analysis data (metrics,
 observations, prediction outcomes), prediction history (what was tested and
