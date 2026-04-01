@@ -3,7 +3,7 @@ name = "auto-scientist"
 version = "0.1.0"
 description = "Autonomous scientific investigation framework - LLM-driven discovery, iteration, and refinement"
 readme = "README.md"
-requires-python = ">=3.11"
+requires-python = ">=3.12"
 dependencies = [
     "claude-code-sdk",
     "pydantic>=2.0",
@@ -16,6 +16,7 @@ dependencies = [
     "textual>=8.0.0",
     "pyyaml>=6.0",
     "pylatexenc>=2.10",
+    "codex-app-server-sdk>=0.3.2",
 ]
 
 [project.optional-dependencies]
@@ -40,7 +41,7 @@ build-backend = "hatchling.build"
 packages = ["src/auto_scientist"]
 
 [tool.ruff]
-target-version = "py311"
+target-version = "py312"
 line-length = 100
 
 [tool.ruff.lint]
@@ -51,7 +52,7 @@ asyncio_mode = "auto"
 testpaths = ["tests"]
 
 [tool.mypy]
-python_version = "3.11"
+python_version = "3.12"
 ignore_missing_imports = true
 warn_return_any = true
 warn_unused_configs = true
