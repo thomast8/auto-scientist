@@ -10,17 +10,12 @@ import json
 import logging
 from pathlib import Path
 
-from claude_code_sdk import (
-    AssistantMessage,
-    ClaudeCodeOptions,
-    ResultMessage,
-    TextBlock,
-)
 from pydantic import ValidationError
 
 from auto_scientist.config import DomainConfig
 from auto_scientist.notebook import NOTEBOOK_FILENAME
 from auto_scientist.prompts.ingestor import INGESTOR_SYSTEM, INGESTOR_USER
+from auto_scientist.sdk_backend import SDKOptions, get_backend
 from auto_scientist.sdk_utils import (
     append_block_to_buffer,
     collect_text_from_query,
@@ -41,6 +36,7 @@ async def run_ingestor(
     config_path: Path | None = None,
     model: str | None = None,
     message_buffer: list[str] | None = None,
+    provider: str = "anthropic",
 ) -> Path:
     """Inspect raw data and produce a canonical dataset.
 
@@ -65,7 +61,8 @@ async def run_ingestor(
     mode = "interactive" if interactive else "autonomous"
 
     max_turns = 30
-    options = ClaudeCodeOptions(
+    backend = get_backend(provider)
+    options = SDKOptions(
         system_prompt=with_turn_budget(INGESTOR_SYSTEM, max_turns, tools),
         allowed_tools=tools,
         max_turns=max_turns,
@@ -94,17 +91,16 @@ async def run_ingestor(
         effective_prompt = prompt + correction_hint
 
         try:
-            async for msg in safe_query(prompt=effective_prompt, options=options):
-                if isinstance(msg, ResultMessage):
-                    session_id = getattr(msg, "session_id", None)
-                    usage = getattr(msg, "usage", None) or {}
-                    usage["num_turns"] = getattr(msg, "num_turns", 0)
+            async for msg in safe_query(prompt=effective_prompt, options=options, backend=backend):
+                if msg.type == "result":
+                    session_id = msg.session_id
+                    usage = msg.usage
                     collect_text_from_query.last_usage = usage  # type: ignore[attr-defined]
-                elif isinstance(msg, AssistantMessage):
-                    for block in msg.content:
+                elif msg.type == "assistant":
+                    for block in msg.content_blocks:
                         if message_buffer is not None:
                             append_block_to_buffer(block, message_buffer)
-                        elif isinstance(block, TextBlock):
+                        elif hasattr(block, "text") and not hasattr(block, "name"):
                             print(f"  [ingestor] {block.text[:200]}")
         except Exception as e:
             last_sdk_error = e
@@ -180,7 +176,7 @@ async def run_ingestor(
                         f"domain_config.json, resuming session to fix"
                     )
                     clarification_max_turns = 10
-                    options = ClaudeCodeOptions(
+                    options = SDKOptions(
                         system_prompt=with_turn_budget(
                             INGESTOR_SYSTEM, clarification_max_turns, tools
                         ),

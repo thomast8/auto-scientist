@@ -522,6 +522,7 @@ class Orchestrator:
                 config_path=config_path,
                 model=cfg.model,
                 message_buffer=buf,
+                provider=cfg.provider,
             )
 
         buffer: list[str] = []
@@ -1971,6 +1972,7 @@ class Orchestrator:
                     run_timeout_minutes=run_timeout,
                     run_command=run_cmd,
                     data_files_listing=data_files_listing,
+                    provider=cfg.provider,
                 )
 
             new_script: Path | None = await self._with_summaries(
@@ -2243,6 +2245,7 @@ class Orchestrator:
                     output_dir=self.output_dir,
                     model=cfg.model,
                     message_buffer=buf,
+                    provider=cfg.provider,
                 )
 
             report_content = await self._with_summaries(_report_coro, "Report", buffer, panel=panel)

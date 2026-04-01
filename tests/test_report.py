@@ -4,10 +4,28 @@ import asyncio
 from unittest.mock import MagicMock, patch
 
 import pytest
-from claude_code_sdk import AssistantMessage, ResultMessage, TextBlock
 
 from auto_scientist.agents.report import run_report
+from auto_scientist.sdk_backend import SDKMessage
 from auto_scientist.state import ExperimentState
+
+
+def _text_block(text: str) -> MagicMock:
+    """Create a mock TextBlock-like object."""
+    block = MagicMock()
+    block.text = text
+    del block.name  # TextBlock has .text but not .name
+    return block
+
+
+def _assistant_msg(text: str) -> SDKMessage:
+    """Create an SDKMessage(type='assistant') with a single text block."""
+    return SDKMessage(type="assistant", content_blocks=[_text_block(text)])
+
+
+def _result_msg(session_id: str | None = None) -> SDKMessage:
+    """Create an SDKMessage(type='result')."""
+    return SDKMessage(type="result", result=None, usage={}, session_id=session_id)
 
 
 def test_run_report_is_async():
@@ -19,29 +37,21 @@ class TestRunReport:
     @patch("auto_scientist.agents.report.safe_query")
     async def test_returns_report_content_string(self, mock_query, tmp_path):
         """run_report should return the report text, not a Path."""
-        from claude_code_sdk import AssistantMessage, ResultMessage, TextBlock
-
-        assistant_msg = MagicMock(spec=AssistantMessage)
-        text_block = MagicMock(spec=TextBlock)
-        text_block.text = "# Final Report\n\nThis is the report."
-        assistant_msg.content = [text_block]
-        result_msg = MagicMock(spec=ResultMessage)
 
         async def fake_query(**kwargs):
-            yield assistant_msg
-            yield result_msg
+            yield _assistant_msg("# Final Report\n\nThis is the report.")
+            yield _result_msg()
 
         mock_query.side_effect = fake_query
 
-        state = ExperimentState(
-            domain="test", goal="test goal",
-            iteration=5,
-        )
+        state = ExperimentState(domain="test", goal="test goal", iteration=5)
         notebook_path = tmp_path / "lab_notebook.xml"
         notebook_path.write_text("# Lab Notebook")
 
         result = await run_report(
-            state=state, notebook_path=notebook_path, output_dir=tmp_path,
+            state=state,
+            notebook_path=notebook_path,
+            output_dir=tmp_path,
         )
 
         assert isinstance(result, str)
@@ -52,26 +62,12 @@ class TestRunReport:
     @patch("auto_scientist.agents.report.safe_query")
     async def test_strips_preamble_before_first_heading(self, mock_query, _mock_validate, tmp_path):
         """Conversational preamble before the first markdown heading is stripped."""
-        from claude_code_sdk import AssistantMessage, ResultMessage, TextBlock
-
-        preamble_msg = MagicMock(spec=AssistantMessage)
-        preamble_block = MagicMock(spec=TextBlock)
-        preamble_block.text = "Let me read the results first."
-        preamble_msg.content = [preamble_block]
-
-        report_msg = MagicMock(spec=AssistantMessage)
-        report_block = MagicMock(spec=TextBlock)
-        # Must exceed MIN_REPORT_LENGTH (100 chars)
         long_content = "Detailed findings about the investigation. " * 3
-        report_block.text = f"# Final Report\n\n{long_content}"
-        report_msg.content = [report_block]
-
-        result_msg = MagicMock(spec=ResultMessage)
 
         async def fake_query(**kwargs):
-            yield preamble_msg
-            yield report_msg
-            yield result_msg
+            yield _assistant_msg("Let me read the results first.")
+            yield _assistant_msg(f"# Final Report\n\n{long_content}")
+            yield _result_msg()
 
         mock_query.side_effect = fake_query
 
@@ -80,7 +76,9 @@ class TestRunReport:
         notebook_path.write_text("# Notebook")
 
         result = await run_report(
-            state=state, notebook_path=notebook_path, output_dir=tmp_path,
+            state=state,
+            notebook_path=notebook_path,
+            output_dir=tmp_path,
         )
 
         assert result.startswith("# Final Report")
@@ -90,12 +88,9 @@ class TestRunReport:
     @patch("auto_scientist.agents.report.safe_query")
     async def test_raises_when_no_text(self, mock_query, tmp_path):
         """If the agent produces no text blocks, raise RuntimeError."""
-        from claude_code_sdk import ResultMessage
-
-        result_msg = MagicMock(spec=ResultMessage)
 
         async def fake_query(**kwargs):
-            yield result_msg
+            yield _result_msg()
 
         mock_query.side_effect = fake_query
 
@@ -104,28 +99,25 @@ class TestRunReport:
 
         with pytest.raises(RuntimeError, match="no output"):
             await run_report(
-                state=state, notebook_path=notebook_path, output_dir=tmp_path,
+                state=state,
+                notebook_path=notebook_path,
+                output_dir=tmp_path,
             )
 
     @pytest.mark.asyncio
     @patch("auto_scientist.agents.report.safe_query")
     async def test_prompt_includes_state_fields(self, mock_query, tmp_path):
-        from auto_scientist.agents.report import ResultMessage
-        result_msg = MagicMock(spec=ResultMessage)
-
         captured_prompt = {}
 
         async def fake_query(**kwargs):
             captured_prompt["prompt"] = kwargs.get("prompt", "")
-            yield result_msg
+            yield _result_msg()
 
         mock_query.side_effect = fake_query
 
-        state = ExperimentState(
-            domain="spo2", goal="predict oxygen levels",
-            iteration=10,
-        )
+        state = ExperimentState(domain="spo2", goal="predict oxygen levels", iteration=10)
         from auto_scientist.state import VersionEntry
+
         state.versions.append(VersionEntry(version="v07", iteration=7, script_path="/tmp/s.py"))
         notebook_path = tmp_path / "lab_notebook.xml"
         notebook_path.write_text("# Notebook")
@@ -142,14 +134,11 @@ class TestRunReport:
     @patch("auto_scientist.agents.report.safe_query")
     async def test_options_no_write_tool(self, mock_query, tmp_path):
         """Report agent should NOT have Write access - orchestrator writes."""
-        from auto_scientist.agents.report import ResultMessage
-        result_msg = MagicMock(spec=ResultMessage)
-
         captured_opts = {}
 
         async def fake_query(**kwargs):
             captured_opts.update(kwargs)
-            yield result_msg
+            yield _result_msg()
 
         mock_query.side_effect = fake_query
 
@@ -170,14 +159,11 @@ class TestRunReport:
     @pytest.mark.asyncio
     @patch("auto_scientist.agents.report.safe_query")
     async def test_missing_notebook_fallback(self, mock_query, tmp_path):
-        from auto_scientist.agents.report import ResultMessage
-        result_msg = MagicMock(spec=ResultMessage)
-
         captured_prompt = {}
 
         async def fake_query(**kwargs):
             captured_prompt["prompt"] = kwargs.get("prompt", "")
-            yield result_msg
+            yield _result_msg()
 
         mock_query.side_effect = fake_query
 
@@ -194,14 +180,11 @@ class TestReportPrompt:
     @patch("auto_scientist.agents.report.safe_query")
     async def test_prompt_asks_to_output_text_not_write_file(self, mock_query, tmp_path):
         """The prompt should instruct the agent to output the report as text."""
-        from auto_scientist.agents.report import ResultMessage
-        result_msg = MagicMock(spec=ResultMessage)
-
         captured_prompt = {}
 
         async def fake_query(**kwargs):
             captured_prompt["prompt"] = kwargs.get("prompt", "")
-            yield result_msg
+            yield _result_msg()
 
         mock_query.side_effect = fake_query
 
@@ -213,7 +196,6 @@ class TestReportPrompt:
             await run_report(state=state, notebook_path=notebook_path, output_dir=tmp_path)
 
         prompt = captured_prompt["prompt"]
-        # Should NOT instruct the agent to write a file
         assert "Write the final report to the file" not in prompt
 
 
@@ -222,16 +204,11 @@ class TestReportMessageBuffer:
     @patch("auto_scientist.agents.report.validate_report_structure", return_value=[])
     @patch("auto_scientist.agents.report.safe_query")
     async def test_populates_message_buffer(self, mock_query, _mock_validate, tmp_path):
-        assistant_msg = MagicMock(spec=AssistantMessage)
-        text_block = MagicMock(spec=TextBlock)
-        # Must be >= MIN_REPORT_LENGTH (100) to avoid retry
-        text_block.text = "# Final Report\n\n" + "This is a comprehensive report. " * 5
-        assistant_msg.content = [text_block]
-        result_msg = MagicMock(spec=ResultMessage)
+        report_text = "# Final Report\n\n" + "This is a comprehensive report. " * 5
 
         async def fake_query(**kwargs):
-            yield assistant_msg
-            yield result_msg
+            yield _assistant_msg(report_text)
+            yield _result_msg()
 
         mock_query.side_effect = fake_query
 
@@ -241,7 +218,9 @@ class TestReportMessageBuffer:
 
         buf: list[str] = []
         await run_report(
-            state=state, notebook_path=notebook_path, output_dir=tmp_path,
+            state=state,
+            notebook_path=notebook_path,
+            output_dir=tmp_path,
             message_buffer=buf,
         )
         assert len(buf) == 1
@@ -259,15 +238,10 @@ class TestReportRetry:
             nonlocal call_count
             call_count += 1
             if call_count == 1:
-                result_msg = MagicMock(spec=ResultMessage)
-                yield result_msg
+                yield _result_msg()
             else:
-                assistant_msg = MagicMock(spec=AssistantMessage)
-                text_block = MagicMock(spec=TextBlock)
-                text_block.text = "# Report\n\nThis is a valid report with enough content."
-                assistant_msg.content = [text_block]
-                yield assistant_msg
-                yield MagicMock(spec=ResultMessage)
+                yield _assistant_msg("# Report\n\nThis is a valid report with enough content.")
+                yield _result_msg()
 
         mock_query.side_effect = fake_query
 
@@ -276,7 +250,9 @@ class TestReportRetry:
         notebook_path.write_text("# Notebook")
 
         result = await run_report(
-            state=state, notebook_path=notebook_path, output_dir=tmp_path,
+            state=state,
+            notebook_path=notebook_path,
+            output_dir=tmp_path,
         )
         assert "# Report" in result
         assert call_count == 2
@@ -285,8 +261,9 @@ class TestReportRetry:
     @patch("auto_scientist.agents.report.safe_query")
     async def test_exhausts_retries_raises(self, mock_query, tmp_path):
         """All attempts return empty, should raise RuntimeError."""
+
         async def fake_query(**kwargs):
-            yield MagicMock(spec=ResultMessage)
+            yield _result_msg()
 
         mock_query.side_effect = fake_query
 
@@ -295,7 +272,9 @@ class TestReportRetry:
 
         with pytest.raises(RuntimeError, match="no output"):
             await run_report(
-                state=state, notebook_path=notebook_path, output_dir=tmp_path,
+                state=state,
+                notebook_path=notebook_path,
+                output_dir=tmp_path,
             )
 
 
@@ -358,22 +337,16 @@ class TestReportStructuralValidation:
             nonlocal call_count
             call_count += 1
 
-            assistant_msg = MagicMock(spec=AssistantMessage)
-            text_block = MagicMock(spec=TextBlock)
             if call_count == 1:
-                text_block.text = _INCOMPLETE_REPORT
+                yield _assistant_msg(_INCOMPLETE_REPORT)
             else:
-                text_block.text = _COMPLETE_REPORT
+                yield _assistant_msg(_COMPLETE_REPORT)
                 # Second call should use session resume
                 options = kwargs.get("options")
                 assert options is not None
                 assert options.resume is not None
-            assistant_msg.content = [text_block]
 
-            result_msg = MagicMock(spec=ResultMessage)
-            result_msg.session_id = "report-session-456"
-            yield assistant_msg
-            yield result_msg
+            yield _result_msg(session_id="report-session-456")
 
         mock_query.side_effect = fake_query
 
@@ -382,7 +355,9 @@ class TestReportStructuralValidation:
         notebook_path.write_text("# Notebook")
 
         result = await run_report(
-            state=state, notebook_path=notebook_path, output_dir=tmp_path,
+            state=state,
+            notebook_path=notebook_path,
+            output_dir=tmp_path,
         )
         assert call_count == 2
         assert "Executive Summary" in result
@@ -399,18 +374,12 @@ class TestReportStructuralValidation:
             call_count += 1
             captured_prompts.append(kwargs.get("prompt", ""))
 
-            assistant_msg = MagicMock(spec=AssistantMessage)
-            text_block = MagicMock(spec=TextBlock)
             if call_count == 1:
-                text_block.text = _INCOMPLETE_REPORT
+                yield _assistant_msg(_INCOMPLETE_REPORT)
             else:
-                text_block.text = _COMPLETE_REPORT
-            assistant_msg.content = [text_block]
+                yield _assistant_msg(_COMPLETE_REPORT)
 
-            result_msg = MagicMock(spec=ResultMessage)
-            result_msg.session_id = "report-session-789"
-            yield assistant_msg
-            yield result_msg
+            yield _result_msg(session_id="report-session-789")
 
         mock_query.side_effect = fake_query
 
@@ -419,7 +388,9 @@ class TestReportStructuralValidation:
         notebook_path.write_text("# Notebook")
 
         await run_report(
-            state=state, notebook_path=notebook_path, output_dir=tmp_path,
+            state=state,
+            notebook_path=notebook_path,
+            output_dir=tmp_path,
         )
 
         # Second prompt should contain the correction with missing sections
@@ -432,15 +403,10 @@ class TestReportStructuralValidation:
     @patch("auto_scientist.agents.report.safe_query")
     async def test_incomplete_report_gets_warning_header(self, mock_query, tmp_path):
         """When report stays incomplete after all retries, a warning header is prepended."""
+
         async def fake_query(**kwargs):
-            assistant_msg = MagicMock(spec=AssistantMessage)
-            text_block = MagicMock(spec=TextBlock)
-            text_block.text = _INCOMPLETE_REPORT
-            assistant_msg.content = [text_block]
-            result_msg = MagicMock(spec=ResultMessage)
-            result_msg.session_id = "report-session-warn"
-            yield assistant_msg
-            yield result_msg
+            yield _assistant_msg(_INCOMPLETE_REPORT)
+            yield _result_msg(session_id="report-session-warn")
 
         mock_query.side_effect = fake_query
 
@@ -449,7 +415,9 @@ class TestReportStructuralValidation:
         notebook_path.write_text("# Notebook")
 
         result = await run_report(
-            state=state, notebook_path=notebook_path, output_dir=tmp_path,
+            state=state,
+            notebook_path=notebook_path,
+            output_dir=tmp_path,
         )
         assert result.startswith("> **WARNING: This report is incomplete.**")
         assert "Missing sections:" in result
