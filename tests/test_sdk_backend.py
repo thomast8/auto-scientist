@@ -262,20 +262,35 @@ class TestCodexBackend:
         assert backend._resolve_effort({"effort": "max"}) == "xhigh"
         assert backend._resolve_effort({}) is None
 
+    @staticmethod
+    def _make_mock_step(text: str, thread_id: str = "thr-123") -> MagicMock:
+        """Create a mock ConversationStep with text and thread_id."""
+        step = MagicMock()
+        step.text = text
+        step.thread_id = thread_id
+        return step
+
+    @staticmethod
+    def _make_mock_client(steps: list[MagicMock]) -> AsyncMock:
+        """Create a mock CodexClient whose chat() yields the given steps."""
+        mock_client = AsyncMock()
+        mock_client.start = AsyncMock()
+        mock_client.close = AsyncMock()
+
+        async def mock_chat(*args, **kwargs):
+            for step in steps:
+                yield step
+
+        mock_client.chat = mock_chat
+        return mock_client
+
     @pytest.mark.asyncio
-    async def test_chat_once_returns_sdk_messages(self):
-        """CodexBackend.query calls chat_once and yields SDKMessages."""
+    async def test_chat_streams_sdk_messages(self):
+        """CodexBackend.query streams steps from chat() and yields SDKMessages."""
         from auto_scientist.sdk_backend import CodexBackend, SDKOptions
 
-        mock_result = MagicMock()
-        mock_result.final_text = "The answer is 42"
-        mock_result.thread_id = "thr-123"
-        mock_result.raw_events = []
-
-        mock_client = AsyncMock()
-        mock_client.chat_once = AsyncMock(return_value=mock_result)
-        mock_client.start = AsyncMock(return_value=mock_client)
-        mock_client.close = AsyncMock()
+        steps = [self._make_mock_step("The answer is 42", "thr-123")]
+        mock_client = self._make_mock_client(steps)
 
         backend = CodexBackend()
         opts = SDKOptions(
@@ -291,26 +306,22 @@ class TestCodexBackend:
         ):
             messages = [msg async for msg in backend.query("hello", opts)]
 
-        assert len(messages) >= 1
-        result_msg = [m for m in messages if m.type == "result"]
-        assert len(result_msg) == 1
-        assert result_msg[0].result == "The answer is 42"
-        assert result_msg[0].session_id == "thr-123"
+        assistant_msgs = [m for m in messages if m.type == "assistant"]
+        assert len(assistant_msgs) == 1
+        assert assistant_msgs[0].content_blocks[0].text == "The answer is 42"
+
+        result_msgs = [m for m in messages if m.type == "result"]
+        assert len(result_msgs) == 1
+        assert result_msgs[0].result == "The answer is 42"
+        assert result_msgs[0].session_id == "thr-123"
 
     @pytest.mark.asyncio
     async def test_strips_openai_api_key(self):
         """When OPENAI_API_KEY is in env, CodexBackend strips it from subprocess."""
         from auto_scientist.sdk_backend import CodexBackend, SDKOptions
 
-        mock_result = MagicMock()
-        mock_result.final_text = "ok"
-        mock_result.thread_id = "thr-1"
-        mock_result.raw_events = []
-
-        mock_client = AsyncMock()
-        mock_client.chat_once = AsyncMock(return_value=mock_result)
-        mock_client.start = AsyncMock(return_value=mock_client)
-        mock_client.close = AsyncMock()
+        steps = [self._make_mock_step("ok", "thr-1")]
+        mock_client = self._make_mock_client(steps)
 
         backend = CodexBackend()
         opts = SDKOptions(system_prompt="", allowed_tools=[], max_turns=5)
@@ -334,18 +345,23 @@ class TestCodexBackend:
 
     @pytest.mark.asyncio
     async def test_session_resumption(self):
-        """When resume is set, CodexBackend passes thread_id to chat_once."""
+        """When resume is set, CodexBackend passes thread_id to chat()."""
         from auto_scientist.sdk_backend import CodexBackend, SDKOptions
 
-        mock_result = MagicMock()
-        mock_result.final_text = "continued"
-        mock_result.thread_id = "thr-existing"
-        mock_result.raw_events = []
+        steps = [self._make_mock_step("continued", "thr-existing")]
 
+        # Custom mock to capture kwargs
+        chat_kwargs_captured = {}
         mock_client = AsyncMock()
-        mock_client.chat_once = AsyncMock(return_value=mock_result)
-        mock_client.start = AsyncMock(return_value=mock_client)
+        mock_client.start = AsyncMock()
         mock_client.close = AsyncMock()
+
+        async def mock_chat(*args, **kwargs):
+            chat_kwargs_captured.update(kwargs)
+            for step in steps:
+                yield step
+
+        mock_client.chat = mock_chat
 
         backend = CodexBackend()
         opts = SDKOptions(
@@ -365,5 +381,4 @@ class TestCodexBackend:
         assert len(result_msgs) == 1
         assert result_msgs[0].result == "continued"
         # Verify thread_id was passed for resumption
-        call_kwargs = mock_client.chat_once.call_args
-        assert call_kwargs.kwargs.get("thread_id") == "thr-existing"
+        assert chat_kwargs_captured.get("thread_id") == "thr-existing"

@@ -25,8 +25,17 @@ from claude_code_sdk import (
 from claude_code_sdk import query as claude_query
 from claude_code_sdk._errors import MessageParseError
 from codex_app_server_sdk import CodexClient, ThreadConfig, TurnOverrides
+from codex_app_server_sdk.errors import CodexProtocolError
 
 logger = logging.getLogger(__name__)
+
+# Models broken with Codex + ChatGPT subscription auth.
+# Workaround: auto-upgrade to the cheapest working model.
+# Track: https://github.com/openai/codex/issues/14266
+# Remove this when OpenAI fixes the issue.
+CODEX_MODEL_OVERRIDES: dict[str, str] = {
+    "gpt-5.4-nano": "gpt-5.4-mini",
+}
 
 # Codex effort mapping: our levels -> Codex ReasoningEffort strings
 _CODEX_EFFORT_MAP: dict[str, str] = {
@@ -196,6 +205,7 @@ class CodexBackend:
         """Run a Codex SDK query, yielding unified SDKMessages."""
         sandbox_mode = self._resolve_sandbox(options.allowed_tools)
         effort = self._resolve_effort(options.extra_args)
+        model = options.model
 
         # Build environment for the Codex subprocess.
         # IMPORTANT: create_subprocess_exec replaces the entire env when a
@@ -213,7 +223,7 @@ class CodexBackend:
 
         # Build thread config
         thread_config = ThreadConfig(
-            model=options.model,
+            model=model,
             base_instructions=options.system_prompt,
             sandbox=sandbox_mode,  # type: ignore[arg-type]
             approval_policy=_CODEX_APPROVAL_POLICY,
@@ -227,11 +237,12 @@ class CodexBackend:
             turn_overrides.effort = effort  # type: ignore[assignment]
 
         logger.debug(
-            f"CodexBackend query: model={options.model}, "
+            f"CodexBackend query: model={model}, "
             f"sandbox={sandbox_mode}, effort={effort}, prompt_len={len(prompt)}"
         )
 
-        # Connect and run
+        # Connect and run using chat() for streaming (enables progress
+        # summaries) instead of chat_once() which blocks until turn completes.
         client = CodexClient.connect_stdio(
             cwd=str(options.cwd) if options.cwd else None,
             env=env,
@@ -239,39 +250,45 @@ class CodexBackend:
         try:
             await client.start()
 
-            # Use chat_once for simple request-response
+            chat_kwargs: dict[str, Any] = {"turn_overrides": turn_overrides}
             if options.resume:
-                result = await client.chat_once(
-                    prompt,
-                    thread_id=options.resume,
-                    turn_overrides=turn_overrides,
-                )
+                chat_kwargs["thread_id"] = options.resume
             else:
-                result = await client.chat_once(
-                    prompt,
-                    thread_config=thread_config,
-                    turn_overrides=turn_overrides,
-                )
+                chat_kwargs["thread_config"] = thread_config
 
-            # Synthesize an assistant message so agents that read from
-            # assistant blocks (report, coder, ingestor) get the text content
-            # for message buffers and report assembly.
-            if result.final_text:
-                synthetic_block = type("_SyntheticTextBlock", (), {"text": result.final_text})()
-                yield SDKMessage(
-                    type="assistant",
-                    content_blocks=[synthetic_block],
-                )
+            final_text_parts: list[str] = []
+            thread_id: str | None = None
+
+            async for step in client.chat(prompt, **chat_kwargs):
+                thread_id = step.thread_id
+                if step.text:
+                    final_text_parts.append(step.text)
+                    # Yield each step as an assistant message so the
+                    # message_buffer gets populated during the turn
+                    # (enables progress summaries).
+                    synthetic_block = type("_SyntheticTextBlock", (), {"text": step.text})()
+                    yield SDKMessage(
+                        type="assistant",
+                        content_blocks=[synthetic_block],
+                    )
+
+            final_text = "\n".join(final_text_parts) if final_text_parts else ""
 
             yield SDKMessage(
                 type="result",
-                result=result.final_text,
-                session_id=result.thread_id,
+                result=final_text if final_text else None,
+                session_id=thread_id,
                 usage={"_provider": "codex", "_usage_unavailable": True},
             )
+        except CodexProtocolError as e:
+            raise RuntimeError(
+                f"Codex query failed (model={model}, sandbox={sandbox_mode}): {e}\n"
+                f"If using ChatGPT subscription, note that gpt-5.4-nano is not supported "
+                f"by Codex. Use gpt-5.4-mini or higher."
+            ) from e
         except Exception as e:
             raise RuntimeError(
-                f"Codex query failed (model={options.model}, sandbox={sandbox_mode}): {e}"
+                f"Codex query failed (model={model}, sandbox={sandbox_mode}): {e}"
             ) from e
         finally:
             try:
@@ -294,3 +311,34 @@ def get_backend(provider: str) -> SDKBackend:
     raise ValueError(
         f"No SDK backend for provider {provider!r}. SDK mode requires 'anthropic' or 'openai'."
     )
+
+
+def apply_codex_model_overrides(mc: Any) -> None:
+    """Patch a ModelConfig in-place, replacing broken Codex models.
+
+    Call once at startup so the TUI, agent panels, and actual queries
+    all show the correct (overridden) model name.
+
+    Remove this function when OpenAI fixes the issue:
+    https://github.com/openai/codex/issues/14266
+    """
+    if not CODEX_MODEL_OVERRIDES:
+        return
+
+    def _patch(cfg: Any) -> None:
+        if cfg is None or cfg.provider != "openai" or cfg.mode != "sdk":
+            return
+        replacement = CODEX_MODEL_OVERRIDES.get(cfg.model)
+        if replacement:
+            logger.warning(
+                f"Model {cfg.model!r} is unsupported by Codex with ChatGPT subscription. "
+                f"Overriding to {replacement!r}. "
+                f"(https://github.com/openai/codex/issues/14266)"
+            )
+            cfg.model = replacement
+
+    _patch(mc.defaults)
+    for agent in ("analyst", "scientist", "coder", "ingestor", "report", "summarizer", "assessor"):
+        _patch(getattr(mc, agent, None))
+    for critic in mc.critics:
+        _patch(critic)

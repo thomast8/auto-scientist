@@ -294,6 +294,12 @@ class Orchestrator:
         self.output_dir = output_dir.resolve()
         self.max_iterations = max_iterations
         self.model_config = model_config or ModelConfig.builtin_preset("default")
+
+        # Patch broken Codex models before anything reads the config
+        from auto_scientist.sdk_backend import apply_codex_model_overrides
+
+        apply_codex_model_overrides(self.model_config)
+
         self.interactive = interactive
         self.max_consecutive_failures = max_consecutive_failures
         self.config: DomainConfig | None = None
