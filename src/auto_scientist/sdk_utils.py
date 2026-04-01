@@ -1,81 +1,65 @@
-"""Utilities for working with claude_code_sdk.
+"""Utilities for working with SDK backends (Claude Code SDK and Codex SDK).
 
-Monkey-patches the SDK's message parser at import time so that unknown message
-types (e.g., rate_limit_event) are silently skipped instead of crashing the
-stream. This keeps the async generator in client.py alive through events the
-SDK doesn't yet handle.
+Provides output validation, retry utilities, and helper functions that work
+with the unified SDKMessage type from sdk_backend.py.
 
-Also provides output validation and retry utilities for agent output parsing.
+The monkey-patch for unknown message types now lives in sdk_backend.py
+(ClaudeBackend-specific).
 """
 
 import json
 import logging
-import os
 from collections.abc import AsyncIterator
+from pathlib import Path
 from typing import Any
 
-import claude_code_sdk._internal.client as _client_mod
-import claude_code_sdk._internal.message_parser as _parser_mod
-from claude_code_sdk import (
+from claude_code_sdk import (  # noqa: F401
     AssistantMessage,
-    ClaudeCodeOptions,
-    Message,
     ResultMessage,
     TextBlock,
-    query,
+    query,  # noqa: F401 - re-exported for backwards compat
 )
-from claude_code_sdk._errors import MessageParseError
 from pydantic import BaseModel, ValidationError
+
+from auto_scientist.sdk_backend import (
+    ClaudeBackend,
+    CodexBackend,
+    SDKOptions,
+)
 
 logger = logging.getLogger(__name__)
 
-# ---------------------------------------------------------------------------
-# Monkey-patch: make parse_message return None for unknown types
-# ---------------------------------------------------------------------------
-_original_parse_message = _parser_mod.parse_message
-
-
-def _tolerant_parse_message(data: dict[str, Any]) -> Message | None:
-    """parse_message wrapper that returns None for unknown message types."""
-    try:
-        return _original_parse_message(data)
-    except MessageParseError as exc:
-        if "Unknown message type" in str(exc):
-            msg_type = data.get("type", "<missing>")
-            logger.debug(f"Skipping unknown SDK message type: {msg_type}")
-            return None
-        raise
-
-
-# Patch both the module-level function and the reference imported by client.py
-_parser_mod.parse_message = _tolerant_parse_message  # type: ignore[assignment]
-_client_mod.parse_message = _tolerant_parse_message  # type: ignore[assignment]
-
 
 # ---------------------------------------------------------------------------
-# Public helper
+# Public helpers
 # ---------------------------------------------------------------------------
+
+
 def append_block_to_buffer(block: Any, buffer: list[str]) -> None:
     """Append a content block's text to a message buffer.
 
     Handles TextBlock (text), ToolUseBlock (tool name + truncated input),
     and ToolResultBlock (truncated output). Silently skips unknown types.
     Also logs each block to debug.log for post-mortem analysis.
-    """
-    from claude_code_sdk import TextBlock, ToolResultBlock, ToolUseBlock
 
-    if isinstance(block, TextBlock):
+    Works with both Claude Code SDK block types (via attribute checks)
+    and any future block types that follow the same interface.
+    """
+    if hasattr(block, "text") and not hasattr(block, "name"):
+        # TextBlock-like: has .text but not .name
         buffer.append(block.text)
         preview = block.text[:300].replace("\n", " ")
         logger.debug(f"[text] {preview}")
-    elif isinstance(block, ToolUseBlock):
+    elif hasattr(block, "name") and hasattr(block, "input"):
+        # ToolUseBlock-like: has .name and .input
         input_str = str(block.input)
         if len(input_str) > 200:
             input_str = input_str[:200] + "..."
         entry = f"[Tool: {block.name}] {input_str}"
         buffer.append(entry)
         logger.debug(entry)
-    elif isinstance(block, ToolResultBlock):
+    elif hasattr(block, "content") and hasattr(block, "is_error"):
+        # ToolResultBlock-like: has .content and .is_error
         content = str(block.content) if block.content else ""
         if len(content) > 200:
             content = content[:200] + "..."
@@ -85,35 +69,70 @@ def append_block_to_buffer(block: Any, buffer: list[str]) -> None:
         logger.debug(entry)
 
 
-async def safe_query(prompt: str, options: ClaudeCodeOptions) -> AsyncIterator[Message]:
-    """Wrap claude_code_sdk.query, filtering out None (unknown message types).
-
-    Strips ANTHROPIC_API_KEY from the subprocess environment so SDK agents use
-    the Claude Code subscription (Max plan) instead of direct API billing.  The
-    key is still available in the parent process for direct Anthropic client
-    calls (e.g. anthropic_client.py).
-    """
-    if "ANTHROPIC_API_KEY" not in options.env and os.environ.get("ANTHROPIC_API_KEY"):
-        logger.info(
-            "Stripping ANTHROPIC_API_KEY from SDK subprocess env "
-            "(using Claude Code subscription instead of direct API billing)"
-        )
-        options = ClaudeCodeOptions(
-            **{
-                field: getattr(options, field)
-                for field in options.__dataclass_fields__
-                if field != "env"
-            },
-            env={**options.env, "ANTHROPIC_API_KEY": ""},
-        )
-    logger.debug(
-        f"SDK query start: model={options.model}, "
-        f"max_turns={options.max_turns}, "
-        f"prompt_len={len(prompt)}"
+def _claude_options_to_sdk_options(cc_opts: Any) -> SDKOptions:
+    """Convert a ClaudeCodeOptions to SDKOptions for backwards compatibility."""
+    return SDKOptions(
+        system_prompt=getattr(cc_opts, "system_prompt", "") or "",
+        allowed_tools=list(getattr(cc_opts, "allowed_tools", []) or []),
+        max_turns=getattr(cc_opts, "max_turns", 10) or 10,
+        model=getattr(cc_opts, "model", None),
+        cwd=Path(cc_opts.cwd) if getattr(cc_opts, "cwd", None) else None,
+        permission_mode=getattr(cc_opts, "permission_mode", "default") or "default",
+        extra_args=dict(getattr(cc_opts, "extra_args", {}) or {}),
+        resume=getattr(cc_opts, "resume", None),
+        env=dict(getattr(cc_opts, "env", {}) or {}),
     )
-    async for msg in query(prompt=prompt, options=options):
-        if msg is not None:
-            yield msg
+
+
+async def safe_query(
+    prompt: str,
+    options: Any,
+    backend: "ClaudeBackend | CodexBackend | None" = None,
+) -> AsyncIterator[Any]:
+    """Wrap a backend query, filtering out None messages.
+
+    Backwards-compatible: if backend is None, falls back to legacy
+    claude_code_sdk.query path (yields raw claude_code_sdk Message objects).
+    When backend is provided, yields SDKMessage objects.
+    """
+    if backend is not None:
+        logger.debug(
+            f"SDK query start: model={options.model}, "
+            f"max_turns={options.max_turns}, "
+            f"prompt_len={len(prompt)}"
+        )
+        async for msg in backend.query(prompt=prompt, options=options):
+            if msg is not None:
+                yield msg
+    else:
+        # Legacy path: strip ANTHROPIC_API_KEY and use claude_code_sdk.query
+        import os
+
+        from claude_code_sdk import ClaudeCodeOptions
+
+        if isinstance(options, ClaudeCodeOptions) and (
+            "ANTHROPIC_API_KEY" not in options.env and os.environ.get("ANTHROPIC_API_KEY")
+        ):
+            logger.info(
+                "Stripping ANTHROPIC_API_KEY from SDK subprocess env "
+                "(using Claude Code subscription instead of direct API billing)"
+            )
+            options = ClaudeCodeOptions(
+                **{
+                    field: getattr(options, field)
+                    for field in options.__dataclass_fields__
+                    if field != "env"
+                },
+                env={**options.env, "ANTHROPIC_API_KEY": ""},
+            )
+        logger.debug(
+            f"SDK query start: model={options.model}, "
+            f"max_turns={options.max_turns}, "
+            f"prompt_len={len(prompt)}"
+        )
+        async for legacy_msg in query(prompt=prompt, options=options):
+            if legacy_msg is not None:
+                yield legacy_msg
 
 
 # ---------------------------------------------------------------------------
@@ -271,19 +290,93 @@ def with_turn_budget(system_prompt: str, max_turns: int, tools: list[str] | None
 
 async def collect_text_from_query(
     prompt: str,
-    options: ClaudeCodeOptions,
-    message_buffer: list[str] | None = None,
+    options: Any,
+    message_buffer_or_backend: "ClaudeBackend | CodexBackend | list[str] | None" = None,
+    agent_name_or_buffer: "str | list[str] | None" = None,
     agent_name: str = "Agent",
+    *,
+    message_buffer: list[str] | None = None,
 ) -> tuple[str, dict[str, Any]]:
     """Run an SDK query and collect the text response.
 
-    Prefers ResultMessage.result; falls back to concatenated AssistantMessage
-    TextBlocks. Raises RuntimeError if no text is produced.
+    Supports two call signatures:
+    - New: collect_text_from_query(prompt, sdk_options, backend, message_buffer, agent_name)
+    - Legacy: collect_text_from_query(prompt, claude_options, message_buffer, agent_name)
 
     Returns:
         (text, usage) tuple. Usage dict contains token counts and cost info.
         Also sets ``last_usage`` on the function object so the orchestrator
         can read it after sequential agent phases (coder, ingestor).
+    """
+    # Detect call signature by inspecting 3rd arg type
+    backend: Any = None
+    # message_buffer kwarg takes precedence over positional detection
+    _message_buffer: list[str] | None = message_buffer
+
+    if hasattr(message_buffer_or_backend, "query") and callable(
+        getattr(message_buffer_or_backend, "query", None)
+    ):
+        # New signature: (prompt, options, backend, message_buffer?, agent_name?)
+        backend = message_buffer_or_backend
+        if isinstance(agent_name_or_buffer, list):
+            if _message_buffer is None:
+                _message_buffer = agent_name_or_buffer
+        elif isinstance(agent_name_or_buffer, str):
+            agent_name = agent_name_or_buffer
+    elif isinstance(message_buffer_or_backend, list):
+        # Legacy signature: (prompt, options, message_buffer, agent_name?)
+        if _message_buffer is None:
+            _message_buffer = message_buffer_or_backend
+        if isinstance(agent_name_or_buffer, str):
+            agent_name = agent_name_or_buffer
+    # else: both None, use defaults
+
+    # Backwards compatibility: if no backend provided, use legacy claude_code_sdk.query
+    if backend is None:
+        return await _collect_text_legacy(prompt, options, _message_buffer, agent_name)
+
+    result_text = ""
+    assistant_texts: list[str] = []
+    usage: dict[str, Any] = {}
+
+    async for message in backend.query(prompt=prompt, options=options):
+        if message.type == "result":
+            if message.result:
+                result_text = message.result
+            usage = message.usage
+        elif message.type == "assistant":
+            for block in message.content_blocks:
+                if hasattr(block, "text") and not hasattr(block, "name"):
+                    assistant_texts.append(block.text)
+                if _message_buffer is not None:
+                    append_block_to_buffer(block, _message_buffer)
+
+    raw = result_text if result_text else "\n".join(assistant_texts)
+
+    if not raw:
+        raise RuntimeError(f"{agent_name} agent returned no output")
+
+    # Also store on the function for callers that don't use the return value
+    # (orchestrator's _apply_sdk_usage reads this after sequential agent phases)
+    collect_text_from_query.last_usage = usage  # type: ignore[attr-defined]
+
+    return raw, usage
+
+
+# Initialize the usage attribute
+collect_text_from_query.last_usage = {}  # type: ignore[attr-defined]
+
+
+async def _collect_text_legacy(
+    prompt: str,
+    options: Any,
+    message_buffer: list[str] | None = None,
+    agent_name: str = "Agent",
+) -> tuple[str, dict[str, Any]]:
+    """Legacy collect_text path using claude_code_sdk.query directly.
+
+    Used when no backend is provided (backwards compatibility during migration).
+    Will be removed once all agents pass backend explicitly.
     """
     result_text = ""
     assistant_texts: list[str] = []
@@ -308,15 +401,8 @@ async def collect_text_from_query(
     if not raw:
         raise RuntimeError(f"{agent_name} agent returned no output")
 
-    # Also store on the function for callers that don't use the return value
-    # (orchestrator's _apply_sdk_usage reads this after sequential agent phases)
     collect_text_from_query.last_usage = usage  # type: ignore[attr-defined]
-
     return raw, usage
-
-
-# Initialize the usage attribute
-collect_text_from_query.last_usage = {}  # type: ignore[attr-defined]
 
 
 # ── Report structure validation ─────────────────────────────────────────────

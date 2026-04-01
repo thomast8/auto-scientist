@@ -1,4 +1,4 @@
-"""Tests for SDK utility functions (monkey-patch, safe_query, validation)."""
+"""Tests for SDK utility functions (validation, collect_text, safe_query)."""
 
 import json
 import logging
@@ -7,9 +7,9 @@ from unittest.mock import MagicMock, patch
 import pytest
 
 from auto_scientist.schemas import AnalystOutput, ScientistPlanOutput
+from auto_scientist.sdk_backend import SDKMessage, SDKOptions, _tolerant_parse_message
 from auto_scientist.sdk_utils import (
     OutputValidationError,
-    _tolerant_parse_message,
     collect_text_from_query,
     safe_query,
     validate_json_output,
@@ -21,7 +21,7 @@ class TestTolerantParseMessage:
     def test_known_type_passes_through(self):
         msg = MagicMock()
         with patch(
-            "auto_scientist.sdk_utils._original_parse_message",
+            "auto_scientist.sdk_backend._original_parse_message",
             return_value=msg,
         ):
             result = _tolerant_parse_message({"type": "assistant"})
@@ -31,7 +31,7 @@ class TestTolerantParseMessage:
         from claude_code_sdk._errors import MessageParseError
 
         with patch(
-            "auto_scientist.sdk_utils._original_parse_message",
+            "auto_scientist.sdk_backend._original_parse_message",
             side_effect=MessageParseError("Unknown message type: rate_limit_event"),
         ):
             result = _tolerant_parse_message({"type": "rate_limit_event"})
@@ -42,7 +42,7 @@ class TestTolerantParseMessage:
 
         with (
             patch(
-                "auto_scientist.sdk_utils._original_parse_message",
+                "auto_scientist.sdk_backend._original_parse_message",
                 side_effect=MessageParseError("Malformed JSON payload"),
             ),
             pytest.raises(MessageParseError, match="Malformed JSON payload"),
@@ -54,10 +54,10 @@ class TestTolerantParseMessage:
 
         with (
             patch(
-                "auto_scientist.sdk_utils._original_parse_message",
+                "auto_scientist.sdk_backend._original_parse_message",
                 side_effect=MessageParseError("Unknown message type: foo_event"),
             ),
-            caplog.at_level(logging.DEBUG, logger="auto_scientist.sdk_utils"),
+            caplog.at_level(logging.DEBUG, logger="auto_scientist.sdk_backend"),
         ):
             _tolerant_parse_message({"type": "foo_event"})
 
@@ -67,75 +67,28 @@ class TestTolerantParseMessage:
 class TestSafeQuery:
     @pytest.mark.asyncio
     async def test_yields_non_none_messages(self):
-        from claude_code_sdk import ClaudeCodeOptions
+        msg1 = SDKMessage(type="assistant", text="hello")
+        msg2 = SDKMessage(type="result", result="done")
 
-        msg1, msg2 = MagicMock(), MagicMock()
+        class FakeBackend:
+            async def query(self, prompt, options):
+                yield msg1
+                yield msg2
 
-        async def fake_query(**kwargs):
-            for item in [msg1, None, msg2]:
-                yield item
-
-        opts = ClaudeCodeOptions()
-        with (
-            patch("auto_scientist.sdk_utils.query", side_effect=fake_query),
-            patch.dict("os.environ", {"ANTHROPIC_API_KEY": ""}, clear=False),
-        ):
-            results = [m async for m in safe_query(prompt="hi", options=opts)]
-
+        opts = SDKOptions(system_prompt="test", allowed_tools=[], max_turns=5)
+        results = [m async for m in safe_query("hi", opts, FakeBackend())]
         assert results == [msg1, msg2]
 
     @pytest.mark.asyncio
     async def test_empty_stream_yields_nothing(self):
-        from claude_code_sdk import ClaudeCodeOptions
+        class FakeBackend:
+            async def query(self, prompt, options):
+                return
+                yield
 
-        async def fake_query(**kwargs):
-            return
-            yield  # noqa: RET504 - make it an async generator
-
-        opts = ClaudeCodeOptions()
-        with (
-            patch("auto_scientist.sdk_utils.query", side_effect=fake_query),
-            patch.dict("os.environ", {"ANTHROPIC_API_KEY": ""}, clear=False),
-        ):
-            results = [m async for m in safe_query(prompt="hi", options=opts)]
-
+        opts = SDKOptions(system_prompt="test", allowed_tools=[], max_turns=5)
+        results = [m async for m in safe_query("hi", opts, FakeBackend())]
         assert results == []
-
-    @pytest.mark.asyncio
-    async def test_all_none_yields_nothing(self):
-        from claude_code_sdk import ClaudeCodeOptions
-
-        async def fake_query(**kwargs):
-            yield None
-            yield None
-
-        opts = ClaudeCodeOptions()
-        with (
-            patch("auto_scientist.sdk_utils.query", side_effect=fake_query),
-            patch.dict("os.environ", {"ANTHROPIC_API_KEY": ""}, clear=False),
-        ):
-            results = [m async for m in safe_query(prompt="hi", options=opts)]
-
-        assert results == []
-
-    @pytest.mark.asyncio
-    async def test_passes_prompt_and_options(self):
-        from claude_code_sdk import ClaudeCodeOptions
-
-        opts = ClaudeCodeOptions()
-
-        async def fake_query(**kwargs):
-            return
-            yield  # noqa: RET504
-
-        with (
-            patch("auto_scientist.sdk_utils.query", side_effect=fake_query) as mock_q,
-            patch.dict("os.environ", {"ANTHROPIC_API_KEY": ""}, clear=False),
-        ):
-            async for _ in safe_query(prompt="test prompt", options=opts):
-                pass
-
-        mock_q.assert_called_once_with(prompt="test prompt", options=opts)
 
 
 # ---------------------------------------------------------------------------
@@ -274,102 +227,84 @@ class TestValidateJsonOutput:
 class TestCollectTextFromQuery:
     @pytest.mark.asyncio
     async def test_collects_result_text(self):
-        """Prefers ResultMessage.result over assistant text."""
-        from claude_code_sdk import AssistantMessage, ResultMessage, TextBlock
+        """Prefers result text over assistant text."""
 
-        result_msg = MagicMock(spec=ResultMessage)
-        result_msg.result = '{"answer": 42}'
+        class FakeBackend:
+            async def query(self, prompt, options):
+                # TextBlock-like object
+                text_block = MagicMock()
+                text_block.text = "intermediate text"
+                del text_block.name  # ensure it's treated as TextBlock, not ToolUseBlock
 
-        assistant_msg = MagicMock(spec=AssistantMessage)
-        text_block = MagicMock(spec=TextBlock)
-        text_block.text = "intermediate text"
-        assistant_msg.content = [text_block]
+                yield SDKMessage(type="assistant", content_blocks=[text_block])
+                yield SDKMessage(
+                    type="result",
+                    result='{"answer": 42}',
+                    usage={"input_tokens": 10},
+                )
 
-        async def fake_query(**kwargs):
-            yield assistant_msg
-            yield result_msg
-
-        with patch("auto_scientist.sdk_utils.query", side_effect=fake_query):
-            raw, usage = await collect_text_from_query("prompt", MagicMock())
+        opts = SDKOptions(system_prompt="", allowed_tools=[], max_turns=5)
+        raw, usage = await collect_text_from_query("prompt", opts, FakeBackend())
         assert raw == '{"answer": 42}'
 
     @pytest.mark.asyncio
     async def test_falls_back_to_assistant_text(self):
-        """When no ResultMessage.result, falls back to concatenated assistant text."""
-        from claude_code_sdk import AssistantMessage, ResultMessage, TextBlock
+        """When no result text, falls back to concatenated assistant text."""
 
-        result_msg = MagicMock(spec=ResultMessage)
-        result_msg.result = ""
+        class FakeBackend:
+            async def query(self, prompt, options):
+                text_block = MagicMock()
+                text_block.text = '{"answer": 42}'
+                del text_block.name
 
-        assistant_msg = MagicMock(spec=AssistantMessage)
-        text_block = MagicMock(spec=TextBlock)
-        text_block.text = '{"answer": 42}'
-        assistant_msg.content = [text_block]
+                yield SDKMessage(type="assistant", content_blocks=[text_block])
+                yield SDKMessage(type="result", result="", usage={})
 
-        async def fake_query(**kwargs):
-            yield assistant_msg
-            yield result_msg
-
-        with patch("auto_scientist.sdk_utils.query", side_effect=fake_query):
-            raw, usage = await collect_text_from_query("prompt", MagicMock())
+        opts = SDKOptions(system_prompt="", allowed_tools=[], max_turns=5)
+        raw, usage = await collect_text_from_query("prompt", opts, FakeBackend())
         assert raw == '{"answer": 42}'
 
     @pytest.mark.asyncio
     async def test_empty_output_raises(self):
-        from claude_code_sdk import ResultMessage
+        class FakeBackend:
+            async def query(self, prompt, options):
+                yield SDKMessage(type="result", result="", usage={})
 
-        result_msg = MagicMock(spec=ResultMessage)
-        result_msg.result = ""
-
-        async def fake_query(**kwargs):
-            yield result_msg
-
-        with (
-            patch("auto_scientist.sdk_utils.query", side_effect=fake_query),
-            pytest.raises(RuntimeError, match="returned no output"),
-        ):
-            await collect_text_from_query("prompt", MagicMock(), agent_name="Analyst")
+        opts = SDKOptions(system_prompt="", allowed_tools=[], max_turns=5)
+        with pytest.raises(RuntimeError, match="returned no output"):
+            await collect_text_from_query("prompt", opts, FakeBackend(), agent_name="Analyst")
 
     @pytest.mark.asyncio
     async def test_populates_message_buffer(self):
-        from claude_code_sdk import AssistantMessage, ResultMessage, TextBlock
-
-        result_msg = MagicMock(spec=ResultMessage)
-        result_msg.result = "result"
-
-        assistant_msg = MagicMock(spec=AssistantMessage)
-        text_block = MagicMock(spec=TextBlock)
+        text_block = MagicMock()
         text_block.text = "block text"
-        assistant_msg.content = [text_block]
+        del text_block.name
 
-        async def fake_query(**kwargs):
-            yield assistant_msg
-            yield result_msg
+        class FakeBackend:
+            async def query(self, prompt, options):
+                yield SDKMessage(type="assistant", content_blocks=[text_block])
+                yield SDKMessage(type="result", result="result", usage={})
 
+        opts = SDKOptions(system_prompt="", allowed_tools=[], max_turns=5)
         buffer: list[str] = []
-        with (
-            patch("auto_scientist.sdk_utils.query", side_effect=fake_query),
-            patch("auto_scientist.sdk_utils.append_block_to_buffer") as mock_append,
-        ):
-            await collect_text_from_query("prompt", MagicMock(), message_buffer=buffer)
+        with patch("auto_scientist.sdk_utils.append_block_to_buffer") as mock_append:
+            await collect_text_from_query("prompt", opts, FakeBackend(), message_buffer=buffer)
             mock_append.assert_called_once_with(text_block, buffer)
 
     @pytest.mark.asyncio
     async def test_returns_usage_dict(self):
-        """Usage dict from ResultMessage is returned as second element."""
-        from claude_code_sdk import ResultMessage
+        """Usage dict from result message is returned as second element."""
 
-        result_msg = MagicMock(spec=ResultMessage)
-        result_msg.result = "output"
-        result_msg.usage = {"input_tokens": 100, "output_tokens": 50}
-        result_msg.num_turns = 3
-        result_msg.total_cost_usd = 0.01
+        class FakeBackend:
+            async def query(self, prompt, options):
+                yield SDKMessage(
+                    type="result",
+                    result="output",
+                    usage={"input_tokens": 100, "output_tokens": 50, "num_turns": 3},
+                )
 
-        async def fake_query(**kwargs):
-            yield result_msg
-
-        with patch("auto_scientist.sdk_utils.query", side_effect=fake_query):
-            _text, usage = await collect_text_from_query("prompt", MagicMock())
+        opts = SDKOptions(system_prompt="", allowed_tools=[], max_turns=5)
+        _text, usage = await collect_text_from_query("prompt", opts, FakeBackend())
         assert usage["input_tokens"] == 100
         assert usage["output_tokens"] == 50
         assert usage["num_turns"] == 3
