@@ -65,8 +65,8 @@ BUILTIN_PRESETS: dict[str, dict] = {
             "mode": "api",
         },
         "critics": [
-            {"provider": "google", "model": "gemini-3-flash-preview", "reasoning": "off"},
-            {"provider": "google", "model": "gemini-3-flash-preview", "reasoning": "off"},
+            {"provider": "anthropic", "model": "claude-haiku-4-5-20251001", "reasoning": "off"},
+            {"provider": "openai", "model": "gpt-5.4-nano", "reasoning": "off"},
         ],
     },
     # Quick but competent: scientist upgraded so plans are usable

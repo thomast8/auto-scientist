@@ -161,10 +161,12 @@ class TestBuiltinPresets:
         assert mc.summarizer.model == "gpt-5.4-nano"
         assert mc.summarizer.reasoning.level == "off"
         assert len(mc.critics) == 2
-        for critic in mc.critics:
-            assert critic.provider == "google"
-            assert critic.model == "gemini-3-flash-preview"
-            assert critic.reasoning.level == "off"
+        assert mc.critics[0].provider == "anthropic"
+        assert mc.critics[0].model == "claude-haiku-4-5-20251001"
+        assert mc.critics[0].reasoning.level == "off"
+        assert mc.critics[1].provider == "openai"
+        assert mc.critics[1].model == "gpt-5.4-nano"
+        assert mc.critics[1].reasoning.level == "off"
 
     def test_turbo_preset_all_agents_use_haiku_with_off_reasoning(self):
         mc = ModelConfig.builtin_preset("turbo")
