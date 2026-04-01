@@ -147,7 +147,8 @@ class TestValidatePrerequisites:
         o = self._make_orchestrator(tmp_path, state=state, data_path=None)
         o._validate_prerequisites()  # should not raise
 
-    def test_missing_anthropic_auth(self, tmp_path, monkeypatch):
+    def test_missing_anthropic_auth_api_mode(self, tmp_path, monkeypatch):
+        """API-mode agents still need API key validation."""
         data = tmp_path / "data.csv"
         data.write_text("x")
         monkeypatch.setattr(
@@ -155,7 +156,12 @@ class TestValidatePrerequisites:
             self._mock_auth_fail("anthropic"),
         )
         monkeypatch.setattr("shutil.which", lambda name: "/usr/bin/claude")
-        o = self._make_orchestrator(tmp_path, data_path=data)
+        mc = ModelConfig(
+            defaults=AgentModelConfig(model="claude-sonnet-4-6"),
+            scientist=AgentModelConfig(model="claude-sonnet-4-6", mode="api"),
+            critics=[],
+        )
+        o = self._make_orchestrator(tmp_path, data_path=data, mc=mc)
         with pytest.raises(RuntimeError, match="Anthropic SDK authentication failed"):
             o._validate_prerequisites()
 
@@ -176,7 +182,8 @@ class TestValidatePrerequisites:
         with pytest.raises(RuntimeError, match="OpenAI SDK authentication failed"):
             o._validate_prerequisites()
 
-    def test_missing_google_key_for_critic(self, tmp_path, monkeypatch):
+    def test_missing_google_key_for_api_critic(self, tmp_path, monkeypatch):
+        """Google critic in api mode needs an API key."""
         data = tmp_path / "data.csv"
         data.write_text("x")
         monkeypatch.setattr(
@@ -186,7 +193,7 @@ class TestValidatePrerequisites:
         monkeypatch.setattr("shutil.which", lambda name: "/usr/bin/claude")
         mc = ModelConfig(
             defaults=AgentModelConfig(model="claude-sonnet-4-6"),
-            critics=[AgentModelConfig(provider="google", model="gemini-2.5-pro")],
+            critics=[AgentModelConfig(provider="google", model="gemini-2.5-pro", mode="api")],
         )
         o = self._make_orchestrator(tmp_path, data_path=data, mc=mc)
         with pytest.raises(RuntimeError, match="Google SDK authentication failed"):
@@ -195,14 +202,15 @@ class TestValidatePrerequisites:
     def test_multiple_errors_reported_at_once(self, tmp_path, monkeypatch):
         monkeypatch.setattr(
             "auto_scientist.orchestrator._check_provider_auth",
-            self._mock_auth_fail("anthropic"),
+            self._mock_auth_fail("openai"),
         )
         monkeypatch.setattr("shutil.which", lambda name: None)
+        # Default preset has summarizer with provider=openai (api mode)
         o = self._make_orchestrator(tmp_path)  # data.csv doesn't exist
         with pytest.raises(RuntimeError, match="Data path does not exist") as exc_info:
             o._validate_prerequisites()
         msg = str(exc_info.value)
-        assert "Anthropic SDK authentication failed" in msg
+        # Multiple errors should be reported: data path + CLI not found
         assert "Claude Code CLI not found" in msg
 
     def test_missing_claude_cli(self, tmp_path, monkeypatch):
@@ -214,8 +222,8 @@ class TestValidatePrerequisites:
         with pytest.raises(RuntimeError, match="Claude Code CLI not found"):
             o._validate_prerequisites()
 
-    def test_non_anthropic_sdk_agent_rejected(self, tmp_path, monkeypatch):
-        """SDK agents (analyst, coder, etc.) must use Anthropic models."""
+    def test_google_sdk_agent_rejected(self, tmp_path, monkeypatch):
+        """SDK agents cannot use Google provider (no Google coding CLI)."""
         data = tmp_path / "data.csv"
         data.write_text("x")
         monkeypatch.setattr("auto_scientist.orchestrator._check_provider_auth", self._mock_auth_ok)
@@ -225,21 +233,37 @@ class TestValidatePrerequisites:
             critics=[],
         )
         o = self._make_orchestrator(tmp_path, data_path=data, mc=mc)
-        with pytest.raises(RuntimeError, match="require provider 'anthropic'"):
+        with pytest.raises(RuntimeError, match="no Google coding agent CLI exists"):
             o._validate_prerequisites()
 
-    def test_non_anthropic_critic_allowed(self, tmp_path, monkeypatch):
-        """Critics can use non-Anthropic models."""
+    def test_non_anthropic_critic_allowed_in_api_mode(self, tmp_path, monkeypatch):
+        """Critics can use non-Anthropic models in API mode."""
         data = tmp_path / "data.csv"
         data.write_text("x")
         monkeypatch.setattr("auto_scientist.orchestrator._check_provider_auth", self._mock_auth_ok)
         monkeypatch.setattr("shutil.which", lambda name: "/usr/bin/claude")
         mc = ModelConfig(
             defaults=AgentModelConfig(model="claude-sonnet-4-6"),
-            critics=[AgentModelConfig(provider="google", model="gemini-2.5-pro")],
+            critics=[AgentModelConfig(provider="google", model="gemini-2.5-pro", mode="api")],
         )
         o = self._make_orchestrator(tmp_path, data_path=data, mc=mc)
         o._validate_prerequisites()  # should not raise
+
+    def test_openai_sdk_agent_needs_codex_cli(self, tmp_path, monkeypatch):
+        """OpenAI SDK agents need the Codex CLI on PATH."""
+        data = tmp_path / "data.csv"
+        data.write_text("x")
+        monkeypatch.setattr("auto_scientist.orchestrator._check_provider_auth", self._mock_auth_ok)
+        monkeypatch.setattr(
+            "shutil.which", lambda name: "/usr/bin/claude" if name == "claude" else None
+        )
+        mc = ModelConfig(
+            defaults=AgentModelConfig(provider="openai", model="gpt-5.4-mini"),
+            critics=[],
+        )
+        o = self._make_orchestrator(tmp_path, data_path=data, mc=mc)
+        with pytest.raises(RuntimeError, match="Codex CLI not found"):
+            o._validate_prerequisites()
 
 
 class TestValidateModelNames:

@@ -271,13 +271,6 @@ class Orchestrator:
         if parent.exists() and not os.access(parent, os.W_OK):
             errors.append(f"Output directory parent is not writable: {parent}")
 
-        # Claude Code CLI must be installed (powers all main agents)
-        if not shutil.which("claude"):
-            errors.append(
-                "Claude Code CLI not found on PATH. "
-                "Install with: npm install -g @anthropic-ai/claude-code"
-            )
-
         # uv must be installed (runs experiment scripts)
         run_cmd = self.config.run_command if self.config else "uv run {script_path}"
         exe = run_cmd.split()[0] if run_cmd.strip() else ""
@@ -287,17 +280,49 @@ class Orchestrator:
                 f"Install uv with: curl -LsSf https://astral.sh/uv/install.sh | sh"
             )
 
-        # SDK agents must use Anthropic models (they run through claude CLI)
+        # Validate SDK agent provider+mode combinations
         mc = self.model_config
-        sdk_agents = ["analyst", "scientist", "coder", "ingestor", "report"]
-        for agent_name in sdk_agents:
+        sdk_only_agents = ["analyst", "coder", "ingestor", "report", "assessor"]
+        sdk_capable_agents = ["analyst", "scientist", "coder", "ingestor", "report", "assessor"]
+        needs_claude_cli = False
+        needs_codex_cli = False
+
+        for agent_name in sdk_capable_agents:
             cfg = mc.resolve(agent_name)
-            if cfg.provider != "anthropic":
+
+            # SDK-only agents cannot use mode=api
+            if agent_name in sdk_only_agents and cfg.mode == "api":
                 errors.append(
-                    f"{agent_name} uses provider '{cfg.provider}' (model: {cfg.model}), "
-                    f"but SDK agents require provider 'anthropic'. "
-                    f"Non-Anthropic models can only be used for critics and summarizer."
+                    f"{agent_name} uses mode='api', but it requires mode='sdk' "
+                    f"(needs file tools). Remove the mode override or set mode='sdk'."
                 )
+
+            # SDK mode requires anthropic or openai (not google)
+            if cfg.mode == "sdk" and cfg.provider == "google":
+                errors.append(
+                    f"{agent_name} uses mode='sdk' with provider='google', "
+                    f"but no Google coding agent CLI exists. "
+                    f"Use provider='anthropic' or provider='openai' for SDK mode."
+                )
+
+            # Track which CLIs are needed
+            if cfg.mode == "sdk":
+                if cfg.provider == "anthropic":
+                    needs_claude_cli = True
+                elif cfg.provider == "openai":
+                    needs_codex_cli = True
+
+        # Check CLI availability based on actual needs
+        if needs_claude_cli and not shutil.which("claude"):
+            errors.append(
+                "Claude Code CLI not found on PATH (needed by Anthropic SDK agents). "
+                "Install with: npm install -g @anthropic-ai/claude-code"
+            )
+        if needs_codex_cli and not shutil.which("codex"):
+            errors.append(
+                "Codex CLI not found on PATH (needed by OpenAI SDK agents). "
+                "Install with: npm install -g @openai/codex"
+            )
 
         # Validate model names against provider APIs
         model_errors = _validate_model_names(mc)
@@ -310,16 +335,22 @@ class Orchestrator:
         # Collect required providers from model config
         required_providers: set[str] = set()
 
-        # Claude Code SDK powers all main agents, always needs Anthropic
-        required_providers.add("anthropic")
+        # Add providers for SDK agents (API key needed for api mode,
+        # subscription or key for sdk mode)
+        for agent_name in sdk_capable_agents:
+            cfg = mc.resolve(agent_name)
+            if cfg.mode == "api":
+                required_providers.add(cfg.provider)
+            # SDK mode: CLI handles auth (subscription or key), skip API key check
 
-        # Summarizer always uses OpenAI directly
+        # Summarizer uses direct API
         if mc.summarizer is not None:
-            required_providers.add("openai")
+            required_providers.add(mc.summarizer.provider)
 
-        # Critics use their configured provider
+        # Critics use their configured provider (api mode by default)
         for critic in mc.critics:
-            required_providers.add(critic.provider)
+            if critic.mode == "api":
+                required_providers.add(critic.provider)
 
         # Validate each provider by trying to instantiate its SDK client
         for provider in sorted(required_providers):
