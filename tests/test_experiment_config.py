@@ -29,7 +29,6 @@ class TestExperimentConfigDefaults:
         cfg = ExperimentConfig(data="data.csv", goal="test")
         assert cfg.max_iterations == 20
         assert cfg.preset == "default"
-        assert cfg.debate_rounds == 1
         assert cfg.output_dir == "experiments/runs"
         assert cfg.schedule is None
         assert cfg.interactive is False
@@ -98,14 +97,6 @@ class TestExperimentConfigBounds:
     def test_max_iterations_negative_raises(self):
         with pytest.raises(ValidationError):
             ExperimentConfig(data="data.csv", goal="test", max_iterations=-1)
-
-    def test_debate_rounds_negative_raises(self):
-        with pytest.raises(ValidationError):
-            ExperimentConfig(data="data.csv", goal="test", debate_rounds=-1)
-
-    def test_debate_rounds_zero_allowed(self):
-        cfg = ExperimentConfig(data="data.csv", goal="test", debate_rounds=0)
-        assert cfg.debate_rounds == 0
 
     def test_empty_data_raises(self):
         with pytest.raises(ValidationError):
@@ -192,7 +183,6 @@ class TestFromYaml:
             "goal": "Model SpO2 dynamics",
             "max_iterations": 10,
             "preset": "high",
-            "debate_rounds": 2,
             "output_dir": "my_experiments",
             "models": {
                 "scientist": {"model": "claude-opus-4-6", "reasoning": "high"},
@@ -206,7 +196,6 @@ class TestFromYaml:
         assert cfg.goal == "Model SpO2 dynamics"
         assert cfg.max_iterations == 10
         assert cfg.preset == "high"
-        assert cfg.debate_rounds == 2
         assert cfg.output_dir == "my_experiments"
         assert cfg.models.scientist.model == "claude-opus-4-6"
 

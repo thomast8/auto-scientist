@@ -154,7 +154,6 @@ def _run_from_experiment_config(exp_config: ExperimentConfig, data_path: Path) -
         max_iterations=exp_config.max_iterations,
         model_config=model_config,
         interactive=exp_config.interactive,
-        debate_rounds=exp_config.debate_rounds,
         verbose=exp_config.verbose,
     )
 
@@ -215,12 +214,6 @@ def cli(ctx: click.Context, config_path: str | None):
 @click.option("--schedule", default=None, help="Time window for execution (e.g., '22:00-06:00')")
 @click.option("--interactive", is_flag=True, help="Enable interactive mode")
 @click.option(
-    "--debate-rounds",
-    default=1,
-    type=int,
-    help="Number of critic-scientist debate rounds per persona (1 = single-pass, default 1)",
-)
-@click.option(
     "--output-dir",
     default="experiments/runs",
     type=click.Path(),
@@ -243,7 +236,6 @@ def run(
     no_summaries: bool,
     schedule: str | None,
     interactive: bool,
-    debate_rounds: int,
     output_dir: str,
     verbose: bool,
 ):
@@ -263,8 +255,6 @@ def run(
             exp_config.preset = preset
         if ctx.get_parameter_source("max_iterations") == _cli:
             exp_config.max_iterations = max_iterations
-        if ctx.get_parameter_source("debate_rounds") == _cli:
-            exp_config.debate_rounds = debate_rounds
         if ctx.get_parameter_source("output_dir") == _cli:
             exp_config.output_dir = output_dir
         if ctx.get_parameter_source("schedule") == _cli:
@@ -327,7 +317,6 @@ def run(
         max_iterations=max_iterations,
         model_config=model_config,
         interactive=interactive,
-        debate_rounds=debate_rounds,
         verbose=verbose,
     )
 
@@ -386,12 +375,6 @@ def run(
 )
 @click.option("--no-summaries", is_flag=True, help="Disable periodic agent summaries")
 @click.option(
-    "--debate-rounds",
-    default=1,
-    type=int,
-    help="Number of critic-scientist debate rounds per persona",
-)
-@click.option(
     "-v",
     "--verbose",
     is_flag=True,
@@ -407,7 +390,6 @@ def resume(
     config_path: str | None,
     preset: str | None,
     no_summaries: bool,
-    debate_rounds: int,
     verbose: bool,
 ):
     """Resume a previously paused or crashed run.
@@ -512,7 +494,6 @@ def resume(
         output_dir=run_dir,
         max_iterations=max_iterations,
         model_config=model_config,
-        debate_rounds=debate_rounds,
         verbose=verbose,
         skip_to_agent=from_agent if fork else None,
         restored_panels=restored_panels,

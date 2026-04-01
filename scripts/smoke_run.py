@@ -18,17 +18,18 @@ from pathlib import Path
 from unittest.mock import patch
 
 from auto_scientist.agent_result import AgentResult
-from auto_scientist.agents.critic import MIN_RESPONSE_LENGTH
 from auto_scientist.model_config import AgentModelConfig, ModelConfig
 from auto_scientist.orchestrator import Orchestrator
 from auto_scientist.state import ExperimentState
 
+_MIN_RESPONSE_LENGTH = 50
+
 
 def _pad(text: str) -> str:
-    """Pad text to meet MIN_RESPONSE_LENGTH for critic responses."""
-    if len(text) >= MIN_RESPONSE_LENGTH:
+    """Pad text to minimum length for critic responses."""
+    if len(text) >= _MIN_RESPONSE_LENGTH:
         return text
-    return text + " " + "x" * (MIN_RESPONSE_LENGTH - len(text) - 1)
+    return text + " " + "x" * (_MIN_RESPONSE_LENGTH - len(text) - 1)
 
 
 # ---------------------------------------------------------------------------
@@ -136,20 +137,28 @@ async def _drip_buffer(buf: list[str] | None, entries: list[str], delay: float =
 
 def _make_ingestor_mock():
     async def fake(
-        raw_data_path, output_dir, goal, interactive=False,
-        config_path=None, model=None, message_buffer=None,
+        raw_data_path,
+        output_dir,
+        goal,
+        interactive=False,
+        config_path=None,
+        model=None,
+        message_buffer=None,
     ):
         dest = output_dir / "data"
         dest.mkdir(parents=True, exist_ok=True)
         for f in raw_data_path.iterdir():
             if f.is_file():
                 (dest / f.name).write_text(f.read_text())
-        await _drip_buffer(message_buffer, [
-            "[Ingestor] Reading raw data files",
-            "[Ingestor] Validating CSV schema and column types",
-            "[Ingestor] Copying canonical data to output directory",
-            "[Ingestor] Canonicalized 1 file",
-        ])
+        await _drip_buffer(
+            message_buffer,
+            [
+                "[Ingestor] Reading raw data files",
+                "[Ingestor] Validating CSV schema and column types",
+                "[Ingestor] Copying canonical data to output directory",
+                "[Ingestor] Canonicalized 1 file",
+            ],
+        )
         return dest
 
     return fake
@@ -162,12 +171,15 @@ def _make_analyst_mock():
     async def fake(**kwargs):
         nonlocal call_idx
         buf = kwargs.get("message_buffer")
-        await _drip_buffer(buf, [
-            "[Analyst] Loading data and checking structure",
-            "[Analyst] Computing summary statistics",
-            "[Analyst] Evaluating success criteria",
-            "[Analyst] Analysis complete",
-        ])
+        await _drip_buffer(
+            buf,
+            [
+                "[Analyst] Loading data and checking structure",
+                "[Analyst] Computing summary statistics",
+                "[Analyst] Evaluating success criteria",
+                "[Analyst] Analysis complete",
+            ],
+        )
         result = results[min(call_idx, len(results) - 1)]
         call_idx += 1
         return result
@@ -182,12 +194,15 @@ def _make_scientist_mock():
     async def fake(**kwargs):
         nonlocal call_idx
         buf = kwargs.get("message_buffer")
-        await _drip_buffer(buf, [
-            "[Scientist] Reviewing analysis results",
-            "[Scientist] Formulating hypothesis",
-            "[Scientist] Designing experimental strategy",
-            "[Scientist] Plan complete",
-        ])
+        await _drip_buffer(
+            buf,
+            [
+                "[Scientist] Reviewing analysis results",
+                "[Scientist] Formulating hypothesis",
+                "[Scientist] Designing experimental strategy",
+                "[Scientist] Plan complete",
+            ],
+        )
         result = results[min(call_idx, len(results) - 1)]
         call_idx += 1
         return result
@@ -198,11 +213,14 @@ def _make_scientist_mock():
 def _make_revision_mock():
     async def fake(**kwargs):
         buf = kwargs.get("message_buffer")
-        await _drip_buffer(buf, [
-            "[Revision] Reading critic feedback",
-            "[Revision] Incorporating suggestions into plan",
-            "[Revision] Revised plan ready",
-        ])
+        await _drip_buffer(
+            buf,
+            [
+                "[Revision] Reading critic feedback",
+                "[Revision] Incorporating suggestions into plan",
+                "[Revision] Revised plan ready",
+            ],
+        )
         return REVISED_PLAN
 
     return fake
@@ -210,9 +228,15 @@ def _make_revision_mock():
 
 def _make_coder_mock():
     async def fake(
-        plan, previous_script, output_dir, version,
-        domain_knowledge="", data_path="", model=None,
-        message_buffer=None, run_timeout_minutes=120,
+        plan,
+        previous_script,
+        output_dir,
+        version,
+        domain_knowledge="",
+        data_path="",
+        model=None,
+        message_buffer=None,
+        run_timeout_minutes=120,
         run_command="uv run {script_path}",
         top_level_criteria=None,
     ):
@@ -221,21 +245,22 @@ def _make_coder_mock():
 
         script = version_dir / "experiment.py"
         script.write_text("# Smoke test script\nprint('R2=0.95')\n")
-        (version_dir / "results.txt").write_text(
-            f"Smoke test results for {version}\nR2=0.95\n"
-        )
+        (version_dir / "results.txt").write_text(f"Smoke test results for {version}\nR2=0.95\n")
         (version_dir / "run_result.json").write_text(
             json.dumps({"success": True, "return_code": 0, "timed_out": False})
         )
 
-        await _drip_buffer(message_buffer, [
-            f"[Coder] Reading plan for {version}",
-            f"[Coder] Writing {version} experiment script",
-            "[Coder] Verifying script syntax",
-            "[Coder] Running experiment...",
-            "[Coder] Collecting results and generating plots",
-            "[Coder] Experiment completed successfully",
-        ])
+        await _drip_buffer(
+            message_buffer,
+            [
+                f"[Coder] Reading plan for {version}",
+                f"[Coder] Writing {version} experiment script",
+                "[Coder] Verifying script syntax",
+                "[Coder] Running experiment...",
+                "[Coder] Collecting results and generating plots",
+                "[Coder] Experiment completed successfully",
+            ],
+        )
         return script
 
     return fake
@@ -244,11 +269,14 @@ def _make_coder_mock():
 def _make_report_mock():
     async def fake(**kwargs):
         buf = kwargs.get("message_buffer")
-        await _drip_buffer(buf, [
-            "[Report] Gathering results from all iterations",
-            "[Report] Compiling findings and recommendations",
-            "[Report] Writing final summary",
-        ])
+        await _drip_buffer(
+            buf,
+            [
+                "[Report] Gathering results from all iterations",
+                "[Report] Compiling findings and recommendations",
+                "[Report] Writing final summary",
+            ],
+        )
         return "# Smoke Test Report\n\nAll experiments completed successfully."
 
     return fake
@@ -258,12 +286,11 @@ def _make_report_mock():
 # Canned LLM responses for debate mocks
 # ---------------------------------------------------------------------------
 
-# With 3 personas x 2 critic models x debate_rounds=2, we need enough
-# responses. Each persona debate: 2 critic calls + 1 scientist defense.
+# Each persona gets one critic call.
 
 
 def _cr(text: str, inp: int = 100, out: int = 50) -> AgentResult:
-    """Build a padded AgentResult for critic/defense mock responses."""
+    """Build a padded AgentResult for critic mock responses."""
     return AgentResult(text=_pad(text), input_tokens=inp, output_tokens=out)
 
 
@@ -283,15 +310,6 @@ google_critic_responses = [
     _cr("Google R4: Positive about bootstrap approach.", 80, 40),
     _cr("Google R5: Final assessment, approach is reasonable.", 80, 40),
     _cr("Google R6: All major concerns resolved.", 80, 40),
-]
-
-anthropic_defense_responses = [
-    _cr("Scientist: Valid points, will add R2 threshold.", 90, 45),
-    _cr("Scientist: Agreed on confounders, adding residuals.", 90, 45),
-    _cr("Scientist: Adding cross-validation for generalization.", 90, 45),
-    _cr("Scientist: Bootstrap intervals quantify uncertainty.", 90, 45),
-    _cr("Scientist: Statistical power via sample size analysis.", 90, 45),
-    _cr("Scientist: All critiques incorporated into plan.", 90, 45),
 ]
 
 # ---------------------------------------------------------------------------
@@ -329,23 +347,21 @@ async def run_smoke(output_dir: Path) -> None:
         output_dir=experiment_dir,
         max_iterations=2,
         model_config=model_config,
-        debate_rounds=2,
-        stream=False,
     )
 
     # Counter for varying fake token stats per agent call
     _call_count = 0
     _token_table = [
-        (1200, 400, 3),   # Ingestor
-        (800, 300, 2),    # Analyst iter 0
-        (1500, 600, 4),   # Scientist iter 0
-        (2200, 900, 8),   # Coder iter 0
-        (900, 350, 2),    # Analyst iter 1
-        (1800, 700, 5),   # Scientist iter 1
-        (1600, 650, 4),   # Revision iter 1
-        (3500, 1400, 12), # Coder iter 1
-        (700, 250, 2),    # Analyst (final scoring)
-        (2000, 800, 6),   # Report
+        (1200, 400, 3),  # Ingestor
+        (800, 300, 2),  # Analyst iter 0
+        (1500, 600, 4),  # Scientist iter 0
+        (2200, 900, 8),  # Coder iter 0
+        (900, 350, 2),  # Analyst iter 1
+        (1800, 700, 5),  # Scientist iter 1
+        (1600, 650, 4),  # Revision iter 1
+        (3500, 1400, 12),  # Coder iter 1
+        (700, 250, 2),  # Analyst (final scoring)
+        (2000, 800, 6),  # Report
     ]
 
     def _fake_sdk_usage(panel):
@@ -356,7 +372,9 @@ async def run_smoke(output_dir: Path) -> None:
 
     # Reduce summarizer poll interval so it fires during short agent runs
     import auto_scientist.summarizer as _summarizer_mod
+
     _orig_rws = _summarizer_mod.run_with_summaries
+
     async def _fast_rws(*args, interval=0.5, **kwargs):
         return await _orig_rws(*args, interval=interval, **kwargs)
 
@@ -367,10 +385,10 @@ async def run_smoke(output_dir: Path) -> None:
         patch("auto_scientist.summarizer.run_with_summaries", side_effect=_fast_rws),
         patch("auto_scientist.orchestrator.run_with_summaries", side_effect=_fast_rws),
         patch.object(
-            Orchestrator, "_apply_sdk_usage",
+            Orchestrator,
+            "_apply_sdk_usage",
             staticmethod(_fake_sdk_usage),
         ),
-
         # Agent-level mocks
         patch("auto_scientist.agents.ingestor.run_ingestor", side_effect=_make_ingestor_mock()),
         patch("auto_scientist.agents.analyst.run_analyst", side_effect=_make_analyst_mock()),
@@ -381,11 +399,8 @@ async def run_smoke(output_dir: Path) -> None:
         ),
         patch("auto_scientist.agents.coder.run_coder", side_effect=_make_coder_mock()),
         patch("auto_scientist.agents.report.run_report", side_effect=_make_report_mock()),
-
         # LLM-level mocks (debate loop runs for real, with delays)
-        #
-        # With 3 personas, 2 critic models (OpenAI, Google), debate_rounds=2:
-        #   Each debate = 2 critic calls + 1 scientist defense (Anthropic) = 3 LLM calls
+        # Each persona gets one critic call.
         patch(
             "auto_scientist.agents.critic.query_openai",
             side_effect=_make_delayed_side_effect(0.5, oai_critic_responses),
@@ -394,31 +409,29 @@ async def run_smoke(output_dir: Path) -> None:
             "auto_scientist.agents.critic.query_google",
             side_effect=_make_delayed_side_effect(1.5, google_critic_responses),
         ),
-        patch(
-            "auto_scientist.agents.critic.query_anthropic",
-            side_effect=_make_delayed_side_effect(0.4, anthropic_defense_responses),
-        ),
-
         # Summarizer LLM mock - varied responses so panels accumulate
         # multiple lines (tests expand/compact toggle)
         patch(
             "auto_scientist.summarizer._query_summary",
-            side_effect=_make_delayed_side_effect(0.1, [
-                "Inspecting raw data files and checking column types.",
-                "Reading CSV headers and validating schema consistency.",
-                "Computing summary statistics for all numeric columns.",
-                "Evaluating data quality: missing values, outliers, distributions.",
-                "Formulating hypothesis based on observed data patterns.",
-                "Planning experimental strategy with cross-validation approach.",
-                "Writing experiment script with polynomial regression pipeline.",
-                "Running experiment, collecting metrics and generating plots.",
-                "Comparing results against baseline and previous iterations.",
-                "Reviewing methodology and suggesting alternative approaches.",
-                "Analyzing critic feedback and identifying valid concerns.",
-                "Revising plan to incorporate cross-validation per critic feedback.",
-                "Generating final report with all findings and recommendations.",
-                "[done] Pipeline step completed successfully.",
-            ]),
+            side_effect=_make_delayed_side_effect(
+                0.1,
+                [
+                    "Inspecting raw data files and checking column types.",
+                    "Reading CSV headers and validating schema consistency.",
+                    "Computing summary statistics for all numeric columns.",
+                    "Evaluating data quality: missing values, outliers, distributions.",
+                    "Formulating hypothesis based on observed data patterns.",
+                    "Planning experimental strategy with cross-validation approach.",
+                    "Writing experiment script with polynomial regression pipeline.",
+                    "Running experiment, collecting metrics and generating plots.",
+                    "Comparing results against baseline and previous iterations.",
+                    "Reviewing methodology and suggesting alternative approaches.",
+                    "Analyzing critic feedback and identifying valid concerns.",
+                    "Revising plan to incorporate cross-validation per critic feedback.",
+                    "Generating final report with all findings and recommendations.",
+                    "[done] Pipeline step completed successfully.",
+                ],
+            ),
         ),
     ):
         await orchestrator.run()
@@ -444,7 +457,7 @@ async def run_smoke(output_dir: Path) -> None:
         ),
     ]
 
-    # Validate debate transcript (3 personas, each with rounds)
+    # Validate debate transcript (3 personas, each with critic_output)
     debate_ok = False
     debate_path = experiment_dir / "v01" / "debate.json"
     if debate_path.exists():
@@ -452,18 +465,16 @@ async def run_smoke(output_dir: Path) -> None:
         debate_results = debate_data.get("debate_results", [])
         if len(debate_results) == 3:
             models = {r["critic_model"] for r in debate_results}
-            has_rounds = all(len(r.get("rounds", [])) > 0 for r in debate_results)
+            has_output = all(r.get("critic_output") is not None for r in debate_results)
             debate_ok = (
-                "openai:gpt-4o" in models
-                and "google:gemini-2.5-pro" in models
-                and has_rounds
+                "openai:gpt-4o" in models and "google:gemini-2.5-pro" in models and has_output
             )
     checks.append(("Debate transcripts valid", debate_ok))
 
     # Validate panel tracking via PipelineLive._panels
     all_panels = orchestrator._live._panels
     checks.append(("Panels tracked after flush", len(all_panels) > 0))
-    all_collapsed = all(not p.expanded for p in all_panels)
+    all_collapsed = all(not getattr(p, "expanded", False) for p in all_panels)
     checks.append(("All panels collapsed after stop", all_collapsed))
 
     has_all_lines = any(len(p.all_lines) > 0 for p in all_panels)
@@ -471,10 +482,12 @@ async def run_smoke(output_dir: Path) -> None:
 
     # Check that panels have multiple lines (for expand/compact testing)
     multi_line_panels = [p for p in all_panels if len(p.all_lines) > 1]
-    checks.append((
-        f"Panels have multi-line history ({len(multi_line_panels)}/{len(all_panels)})",
-        len(multi_line_panels) > 0,
-    ))
+    checks.append(
+        (
+            f"Panels have multi-line history ({len(multi_line_panels)}/{len(all_panels)})",
+            len(multi_line_panels) > 0,
+        )
+    )
 
     print("\n" + "=" * 50)
     print("SMOKE TEST VALIDATION")
@@ -499,7 +512,9 @@ def main():
 
     parser = argparse.ArgumentParser(description="Smoke run: full pipeline with mocked LLMs")
     parser.add_argument(
-        "--output-dir", type=Path, default=None,
+        "--output-dir",
+        type=Path,
+        default=None,
         help="Output directory (default: temp dir)",
     )
     args = parser.parse_args()

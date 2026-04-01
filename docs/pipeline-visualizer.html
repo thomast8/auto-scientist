@@ -698,8 +698,8 @@ Both sides get identical context (symmetric):
   plan JSON, analysis JSON, prediction history, lab notebook, domain knowledge, goal.
 Neither side sees Python code.
 
-Multi-round: Critic challenges, Scientist responds, Critic refines.
-Produces: concern ledger (structured claims with severity, confidence, category, verdict).">
+Single-pass: each persona produces structured concerns independently.
+Produces: concern ledger (structured claims with severity, confidence, category).">
           <rect x="370" y="280" width="175" height="58" rx="10"
                 fill="#0f1525" stroke="#d44e6e" stroke-width="1.5"/>
           <text x="457" y="314" text-anchor="middle"
@@ -846,7 +846,7 @@ Examples:
 
         <!-- concern ledger -->
         <g class="artifact-node" data-artifact="ledger"
-           data-tooltip="concern ledger|Structured output from the debate. Each entry combines a critic's concern with persona, model, severity, and the scientist's verdict (if multi-round).
+           data-tooltip="concern ledger|Structured output from the critique. Each entry combines a critic's concern with persona, model, severity, confidence, and category.
 
 Example:
 [{
@@ -854,8 +854,7 @@ Example:
   &quot;severity&quot;: &quot;medium&quot;, &quot;confidence&quot;: &quot;high&quot;,
   &quot;category&quot;: &quot;criteria&quot;,
   &quot;persona&quot;: &quot;Methodologist&quot;,
-  &quot;scientist_verdict&quot;: &quot;partially_accepted&quot;,
-  &quot;scientist_reasoning&quot;: &quot;Will allow 1 param at bounds for structural changes&quot;
+  &quot;critic_model&quot;: &quot;openai:gpt-4o&quot;
 }]">
           <rect x="458" y="118" width="112" height="32" rx="6"
                 fill="rgba(212,78,110,0.1)" stroke="#d44e6e" stroke-width="1" stroke-opacity="0.5"/>

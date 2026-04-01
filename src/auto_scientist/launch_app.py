@@ -498,16 +498,6 @@ class LaunchApp(App[ExperimentConfig | None]):
                         classes="short-input",
                     )
 
-                # Debate
-                with Horizontal(classes="form-row"):
-                    yield Label("Debate:", classes="form-label")
-                    yield Input(
-                        value="1",
-                        type="integer",
-                        id="debate-rounds-input",
-                        classes="short-input",
-                    )
-
                 # Output dir with Browse button
                 with Horizontal(classes="form-row"):
                     yield Label("Output:", classes="form-label")
@@ -670,7 +660,7 @@ class LaunchApp(App[ExperimentConfig | None]):
         self.query_one("#goal-input", TextArea).text = cfg.goal
         self.query_one("#preset-select", Select).value = cfg.preset
         self.query_one("#max-iterations-input", Input).value = str(cfg.max_iterations)
-        self.query_one("#debate-rounds-input", Input).value = str(cfg.debate_rounds)
+
         self.query_one("#output-dir-input", Input).value = cfg.output_dir
 
         # Resolve the full model config (preset + any overrides)
@@ -836,7 +826,6 @@ class LaunchApp(App[ExperimentConfig | None]):
                 goal=goal,
                 preset=str(self.query_one("#preset-select", Select).value),
                 max_iterations=int(self.query_one("#max-iterations-input", Input).value or "20"),
-                debate_rounds=int(self.query_one("#debate-rounds-input", Input).value or "1"),
                 output_dir=self.query_one("#output-dir-input", Input).value or "experiments",
                 models=models,
             )

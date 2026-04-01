@@ -139,17 +139,14 @@ implementation detail that only the Coder needs.
 - Role: strategic thinker, formulates hypotheses and plans, does NOT write code
 - Decides when to stop via `should_stop` based on scientific judgment (goal satisfaction, diminishing returns, structural limits), not metric thresholds
 
-**Critic-Scientist Debate** (Phase 1, step 4):
-- Multi-round debate between external critic models and the Scientist (Claude via API)
-- Round 1: plain API call to critic model (OpenAI/Google/Anthropic SDK)
-- Round 2+: Scientist responds to critique, then critic refines
+**Critic** (Phase 1, step 4):
+- Single-pass critique from external critic models (OpenAI/Google/Anthropic SDK)
+- Each persona produces structured concerns, no back-and-forth
 - Input: plan JSON + analysis JSON + prediction history + lab notebook + domain knowledge
-- Both sides share the full evidence base; neither sees experiment scripts
-- Both Critic and Scientist have web search (verify claims, look up papers, check methods)
-- Returns full debate transcript for the Scientist revision step
-- Configurable: `--debate-rounds N` (default 2; 1 = single-pass, no debate)
+- Critics receive the full evidence base but do not see experiment scripts
+- Critics have web search (verify claims, look up papers, check methods)
+- Returns structured critique for the Scientist revision step
 - Configurable: list of critic models to consult (can be empty to skip debate entirely)
-- Scientist debate model defaults to `claude-sonnet-4-6`
 
 **Scientist Revision** (Phase 1, step 5):
 - Second `query()` call to the Scientist after the debate
@@ -360,7 +357,6 @@ auto-scientist run \
   --goal "Investigate the relationship between X and Y with a physically grounded approach" \
   --max-iterations 20 \
   --critics openai:gpt-4o,google:gemini-2.5-pro \
-  --debate-rounds 2 \
   --schedule "22:00-06:00"
 
 # Resume after crash, pause, or overnight stop

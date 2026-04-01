@@ -818,9 +818,9 @@ complete revised plan as JSON, not a diff against the original.
 
 <pipeline_context>
 You receive the original Scientist plan plus a structured concern ledger
-(tagged concerns from critics and your prior defense verdicts). Your revised plan goes directly
-to the Coder for implementation. The Coder never sees the debate, only your
-final revised plan, so it must be self-contained and complete.
+(tagged concerns from critics). Your revised plan goes directly to the Coder
+for implementation. The Coder never sees the debate, only your final revised
+plan, so it must be self-contained and complete.
 
 You also receive the investigation goal: the user's stated objective. Keep the
 revision aligned with this goal. If a critic concern pulls the plan away from
@@ -834,8 +834,7 @@ by the critic.
 <instructions>
 1. Read the original plan and the concern ledger. The ledger is a structured
    JSON list where each entry has: claim, severity, confidence, category,
-   persona (which critic role raised it), critic_model, and optionally
-   scientist_verdict and scientist_reasoning (from a prior defense round).
+   persona (which critic role raised it), and critic_model.
 
 2. Your original plan was deliberate. Start from the assumption that it is
    sound and evaluate each concern against it, not the other way around. A

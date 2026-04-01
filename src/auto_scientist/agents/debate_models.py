@@ -1,8 +1,7 @@
 """Pydantic models for structured debate output.
 
-These models define the structured JSON output for critics and scientist-in-debate,
-replacing free-text prose with validated, typed data. The orchestrator uses these
-to build a concern ledger that the revision scientist consumes.
+These models define the structured JSON output for critics. The orchestrator
+uses these to build a concern ledger that the revision scientist consumes.
 
 All models use extra="ignore" so unexpected fields from LLM output don't
 cause validation failures (same convention as schemas.py).
@@ -43,30 +42,10 @@ class CriticOutput(BaseModel):
     overall_assessment: str
 
 
-class DefenseResponse(BaseModel):
-    """Scientist's response to a single critic concern."""
-
-    model_config = ConfigDict(extra="ignore")
-
-    concern: str
-    verdict: Literal["accepted", "rejected", "partially_accepted"]
-    reasoning: str
-
-
-class ScientistDefense(BaseModel):
-    """Structured output from the scientist defending against a critique."""
-
-    model_config = ConfigDict(extra="ignore")
-
-    responses: list[DefenseResponse]
-    additional_points: str = ""
-
-
 class ConcernLedgerEntry(BaseModel):
     """A single entry in the concern ledger passed to the revision scientist.
 
-    Combines a critic's concern with metadata (persona, model) and the
-    scientist's defense verdict (if a multi-round debate occurred).
+    Combines a critic's concern with metadata (persona, model).
     """
 
     model_config = ConfigDict(extra="ignore")
@@ -77,34 +56,23 @@ class ConcernLedgerEntry(BaseModel):
     category: ConcernCategory
     persona: str
     critic_model: str
-    scientist_verdict: Literal["accepted", "rejected", "partially_accepted"] | None = None
-    scientist_reasoning: str | None = None
-
-
-class DebateRound(BaseModel):
-    """One round of a critic-scientist debate."""
-
-    model_config = ConfigDict(extra="ignore")
-
-    critic_output: CriticOutput
-    scientist_defense: ScientistDefense | None = None
 
 
 class DebateResult(BaseModel):
-    """Complete result of a single persona's debate."""
+    """Complete result of a single persona's critique."""
 
     model_config = ConfigDict(extra="ignore")
 
     persona: str
     critic_model: str
-    rounds: list[DebateRound]
+    critic_output: CriticOutput
     raw_transcript: list[dict[str, str]]
     input_tokens: int = 0
     output_tokens: int = 0
     thinking_tokens: int = 0
 
 
-# JSON schema dicts for prompt injection (mirrors the Pydantic models).
+# JSON schema dict for prompt injection (mirrors the Pydantic model).
 CRITIC_OUTPUT_SCHEMA: dict[str, Any] = {
     "concerns": [
         {
@@ -116,15 +84,4 @@ CRITIC_OUTPUT_SCHEMA: dict[str, Any] = {
     ],
     "alternative_hypotheses": ["<alternative hypothesis the scientist has not considered>"],
     "overall_assessment": "<brief overall assessment of the plan>",
-}
-
-SCIENTIST_DEFENSE_SCHEMA: dict[str, Any] = {
-    "responses": [
-        {
-            "concern": "<the concern being addressed>",
-            "verdict": "accepted | rejected | partially_accepted",
-            "reasoning": "<why you accept, reject, or partially accept this concern>",
-        }
-    ],
-    "additional_points": "<any points not tied to a specific concern>",
 }

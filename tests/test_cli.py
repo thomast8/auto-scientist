@@ -447,28 +447,6 @@ class TestRunCommandOptions:
         call_kwargs = mock_orch.call_args.kwargs
         assert call_kwargs["state"].schedule == "22:00-06:00"
 
-    @patch("auto_scientist.cli.PipelineApp")
-    @patch("auto_scientist.cli.Orchestrator")
-    def test_passes_debate_rounds(self, mock_orch, mock_app_cls, tmp_path):
-        data_file = tmp_path / "data.csv"
-        data_file.write_text("a,b\n1,2\n")
-
-        runner = CliRunner()
-        runner.invoke(
-            cli,
-            [
-                "run",
-                "--data",
-                str(data_file),
-                "--goal",
-                "test",
-                "--debate-rounds",
-                "3",
-            ],
-        )
-        call_kwargs = mock_orch.call_args.kwargs
-        assert call_kwargs["debate_rounds"] == 3
-
 
 class TestResumeCommand:
     @patch("auto_scientist.cli.PipelineApp")

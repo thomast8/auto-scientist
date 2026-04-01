@@ -232,7 +232,6 @@ class Orchestrator:
         model_config: ModelConfig | None = None,
         interactive: bool = False,
         max_consecutive_failures: int = 5,
-        debate_rounds: int = 1,
         verbose: bool = False,
         skip_to_agent: str | None = None,
         restored_panels: list[dict] | None = None,
@@ -244,7 +243,6 @@ class Orchestrator:
         self.model_config = model_config or ModelConfig.builtin_preset("default")
         self.interactive = interactive
         self.max_consecutive_failures = max_consecutive_failures
-        self.debate_rounds = debate_rounds
         self.config: DomainConfig | None = None
         self.verbose = verbose
         self._live: PipelineLive = PipelineLive()
@@ -1347,11 +1345,9 @@ class Orchestrator:
                     panel.add_line(f"[{time_label}] {summary}")
                 seen[name] = len(entries)
 
-                assessment_text = ""
-                if result.rounds:
-                    assessment_text = result.rounds[-1].critic_output.overall_assessment
+                assessment_text = result.critic_output.overall_assessment
                 done_summary = _truncate_summary(assessment_text)
-                self._live.collapse_panel(panel, done_summary or f"{len(result.rounds)} round(s)")
+                self._live.collapse_panel(panel, done_summary or "Critique complete")
 
             async def _summarized_stop_debate(persona_index, persona):
                 name = persona["name"]
@@ -1592,8 +1588,6 @@ class Orchestrator:
                     plan=plan,
                     notebook_content=notebook_content,
                     domain_knowledge=domain_knowledge,
-                    max_rounds=self.debate_rounds,
-                    scientist_config=scientist_cfg,
                     message_buffers=buffers,
                     iteration=self.state.iteration,
                     analysis_json=analysis_json,
@@ -1697,9 +1691,7 @@ class Orchestrator:
             if done_entries:
                 done_summary = done_entries[-1][1]
             else:
-                assessment = ""
-                if result.rounds:
-                    assessment = result.rounds[-1].critic_output.overall_assessment
+                assessment = result.critic_output.overall_assessment
                 done_summary = _truncate_summary(assessment)
             self._live.collapse_panel(panel, done_summary or "Debate complete")
 
@@ -1720,8 +1712,6 @@ class Orchestrator:
                     plan=plan,
                     notebook_content=notebook_content,
                     domain_knowledge=domain_knowledge,
-                    max_rounds=self.debate_rounds,
-                    scientist_config=scientist_cfg,
                     message_buffer=buf,
                     persona=persona,
                     analysis_json=analysis_json,
@@ -1785,8 +1775,7 @@ class Orchestrator:
     def _build_concern_ledger(debate_results: list) -> list[dict[str, Any]]:
         """Build a concern ledger from structured debate results.
 
-        For each concern in the final round's CriticOutput, attach the persona,
-        model, and (if available) the scientist's defense verdict.
+        For each concern in the CriticOutput, attach the persona and model.
         """
         from auto_scientist.agents.debate_models import ConcernLedgerEntry, DebateResult
 
@@ -1794,45 +1783,17 @@ class Orchestrator:
         for result in debate_results:
             if not isinstance(result, DebateResult):
                 continue
-            if not result.rounds:
-                continue
 
-            # Build ledger from each round's concerns paired with that
-            # round's defense (not cross-round positional matching).
-            seen_claims: set[str] = set()
-            for rnd in result.rounds:
-                critic_output = rnd.critic_output
-                defense_responses = rnd.scientist_defense.responses if rnd.scientist_defense else []
-                # Build a lookup by concern text for fuzzy matching
-                defense_by_text = {}
-                for resp in defense_responses:
-                    defense_by_text[resp.concern.lower().strip()] = resp
-
-                for i, concern in enumerate(critic_output.concerns):
-                    # Deduplicate concerns that appear across rounds
-                    claim_key = concern.claim.lower().strip()
-                    if claim_key in seen_claims:
-                        continue
-                    seen_claims.add(claim_key)
-
-                    # Try text match first, fall back to positional
-                    matched_resp = defense_by_text.get(claim_key)
-                    if matched_resp is None and i < len(defense_responses):
-                        matched_resp = defense_responses[i]
-                    verdict = matched_resp.verdict if matched_resp else None
-                    reasoning = matched_resp.reasoning if matched_resp else None
-
-                    entry = ConcernLedgerEntry(
-                        claim=concern.claim,
-                        severity=concern.severity,
-                        confidence=concern.confidence,
-                        category=concern.category,
-                        persona=result.persona,
-                        critic_model=result.critic_model,
-                        scientist_verdict=verdict,
-                        scientist_reasoning=reasoning,
-                    )
-                    ledger.append(entry.model_dump())
+            for concern in result.critic_output.concerns:
+                entry = ConcernLedgerEntry(
+                    claim=concern.claim,
+                    severity=concern.severity,
+                    confidence=concern.confidence,
+                    category=concern.category,
+                    persona=result.persona,
+                    critic_model=result.critic_model,
+                )
+                ledger.append(entry.model_dump())
 
         return ledger
 

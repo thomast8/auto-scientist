@@ -16,17 +16,23 @@ from auto_scientist.state import PredictionRecord
 
 SAMPLE_LEDGER = [
     {
-        "claim": "weak point", "severity": "medium",
-        "confidence": "medium", "category": "methodology",
-        "persona": "Methodologist", "critic_model": "test",
+        "claim": "weak point",
+        "severity": "medium",
+        "confidence": "medium",
+        "category": "methodology",
+        "persona": "Methodologist",
+        "critic_model": "test",
     },
 ]
 
 SAMPLE_LEDGER_SMALL = [
     {
-        "claim": "test concern", "severity": "low",
-        "confidence": "low", "category": "other",
-        "persona": "Test", "critic_model": "test",
+        "claim": "test concern",
+        "severity": "low",
+        "confidence": "low",
+        "category": "other",
+        "persona": "Test",
+        "critic_model": "test",
     },
 ]
 
@@ -47,6 +53,7 @@ class TestRunScientist:
     @patch("auto_scientist.sdk_utils.query")
     async def test_returns_parsed_plan(self, mock_query, tmp_path):
         from claude_code_sdk import ResultMessage
+
         result_msg = MagicMock(spec=ResultMessage)
         result_msg.result = json.dumps(SAMPLE_PLAN)
 
@@ -71,6 +78,7 @@ class TestRunScientist:
     @patch("auto_scientist.sdk_utils.query")
     async def test_missing_notebook_uses_fallback(self, mock_query, tmp_path):
         from claude_code_sdk import ResultMessage
+
         result_msg = MagicMock(spec=ResultMessage)
         result_msg.result = json.dumps(SAMPLE_PLAN)
 
@@ -82,7 +90,9 @@ class TestRunScientist:
         notebook_path = tmp_path / "nonexistent.md"
 
         result = await run_scientist(
-            analysis={}, notebook_path=notebook_path, version="v01",
+            analysis={},
+            notebook_path=notebook_path,
+            version="v01",
         )
         assert result["hypothesis"] == "test hypothesis"
 
@@ -90,6 +100,7 @@ class TestRunScientist:
     @patch("auto_scientist.sdk_utils.query")
     async def test_empty_output_raises(self, mock_query, tmp_path):
         from claude_code_sdk import ResultMessage
+
         result_msg = MagicMock(spec=ResultMessage)
         result_msg.result = ""
 
@@ -102,7 +113,9 @@ class TestRunScientist:
 
         with pytest.raises(RuntimeError, match="returned no output"):
             await run_scientist(
-                analysis={}, notebook_path=notebook_path, version="v01",
+                analysis={},
+                notebook_path=notebook_path,
+                version="v01",
             )
 
     @pytest.mark.asyncio
@@ -110,6 +123,7 @@ class TestRunScientist:
     async def test_has_web_search_only(self, mock_query, tmp_path):
         """Scientist should have WebSearch only (file access is the Analyst's job)."""
         from claude_code_sdk import ResultMessage
+
         result_msg = MagicMock(spec=ResultMessage)
         result_msg.result = json.dumps(SAMPLE_PLAN)
 
@@ -152,7 +166,9 @@ class TestRunScientistMessageBuffer:
 
         buf: list[str] = []
         await run_scientist(
-            analysis={}, notebook_path=notebook_path, version="v01",
+            analysis={},
+            notebook_path=notebook_path,
+            version="v01",
             message_buffer=buf,
         )
         assert len(buf) == 1
@@ -203,8 +219,12 @@ class TestRunScientistExploration:
             "hypothesis": "Data exploration to establish baselines and identify patterns",
             "strategy": "exploratory",
             "changes": [
-                {"what": "Compute distributions", "why": "Understand data shape",
-                 "how": "Histograms and summary stats", "priority": 1},
+                {
+                    "what": "Compute distributions",
+                    "why": "Understand data shape",
+                    "how": "Histograms and summary stats",
+                    "priority": 1,
+                },
             ],
             "expected_impact": "Baseline understanding of the dataset",
             "should_stop": False,
@@ -213,6 +233,7 @@ class TestRunScientistExploration:
         }
 
         from claude_code_sdk import ResultMessage
+
         result_msg = MagicMock(spec=ResultMessage)
         result_msg.result = json.dumps(exploration_plan)
 
@@ -235,6 +256,7 @@ class TestRunScientistRevision:
     @patch("auto_scientist.sdk_utils.query")
     async def test_returns_revised_plan(self, mock_query, tmp_path):
         from claude_code_sdk import ResultMessage
+
         result_msg = MagicMock(spec=ResultMessage)
         result_msg.result = json.dumps(SAMPLE_PLAN)
 
@@ -247,10 +269,14 @@ class TestRunScientistRevision:
         notebook_path.write_text("# Notebook")
 
         ledger = [
-            {"claim": "This is weak", "severity": "high", "confidence": "high",
-             "category": "methodology", "persona": "Methodologist",
-             "critic_model": "test", "scientist_verdict": "rejected",
-             "scientist_reasoning": "I disagree"},
+            {
+                "claim": "This is weak",
+                "severity": "high",
+                "confidence": "high",
+                "category": "methodology",
+                "persona": "Methodologist",
+                "critic_model": "test",
+            },
         ]
 
         result = await run_scientist_revision(
@@ -267,6 +293,7 @@ class TestRunScientistRevision:
     @patch("auto_scientist.sdk_utils.query")
     async def test_empty_output_raises(self, mock_query, tmp_path):
         from claude_code_sdk import ResultMessage
+
         result_msg = MagicMock(spec=ResultMessage)
         result_msg.result = ""
 
@@ -340,7 +367,9 @@ class TestRunScientistAssistantFallback:
         notebook_path = tmp_path / "notebook.md"
 
         result = await run_scientist(
-            analysis={}, notebook_path=notebook_path, version="v01",
+            analysis={},
+            notebook_path=notebook_path,
+            version="v01",
         )
         assert result["hypothesis"] == "test hypothesis"
 
@@ -367,7 +396,9 @@ class TestRunScientistAssistantFallback:
         notebook_path = tmp_path / "notebook.md"
 
         result = await run_scientist(
-            analysis={}, notebook_path=notebook_path, version="v01",
+            analysis={},
+            notebook_path=notebook_path,
+            version="v01",
         )
         assert result["hypothesis"] == "test hypothesis"
 
@@ -394,7 +425,9 @@ class TestScientistRetry:
         notebook_path = tmp_path / "notebook.md"
 
         result = await run_scientist(
-            analysis={}, notebook_path=notebook_path, version="v01",
+            analysis={},
+            notebook_path=notebook_path,
+            version="v01",
         )
         assert result["hypothesis"] == "test hypothesis"
         assert call_count == 2
@@ -412,7 +445,9 @@ class TestScientistRetry:
 
         with pytest.raises(OutputValidationError, match="Scientist"):
             await run_scientist(
-                analysis={}, notebook_path=notebook_path, version="v01",
+                analysis={},
+                notebook_path=notebook_path,
+                version="v01",
             )
 
     @pytest.mark.asyncio
@@ -615,5 +650,3 @@ class TestGoalInPrompts:
         )
         assert "find classification rules" in prompt
         assert "<goal>" in prompt
-
-
