@@ -9,7 +9,6 @@ import logging
 from pathlib import Path
 from typing import Any
 
-from claude_code_sdk import ClaudeCodeOptions
 from pydantic import BaseModel
 
 from auto_scientist.agents.debate_models import (
@@ -29,6 +28,7 @@ from auto_scientist.prompts.stop_gate import (
     STOP_REVISION_USER,
 )
 from auto_scientist.schemas import CompletenessAssessmentOutput, ScientistPlanOutput
+from auto_scientist.sdk_backend import SDKOptions, get_backend
 from auto_scientist.sdk_utils import (
     OutputValidationError,
     collect_text_from_query,
@@ -64,6 +64,7 @@ async def run_completeness_assessment(
     prediction_history: list[PredictionRecord] | None = None,
     model: str | None = None,
     message_buffer: list[str] | None = None,
+    provider: str = "anthropic",
 ) -> dict[str, Any]:
     """Assess whether the investigation goal has been thoroughly addressed.
 
@@ -88,7 +89,8 @@ async def run_completeness_assessment(
     )
 
     max_turns = 5
-    options = ClaudeCodeOptions(
+    backend = get_backend(provider)
+    options = SDKOptions(
         system_prompt=with_turn_budget(ASSESSMENT_SYSTEM + json_instruction, max_turns, []),
         allowed_tools=[],
         max_turns=max_turns,
@@ -104,6 +106,7 @@ async def run_completeness_assessment(
             raw, _usage = await collect_text_from_query(
                 effective_prompt,
                 options,
+                backend,
                 message_buffer,
                 agent_name="Completeness Assessment",
             )
@@ -252,6 +255,7 @@ async def run_scientist_stop_revision(
     model: str | None = None,
     message_buffer: list[str] | None = None,
     goal: str = "",
+    provider: str = "anthropic",
 ) -> dict[str, Any]:
     """Revise the stop decision after the stop debate.
 
@@ -283,7 +287,8 @@ async def run_scientist_stop_revision(
     )
 
     max_turns = 5
-    options = ClaudeCodeOptions(
+    backend = get_backend(provider)
+    options = SDKOptions(
         system_prompt=with_turn_budget(STOP_REVISION_SYSTEM + json_instruction, max_turns, []),
         allowed_tools=[],
         max_turns=max_turns,
@@ -299,6 +304,7 @@ async def run_scientist_stop_revision(
             raw, _usage = await collect_text_from_query(
                 effective_prompt,
                 options,
+                backend,
                 message_buffer,
                 agent_name="Stop Revision",
             )

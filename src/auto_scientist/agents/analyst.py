@@ -12,10 +12,9 @@ import logging
 from pathlib import Path
 from typing import Any
 
-from claude_code_sdk import ClaudeCodeOptions
-
 from auto_scientist.prompts.analyst import ANALYST_SYSTEM, ANALYST_USER
 from auto_scientist.schemas import AnalystOutput
+from auto_scientist.sdk_backend import SDKOptions, get_backend
 from auto_scientist.sdk_utils import (
     OutputValidationError,
     collect_text_from_query,
@@ -71,6 +70,7 @@ async def run_analyst(
     data_dir: Path | None = None,
     model: str | None = None,
     message_buffer: list[str] | None = None,
+    provider: str = "anthropic",
 ) -> dict[str, Any]:
     """Analyze experiment results and produce structured observation.
 
@@ -146,7 +146,8 @@ async def run_analyst(
     # prompts when running as a sub-agent via the SDK.
     max_turns = 30
     allowed_tools = ["Read", "Glob"]
-    options = ClaudeCodeOptions(
+    backend = get_backend(provider)
+    options = SDKOptions(
         system_prompt=with_turn_budget(ANALYST_SYSTEM + json_instruction, max_turns, allowed_tools),
         allowed_tools=allowed_tools,
         max_turns=max_turns,
@@ -164,6 +165,7 @@ async def run_analyst(
             raw, _usage = await collect_text_from_query(
                 effective_prompt,
                 options,
+                backend,
                 message_buffer,
                 agent_name="Analyst",
             )

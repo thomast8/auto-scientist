@@ -10,8 +10,6 @@ import logging
 from pathlib import Path
 from typing import Any
 
-from claude_code_sdk import ClaudeCodeOptions
-
 from auto_scientist.prompts.scientist import (
     SCIENTIST_REVISION_SYSTEM,
     SCIENTIST_REVISION_USER,
@@ -19,6 +17,7 @@ from auto_scientist.prompts.scientist import (
     SCIENTIST_USER,
 )
 from auto_scientist.schemas import ScientistPlanOutput
+from auto_scientist.sdk_backend import SDKOptions, get_backend
 from auto_scientist.sdk_utils import (
     OutputValidationError,
     collect_text_from_query,
@@ -160,6 +159,7 @@ async def run_scientist(
     model: str | None = None,
     message_buffer: list[str] | None = None,
     goal: str = "",
+    provider: str = "anthropic",
 ) -> dict[str, Any]:
     """Formulate hypothesis and plan based on analysis.
 
@@ -206,7 +206,8 @@ async def run_scientist(
     )
 
     max_turns = 10
-    options = ClaudeCodeOptions(
+    backend = get_backend(provider)
+    options = SDKOptions(
         system_prompt=with_turn_budget(
             system_prompt + json_instruction, max_turns, SCIENTIST_TOOLS
         ),
@@ -224,6 +225,7 @@ async def run_scientist(
             raw, _usage = await collect_text_from_query(
                 effective_prompt,
                 options,
+                backend,
                 message_buffer,
                 agent_name="Scientist",
             )
@@ -255,6 +257,7 @@ async def run_scientist_revision(
     model: str | None = None,
     message_buffer: list[str] | None = None,
     goal: str = "",
+    provider: str = "anthropic",
 ) -> dict[str, Any]:
     """Revise the plan after a critic debate.
 
@@ -297,7 +300,8 @@ async def run_scientist_revision(
     )
 
     max_turns = 10
-    options = ClaudeCodeOptions(
+    backend = get_backend(provider)
+    options = SDKOptions(
         system_prompt=with_turn_budget(
             SCIENTIST_REVISION_SYSTEM + json_instruction, max_turns, SCIENTIST_TOOLS
         ),
@@ -315,6 +319,7 @@ async def run_scientist_revision(
             raw, _usage = await collect_text_from_query(
                 effective_prompt,
                 options,
+                backend,
                 message_buffer,
                 agent_name="Scientist revision",
             )

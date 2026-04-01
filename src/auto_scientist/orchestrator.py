@@ -1104,6 +1104,7 @@ class Orchestrator:
                     data_dir=self.data_path,
                     model=cfg.model,
                     message_buffer=buf,
+                    provider=cfg.provider,
                 )
 
             analysis: dict[str, Any] | None = await self._with_summaries(
@@ -1164,6 +1165,7 @@ class Orchestrator:
                     domain_knowledge=domain_knowledge,
                     model=cfg.model,
                     message_buffer=buf,
+                    provider=cfg.provider,
                 )
 
             analysis: dict[str, Any] = await self._with_summaries(
@@ -1214,6 +1216,7 @@ class Orchestrator:
                     model=cfg.model,
                     message_buffer=buf,
                     goal=self.state.goal,
+                    provider=cfg.provider,
                 )
 
             plan: dict[str, Any] = await self._with_summaries(
@@ -1289,6 +1292,7 @@ class Orchestrator:
                     prediction_history=self.state.prediction_history,
                     model=cfg.model,
                     message_buffer=buf,
+                    provider=cfg.provider,
                 )
 
             assessment: dict[str, Any] = await self._with_summaries(
@@ -1504,6 +1508,7 @@ class Orchestrator:
                     model=revision_cfg.model,
                     message_buffer=buf,
                     goal=self.state.goal,
+                    provider=revision_cfg.provider,
                 )
 
             revised: dict[str, Any] = await self._with_summaries(
@@ -1871,6 +1876,7 @@ class Orchestrator:
                     model=cfg.model,
                     message_buffer=buf,
                     goal=self.state.goal,
+                    provider=cfg.provider,
                 )
 
             revised: dict[str, Any] = await self._with_summaries(
