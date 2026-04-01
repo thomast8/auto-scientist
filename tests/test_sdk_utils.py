@@ -10,11 +10,84 @@ from auto_scientist.schemas import AnalystOutput, ScientistPlanOutput
 from auto_scientist.sdk_backend import SDKMessage, SDKOptions, _tolerant_parse_message
 from auto_scientist.sdk_utils import (
     OutputValidationError,
+    append_block_to_buffer,
     collect_text_from_query,
     safe_query,
     validate_json_output,
     validate_report_structure,
 )
+
+
+class TestAppendBlockToBuffer:
+    def test_text_block(self):
+        block = MagicMock()
+        block.text = "hello world"
+        del block.name  # TextBlock has no .name
+        buf: list[str] = []
+        append_block_to_buffer(block, buf)
+        assert buf == ["hello world"]
+
+    def test_tool_use_block(self):
+        block = MagicMock()
+        block.name = "WebSearch"
+        block.input = {"query": "test"}
+        buf: list[str] = []
+        append_block_to_buffer(block, buf)
+        assert len(buf) == 1
+        assert "[Tool: WebSearch]" in buf[0]
+
+    def test_tool_result_block(self):
+        block = MagicMock()
+        block.content = "search results here"
+        block.is_error = False
+        del block.text
+        del block.name
+        del block.thinking
+        del block.input
+        buf: list[str] = []
+        append_block_to_buffer(block, buf)
+        assert buf == ["[Result] search results here"]
+
+    def test_thinking_block(self):
+        block = MagicMock()
+        block.thinking = "Let me analyze this step by step..."
+        block.signature = "sig123"
+        del block.text
+        del block.name
+        del block.content
+        del block.is_error
+        del block.input
+        buf: list[str] = []
+        append_block_to_buffer(block, buf)
+        assert len(buf) == 1
+        assert "[Thinking]" in buf[0]
+        assert "analyze this step by step" in buf[0]
+
+    def test_thinking_block_truncated(self):
+        block = MagicMock()
+        block.thinking = "x" * 500
+        block.signature = "sig"
+        del block.text
+        del block.name
+        del block.content
+        del block.is_error
+        del block.input
+        buf: list[str] = []
+        append_block_to_buffer(block, buf)
+        # Should be truncated to 300 chars of thinking content
+        assert len(buf[0]) < 500
+
+    def test_unknown_block_skipped(self):
+        block = MagicMock()
+        del block.text
+        del block.name
+        del block.thinking
+        del block.content
+        del block.is_error
+        del block.input
+        buf: list[str] = []
+        append_block_to_buffer(block, buf)
+        assert buf == []
 
 
 class TestTolerantParseMessage:

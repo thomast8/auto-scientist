@@ -281,6 +281,7 @@ async def run_with_summaries(
         nonlocal elapsed
         current_interval = interval
         last_seen_len = 0
+        waiting_emitted = False
 
         while True:
             await asyncio.sleep(current_interval)
@@ -288,6 +289,18 @@ async def run_with_summaries(
 
             buf_len = len(message_buffer)
             if buf_len == 0:
+                # No content yet; emit a one-time status so the user
+                # knows the agent is alive (handles extended thinking
+                # and coarse-grained Codex streaming).
+                if not waiting_emitted and elapsed >= interval * 2:
+                    waiting_emitted = True
+                    label = f"{label_prefix}{int(elapsed)}s"
+                    if summary_collector is not None:
+                        summary_collector.append(
+                            (agent_name, "Waiting for model response...", label)
+                        )
+                    else:
+                        logger.info(f"{agent_name} [{label}]: Waiting for model response...")
                 continue
 
             if buf_len == last_seen_len:

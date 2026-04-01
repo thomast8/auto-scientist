@@ -265,14 +265,16 @@ class CodexBackend:
                 step_count += 1
                 if step.text:
                     final_text_parts.append(step.text)
-                    # Yield each step as an assistant message so the
-                    # message_buffer gets populated during the turn
-                    # (enables progress summaries).
-                    synthetic_block = type("_SyntheticTextBlock", (), {"text": step.text})()
-                    yield SDKMessage(
-                        type="assistant",
-                        content_blocks=[synthetic_block],
-                    )
+                # Always yield a message so the message_buffer gets
+                # populated during the turn (enables progress summaries).
+                # Steps without text (thinking, exec) use step_type as
+                # fallback so the summarizer sees activity.
+                display_text = step.text or f"[{step.step_type}]"
+                synthetic_block = type("_SyntheticTextBlock", (), {"text": display_text})()
+                yield SDKMessage(
+                    type="assistant",
+                    content_blocks=[synthetic_block],
+                )
 
             final_text = "\n".join(final_text_parts) if final_text_parts else ""
 

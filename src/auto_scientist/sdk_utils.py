@@ -48,6 +48,12 @@ def append_block_to_buffer(block: Any, buffer: list[str]) -> None:
         entry = f"[Tool: {block.name}] {input_str}"
         buffer.append(entry)
         logger.debug(entry)
+    elif hasattr(block, "thinking"):
+        # ThinkingBlock-like: has .thinking attribute (not .text)
+        thinking_preview = block.thinking[:300].replace("\n", " ")
+        entry = f"[Thinking] {thinking_preview}"
+        buffer.append(entry)
+        logger.debug(f"[thinking] {thinking_preview}")
     elif hasattr(block, "content") and hasattr(block, "is_error"):
         # ToolResultBlock-like: has .content and .is_error
         content = str(block.content) if block.content else ""
