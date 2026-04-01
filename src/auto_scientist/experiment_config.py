@@ -4,13 +4,16 @@ A single YAML file captures data path, goal, iteration settings, preset,
 and optional per-agent model overrides. Replaces long multiline CLI commands.
 """
 
+import logging
 from pathlib import Path
 from typing import Literal
 
 import yaml
-from pydantic import BaseModel, ConfigDict, Field, ValidationError, field_validator
+from pydantic import BaseModel, ConfigDict, Field, ValidationError, field_validator, model_validator
 
 from auto_scientist.model_config import BUILTIN_PRESETS, AgentModelConfig
+
+logger = logging.getLogger(__name__)
 
 
 class ExperimentModelsConfig(BaseModel):
@@ -55,6 +58,14 @@ class ExperimentConfig(BaseModel):
 
     # Optional per-agent model overrides
     models: ExperimentModelsConfig | None = None
+
+    @model_validator(mode="before")
+    @classmethod
+    def _strip_removed_fields(cls, values: dict) -> dict:
+        if isinstance(values, dict) and "debate_rounds" in values:
+            logger.warning("'debate_rounds' is no longer supported and will be ignored.")
+            values.pop("debate_rounds")
+        return values
 
     @field_validator("preset")
     @classmethod

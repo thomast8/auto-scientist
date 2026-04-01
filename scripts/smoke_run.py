@@ -356,7 +356,6 @@ async def run_smoke(output_dir: Path) -> None:
         output_dir=experiment_dir,
         max_iterations=2,
         model_config=model_config,
-        stream=False,
     )
 
     # Counter for varying fake token stats per agent call
@@ -471,7 +470,7 @@ async def run_smoke(output_dir: Path) -> None:
         ),
     ]
 
-    # Validate debate transcript (3 personas, each with rounds)
+    # Validate debate transcript (3 personas, each with critic_output)
     debate_ok = False
     debate_path = experiment_dir / "v01" / "debate.json"
     if debate_path.exists():
@@ -479,16 +478,16 @@ async def run_smoke(output_dir: Path) -> None:
         debate_results = debate_data.get("debate_results", [])
         if len(debate_results) == 3:
             models = {r["critic_model"] for r in debate_results}
-            has_rounds = all(len(r.get("rounds", [])) > 0 for r in debate_results)
+            has_output = all(r.get("critic_output") is not None for r in debate_results)
             debate_ok = (
-                "openai:gpt-4o" in models and "google:gemini-2.5-pro" in models and has_rounds
+                "openai:gpt-4o" in models and "google:gemini-2.5-pro" in models and has_output
             )
     checks.append(("Debate transcripts valid", debate_ok))
 
     # Validate panel tracking via PipelineLive._panels
     all_panels = orchestrator._live._panels
     checks.append(("Panels tracked after flush", len(all_panels) > 0))
-    all_collapsed = all(not p.expanded for p in all_panels)
+    all_collapsed = all(not getattr(p, "expanded", False) for p in all_panels)
     checks.append(("All panels collapsed after stop", all_collapsed))
 
     has_all_lines = any(len(p.all_lines) > 0 for p in all_panels)

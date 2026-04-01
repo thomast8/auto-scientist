@@ -189,8 +189,8 @@ async def run_single_stop_debate(
 ) -> DebateResult:
     """Run a single critic persona's challenge of the stop decision.
 
-    Critic-only (no scientist defense). The scientist responds once via
-    run_scientist_stop_revision after all critics have challenged.
+    The scientist responds once via run_scientist_stop_revision after
+    all critics have challenged.
     """
     persona = persona or {"name": "Generic", "system_text": ""}
     persona_name = persona["name"]

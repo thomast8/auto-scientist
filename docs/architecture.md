@@ -139,10 +139,9 @@ implementation detail that only the Coder needs.
 - Role: strategic thinker, formulates hypotheses and plans, does NOT write code
 - Decides when to stop via `should_stop` based on scientific judgment (goal satisfaction, diminishing returns, structural limits), not metric thresholds
 
-**Critic-Scientist Debate** (Phase 1, step 4):
-- Multi-round debate between external critic models and the Scientist (Claude via API)
-- Round 1: plain API call to critic model (OpenAI/Google/Anthropic SDK)
-- Single-pass critique: each persona produces structured concerns, no back-and-forth
+**Critic** (Phase 1, step 4):
+- Single-pass critique from external critic models (OpenAI/Google/Anthropic SDK)
+- Each persona produces structured concerns, no back-and-forth
 - Input: plan JSON + analysis JSON + prediction history + lab notebook + domain knowledge
 - Critics receive the full evidence base but do not see experiment scripts
 - Critics have web search (verify claims, look up papers, check methods)
