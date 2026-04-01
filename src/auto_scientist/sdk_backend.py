@@ -258,9 +258,11 @@ class CodexBackend:
 
             final_text_parts: list[str] = []
             thread_id: str | None = None
+            step_count = 0
 
             async for step in client.chat(prompt, **chat_kwargs):
                 thread_id = step.thread_id
+                step_count += 1
                 if step.text:
                     final_text_parts.append(step.text)
                     # Yield each step as an assistant message so the
@@ -274,11 +276,12 @@ class CodexBackend:
 
             final_text = "\n".join(final_text_parts) if final_text_parts else ""
 
+            # Codex SDK doesn't expose token usage; report step count as turns.
             yield SDKMessage(
                 type="result",
                 result=final_text if final_text else None,
                 session_id=thread_id,
-                usage={"_provider": "codex", "_usage_unavailable": True},
+                usage={"num_turns": step_count},
             )
         except CodexProtocolError as e:
             raise RuntimeError(

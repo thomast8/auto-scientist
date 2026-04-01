@@ -314,6 +314,36 @@ class TestCodexBackend:
         assert len(result_msgs) == 1
         assert result_msgs[0].result == "The answer is 42"
         assert result_msgs[0].session_id == "thr-123"
+        assert result_msgs[0].usage["num_turns"] == 1
+
+    @pytest.mark.asyncio
+    async def test_counts_multiple_steps_as_turns(self):
+        """CodexBackend.query counts all ConversationSteps as num_turns."""
+        from auto_scientist.sdk_backend import CodexBackend, SDKOptions
+
+        steps = [
+            self._make_mock_step("thinking...", "thr-1"),
+            self._make_mock_step("running code...", "thr-1"),
+            self._make_mock_step("final answer", "thr-1"),
+        ]
+        mock_client = self._make_mock_client(steps)
+
+        backend = CodexBackend()
+        opts = SDKOptions(
+            system_prompt="test",
+            allowed_tools=["Read"],
+            max_turns=10,
+            model="gpt-5.4",
+        )
+
+        with patch(
+            "auto_scientist.sdk_backend.CodexClient.connect_stdio",
+            return_value=mock_client,
+        ):
+            messages = [msg async for msg in backend.query("hello", opts)]
+
+        result_msgs = [m for m in messages if m.type == "result"]
+        assert result_msgs[0].usage["num_turns"] == 3
 
     @pytest.mark.asyncio
     async def test_strips_openai_api_key(self):
