@@ -602,6 +602,11 @@ class Orchestrator:
             data_files = sorted(canonical_data_dir.iterdir())
             file_list = ", ".join(f.name for f in data_files)
             self._collapse(panel, f"Canonicalized {len(data_files)} files: {file_list}")
+        except Exception as e:
+            logger.exception(f"Ingestor error: {e}")
+            panel.error(str(e))
+            self._live.collapse_panel(panel)
+            raise
         finally:
             self._persist_buffer("ingestor", buffer)
 

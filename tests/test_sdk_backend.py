@@ -326,9 +326,11 @@ class TestCodexBackend:
                 pass
 
         call_kwargs = mock_connect.call_args
-        env = call_kwargs.kwargs.get("env", {})
-        if env:
-            assert env.get("OPENAI_API_KEY", "") == ""
+        env = call_kwargs.kwargs.get("env")
+        assert env is not None, "env must be passed when OPENAI_API_KEY needs stripping"
+        assert env["OPENAI_API_KEY"] == ""
+        # Must include parent PATH so subprocess can find the codex binary
+        assert "PATH" in env
 
     @pytest.mark.asyncio
     async def test_session_resumption(self):

@@ -197,14 +197,19 @@ class CodexBackend:
         sandbox_mode = self._resolve_sandbox(options.allowed_tools)
         effort = self._resolve_effort(options.extra_args)
 
-        # Build environment, stripping OPENAI_API_KEY for subscription mode
-        env: dict[str, str] = dict(options.env)
-        if "OPENAI_API_KEY" not in env and os.environ.get("OPENAI_API_KEY"):
-            logger.info(
-                "Stripping OPENAI_API_KEY from Codex subprocess env "
-                "(using ChatGPT subscription instead of direct API billing)"
-            )
-            env["OPENAI_API_KEY"] = ""
+        # Build environment for the Codex subprocess.
+        # IMPORTANT: create_subprocess_exec replaces the entire env when a
+        # dict is passed, so we must start from os.environ and layer overrides.
+        env: dict[str, str] | None = None
+        needs_env = bool(options.env) or os.environ.get("OPENAI_API_KEY")
+        if needs_env:
+            env = {**os.environ, **options.env}
+            if "OPENAI_API_KEY" not in options.env and os.environ.get("OPENAI_API_KEY"):
+                logger.info(
+                    "Stripping OPENAI_API_KEY from Codex subprocess env "
+                    "(using ChatGPT subscription instead of direct API billing)"
+                )
+                env["OPENAI_API_KEY"] = ""
 
         # Build thread config
         thread_config = ThreadConfig(
@@ -229,7 +234,7 @@ class CodexBackend:
         # Connect and run
         client = CodexClient.connect_stdio(
             cwd=str(options.cwd) if options.cwd else None,
-            env=env if env else None,
+            env=env,
         )
         try:
             await client.start()

@@ -674,6 +674,15 @@ class LaunchApp(App[ExperimentConfig | None]):
                 continue
             self._set_agent_model(f"model-{agent}", resolved)
 
+    def _safe_set_model_value(self, prefix: str, model: str) -> None:
+        """Set a model Select value, ignoring if options changed since scheduling."""
+        import contextlib
+
+        from textual.widgets._select import InvalidSelectValueError
+
+        with contextlib.suppress(InvalidSelectValueError):
+            self.query_one(f"#{prefix}-name", Select).value = model
+
     def _set_agent_model(self, prefix: str, cfg: AgentModelConfig) -> None:
         """Set provider, model, reasoning, and mode for one agent row."""
         provider_sel = self.query_one(f"#{prefix}-provider", Select)
@@ -681,10 +690,11 @@ class LaunchApp(App[ExperimentConfig | None]):
 
         model_sel = self.query_one(f"#{prefix}-name", Select)
         options = MODELS_BY_PROVIDER.get(cfg.provider, [])
-        current_options = [(label, val) for label, val in options]
-        model_sel.set_options(current_options)
-        # Use call_after_refresh to ensure options are loaded before setting value
-        self.call_after_refresh(setattr, model_sel, "value", cfg.model)
+        model_sel.set_options(options)
+        # Defer value setting so the widget is ready after initial mount.
+        # The _safe wrapper handles races where a newer call changed the
+        # options before this deferred callback runs.
+        self.call_after_refresh(self._safe_set_model_value, prefix, cfg.model)
 
         reasoning_sel = self.query_one(f"#{prefix}-reasoning", Select)
         reasoning_sel.value = cfg.reasoning.level
