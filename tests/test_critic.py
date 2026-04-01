@@ -120,12 +120,12 @@ def plan():
 
 @pytest.fixture
 def openai_critic():
-    return AgentModelConfig(provider="openai", model="gpt-4o")
+    return AgentModelConfig(provider="openai", model="gpt-4o", mode="api")
 
 
 @pytest.fixture
 def google_critic():
-    return AgentModelConfig(provider="google", model="gemini-2.5-pro")
+    return AgentModelConfig(provider="google", model="gemini-2.5-pro", mode="api")
 
 
 @pytest.fixture
@@ -333,6 +333,7 @@ class TestRunDebate:
             provider="openai",
             model="o4-mini",
             reasoning=ReasoningConfig(level="high"),
+            mode="api",
         )
         with patch(
             OPENAI_PATH,
@@ -417,7 +418,7 @@ class TestCriticValidation:
     @pytest.mark.asyncio
     async def test_valid_json_parsed_to_critic_output(self, plan):
         """Valid structured JSON is parsed into CriticOutput."""
-        critic = AgentModelConfig(provider="openai", model="gpt-4o")
+        critic = AgentModelConfig(provider="openai", model="gpt-4o", mode="api")
         with patch(
             OPENAI_PATH,
             new_callable=AsyncMock,
@@ -436,7 +437,7 @@ class TestCriticValidation:
     @pytest.mark.asyncio
     async def test_invalid_json_preserves_raw_text_as_concern(self, plan):
         """Invalid JSON falls back with raw text preserved as a PARSE ERROR concern."""
-        critic = AgentModelConfig(provider="openai", model="gpt-4o")
+        critic = AgentModelConfig(provider="openai", model="gpt-4o", mode="api")
         with patch(
             OPENAI_PATH,
             new_callable=AsyncMock,
@@ -454,6 +455,51 @@ class TestCriticValidation:
         assert "[SYNTHETIC - PARSE ERROR]" in co.concerns[0].claim
         assert co.concerns[0].severity == "high"
         assert co.concerns[0].category == "other"
+
+
+class TestScientistDefenseValidation:
+    @pytest.mark.asyncio
+    async def test_valid_defense_parsed(self, plan):
+        """Valid defense JSON is parsed into ScientistDefense."""
+        critic = AgentModelConfig(provider="openai", model="gpt-4o", mode="api")
+        with (
+            patch(OPENAI_PATH, new_callable=AsyncMock, return_value=_CR()),
+            patch(SDK_PATH, _sdk_defense_mock()),
+        ):
+            result = await run_single_critic_debate(
+                config=critic,
+                plan=plan,
+                notebook_content="",
+                max_rounds=2,
+            )
+
+        defense = result.rounds[0].scientist_defense
+        assert isinstance(defense, ScientistDefense)
+        assert len(defense.responses) == 1
+        assert defense.responses[0].verdict == "accepted"
+
+    @pytest.mark.asyncio
+    async def test_invalid_defense_falls_back(self, plan):
+        """Invalid defense JSON falls back to empty responses."""
+        critic = AgentModelConfig(provider="openai", model="gpt-4o", mode="api")
+        with (
+            patch(OPENAI_PATH, new_callable=AsyncMock, return_value=_CR()),
+            patch(
+                SDK_PATH,
+                _sdk_mock(text=_pad("Not JSON, just a prose defense.")),
+            ),
+        ):
+            result = await run_single_critic_debate(
+                config=critic,
+                plan=plan,
+                notebook_content="",
+                max_rounds=2,
+            )
+
+        defense = result.rounds[0].scientist_defense
+        assert isinstance(defense, ScientistDefense)
+        assert defense.responses == []
+
 
 
 class TestBuildCriticPromptContext:
@@ -597,7 +643,7 @@ class TestResponseSchemaPassthrough:
     @pytest.mark.asyncio
     async def test_critic_passes_response_schema_to_provider(self, plan):
         """Critic structured query passes response_schema=CriticOutput to provider."""
-        critic = AgentModelConfig(provider="openai", model="gpt-4o")
+        critic = AgentModelConfig(provider="openai", model="gpt-4o", mode="api")
         with patch(
             OPENAI_PATH,
             new_callable=AsyncMock,
@@ -610,6 +656,27 @@ class TestResponseSchemaPassthrough:
             )
 
         assert mock_openai.call_args.kwargs.get("response_schema") is CriticOutput
+
+    @pytest.mark.asyncio
+    async def test_scientist_defense_uses_sdk_with_correct_model(self, plan):
+        """Scientist defense (Anthropic) uses SDK with correct model in options."""
+        critic = AgentModelConfig(provider="openai", model="gpt-4o", mode="api")
+        mock_sdk = _sdk_defense_mock()
+        with (
+            patch(OPENAI_PATH, new_callable=AsyncMock, return_value=_CR()),
+            patch(SDK_PATH, mock_sdk),
+        ):
+            await run_single_critic_debate(
+                config=critic,
+                plan=plan,
+                notebook_content="",
+                max_rounds=2,
+            )
+
+        # Verify ClaudeCodeOptions has the default scientist model
+        options = mock_sdk.call_args[0][1]
+        assert options.model == "claude-sonnet-4-6"
+
 
 
 class TestGoalInPrompts:
@@ -672,3 +739,28 @@ class TestAnthropicSDKPath:
         options = mock_sdk.call_args[0][1]
         assert options.system_prompt
         assert "<output_format>" in options.system_prompt
+
+    @pytest.mark.asyncio
+    async def test_anthropic_scientist_defense_uses_sdk(self, plan):
+        """Scientist-in-debate with Anthropic config uses SDK too."""
+        critic = AgentModelConfig(provider="openai", model="gpt-4o", mode="api")
+        scientist = AgentModelConfig(provider="anthropic", model="claude-sonnet-4-6")
+
+        sdk_usage = {"input_tokens": 80, "output_tokens": 40}
+        mock_sdk = AsyncMock(return_value=(_pad(_valid_defense_json()), sdk_usage))
+        mock_sdk.last_usage = sdk_usage
+
+        with (
+            patch(OPENAI_PATH, new_callable=AsyncMock, return_value=_CR()),
+            patch(SDK_PATH, mock_sdk),
+        ):
+            result = await run_single_critic_debate(
+                config=critic,
+                plan=plan,
+                notebook_content="",
+                max_rounds=2,
+                scientist_config=scientist,
+            )
+
+        mock_sdk.assert_called()
+        assert result.rounds[0].scientist_defense is not None

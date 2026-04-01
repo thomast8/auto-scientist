@@ -10,21 +10,14 @@ The monkey-patch for unknown message types now lives in sdk_backend.py
 import json
 import logging
 from collections.abc import AsyncIterator
-from pathlib import Path
 from typing import Any
 
-from claude_code_sdk import (  # noqa: F401
-    AssistantMessage,
-    ResultMessage,
-    TextBlock,
-    query,  # noqa: F401 - re-exported for backwards compat
-)
+from claude_code_sdk import AssistantMessage, ResultMessage, TextBlock, query
 from pydantic import BaseModel, ValidationError
 
 from auto_scientist.sdk_backend import (
     ClaudeBackend,
     CodexBackend,
-    SDKOptions,
 )
 
 logger = logging.getLogger(__name__)
@@ -67,21 +60,6 @@ def append_block_to_buffer(block: Any, buffer: list[str]) -> None:
         entry = f"{prefix}{content}"
         buffer.append(entry)
         logger.debug(entry)
-
-
-def _claude_options_to_sdk_options(cc_opts: Any) -> SDKOptions:
-    """Convert a ClaudeCodeOptions to SDKOptions for backwards compatibility."""
-    return SDKOptions(
-        system_prompt=getattr(cc_opts, "system_prompt", "") or "",
-        allowed_tools=list(getattr(cc_opts, "allowed_tools", []) or []),
-        max_turns=getattr(cc_opts, "max_turns", 10) or 10,
-        model=getattr(cc_opts, "model", None),
-        cwd=Path(cc_opts.cwd) if getattr(cc_opts, "cwd", None) else None,
-        permission_mode=getattr(cc_opts, "permission_mode", "default") or "default",
-        extra_args=dict(getattr(cc_opts, "extra_args", {}) or {}),
-        resume=getattr(cc_opts, "resume", None),
-        env=dict(getattr(cc_opts, "env", {}) or {}),
-    )
 
 
 async def safe_query(

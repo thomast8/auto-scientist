@@ -244,15 +244,31 @@ class CodexBackend:
                     turn_overrides=turn_overrides,
                 )
 
-            # Yield a result message with the final text
+            # Synthesize an assistant message so agents that read from
+            # assistant blocks (report, coder, ingestor) get the text content
+            # for message buffers and report assembly.
+            if result.final_text:
+                synthetic_block = type("_SyntheticTextBlock", (), {"text": result.final_text})()
+                yield SDKMessage(
+                    type="assistant",
+                    content_blocks=[synthetic_block],
+                )
+
             yield SDKMessage(
                 type="result",
                 result=result.final_text,
                 session_id=result.thread_id,
-                usage={},  # Codex doesn't expose token usage in ChatResult
+                usage={"_provider": "codex", "_usage_unavailable": True},
             )
+        except Exception as e:
+            raise RuntimeError(
+                f"Codex query failed (model={options.model}, sandbox={sandbox_mode}): {e}"
+            ) from e
         finally:
-            await client.close()
+            try:
+                await client.close()
+            except Exception:
+                logger.debug("Error closing Codex client", exc_info=True)
 
 
 # ---------------------------------------------------------------------------
