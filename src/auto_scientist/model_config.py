@@ -38,6 +38,8 @@ class ReasoningConfig(BaseModel):
 class AgentModelConfig(BaseModel):
     """Configuration for a single agent's model and reasoning."""
 
+    model_config = ConfigDict(validate_assignment=True)
+
     provider: Literal["anthropic", "openai", "google"] = "anthropic"
     model: str = Field(min_length=1)
     reasoning: ReasoningConfig = ReasoningConfig()

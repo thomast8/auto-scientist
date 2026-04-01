@@ -15,10 +15,7 @@ from typing import Any
 from claude_code_sdk import AssistantMessage, ResultMessage, TextBlock, query
 from pydantic import BaseModel, ValidationError
 
-from auto_scientist.sdk_backend import (
-    ClaudeBackend,
-    CodexBackend,
-)
+from auto_scientist.sdk_backend import SDKBackend
 
 logger = logging.getLogger(__name__)
 
@@ -65,7 +62,7 @@ def append_block_to_buffer(block: Any, buffer: list[str]) -> None:
 async def safe_query(
     prompt: str,
     options: Any,
-    backend: "ClaudeBackend | CodexBackend | None" = None,
+    backend: "SDKBackend | None" = None,
 ) -> AsyncIterator[Any]:
     """Wrap a backend query, filtering out None messages.
 
@@ -269,7 +266,7 @@ def with_turn_budget(system_prompt: str, max_turns: int, tools: list[str] | None
 async def collect_text_from_query(
     prompt: str,
     options: Any,
-    message_buffer_or_backend: "ClaudeBackend | CodexBackend | list[str] | None" = None,
+    message_buffer_or_backend: "SDKBackend | list[str] | None" = None,
     agent_name_or_buffer: "str | list[str] | None" = None,
     agent_name: str = "Agent",
     *,

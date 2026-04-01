@@ -13,7 +13,7 @@ import os
 from collections.abc import AsyncIterator
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Any
+from typing import Any, Literal, Protocol
 
 import claude_code_sdk._internal.client as _client_mod
 import claude_code_sdk._internal.message_parser as _parser_mod
@@ -66,12 +66,12 @@ _client_mod.parse_message = _tolerant_parse_message  # type: ignore[assignment]
 # ---------------------------------------------------------------------------
 
 
-@dataclass
+@dataclass(frozen=True)
 class SDKOptions:
     """Unified options for both Claude Code SDK and Codex SDK."""
 
     system_prompt: str
-    allowed_tools: list[str]
+    allowed_tools: tuple[str, ...] | list[str]
     max_turns: int
     model: str | None = None
     cwd: Path | None = None
@@ -85,12 +85,18 @@ class SDKOptions:
 class SDKMessage:
     """Unified message envelope for both SDK backends."""
 
-    type: str  # "assistant" or "result"
+    type: Literal["assistant", "result"]
     text: str | None = None
     content_blocks: list[Any] = field(default_factory=list)
     usage: dict[str, Any] = field(default_factory=dict)
     result: str | None = None
     session_id: str | None = None
+
+
+class SDKBackend(Protocol):
+    """Protocol that both Claude and Codex backends implement."""
+
+    def query(self, prompt: str, options: SDKOptions) -> AsyncIterator[SDKMessage]: ...
 
 
 # ---------------------------------------------------------------------------
@@ -166,15 +172,13 @@ class ClaudeBackend:
 # ---------------------------------------------------------------------------
 
 # Sandbox mode type for Codex SDK
-_CODEX_SANDBOX_WRITE: Any = "workspace-write"
-_CODEX_SANDBOX_READ: Any = "read-only"
 _CODEX_APPROVAL_POLICY: Any = "never"
 
 
 class CodexBackend:
     """Wraps codex_app_server_sdk behind the SDKBackend interface."""
 
-    def _resolve_sandbox(self, allowed_tools: list[str]) -> str:
+    def _resolve_sandbox(self, allowed_tools: list[str] | tuple[str, ...]) -> str:
         """Map allowed tools to Codex sandbox mode."""
         write_tools = {"Write", "Edit", "Bash"}
         if write_tools & set(allowed_tools):
@@ -276,7 +280,7 @@ class CodexBackend:
 # ---------------------------------------------------------------------------
 
 
-def get_backend(provider: str) -> "ClaudeBackend | CodexBackend":
+def get_backend(provider: str) -> SDKBackend:
     """Return the SDK backend for the given provider."""
     if provider == "anthropic":
         return ClaudeBackend()
