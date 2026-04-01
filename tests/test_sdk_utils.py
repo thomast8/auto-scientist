@@ -236,6 +236,24 @@ class TestValidateJsonOutput:
         result = validate_json_output(raw, AnalystOutput, "Analyst")
         assert result["key_metrics"] == {"rmse": 0.5}
 
+    def test_json_after_python_array_indexing(self):
+        """JSON extraction skips [0] from Python indexing in shell commands."""
+        shell_noise = (
+            '/bin/zsh -lc "python -c \\"from pathlib import Path; '
+            "rows=list(csv.DictReader(p.open())); "
+            "xs=[float(r['x']) for r in rows]; "
+            "print('headers', list(rows[0].keys()) if rows else [])\\\"\"\\n"
+        )
+        data = {
+            "key_metrics": {},
+            "improvements": [],
+            "regressions": [],
+            "observations": ["ok"],
+        }
+        raw = shell_noise + json.dumps(data)
+        result = validate_json_output(raw, AnalystOutput, "Analyst")
+        assert result["observations"] == ["ok"]
+
     def test_json_after_braces_in_prose(self):
         """Handles {curly braces} in prose before the actual JSON."""
         data = {

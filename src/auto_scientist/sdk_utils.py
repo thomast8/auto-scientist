@@ -175,18 +175,21 @@ def _strip_markdown_fencing(raw: str) -> str:
     return raw
 
 
-def _find_json_object(text: str) -> tuple[Any, int, int] | None:
+def _find_json_object(text: str, *, require_dict: bool = False) -> tuple[Any, int, int] | None:
     """Scan *text* for the first valid JSON object or array.
 
-    Tries ``raw_decode`` at every ``{`` and ``[`` position until one succeeds.
+    Tries ``raw_decode`` at every ``{`` (and ``[`` unless *require_dict*)
+    position until one succeeds.
     Returns ``(parsed, start_idx, end_idx)`` or ``None``.
 
-    This handles Codex output where shell commands containing ``{`` appear
-    before the actual JSON block.
+    When *require_dict* is True only ``{`` positions are tried.  This avoids
+    false-positive matches on JSON arrays like ``[0]`` embedded in Python
+    expressions (e.g. ``rows[0]``) that appear in Codex shell-command output
+    before the actual JSON object.
     """
     decoder = json.JSONDecoder()
     for i, ch in enumerate(text):
-        if ch in "{[":
+        if ch == "{" or (ch == "[" and not require_dict):
             try:
                 parsed, length = decoder.raw_decode(text, i)
                 return parsed, i, i + length
@@ -216,17 +219,31 @@ def validate_json_output(
     # Fast path: try raw_decode from the start (works for clean output)
     parsed = None
     try:
-        parsed, end_idx = json.JSONDecoder().raw_decode(cleaned)
-        trailing = cleaned[end_idx:].strip()
-        if trailing:
+        decoded, end_idx = json.JSONDecoder().raw_decode(cleaned)
+        # BaseModel always maps to a JSON object (dict).  If the fast path
+        # decoded something else (e.g. ``[0]`` from Python indexing in Codex
+        # shell output), reject it and fall through to the slow path.
+        if isinstance(decoded, dict):
+            parsed = decoded
+            trailing = cleaned[end_idx:].strip()
+            if trailing:
+                logger.warning(
+                    f"{agent_name}: raw_decode ignored {len(trailing)} chars of trailing content: "
+                    f"{trailing[:200]!r}"
+                )
+        else:
             logger.warning(
-                f"{agent_name}: raw_decode ignored {len(trailing)} chars of trailing content: "
-                f"{trailing[:200]!r}"
+                f"{agent_name}: fast-path decoded {type(decoded).__name__}, "
+                f"expected dict - trying slow path"
             )
     except json.JSONDecodeError:
-        # Slow path: scan for the first valid JSON object/array.
-        # This handles Codex output with shell commands before the JSON.
-        result = _find_json_object(cleaned)
+        pass
+
+    if parsed is None:
+        # Slow path: scan for the first valid JSON object.
+        # Use require_dict=True since Pydantic BaseModel always maps to a
+        # dict, skipping false-positive array matches from shell/Python code.
+        result = _find_json_object(cleaned, require_dict=True)
         if result is not None:
             parsed, start_idx, _end_idx = result
             logger.warning(
