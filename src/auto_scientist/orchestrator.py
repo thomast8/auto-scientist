@@ -143,8 +143,11 @@ class Orchestrator:
                 try:
                     canonical_data_dir = await self._run_ingestion()
                 except Exception:
-                    self._live.end_iteration("failed", "red", "")
-                    self._live.flush_completed()
+                    try:
+                        self._live.end_iteration("failed", "red", "")
+                        self._live.flush_completed()
+                    except Exception:
+                        logger.warning("Failed to finalize iteration box", exc_info=True)
                     raise
 
                 if canonical_data_dir is None:
@@ -244,8 +247,14 @@ class Orchestrator:
                 try:
                     await self._run_iteration_body()
                 except Exception:
-                    self._live.end_iteration("failed", "red", "")
-                    self._live.flush_completed()
+                    # Catches orchestration errors (state, evaluation, summary).
+                    # Individual agent failures are handled inside
+                    # _run_iteration_body via _fail_iteration().
+                    try:
+                        self._live.end_iteration("failed", "red", "")
+                        self._live.flush_completed()
+                    except Exception:
+                        logger.warning("Failed to finalize iteration box", exc_info=True)
                     raise
                 self.state.save(state_path)
 
@@ -261,8 +270,11 @@ class Orchestrator:
                 try:
                     report_ok = await self._run_report()
                 except Exception:
-                    self._live.end_iteration("failed", "red", "")
-                    self._live.flush_completed()
+                    try:
+                        self._live.end_iteration("failed", "red", "")
+                        self._live.flush_completed()
+                    except Exception:
+                        logger.warning("Failed to finalize iteration box", exc_info=True)
                     raise
                 self.state.phase = "stopped"
                 self.state.save(state_path)
