@@ -1868,7 +1868,6 @@ class Orchestrator:
             logger.exception(f"Report error: {e}")
             panel.error(str(e))
             self._live.collapse_panel(panel)
-            self.state.record_failure()
-            return False
+            raise
         finally:
             persist_buffer(self.output_dir, "report", buffer, self.state.iteration)
