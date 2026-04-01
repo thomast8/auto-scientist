@@ -6,6 +6,7 @@ The calling CLI code then constructs the Orchestrator and PipelineApp.
 """
 
 from pathlib import Path
+from typing import Literal, cast
 
 from textual import on
 from textual.app import App, ComposeResult
@@ -50,11 +51,19 @@ REASONING_OPTIONS = [
     ("max", "max"),
 ]
 
+MODE_OPTIONS = [
+    ("sdk", "sdk"),
+    ("api", "api"),
+]
+
+# Top-level provider options (only SDK-capable providers)
+SDK_PROVIDER_OPTIONS = [
+    ("anthropic", "anthropic"),
+    ("openai", "openai"),
+]
+
 # Agents that can be overridden, in display order
 _AGENT_FIELDS = ["ingestor", "analyst", "scientist", "coder", "report"]
-
-# SDK agents are locked to anthropic provider
-_SDK_AGENTS = {"ingestor", "analyst", "scientist", "coder", "report"}
 
 # Non-SDK agents rendered after critics
 _TRAILING_AGENTS = ["summarizer"]
@@ -374,6 +383,9 @@ class LaunchApp(App[ExperimentConfig | None]):
     .model-reasoning {
         width: 14;
     }
+    .model-mode {
+        width: 10;
+    }
     SelectOverlay {
         width: auto;
         min-width: 16;
@@ -420,6 +432,7 @@ class LaunchApp(App[ExperimentConfig | None]):
         self._save_path = save_path
         self.result_config: ExperimentConfig | None = None
         self._domain_options = _discover_domains()
+        self._applying_config = False
         # Track the YAML path for domain-relative data resolution
         self._yaml_path: Path | None = None
 
@@ -488,6 +501,17 @@ class LaunchApp(App[ExperimentConfig | None]):
                         classes="short-input",
                     )
 
+                # Top-level provider (quick switch between anthropic/openai presets)
+                with Horizontal(classes="form-row"):
+                    yield Label("Provider:", classes="form-label")
+                    yield Select(
+                        SDK_PROVIDER_OPTIONS,
+                        value="anthropic",
+                        allow_blank=False,
+                        id="top-provider-select",
+                        classes="short-input",
+                    )
+
                 # Iterations
                 with Horizontal(classes="form-row"):
                     yield Label("Iterations:", classes="form-label")
@@ -515,26 +539,21 @@ class LaunchApp(App[ExperimentConfig | None]):
                     yield Static("[dim]Provider[/dim]", classes="model-provider", markup=True)
                     yield Static("[dim]Model[/dim]", classes="model-name", markup=True)
                     yield Static("[dim]Reasoning[/dim]", classes="model-reasoning", markup=True)
+                    yield Static("[dim]Mode[/dim]", classes="model-mode", markup=True)
 
                 for agent in _AGENT_FIELDS:
                     display = agent.title()
-                    sdk_locked = agent in _SDK_AGENTS
                     with Horizontal(classes="model-row"):
                         yield Label(f"{display}:", classes="model-label")
-                        provider_sel = Select(
+                        yield Select(
                             PROVIDER_OPTIONS,
                             value="anthropic",
-                            allow_blank=not sdk_locked,
+                            allow_blank=True,
                             id=f"model-{agent}-provider",
                             classes="model-provider",
-                            disabled=sdk_locked,
-                        )
-                        yield provider_sel
-                        initial_models = (
-                            MODELS_BY_PROVIDER["anthropic"] if sdk_locked else ALL_MODELS
                         )
                         yield Select(
-                            initial_models,
+                            ALL_MODELS,
                             allow_blank=True,
                             id=f"model-{agent}-name",
                             classes="model-name",
@@ -544,6 +563,13 @@ class LaunchApp(App[ExperimentConfig | None]):
                             allow_blank=True,
                             id=f"model-{agent}-reasoning",
                             classes="model-reasoning",
+                        )
+                        yield Select(
+                            MODE_OPTIONS,
+                            value="sdk",
+                            allow_blank=False,
+                            id=f"model-{agent}-mode",
+                            classes="model-mode",
                         )
 
                 # Critic rows (any provider)
@@ -569,6 +595,12 @@ class LaunchApp(App[ExperimentConfig | None]):
                             id=f"model-critic-{i}-reasoning",
                             classes="model-reasoning",
                         )
+                        yield Select(
+                            MODE_OPTIONS,
+                            allow_blank=True,
+                            id=f"model-critic-{i}-mode",
+                            classes="model-mode",
+                        )
 
                 # Non-SDK agents after critics
                 for agent in _TRAILING_AGENTS:
@@ -592,6 +624,12 @@ class LaunchApp(App[ExperimentConfig | None]):
                             allow_blank=True,
                             id=f"model-{agent}-reasoning",
                             classes="model-reasoning",
+                        )
+                        yield Select(
+                            MODE_OPTIONS,
+                            allow_blank=True,
+                            id=f"model-{agent}-mode",
+                            classes="model-mode",
                         )
 
                 # Error display
@@ -637,13 +675,12 @@ class LaunchApp(App[ExperimentConfig | None]):
             self._set_agent_model(f"model-{agent}", resolved)
 
     def _set_agent_model(self, prefix: str, cfg: AgentModelConfig) -> None:
-        """Set provider, model, and reasoning for one agent row."""
+        """Set provider, model, reasoning, and mode for one agent row."""
         provider_sel = self.query_one(f"#{prefix}-provider", Select)
         provider_sel.value = cfg.provider
 
         model_sel = self.query_one(f"#{prefix}-name", Select)
         options = MODELS_BY_PROVIDER.get(cfg.provider, [])
-        # Only reset options if the provider changed
         current_options = [(label, val) for label, val in options]
         model_sel.set_options(current_options)
         # Use call_after_refresh to ensure options are loaded before setting value
@@ -652,38 +689,62 @@ class LaunchApp(App[ExperimentConfig | None]):
         reasoning_sel = self.query_one(f"#{prefix}-reasoning", Select)
         reasoning_sel.value = cfg.reasoning.level
 
+        mode_sel = self.query_one(f"#{prefix}-mode", Select)
+        mode_sel.value = cfg.mode
+
     def _apply_config(self, cfg: ExperimentConfig) -> None:
-        """Fill the form from an ExperimentConfig."""
+        """Fill the form from an ExperimentConfig.
+
+        Suppresses preset/provider event handlers to prevent conflicting
+        deferred model updates. Uses the current top-level provider when the
+        config doesn't specify one, so domain selection respects the user's
+        provider choice.
+        """
         from auto_scientist.model_config import ModelConfig
 
-        self.query_one("#data-input", Input).value = cfg.data
-        self.query_one("#goal-input", TextArea).text = cfg.goal
-        self.query_one("#preset-select", Select).value = cfg.preset
-        self.query_one("#max-iterations-input", Input).value = str(cfg.max_iterations)
+        self._applying_config = True
+        try:
+            self.query_one("#data-input", Input).value = cfg.data
+            self.query_one("#goal-input", TextArea).text = cfg.goal
+            self.query_one("#preset-select", Select).value = cfg.preset
+            self.query_one("#max-iterations-input", Input).value = str(cfg.max_iterations)
+            self.query_one("#output-dir-input", Input).value = cfg.output_dir
 
-        self.query_one("#output-dir-input", Input).value = cfg.output_dir
+            # Set top-level provider only if the config explicitly specifies one
+            if cfg.provider:
+                self.query_one("#top-provider-select", Select).value = cfg.provider
 
-        # Resolve the full model config (preset + any overrides)
-        mc = ModelConfig.from_experiment_config(cfg)
+            # Resolve models using the current top-level provider (so domain
+            # selection respects the user's provider choice)
+            top_val = self.query_one("#top-provider-select", Select).value
+            resolve_provider = (
+                cast("Literal['anthropic', 'openai']", top_val)
+                if isinstance(top_val, str)
+                else None
+            )
+            resolve_cfg = cfg.model_copy(update={"provider": resolve_provider})
+            mc = ModelConfig.from_experiment_config(resolve_cfg)
 
-        # Fill per-agent model fields from resolved config
-        for agent in _AGENT_FIELDS:
-            agent_cfg = mc.resolve(agent)
-            if agent_cfg is None:
-                continue
-            self._set_agent_model(f"model-{agent}", agent_cfg)
+            # Fill per-agent model fields from resolved config
+            for agent in _AGENT_FIELDS:
+                agent_cfg = mc.resolve(agent)
+                if agent_cfg is None:
+                    continue
+                self._set_agent_model(f"model-{agent}", agent_cfg)
 
-        # Fill critic fields from resolved config
-        for i in range(_NUM_CRITIC_SLOTS):
-            if i < len(mc.critics):
-                self._set_agent_model(f"model-critic-{i}", mc.critics[i])
+            # Fill critic fields from resolved config
+            for i in range(_NUM_CRITIC_SLOTS):
+                if i < len(mc.critics):
+                    self._set_agent_model(f"model-critic-{i}", mc.critics[i])
 
-        # Fill trailing agent fields (e.g. summarizer)
-        for agent in _TRAILING_AGENTS:
-            resolved = mc.summarizer if agent == "summarizer" else mc.resolve(agent)
-            if resolved is None:
-                continue
-            self._set_agent_model(f"model-{agent}", resolved)
+            # Fill trailing agent fields (e.g. summarizer)
+            for agent in _TRAILING_AGENTS:
+                resolved = mc.summarizer if agent == "summarizer" else mc.resolve(agent)
+                if resolved is None:
+                    continue
+                self._set_agent_model(f"model-{agent}", resolved)
+        finally:
+            self._applying_config = False
 
     @on(Button.Pressed, "#browse-btn")
     def _on_browse(self, event: Button.Pressed) -> None:
@@ -697,9 +758,32 @@ class LaunchApp(App[ExperimentConfig | None]):
     @on(Select.Changed, "#preset-select")
     def _on_preset_changed(self, event: Select.Changed) -> None:
         """When the preset changes, refresh model fields to show preset defaults."""
+        if self._applying_config:
+            return
         if not isinstance(event.value, str):
             return
-        cfg = ExperimentConfig(data=".", goal=".", preset=event.value)
+        provider_val = self.query_one("#top-provider-select", Select).value
+        provider = (
+            cast("Literal['anthropic', 'openai']", provider_val)
+            if isinstance(provider_val, str)
+            else None
+        )
+        cfg = ExperimentConfig(data=".", goal=".", preset=event.value, provider=provider)
+        self._apply_model_defaults(cfg)
+
+    @on(Select.Changed, "#top-provider-select")
+    def _on_top_provider_changed(self, event: Select.Changed) -> None:
+        """When top-level provider changes, reload preset defaults for new provider."""
+        if self._applying_config:
+            return
+        provider = (
+            cast("Literal['anthropic', 'openai']", event.value)
+            if isinstance(event.value, str)
+            else None
+        )
+        preset_val = self.query_one("#preset-select", Select).value
+        preset = preset_val if isinstance(preset_val, str) else "default"
+        cfg = ExperimentConfig(data=".", goal=".", preset=preset, provider=provider)
         self._apply_model_defaults(cfg)
 
     @on(Button.Pressed, "#browse-output-btn")
@@ -767,6 +851,14 @@ class LaunchApp(App[ExperimentConfig | None]):
 
         self._show_error("")
 
+        # Get top-level provider
+        top_provider_val = self.query_one("#top-provider-select", Select).value
+        top_provider: Literal["anthropic", "openai"] | None = (
+            cast("Literal['anthropic', 'openai']", top_provider_val)
+            if isinstance(top_provider_val, str)
+            else None
+        )
+
         # Collect per-agent model overrides
         models_dict: dict[str, AgentModelConfig] = {}
         for agent in [*_AGENT_FIELDS, *_TRAILING_AGENTS]:
@@ -776,13 +868,16 @@ class LaunchApp(App[ExperimentConfig | None]):
             model_name = model_val
             provider_val = self.query_one(f"#model-{agent}-provider", Select).value
             reasoning_val = self.query_one(f"#model-{agent}-reasoning", Select).value
+            mode_val = self.query_one(f"#model-{agent}-mode", Select).value
             provider_str = provider_val if isinstance(provider_val, str) else "anthropic"
             reasoning_str = reasoning_val if isinstance(reasoning_val, str) else "off"
+            mode_str = mode_val if isinstance(mode_val, str) else "sdk"
             try:
                 models_dict[agent] = AgentModelConfig(
                     provider=provider_str,  # type: ignore[arg-type]
                     model=model_name,
                     reasoning=reasoning_str,  # type: ignore[arg-type]
+                    mode=mode_str,  # type: ignore[arg-type]
                 )
             except (ValidationError, ValueError) as e:
                 self._show_error(f"Invalid model config for {agent}: {e}")
@@ -796,14 +891,17 @@ class LaunchApp(App[ExperimentConfig | None]):
                 continue
             provider_val = self.query_one(f"#model-critic-{i}-provider", Select).value
             reasoning_val = self.query_one(f"#model-critic-{i}-reasoning", Select).value
+            mode_val = self.query_one(f"#model-critic-{i}-mode", Select).value
             provider_str = provider_val if isinstance(provider_val, str) else "anthropic"
             reasoning_str = reasoning_val if isinstance(reasoning_val, str) else "off"
+            mode_str = mode_val if isinstance(mode_val, str) else "sdk"
             try:
                 critics_list.append(
                     AgentModelConfig(
                         provider=provider_str,  # type: ignore[arg-type]
                         model=model_val,
                         reasoning=reasoning_str,  # type: ignore[arg-type]
+                        mode=mode_str,  # type: ignore[arg-type]
                     )
                 )
             except (ValidationError, ValueError) as e:
@@ -825,6 +923,7 @@ class LaunchApp(App[ExperimentConfig | None]):
                 data=data,
                 goal=goal,
                 preset=str(self.query_one("#preset-select", Select).value),
+                provider=top_provider,
                 max_iterations=int(self.query_one("#max-iterations-input", Input).value or "20"),
                 output_dir=self.query_one("#output-dir-input", Input).value or "experiments",
                 models=models,
@@ -834,9 +933,13 @@ class LaunchApp(App[ExperimentConfig | None]):
             return None
 
     def _validate_models(self, config: ExperimentConfig) -> list[str]:
-        """Run provider auth, model name, and reasoning validation."""
+        """Run provider auth, CLI login, model name, and reasoning validation."""
+        import shutil
+
         from auto_scientist.model_config import ModelConfig
         from auto_scientist.orchestrator import (
+            _check_claude_cli_auth,
+            _check_codex_cli_auth,
             _check_provider_auth,
             _validate_model_names,
             _validate_reasoning_configs,
@@ -845,16 +948,60 @@ class LaunchApp(App[ExperimentConfig | None]):
         mc = ModelConfig.from_experiment_config(config)
         errors: list[str] = []
 
-        # Check API keys for required providers
-        providers: set[str] = {"anthropic"}
+        # Check API keys for providers used in API mode
+        # (SDK mode agents use CLI subscription auth, no API key needed)
+        api_providers: set[str] = set()
+        needs_claude_cli = False
+        needs_codex_cli = False
+
+        all_configs: list[AgentModelConfig] = []
+        for field in ModelConfig._AGENT_FIELDS:
+            agent_cfg = getattr(mc, field, None)
+            if agent_cfg:
+                all_configs.append(agent_cfg)
+        all_configs.append(mc.defaults)
         if mc.summarizer:
-            providers.add(mc.summarizer.provider)
-        for critic in mc.critics:
-            providers.add(critic.provider)
-        for provider in sorted(providers):
+            all_configs.append(mc.summarizer)
+        all_configs.extend(mc.critics)
+
+        for cfg in all_configs:
+            if cfg.mode == "api":
+                api_providers.add(cfg.provider)
+            elif cfg.mode == "sdk":
+                if cfg.provider == "anthropic":
+                    needs_claude_cli = True
+                elif cfg.provider == "openai":
+                    needs_codex_cli = True
+
+        for provider in sorted(api_providers):
             err = _check_provider_auth(provider)
             if err:
                 errors.append(err)
+
+        # Check SDK CLI availability and login status
+        if needs_claude_cli:
+            claude_bin = shutil.which("claude")
+            if not claude_bin:
+                errors.append(
+                    "Claude Code CLI not found (needed by Anthropic SDK agents). "
+                    "Install: npm install -g @anthropic-ai/claude-code"
+                )
+            else:
+                err = _check_claude_cli_auth(claude_bin)
+                if err:
+                    errors.append(err)
+
+        if needs_codex_cli:
+            codex_bin = shutil.which("codex")
+            if not codex_bin:
+                errors.append(
+                    "Codex CLI not found (needed by OpenAI SDK agents). "
+                    "Install: npm install -g @openai/codex"
+                )
+            else:
+                err = _check_codex_cli_auth()
+                if err:
+                    errors.append(err)
 
         # Check model names exist
         errors.extend(_validate_model_names(mc))

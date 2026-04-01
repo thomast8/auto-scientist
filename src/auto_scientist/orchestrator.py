@@ -64,6 +64,59 @@ def _check_provider_auth(provider: str) -> str | None:
         return f"Unknown provider: {provider}"
 
 
+def _check_claude_cli_auth(claude_bin: str) -> str | None:
+    """Check that the Claude Code CLI is logged in. Returns error message or None."""
+    import subprocess
+
+    try:
+        result = subprocess.run(
+            [claude_bin, "auth", "status"],
+            capture_output=True,
+            text=True,
+            timeout=10,
+        )
+        if result.returncode != 0:
+            return (
+                "Claude Code CLI is not logged in (needed by Anthropic SDK agents). "
+                "Run: claude login"
+            )
+        # Parse JSON output to check loggedIn field
+        import json
+
+        try:
+            status = json.loads(result.stdout)
+            if not status.get("loggedIn"):
+                return (
+                    "Claude Code CLI is not logged in (needed by Anthropic SDK agents). "
+                    "Run: claude login"
+                )
+        except (json.JSONDecodeError, KeyError):
+            pass  # If we can't parse, assume OK (returncode was 0)
+    except (subprocess.TimeoutExpired, OSError) as e:
+        logger.warning(f"Could not check Claude CLI auth status: {e}")
+    return None
+
+
+def _check_codex_cli_auth() -> str | None:
+    """Check that the Codex CLI is logged in. Returns error message or None."""
+    import json
+    from pathlib import Path
+
+    auth_path = Path.home() / ".codex" / "auth.json"
+    if not auth_path.exists():
+        return "Codex CLI is not logged in (needed by OpenAI SDK agents). Run: codex login"
+    try:
+        auth = json.loads(auth_path.read_text())
+        has_auth = bool(auth.get("tokens")) or bool(auth.get("OPENAI_API_KEY"))
+        if not has_auth:
+            return (
+                "Codex CLI has no valid credentials (needed by OpenAI SDK agents). Run: codex login"
+            )
+    except (json.JSONDecodeError, OSError) as e:
+        logger.warning(f"Could not read Codex auth file: {e}")
+    return None
+
+
 def _validate_reasoning_configs(mc: ModelConfig) -> list[str]:
     """Validate reasoning configs are compatible with their provider and model.
 
@@ -312,17 +365,30 @@ class Orchestrator:
                 elif cfg.provider == "openai":
                     needs_codex_cli = True
 
-        # Check CLI availability based on actual needs
-        if needs_claude_cli and not shutil.which("claude"):
-            errors.append(
-                "Claude Code CLI not found on PATH (needed by Anthropic SDK agents). "
-                "Install with: npm install -g @anthropic-ai/claude-code"
-            )
-        if needs_codex_cli and not shutil.which("codex"):
-            errors.append(
-                "Codex CLI not found on PATH (needed by OpenAI SDK agents). "
-                "Install with: npm install -g @openai/codex"
-            )
+        # Check CLI availability and login status based on actual needs
+        if needs_claude_cli:
+            claude_bin = shutil.which("claude")
+            if not claude_bin:
+                errors.append(
+                    "Claude Code CLI not found on PATH (needed by Anthropic SDK agents). "
+                    "Install with: npm install -g @anthropic-ai/claude-code"
+                )
+            else:
+                err = _check_claude_cli_auth(claude_bin)
+                if err:
+                    errors.append(err)
+
+        if needs_codex_cli:
+            codex_bin = shutil.which("codex")
+            if not codex_bin:
+                errors.append(
+                    "Codex CLI not found on PATH (needed by OpenAI SDK agents). "
+                    "Install with: npm install -g @openai/codex"
+                )
+            else:
+                err = _check_codex_cli_auth()
+                if err:
+                    errors.append(err)
 
         # Validate model names against provider APIs
         model_errors = _validate_model_names(mc)
