@@ -58,7 +58,12 @@ BUILTIN_PRESETS: dict[str, dict] = {
     # Smoke tests, cheapest possible, quality not important
     "turbo": {
         "defaults": {"model": "claude-haiku-4-5-20251001", "reasoning": "off"},
-        "summarizer": {"provider": "openai", "model": "gpt-5.4-nano", "reasoning": "off"},
+        "summarizer": {
+            "provider": "openai",
+            "model": "gpt-5.4-nano",
+            "reasoning": "off",
+            "mode": "api",
+        },
         "critics": [
             {"provider": "google", "model": "gemini-3-flash-preview", "reasoning": "off"},
             {"provider": "google", "model": "gemini-3-flash-preview", "reasoning": "off"},
@@ -68,7 +73,12 @@ BUILTIN_PRESETS: dict[str, dict] = {
     "fast": {
         "defaults": {"model": "claude-haiku-4-5-20251001", "reasoning": "low"},
         "scientist": {"model": "claude-sonnet-4-6", "reasoning": "low"},
-        "summarizer": {"provider": "openai", "model": "gpt-5.4-nano", "reasoning": "off"},
+        "summarizer": {
+            "provider": "openai",
+            "model": "gpt-5.4-nano",
+            "reasoning": "off",
+            "mode": "api",
+        },
         "critics": [
             {"provider": "openai", "model": "gpt-5.4-mini", "reasoning": "low"},
             {"provider": "anthropic", "model": "claude-haiku-4-5-20251001", "reasoning": "low"},
@@ -78,7 +88,12 @@ BUILTIN_PRESETS: dict[str, dict] = {
     "default": {
         "defaults": {"model": "claude-sonnet-4-6", "reasoning": "medium"},
         "scientist": {"model": "claude-opus-4-6", "reasoning": "medium"},
-        "summarizer": {"provider": "openai", "model": "gpt-5.4-nano", "reasoning": "off"},
+        "summarizer": {
+            "provider": "openai",
+            "model": "gpt-5.4-nano",
+            "reasoning": "off",
+            "mode": "api",
+        },
         "critics": [
             {"provider": "openai", "model": "gpt-5.4-mini", "reasoning": "medium"},
             {"provider": "anthropic", "model": "claude-sonnet-4-6", "reasoning": "medium"},
@@ -90,7 +105,12 @@ BUILTIN_PRESETS: dict[str, dict] = {
         "analyst": {"model": "claude-opus-4-6", "reasoning": "medium"},
         "scientist": {"model": "claude-opus-4-6", "reasoning": "high"},
         "assessor": {"model": "claude-opus-4-6", "reasoning": "medium"},
-        "summarizer": {"provider": "openai", "model": "gpt-5.4-nano", "reasoning": "off"},
+        "summarizer": {
+            "provider": "openai",
+            "model": "gpt-5.4-nano",
+            "reasoning": "off",
+            "mode": "api",
+        },
         "critics": [
             {"provider": "openai", "model": "gpt-5.4", "reasoning": "high"},
             {"provider": "anthropic", "model": "claude-opus-4-6", "reasoning": "high"},
@@ -103,7 +123,12 @@ BUILTIN_PRESETS: dict[str, dict] = {
         "coder": {"model": "claude-sonnet-4-6", "reasoning": "high"},
         "ingestor": {"model": "claude-sonnet-4-6", "reasoning": "high"},
         "report": {"model": "claude-sonnet-4-6", "reasoning": "high"},
-        "summarizer": {"provider": "openai", "model": "gpt-5.4-mini", "reasoning": "off"},
+        "summarizer": {
+            "provider": "openai",
+            "model": "gpt-5.4-mini",
+            "reasoning": "off",
+            "mode": "api",
+        },
         "critics": [
             {"provider": "openai", "model": "gpt-5.4", "reasoning": "max"},
             {"provider": "anthropic", "model": "claude-opus-4-6", "reasoning": "max"},
@@ -121,10 +146,15 @@ _OPENAI_PRESETS: dict[str, dict] = {
             "model": "gpt-5.4-nano",
             "reasoning": "off",
         },
-        "summarizer": {"provider": "openai", "model": "gpt-5.4-nano", "reasoning": "off"},
+        "summarizer": {
+            "provider": "openai",
+            "model": "gpt-5.4-nano",
+            "reasoning": "off",
+            "mode": "api",
+        },
         "critics": [
             {"provider": "openai", "model": "gpt-5.4-nano", "reasoning": "off"},
-            {"provider": "openai", "model": "gpt-5.4-nano", "reasoning": "off"},
+            {"provider": "anthropic", "model": "claude-haiku-4-5-20251001", "reasoning": "off"},
         ],
     },
     "fast-openai": {
@@ -134,10 +164,15 @@ _OPENAI_PRESETS: dict[str, dict] = {
             "reasoning": "low",
         },
         "scientist": {"provider": "openai", "model": "gpt-5.4-mini", "reasoning": "low"},
-        "summarizer": {"provider": "openai", "model": "gpt-5.4-nano", "reasoning": "off"},
+        "summarizer": {
+            "provider": "openai",
+            "model": "gpt-5.4-nano",
+            "reasoning": "off",
+            "mode": "api",
+        },
         "critics": [
             {"provider": "openai", "model": "gpt-5.4-mini", "reasoning": "low"},
-            {"provider": "openai", "model": "gpt-5.4-nano", "reasoning": "low"},
+            {"provider": "anthropic", "model": "claude-haiku-4-5-20251001", "reasoning": "low"},
         ],
     },
     "default-openai": {
@@ -147,10 +182,15 @@ _OPENAI_PRESETS: dict[str, dict] = {
             "reasoning": "medium",
         },
         "scientist": {"provider": "openai", "model": "gpt-5.4", "reasoning": "medium"},
-        "summarizer": {"provider": "openai", "model": "gpt-5.4-nano", "reasoning": "off"},
+        "summarizer": {
+            "provider": "openai",
+            "model": "gpt-5.4-nano",
+            "reasoning": "off",
+            "mode": "api",
+        },
         "critics": [
             {"provider": "openai", "model": "gpt-5.4-mini", "reasoning": "medium"},
-            {"provider": "openai", "model": "gpt-5.4-mini", "reasoning": "medium"},
+            {"provider": "anthropic", "model": "claude-sonnet-4-6", "reasoning": "medium"},
         ],
     },
     "high-openai": {
@@ -162,10 +202,15 @@ _OPENAI_PRESETS: dict[str, dict] = {
         "analyst": {"provider": "openai", "model": "gpt-5.4", "reasoning": "medium"},
         "scientist": {"provider": "openai", "model": "gpt-5.4", "reasoning": "high"},
         "assessor": {"provider": "openai", "model": "gpt-5.4", "reasoning": "medium"},
-        "summarizer": {"provider": "openai", "model": "gpt-5.4-nano", "reasoning": "off"},
+        "summarizer": {
+            "provider": "openai",
+            "model": "gpt-5.4-nano",
+            "reasoning": "off",
+            "mode": "api",
+        },
         "critics": [
             {"provider": "openai", "model": "gpt-5.4", "reasoning": "high"},
-            {"provider": "openai", "model": "gpt-5.4", "reasoning": "high"},
+            {"provider": "anthropic", "model": "claude-opus-4-6", "reasoning": "high"},
         ],
     },
     "max-openai": {
@@ -178,10 +223,15 @@ _OPENAI_PRESETS: dict[str, dict] = {
         "coder": {"provider": "openai", "model": "gpt-5.4-mini", "reasoning": "high"},
         "ingestor": {"provider": "openai", "model": "gpt-5.4-mini", "reasoning": "high"},
         "report": {"provider": "openai", "model": "gpt-5.4-mini", "reasoning": "high"},
-        "summarizer": {"provider": "openai", "model": "gpt-5.4-mini", "reasoning": "off"},
+        "summarizer": {
+            "provider": "openai",
+            "model": "gpt-5.4-mini",
+            "reasoning": "off",
+            "mode": "api",
+        },
         "critics": [
             {"provider": "openai", "model": "gpt-5.4", "reasoning": "max"},
-            {"provider": "openai", "model": "gpt-5.4", "reasoning": "max"},
+            {"provider": "anthropic", "model": "claude-opus-4-6", "reasoning": "max"},
         ],
     },
 }
