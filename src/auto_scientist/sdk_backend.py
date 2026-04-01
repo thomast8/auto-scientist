@@ -128,6 +128,14 @@ class ClaudeBackend:
             )
             env["ANTHROPIC_API_KEY"] = ""
 
+        # When reasoning is "off" (no effort key in extra_args), disable
+        # extended thinking via env var.  The Claude Code CLI has no
+        # --effort off/none flag; omitting --effort lets the model use
+        # adaptive thinking by default.  MAX_THINKING_TOKENS=0 is the
+        # only way to fully suppress it.
+        if "effort" not in options.extra_args:
+            env["MAX_THINKING_TOKENS"] = "0"
+
         kwargs: dict[str, Any] = {
             "system_prompt": options.system_prompt,
             "allowed_tools": options.allowed_tools,
@@ -194,11 +202,19 @@ class CodexBackend:
             return "workspace-write"
         return "read-only"
 
-    def _resolve_effort(self, extra_args: dict[str, str | None]) -> str | None:
-        """Map extra_args effort to Codex reasoning effort string."""
+    def _resolve_effort(self, extra_args: dict[str, str | None]) -> str:
+        """Map extra_args effort to Codex reasoning effort string.
+
+        Unlike the Claude Code CLI (which defaults to no extended thinking
+        when --effort is omitted), the Codex SDK lets the model choose its
+        own reasoning level when effort is unset.  For gpt-5.4-mini this
+        can mean uncapped reasoning that produces no streaming events,
+        triggering the inactivity timeout on large prompts.  We therefore
+        default to ``"none"`` so reasoning is always explicitly controlled.
+        """
         effort = extra_args.get("effort")
         if effort is None:
-            return None
+            return "none"
         return _CODEX_EFFORT_MAP.get(effort, effort)
 
     async def query(self, prompt: str, options: SDKOptions) -> AsyncIterator[SDKMessage]:
@@ -246,6 +262,7 @@ class CodexBackend:
         client = CodexClient.connect_stdio(
             cwd=str(options.cwd) if options.cwd else None,
             env=env,
+            inactivity_timeout=600.0,
         )
         try:
             await client.start()

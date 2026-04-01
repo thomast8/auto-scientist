@@ -260,7 +260,7 @@ class TestCodexBackend:
         backend = CodexBackend()
         assert backend._resolve_effort({"effort": "high"}) == "high"
         assert backend._resolve_effort({"effort": "max"}) == "xhigh"
-        assert backend._resolve_effort({}) is None
+        assert backend._resolve_effort({}) == "none"
 
     @staticmethod
     def _make_mock_step(text: str, thread_id: str = "thr-123") -> MagicMock:

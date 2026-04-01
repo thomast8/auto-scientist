@@ -10,6 +10,7 @@ import logging
 from pathlib import Path
 from typing import Any
 
+from auto_scientist.model_config import ReasoningConfig, reasoning_to_cc_extra_args
 from auto_scientist.prompts.scientist import (
     SCIENTIST_REVISION_SYSTEM,
     SCIENTIST_REVISION_USER,
@@ -160,6 +161,7 @@ async def run_scientist(
     message_buffer: list[str] | None = None,
     goal: str = "",
     provider: str = "anthropic",
+    reasoning: ReasoningConfig | None = None,
 ) -> dict[str, Any]:
     """Formulate hypothesis and plan based on analysis.
 
@@ -205,6 +207,10 @@ async def run_scientist(
         f"Schema:\n{json.dumps(SCIENTIST_PLAN_SCHEMA, indent=2)}"
     )
 
+    extra_args: dict[str, str | None] = {"setting-sources": ""}
+    if reasoning and reasoning.level != "off":
+        extra_args.update(reasoning_to_cc_extra_args(reasoning))
+
     max_turns = 10
     backend = get_backend(provider)
     options = SDKOptions(
@@ -214,7 +220,7 @@ async def run_scientist(
         allowed_tools=SCIENTIST_TOOLS,
         max_turns=max_turns,
         model=model,
-        extra_args={"setting-sources": ""},
+        extra_args=extra_args,
     )
 
     correction_hint = ""
@@ -258,6 +264,7 @@ async def run_scientist_revision(
     message_buffer: list[str] | None = None,
     goal: str = "",
     provider: str = "anthropic",
+    reasoning: ReasoningConfig | None = None,
 ) -> dict[str, Any]:
     """Revise the plan after a critic debate.
 
@@ -272,6 +279,7 @@ async def run_scientist_revision(
         model: Model override.
         message_buffer: Optional buffer for streaming messages.
         goal: The user's investigation goal.
+        reasoning: Reasoning/effort config for the model.
 
     Returns:
         Revised plan dict (same schema as the initial plan).
@@ -299,6 +307,10 @@ async def run_scientist_revision(
         f"Schema:\n{json.dumps(SCIENTIST_PLAN_SCHEMA, indent=2)}"
     )
 
+    extra_args: dict[str, str | None] = {"setting-sources": ""}
+    if reasoning and reasoning.level != "off":
+        extra_args.update(reasoning_to_cc_extra_args(reasoning))
+
     max_turns = 10
     backend = get_backend(provider)
     options = SDKOptions(
@@ -308,7 +320,7 @@ async def run_scientist_revision(
         allowed_tools=SCIENTIST_TOOLS,
         max_turns=max_turns,
         model=model,
-        extra_args={"setting-sources": ""},
+        extra_args=extra_args,
     )
 
     correction_hint = ""

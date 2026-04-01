@@ -1305,6 +1305,7 @@ class Orchestrator:
                     message_buffer=buf,
                     goal=self.state.goal,
                     provider=cfg.provider,
+                    reasoning=cfg.reasoning,
                 )
 
             plan: dict[str, Any] = await self._with_summaries(
@@ -1966,6 +1967,7 @@ class Orchestrator:
                     message_buffer=buf,
                     goal=self.state.goal,
                     provider=cfg.provider,
+                    reasoning=cfg.reasoning,
                 )
 
             revised: dict[str, Any] = await self._with_summaries(
