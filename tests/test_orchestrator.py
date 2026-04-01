@@ -48,7 +48,7 @@ class TestOrchestratorInit:
         o = Orchestrator(state=base_state, data_path=tmp_path, output_dir=tmp_path)
         assert o.max_iterations == 20
         assert len(o.model_config.critics) == 2
-        assert o.max_consecutive_failures == 5
+        assert o.max_consecutive_failures == 3
 
     def test_custom_values(self, base_state, tmp_path):
         mc = ModelConfig(
@@ -546,6 +546,30 @@ class TestRunIngestion:
         assert result == canonical
         mock_ingestor.assert_called_once()
 
+    @pytest.mark.asyncio
+    @patch(
+        "auto_scientist.agents.ingestor.run_ingestor",
+        new_callable=AsyncMock,
+        side_effect=RuntimeError("LLM error"),
+    )
+    async def test_error_returns_none_and_records_failure(self, _mock_ingestor, tmp_path):
+        """Ingestor error returns None instead of raising, records failure."""
+        state = ExperimentState(
+            domain="test",
+            goal="g",
+            phase="ingestion",
+            data_path=str(tmp_path / "raw.csv"),
+        )
+        o = Orchestrator(
+            state=state,
+            data_path=tmp_path / "raw.csv",
+            output_dir=tmp_path / "experiments",
+        )
+        result = await o._run_ingestion()
+
+        assert result is None
+        assert state.consecutive_failures == 1
+
 
 class TestPhaseTransitions:
     @pytest.mark.asyncio
@@ -566,31 +590,7 @@ class TestPhaseTransitions:
 
         with (
             patch.object(o, "_validate_prerequisites"),
-            patch.object(o, "_run_report", new_callable=AsyncMock),
-        ):
-            await o.run()
-
-        assert state.phase == "stopped"
-
-    @pytest.mark.asyncio
-    async def test_consecutive_failures_triggers_report(self, tmp_path):
-        state = ExperimentState(
-            domain="test",
-            goal="g",
-            phase="iteration",
-            consecutive_failures=5,
-        )
-        o = Orchestrator(
-            state=state,
-            data_path=tmp_path,
-            output_dir=tmp_path,
-            max_consecutive_failures=5,
-        )
-        o.config = DomainConfig(name="t", description="d", data_paths=[])
-
-        with (
-            patch.object(o, "_validate_prerequisites"),
-            patch.object(o, "_run_report", new_callable=AsyncMock),
+            patch.object(o, "_run_report", new_callable=AsyncMock, return_value=True),
         ):
             await o.run()
 
@@ -621,7 +621,7 @@ class TestPhaseTransitions:
         with (
             patch.object(o, "_validate_prerequisites"),
             patch.object(o, "_run_ingestion", new_callable=AsyncMock, return_value=canonical),
-            patch.object(o, "_run_report", new_callable=AsyncMock),
+            patch.object(o, "_run_report", new_callable=AsyncMock, return_value=True),
         ):
             await o.run()
 
@@ -646,11 +646,41 @@ class TestPhaseTransitions:
 
         with (
             patch.object(o, "_validate_prerequisites"),
-            patch.object(o, "_run_report", new_callable=AsyncMock) as mock_report,
+            patch.object(
+                o, "_run_report", new_callable=AsyncMock, return_value=True
+            ) as mock_report,
         ):
             await o.run()
 
         mock_report.assert_called_once()
+        assert state.phase == "stopped"
+
+    @pytest.mark.asyncio
+    async def test_consecutive_failures_stops_without_report(self, tmp_path):
+        """Consecutive failures go straight to stopped, skipping report."""
+        state = ExperimentState(
+            domain="test",
+            goal="g",
+            phase="iteration",
+            consecutive_failures=3,
+        )
+        o = Orchestrator(
+            state=state,
+            data_path=tmp_path,
+            output_dir=tmp_path,
+            max_consecutive_failures=3,
+        )
+        o.config = DomainConfig(name="t", description="d", data_paths=[])
+
+        with (
+            patch.object(o, "_validate_prerequisites"),
+            patch.object(
+                o, "_run_report", new_callable=AsyncMock, return_value=True
+            ) as mock_report,
+        ):
+            await o.run()
+
+        mock_report.assert_not_called()
         assert state.phase == "stopped"
 
 
@@ -1886,22 +1916,22 @@ class TestRunReportOrchestrator:
     async def test_calls_run_report(self, orchestrator, tmp_path):
         orchestrator.output_dir.mkdir(parents=True, exist_ok=True)
 
-        report_path = orchestrator.output_dir / "report.md"
-
         with patch(
             "auto_scientist.agents.report.run_report",
             new_callable=AsyncMock,
-            return_value=report_path,
+            return_value="# Report\nDone.",
         ) as mock_report:
-            await orchestrator._run_report()
+            result = await orchestrator._run_report()
 
         mock_report.assert_called_once()
         call_kwargs = mock_report.call_args.kwargs
         assert call_kwargs["state"] is orchestrator.state
         assert call_kwargs["output_dir"] == orchestrator.output_dir
+        assert result is True
 
     @pytest.mark.asyncio
-    async def test_error_does_not_raise(self, orchestrator, tmp_path):
+    async def test_error_returns_false_and_records_failure(self, orchestrator, tmp_path):
+        """Report error returns False and records failure instead of raising."""
         orchestrator.output_dir.mkdir(parents=True, exist_ok=True)
 
         with patch(
@@ -1909,10 +1939,10 @@ class TestRunReportOrchestrator:
             new_callable=AsyncMock,
             side_effect=RuntimeError("Report failed"),
         ):
-            await orchestrator._run_report()
+            result = await orchestrator._run_report()
 
-        # Error is handled internally (logged + panel error state), not raised
-        # The test passes if no exception propagates
+        assert result is False
+        assert orchestrator.state.consecutive_failures == 1
 
 
 class TestRunFullOrchestration:
@@ -1939,7 +1969,7 @@ class TestRunFullOrchestration:
 
         with (
             patch.object(o, "_validate_prerequisites"),
-            patch.object(o, "_run_report", new_callable=AsyncMock),
+            patch.object(o, "_run_report", new_callable=AsyncMock, return_value=True),
         ):
             await o.run()
 
@@ -1983,7 +2013,7 @@ class TestRunFullOrchestration:
             patch.object(o, "_run_scientist_revision", new_callable=AsyncMock, return_value=None),
             patch.object(o, "_run_coder", new_callable=AsyncMock, return_value=script_path),
             patch.object(o, "_read_run_result", return_value=run_result),
-            patch.object(o, "_run_report", new_callable=AsyncMock),
+            patch.object(o, "_run_report", new_callable=AsyncMock, return_value=True),
         ):
             await o.run()
 
@@ -2025,7 +2055,7 @@ class TestRunIngestionFull:
                 new_callable=AsyncMock,
                 return_value=canonical,
             ),
-            patch.object(o, "_run_report", new_callable=AsyncMock),
+            patch.object(o, "_run_report", new_callable=AsyncMock, return_value=True),
         ):
             await o.run()
 
@@ -2064,7 +2094,7 @@ class TestRunIngestionFull:
                 new_callable=AsyncMock,
                 return_value=canonical,
             ),
-            patch.object(o, "_run_report", new_callable=AsyncMock),
+            patch.object(o, "_run_report", new_callable=AsyncMock, return_value=True),
         ):
             await o.run()
 
@@ -2121,7 +2151,7 @@ class TestSummaryIntegration:
             patch.object(o, "_run_scientist_plan", new_callable=AsyncMock, return_value=plan),
             patch.object(o, "_run_coder", new_callable=AsyncMock, return_value=script_path),
             patch.object(o, "_read_run_result", return_value=run_result),
-            patch.object(o, "_run_report", new_callable=AsyncMock),
+            patch.object(o, "_run_report", new_callable=AsyncMock, return_value=True),
             patch(
                 "auto_scientist.orchestrator.run_with_summaries", new_callable=AsyncMock
             ) as mock_rws,
@@ -2179,7 +2209,7 @@ class TestSummaryIntegration:
                 return_value=script_path,
             ),
             patch.object(o, "_read_run_result", return_value=run_result),
-            patch.object(o, "_run_report", new_callable=AsyncMock),
+            patch.object(o, "_run_report", new_callable=AsyncMock, return_value=True),
             patch(
                 "auto_scientist.orchestrator.run_with_summaries", new_callable=AsyncMock
             ) as mock_rws,

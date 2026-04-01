@@ -284,7 +284,7 @@ class Orchestrator:
         max_iterations: int = 20,
         model_config: ModelConfig | None = None,
         interactive: bool = False,
-        max_consecutive_failures: int = 5,
+        max_consecutive_failures: int = 3,
         verbose: bool = False,
         skip_to_agent: str | None = None,
         restored_panels: list[dict] | None = None,
@@ -475,43 +475,53 @@ class Orchestrator:
 
                 canonical_data_dir = await self._run_ingestion()
 
-                self.state.data_path = str(canonical_data_dir)
-                self.data_path = canonical_data_dir
+                if canonical_data_dir is None:
+                    self.state.phase = "stopped"
+                    self.state.save(state_path)
+                    iter_summary = await self._generate_iteration_summary()
+                    self._save_iteration_manifest(
+                        "Ingestion", "failed (ingestor error)", "red", iter_summary
+                    )
+                    self._live.end_iteration("failed (ingestor error)", "red", iter_summary)
+                    self._live.flush_completed()
+                else:
+                    self.state.data_path = str(canonical_data_dir)
+                    self.data_path = canonical_data_dir
 
-                # Load config if produced by ingestor
-                config_path = self.output_dir / "domain_config.json"
-                if config_path.exists():
-                    config_data = json.loads(config_path.read_text())
-                    self.config = DomainConfig.model_validate(config_data)
-                    self.state.config_path = str(config_path)
+                    # Load config if produced by ingestor
+                    config_path = self.output_dir / "domain_config.json"
+                    if config_path.exists():
+                        config_data = json.loads(config_path.read_text())
+                        self.config = DomainConfig.model_validate(config_data)
+                        self.state.config_path = str(config_path)
 
-                self.state.phase = "iteration"
-                self.state.save(state_path)
-                logger.info("Ingestion complete, entering iteration phase")
+                    self.state.phase = "iteration"
+                    self.state.save(state_path)
+                    logger.info("Ingestion complete, entering iteration phase")
 
-                iter_summary = await self._generate_iteration_summary()
-                self._save_iteration_manifest("Ingestion", "done", "green", iter_summary)
-                self._live.end_iteration("done", "green", iter_summary)
-                self._live.flush_completed()
+                    iter_summary = await self._generate_iteration_summary()
+                    self._save_iteration_manifest("Ingestion", "done", "green", iter_summary)
+                    self._live.end_iteration("done", "green", iter_summary)
+                    self._live.flush_completed()
 
             # Phase 1: Unified iteration loop
             while self.state.phase == "iteration":
-                if self.state.iteration >= self.max_iterations:
-                    self._live.add_rule(
-                        Rule(
-                            f"Reached max iterations ({self.max_iterations}). Stopping.",
-                            style="yellow",
-                        )
-                    )
-                    self._live.flush_completed()
-                    self.state.phase = "report"
-                    break
-
                 if self.state.should_stop_on_failures(self.max_consecutive_failures):
                     self._live.add_rule(
                         Rule(
                             f"Hit {self.max_consecutive_failures} consecutive failures. Stopping.",
                             style="red",
+                        )
+                    )
+                    self._live.flush_completed()
+                    self.state.phase = "stopped"
+                    break
+
+                if self.state.iteration >= self.max_iterations:
+                    self._live.add_rule(
+                        Rule(
+                            f"Reached max iterations ({self.max_iterations}). Stopping.",
+                            style="yellow",
                         )
                     )
                     self._live.flush_completed()
@@ -545,18 +555,17 @@ class Orchestrator:
                     await self._resolve_final_predictions()
                     self.state.save(state_path)
 
-                await self._run_report()
+                report_ok = await self._run_report()
                 self.state.phase = "stopped"
                 self.state.save(state_path)
 
+                if report_ok:
+                    label, style = "done", "green"
+                else:
+                    label, style = "failed (report error)", "red"
                 iter_summary = await self._generate_iteration_summary()
-                self._save_iteration_manifest(
-                    "Report",
-                    "done",
-                    "green",
-                    iter_summary,
-                )
-                self._live.end_iteration("done", "green", iter_summary)
+                self._save_iteration_manifest("Report", label, style, iter_summary)
+                self._live.end_iteration(label, style, iter_summary)
                 self._live.flush_completed()
 
             logger.info("Run finished successfully")
@@ -564,7 +573,7 @@ class Orchestrator:
             self._live.wait_for_dismiss()
             self._live.stop()
 
-    async def _run_ingestion(self) -> Path:
+    async def _run_ingestion(self) -> Path | None:
         """Phase 0: Canonicalize raw data into experiments/data/."""
         from auto_scientist.agents.ingestor import run_ingestor
 
@@ -612,7 +621,8 @@ class Orchestrator:
             logger.exception(f"Ingestor error: {e}")
             panel.error(str(e))
             self._live.collapse_panel(panel)
-            raise
+            self.state.record_failure()
+            return None
         finally:
             self._persist_buffer("ingestor", buffer)
 
@@ -1532,12 +1542,13 @@ class Orchestrator:
                 failed_msgs = [str(r) for r in raw_results if isinstance(r, BaseException)]
                 logger.error(
                     f"All {len(raw_results)} stop debates failed. "
-                    f"Stop gate returning None. Errors: {failed_msgs}"
+                    f"Upholding scientist's stop decision. Errors: {failed_msgs}"
                 )
                 self._live.log(
-                    f"STOP DEBATE: all {len(raw_results)} debates failed, stop gate cannot validate"
+                    f"STOP DEBATE: all {len(raw_results)} debates failed, "
+                    f"upholding scientist's stop decision"
                 )
-                return None
+                return plan
 
             self._live.log(f"STOP DEBATE: received {len(debate_results)} critique(s)")
 
@@ -2301,7 +2312,7 @@ class Orchestrator:
         if results_path.exists():
             version_entry.results_path = str(results_path)
 
-    async def _run_report(self) -> None:
+    async def _run_report(self) -> bool:
         """Phase 2: Generate final summary report."""
         from auto_scientist.agents.report import run_report
 
@@ -2329,9 +2340,12 @@ class Orchestrator:
             report_path = self.output_dir / "report.md"
             report_path.write_text(report_content)
             self._collapse(panel, f"Written to {report_path}")
+            return True
         except Exception as e:
             logger.exception(f"Report error: {e}")
             panel.error(str(e))
             self._live.collapse_panel(panel)
+            self.state.record_failure()
+            return False
         finally:
             self._persist_buffer("report", buffer)

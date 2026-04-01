@@ -175,6 +175,26 @@ def _strip_markdown_fencing(raw: str) -> str:
     return raw
 
 
+def _find_json_object(text: str) -> tuple[Any, int, int] | None:
+    """Scan *text* for the first valid JSON object or array.
+
+    Tries ``raw_decode`` at every ``{`` and ``[`` position until one succeeds.
+    Returns ``(parsed, start_idx, end_idx)`` or ``None``.
+
+    This handles Codex output where shell commands containing ``{`` appear
+    before the actual JSON block.
+    """
+    decoder = json.JSONDecoder()
+    for i, ch in enumerate(text):
+        if ch in "{[":
+            try:
+                parsed, length = decoder.raw_decode(text, i)
+                return parsed, i, i + length
+            except json.JSONDecodeError:
+                continue
+    return None
+
+
 def validate_json_output(
     raw: str,
     model_cls: type[BaseModel],
@@ -185,10 +205,16 @@ def validate_json_output(
     Returns model_dump() dict on success.
     Raises OutputValidationError on JSON parse or schema validation failure.
 
-    Uses raw_decode() to extract the first JSON object, tolerating
-    trailing text that models sometimes append after the JSON.
+    Uses a two-phase approach:
+    1. Fast path: strip markdown fencing, then raw_decode from position 0.
+    2. Slow path (on failure): scan every ``{``/``[`` with raw_decode until
+       one parses. This handles Codex output where shell commands containing
+       braces appear before the actual JSON.
     """
     cleaned = _strip_markdown_fencing(raw)
+
+    # Fast path: try raw_decode from the start (works for clean output)
+    parsed = None
     try:
         parsed, end_idx = json.JSONDecoder().raw_decode(cleaned)
         trailing = cleaned[end_idx:].strip()
@@ -197,12 +223,25 @@ def validate_json_output(
                 f"{agent_name}: raw_decode ignored {len(trailing)} chars of trailing content: "
                 f"{trailing[:200]!r}"
             )
-    except json.JSONDecodeError as e:
+    except json.JSONDecodeError:
+        # Slow path: scan for the first valid JSON object/array.
+        # This handles Codex output with shell commands before the JSON.
+        result = _find_json_object(cleaned)
+        if result is not None:
+            parsed, start_idx, _end_idx = result
+            logger.warning(
+                f"{agent_name}: found JSON at position {start_idx} after "
+                f"skipping non-JSON content: {cleaned[:start_idx][:200]!r}"
+            )
+
+    if parsed is None:
         raise OutputValidationError(
             raw_output=raw,
-            validation_error=e,
+            validation_error=json.JSONDecodeError(
+                "No valid JSON object found in output", raw[:500], 0
+            ),
             agent_name=agent_name,
-        ) from e
+        )
 
     try:
         validated = model_cls.model_validate(parsed)

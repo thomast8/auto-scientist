@@ -218,6 +218,36 @@ class TestValidateJsonOutput:
         result = validate_json_output(raw, AnalystOutput, "Analyst")
         assert result["observations"] == ["ok"]
 
+    def test_json_after_shell_commands(self):
+        """JSON extraction works when shell commands with braces precede the JSON."""
+        shell_noise = (
+            '/bin/zsh -lc "python -c \\"from pathlib import Path; '
+            "base=Path('/Users/foo')\\\"\"\\n"
+            '/bin/zsh -lc "python -c \\"import csv; '
+            '{s:steps.count(s) for s in steps}\\""\\n'
+        )
+        data = {
+            "key_metrics": {"rmse": 0.5},
+            "improvements": ["better"],
+            "regressions": [],
+            "observations": ["ok"],
+        }
+        raw = shell_noise + json.dumps(data)
+        result = validate_json_output(raw, AnalystOutput, "Analyst")
+        assert result["key_metrics"] == {"rmse": 0.5}
+
+    def test_json_after_braces_in_prose(self):
+        """Handles {curly braces} in prose before the actual JSON."""
+        data = {
+            "key_metrics": {},
+            "improvements": [],
+            "regressions": [],
+            "observations": ["ok"],
+        }
+        raw = "The set {a, b, c} is interesting.\n" + json.dumps(data)
+        result = validate_json_output(raw, AnalystOutput, "Analyst")
+        assert result["observations"] == ["ok"]
+
 
 # ---------------------------------------------------------------------------
 # collect_text_from_query

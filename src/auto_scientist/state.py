@@ -77,6 +77,6 @@ class ExperimentState(BaseModel):
         """Reset consecutive failure counter on success."""
         self.consecutive_failures = 0
 
-    def should_stop_on_failures(self, max_consecutive: int = 5) -> bool:
+    def should_stop_on_failures(self, max_consecutive: int = 3) -> bool:
         """Check if we've hit the consecutive failure cap."""
         return self.consecutive_failures >= max_consecutive
