@@ -19,7 +19,6 @@ import logging
 import random
 from typing import Any
 
-from claude_code_sdk import ClaudeCodeOptions
 from pydantic import BaseModel
 
 from auto_scientist.agent_result import AgentResult
@@ -40,6 +39,7 @@ from auto_scientist.prompts.critic import (
     PERSONAS,
     get_model_index_for_debate,
 )
+from auto_scientist.sdk_backend import SDKOptions, get_backend
 from auto_scientist.sdk_utils import (
     OutputValidationError,
     collect_text_from_query,
@@ -92,21 +92,22 @@ async def _query_critic(
             reasoning=config.reasoning,
             response_schema=response_schema,
         )
-    elif config.provider == "anthropic":
+    elif config.provider in ("anthropic", "openai"):
+        # SDK mode: use the backend abstraction (supports both Claude Code and Codex)
         extra_args: dict[str, str | None] = {"setting-sources": ""}
         if config.reasoning and config.reasoning.level != "off":
             extra_args.update(reasoning_to_cc_extra_args(config.reasoning))
-        max_turns = 5  # Allows 1-2 web searches + structured JSON response + buffer
+        max_turns = 5
         allowed_tools = ["WebSearch"]
-        options = ClaudeCodeOptions(
+        backend = get_backend(config.provider)
+        options = SDKOptions(
             model=config.model,
             system_prompt=with_turn_budget(system_prompt, max_turns, allowed_tools),
             allowed_tools=allowed_tools,
             max_turns=max_turns,
             extra_args=extra_args,
         )
-        text, usage = await collect_text_from_query(prompt, options, message_buffer)
-        # SDK splits input tokens across cache buckets
+        text, usage = await collect_text_from_query(prompt, options, backend, message_buffer)
         in_tok = (
             usage.get("input_tokens", 0)
             + usage.get("cache_creation_input_tokens", 0)
