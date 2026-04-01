@@ -16,7 +16,6 @@ from auto_scientist.agents.debate_models import (
     CRITIC_OUTPUT_SCHEMA,
     CriticOutput,
     DebateResult,
-    DebateRound,
 )
 from auto_scientist.agents.scientist import SCIENTIST_PLAN_SCHEMA
 from auto_scientist.model_config import AgentModelConfig
@@ -225,12 +224,10 @@ async def run_single_stop_debate(
         message_buffer=message_buffer,
     )
 
-    rounds = [DebateRound(critic_output=critic_output)]
-
     return DebateResult(
         persona=persona_name,
         critic_model=label,
-        rounds=rounds,
+        critic_output=critic_output,
         raw_transcript=[{"role": "critic", "content": critic_result.text}],
         input_tokens=critic_result.input_tokens,
         output_tokens=critic_result.output_tokens,

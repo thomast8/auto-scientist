@@ -1,15 +1,11 @@
-"""Prompt templates for the Critic and Scientist debate agents.
+"""Prompt templates for the Critic agents.
 
-The Critic and Scientist-in-debate use plain API calls (no agent tools).
-Both receive the full evidence base: plan + analysis JSON + prediction
-history + notebook + domain knowledge. Neither sees experiment scripts.
-
-Round 2+ critics are stateless: they receive the scientist's defense as
-additional context but are not told they are "refining" a prior critique.
-This avoids anchoring bias.
+Critics use plain API calls (no agent tools). They receive the full evidence
+base: plan + analysis JSON + prediction history + notebook + domain knowledge.
+They do not see experiment scripts.
 
 Four personas provide orthogonal critical perspectives with explicit lane
-fences and "not in your lane" examples to prevent overlap. Each debate runs
+fences and "not in your lane" examples to prevent overlap. Each critique runs
 one persona; model assignment rotates across iterations.
 
 Topic ownership:
@@ -347,7 +343,6 @@ CRITIC_USER = """\
 
 <data>
 <plan>{plan_json}</plan>
-{scientist_defense}
 </data>
 
 <task>
@@ -356,83 +351,6 @@ concerns (each tagged with severity, confidence, and category), alternative
 hypotheses, and an overall assessment.
 
 Use web search to check the literature for prior work and verify scientific claims.
-</task>
-
-<recap>
-CRITICAL: Your entire response must be a single JSON object matching the schema
-in the output_format section. Do not include any text before or after the JSON.
-No markdown fencing. No explanations. Just the raw JSON object.
-</recap>
-"""
-
-SCIENTIST_DEBATE_SYSTEM = """\
-<role>
-You are a scientist defending your experiment plan during a critique debate.
-You have web search available to support your claims with evidence.
-</role>
-
-<pipeline_context>
-You are the Scientist in a multi-round debate with an external Critic. After
-the debate, you (in a separate revision step) will incorporate valid feedback
-into a revised plan. The Coder only sees the final revised plan, not this
-debate, so focus on substance rather than posturing. Both you and the Critic
-share the full evidence base: analysis data, prediction history, lab notebook,
-and domain knowledge.
-</pipeline_context>
-
-<instructions>
-1. Defend well-motivated choices with specific reasoning. Explain the
-   evidence and logic behind your decisions.
-
-2. Actively challenge critique that adds complexity without addressing the
-   core failing criterion. Ask: "How specifically does this suggestion
-   reduce the metric that is failing?" If the critic proposes adding model
-   families or diagnostics without a clear mechanism for improvement, say
-   so. Your job is not to accommodate every suggestion but to protect the
-   plan's focus.
-
-3. Defend parsimony. If your current model achieves results within noise
-   of a more complex alternative, point this out. Occam's razor applies:
-   a simpler model that explains the data equally well is preferable.
-
-4. Acknowledge genuinely valid critique points and suggest concrete
-   adjustments to address them.
-
-5. Clarify any misunderstandings the critic may have about your plan or the
-   domain.
-
-6. Be concise and substantive. Focus on the most important points rather
-   than responding to every minor comment.
-</instructions>
-
-<output_format>
-You MUST respond with ONLY valid JSON matching this schema. No markdown
-fencing, no explanation, no other text.
-
-Schema:
-{scientist_defense_schema}
-</output_format>
-"""
-
-SCIENTIST_DEBATE_USER = """\
-<context>
-<goal>{goal}</goal>
-<domain_knowledge>{domain_knowledge}</domain_knowledge>
-<notebook>{notebook_content}</notebook>
-<analysis>{analysis_json}</analysis>
-<prediction_history>{prediction_history}</prediction_history>
-</context>
-
-<data>
-<plan>{plan_json}</plan>
-<critique>{critique}</critique>
-<critic_persona>{critic_persona}</critic_persona>
-</data>
-
-<task>
-Respond to the critic's structured feedback. For each concern, provide a
-verdict (accepted, rejected, or partially_accepted) with reasoning. Output
-your response as structured JSON.
 </task>
 
 <recap>

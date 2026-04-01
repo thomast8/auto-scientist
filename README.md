@@ -205,7 +205,6 @@ goal: >
 # Optional
 max_iterations: 20
 preset: default          # default, fast, high, max
-debate_rounds: 1         # 0 = skip debate
 schedule: "22:00-06:00"  # Time window for execution
 interactive: false       # Human-in-the-loop at decision points
 
@@ -246,7 +245,6 @@ All core agents (analyst, scientist, coder, ingestor, report) run through the [C
 | `-c, --config <path>` | | YAML config file |
 | `--preset <name>` | `default` | Model preset |
 | `--max-iterations <int>` | `20` | Maximum iterations |
-| `--debate-rounds <int>` | `1` | Debate rounds (0 = skip) |
 | `--output-dir <path>` | `experiments` | Output directory |
 | `--schedule <window>` | | Time window, e.g. `"22:00-06:00"` |
 | `--interactive` | `false` | Human-in-the-loop mode |
@@ -267,7 +265,6 @@ Resume a paused, crashed, or completed run. By default resumes in-place. With `-
 | `--max-iterations <int>` | `20` | Maximum iteration count |
 | `-c, --config <path>` | | Override model config |
 | `--preset <name>` | | Override preset |
-| `--debate-rounds <int>` | `1` | Debate rounds per persona |
 | `--no-summaries` | | Disable agent progress summaries |
 | `-v, --verbose` | | Debug logging |
 

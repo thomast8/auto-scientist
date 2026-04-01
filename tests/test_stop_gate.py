@@ -497,26 +497,6 @@ class TestRunSingleStopDebate:
             )
 
         assert isinstance(result, DebateResult)
-        assert len(result.rounds) == 1
-
-    @pytest.mark.asyncio
-    async def test_scientist_defense_is_none(self, openai_config, valid_assessment):
-        """stop debate is critic-only; scientist_defense must always be None."""
-        from auto_scientist.agents.stop_gate import run_single_stop_debate
-
-        valid_result = AgentResult(
-            text=_pad(_valid_critic_json()), input_tokens=10, output_tokens=5
-        )
-
-        with patch(QUERY_CRITIC_PATH, new_callable=AsyncMock, return_value=valid_result):
-            result = await run_single_stop_debate(
-                config=openai_config,
-                stop_reason="All criteria met",
-                completeness_assessment=valid_assessment,
-                notebook_content="",
-            )
-
-        assert result.rounds[0].scientist_defense is None
 
     @pytest.mark.asyncio
     async def test_critic_output_is_parsed(self, openai_config, valid_assessment):
@@ -545,7 +525,7 @@ class TestRunSingleStopDebate:
                 notebook_content="",
             )
 
-        critic_out = result.rounds[0].critic_output
+        critic_out = result.critic_output
         assert isinstance(critic_out, CriticOutput)
         assert len(critic_out.concerns) == 1
         assert critic_out.concerns[0].claim == "Sub-question on nonlinear effects unexplored"

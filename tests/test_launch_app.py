@@ -18,7 +18,6 @@ class TestLaunchAppConstruction:
             assert app.query_one("#goal-input") is not None
             assert app.query_one("#preset-select") is not None
             assert app.query_one("#max-iterations-input") is not None
-            assert app.query_one("#debate-rounds-input") is not None
             assert app.query_one("#output-dir-input") is not None
 
     async def test_prefill_from_config(self):

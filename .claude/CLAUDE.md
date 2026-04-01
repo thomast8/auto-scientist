@@ -11,7 +11,7 @@ Two-phase pipeline: Ingestion -> Iteration (unified loop) -> Report.
 Iteration loop (four agents, adaptive behavior):
 1. **Analyst** (observer): reads results + plots (or raw data on iteration 0), outputs structured JSON. No recommendations. On iteration 0, produces domain_knowledge + data_summary.
 2. **Scientist** (planner): pure prompt-in/JSON-out, no tools, no code access. Outputs plan + per-iteration success criteria. On iteration 1, defines top-level criteria. On iteration 2+, may revise criteria.
-3. **Critic** (challenger): multi-round debate with the Scientist. Both have web search. Full evidence base (plan + analysis JSON + prediction history + notebook + domain knowledge). Skipped on iteration 0.
+3. **Critic** (challenger): single-pass critique of the Scientist's plan. Critics have web search. Full evidence base (plan + analysis JSON + prediction history + notebook + domain knowledge). Skipped on iteration 0.
 4. **Coder** (implementer): only agent that reads/writes and runs Python code. Writes the experiment script, runs it with error correction, and reports results via run_result.json.
 
 Orchestrator flow: Ingest -> Analyst -> Scientist (plan) -> criteria update -> stop check -> (Debate, iter 1+) -> Scientist (revise) -> Coder (implement + run) -> Evaluate -> increment iteration
@@ -34,7 +34,7 @@ Orchestrator flow: Ingest -> Analyst -> Scientist (plan) -> criteria update -> s
 
 ### Key Components
 - `models/*.py`: OpenAI/Google/Anthropic wrappers with optional `web_search=True`
-- `agents/critic.py`: `run_debate()` orchestrates multi-round critic-scientist loop
+- `agents/critic.py`: `run_debate()` orchestrates parallel single-pass critiques across personas
 - `agents/scientist.py`: `run_scientist()` for initial plan, `run_scientist_revision()` for post-debate revision
 - `agents/ingestor.py`: `run_ingestor()` canonicalizes raw data into experiments/data/
 

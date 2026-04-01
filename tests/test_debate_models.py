@@ -7,9 +7,6 @@ from auto_scientist.agents.debate_models import (
     ConcernLedgerEntry,
     CriticOutput,
     DebateResult,
-    DebateRound,
-    DefenseResponse,
-    ScientistDefense,
 )
 
 
@@ -108,52 +105,6 @@ class TestCriticOutput:
         assert co.overall_assessment == "ok"
 
 
-class TestDefenseResponse:
-    def test_valid_response(self):
-        dr = DefenseResponse(
-            concern="Data quality issue",
-            verdict="accepted",
-            reasoning="Valid point, will fix.",
-        )
-        assert dr.verdict == "accepted"
-
-    def test_invalid_verdict_raises(self):
-        with pytest.raises(ValidationError):
-            DefenseResponse(
-                concern="x",
-                verdict="maybe",
-                reasoning="unsure",
-            )
-
-    def test_all_verdicts_accepted(self):
-        for verdict in ("accepted", "rejected", "partially_accepted"):
-            dr = DefenseResponse(concern="x", verdict=verdict, reasoning="ok")
-            assert dr.verdict == verdict
-
-
-class TestScientistDefense:
-    def test_valid_defense(self):
-        sd = ScientistDefense(
-            responses=[
-                {
-                    "concern": "Data issue",
-                    "verdict": "accepted",
-                    "reasoning": "Will fix.",
-                }
-            ],
-            additional_points="Checked via web search.",
-        )
-        assert len(sd.responses) == 1
-
-    def test_default_additional_points(self):
-        sd = ScientistDefense(responses=[])
-        assert sd.additional_points == ""
-
-    def test_extra_fields_tolerated(self):
-        sd = ScientistDefense(responses=[], extra="ignored")
-        assert sd.responses == []
-
-
 class TestConcernLedgerEntry:
     def test_full_entry(self):
         entry = ConcernLedgerEntry(
@@ -163,23 +114,8 @@ class TestConcernLedgerEntry:
             category="methodology",
             persona="Methodologist",
             critic_model="google:gemini-3.1-pro-preview",
-            scientist_verdict="accepted",
-            scientist_reasoning="Valid, need normalization.",
         )
         assert entry.persona == "Methodologist"
-        assert entry.scientist_verdict == "accepted"
-
-    def test_entry_without_defense(self):
-        entry = ConcernLedgerEntry(
-            claim="Redundant approach",
-            severity="medium",
-            confidence="low",
-            category="trajectory",
-            persona="Falsification Expert",
-            critic_model="openai:gpt-5.4",
-        )
-        assert entry.scientist_verdict is None
-        assert entry.scientist_reasoning is None
 
     def test_model_dump_serializable(self):
         entry = ConcernLedgerEntry(
@@ -193,29 +129,9 @@ class TestConcernLedgerEntry:
         d = entry.model_dump()
         assert isinstance(d, dict)
         assert d["claim"] == "x"
-        assert d["scientist_verdict"] is None
 
 
-class TestDebateRoundAndResult:
-    def test_debate_round_critic_only(self):
-        co = CriticOutput(
-            concerns=[],
-            alternative_hypotheses=[],
-            overall_assessment="ok",
-        )
-        dr = DebateRound(critic_output=co)
-        assert dr.scientist_defense is None
-
-    def test_debate_round_with_defense(self):
-        co = CriticOutput(
-            concerns=[],
-            alternative_hypotheses=[],
-            overall_assessment="ok",
-        )
-        sd = ScientistDefense(responses=[])
-        dr = DebateRound(critic_output=co, scientist_defense=sd)
-        assert dr.scientist_defense is not None
-
+class TestDebateResult:
     def test_debate_result(self):
         co = CriticOutput(
             concerns=[],
@@ -225,9 +141,9 @@ class TestDebateRoundAndResult:
         result = DebateResult(
             persona="Methodologist",
             critic_model="google:gemini-3.1-pro-preview",
-            rounds=[DebateRound(critic_output=co)],
+            critic_output=co,
             raw_transcript=[{"role": "critic", "content": "ok"}],
         )
         assert result.persona == "Methodologist"
-        assert len(result.rounds) == 1
+        assert result.critic_output.overall_assessment == "ok"
         assert len(result.raw_transcript) == 1

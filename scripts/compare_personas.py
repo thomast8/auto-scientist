@@ -41,7 +41,6 @@ from auto_scientist.agents.debate_models import (  # noqa: E402
     Concern,
     CriticOutput,
     DebateResult,
-    DebateRound,
 )
 from auto_scientist.agents.scientist import _format_predictions_for_prompt  # noqa: E402
 from auto_scientist.model_config import AgentModelConfig  # noqa: E402
@@ -361,7 +360,6 @@ async def run_single_sdk(
         critic_output_schema=json.dumps(CRITIC_OUTPUT_SCHEMA, indent=2),
     )
 
-    defense_section = ""
     user = CRITIC_USER.format(
         goal=inputs["goal"] or "(no goal specified)",
         domain_knowledge=inputs["domain_knowledge"] or "(none provided)",
@@ -369,7 +367,6 @@ async def run_single_sdk(
         analysis_json=inputs["analysis_json"] or "(no analysis yet)",
         prediction_history=inputs["prediction_history"] or "(no prediction history yet)",
         plan_json=json.dumps(inputs["plan"], indent=2),
-        scientist_defense=defense_section,
     )
 
     raw_text = await _query_via_sdk(config.model, system, user)
@@ -402,7 +399,7 @@ async def run_single_sdk(
     return DebateResult(
         persona=persona_name,
         critic_model=model_label,
-        rounds=[DebateRound(critic_output=critic_output)],
+        critic_output=critic_output,
         raw_transcript=[{"role": "critic", "content": raw_text}],
     )
 
@@ -432,7 +429,6 @@ async def run_single(
         plan=inputs["plan"],
         notebook_content=inputs["notebook_content"],
         domain_knowledge=inputs["domain_knowledge"],
-        max_rounds=1,
         persona=persona,
         analysis_json=inputs["analysis_json"],
         prediction_history=inputs["prediction_history"],
@@ -440,7 +436,7 @@ async def run_single(
     )
 
     elapsed = time.time() - t0
-    n_concerns = sum(len(r.critic_output.concerns) for r in result.rounds)
+    n_concerns = len(result.critic_output.concerns)
     print(
         f"  [{label}] {persona_name} x {model_label} done in {elapsed:.1f}s "
         f"({n_concerns} concerns, "
@@ -494,20 +490,19 @@ def analyze_results(
         model = result.critic_model
         by_persona.setdefault(persona, [])
         by_model.setdefault(model, 0)
-        for rnd in result.rounds:
-            for concern in rnd.critic_output.concerns:
-                by_persona[persona].append(concern)
-                by_model[model] += 1
-                all_concerns.append(
-                    {
-                        "persona": persona,
-                        "model": model,
-                        "claim": concern.claim,
-                        "severity": concern.severity,
-                        "confidence": concern.confidence,
-                        "category": concern.category,
-                    }
-                )
+        for concern in result.critic_output.concerns:
+            by_persona[persona].append(concern)
+            by_model[model] += 1
+            all_concerns.append(
+                {
+                    "persona": persona,
+                    "model": model,
+                    "claim": concern.claim,
+                    "severity": concern.severity,
+                    "confidence": concern.confidence,
+                    "category": concern.category,
+                }
+            )
 
     # Category distribution
     categories: dict[str, int] = {}
