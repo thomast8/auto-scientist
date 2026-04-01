@@ -50,6 +50,7 @@ class ExperimentConfig(BaseModel):
     # Optional with defaults
     max_iterations: int = Field(default=20, ge=1)
     preset: str = "default"
+    provider: Literal["anthropic", "openai"] | None = None
     output_dir: str = "experiments/runs"
     schedule: str | None = None
     interactive: bool = False

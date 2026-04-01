@@ -41,6 +41,7 @@ class AgentModelConfig(BaseModel):
     provider: Literal["anthropic", "openai", "google"] = "anthropic"
     model: str = Field(min_length=1)
     reasoning: ReasoningConfig = ReasoningConfig()
+    mode: Literal["sdk", "api"] = "sdk"
 
     @field_validator("reasoning", mode="before")
     @classmethod
@@ -109,6 +110,83 @@ BUILTIN_PRESETS: dict[str, dict] = {
 }
 BUILTIN_PRESETS["medium"] = BUILTIN_PRESETS["default"]
 
+# Model mapping: Anthropic -> OpenAI equivalents
+# claude-opus-4-6 -> gpt-5.4, claude-sonnet-4-6 -> gpt-5.4-mini, haiku -> gpt-5.4-nano
+_OPENAI_PRESETS: dict[str, dict] = {
+    "turbo-openai": {
+        "defaults": {
+            "provider": "openai",
+            "model": "gpt-5.4-nano",
+            "reasoning": "off",
+        },
+        "summarizer": {"provider": "openai", "model": "gpt-5.4-nano", "reasoning": "off"},
+        "critics": [
+            {"provider": "openai", "model": "gpt-5.4-nano", "reasoning": "off"},
+            {"provider": "openai", "model": "gpt-5.4-nano", "reasoning": "off"},
+        ],
+    },
+    "fast-openai": {
+        "defaults": {
+            "provider": "openai",
+            "model": "gpt-5.4-nano",
+            "reasoning": "low",
+        },
+        "scientist": {"provider": "openai", "model": "gpt-5.4-mini", "reasoning": "low"},
+        "summarizer": {"provider": "openai", "model": "gpt-5.4-nano", "reasoning": "off"},
+        "critics": [
+            {"provider": "openai", "model": "gpt-5.4-mini", "reasoning": "low"},
+            {"provider": "openai", "model": "gpt-5.4-nano", "reasoning": "low"},
+        ],
+    },
+    "default-openai": {
+        "defaults": {
+            "provider": "openai",
+            "model": "gpt-5.4-mini",
+            "reasoning": "medium",
+        },
+        "scientist": {"provider": "openai", "model": "gpt-5.4", "reasoning": "medium"},
+        "summarizer": {"provider": "openai", "model": "gpt-5.4-nano", "reasoning": "off"},
+        "critics": [
+            {"provider": "openai", "model": "gpt-5.4-mini", "reasoning": "medium"},
+            {"provider": "openai", "model": "gpt-5.4-mini", "reasoning": "medium"},
+        ],
+    },
+    "high-openai": {
+        "defaults": {
+            "provider": "openai",
+            "model": "gpt-5.4-mini",
+            "reasoning": "high",
+        },
+        "analyst": {"provider": "openai", "model": "gpt-5.4", "reasoning": "medium"},
+        "scientist": {"provider": "openai", "model": "gpt-5.4", "reasoning": "high"},
+        "assessor": {"provider": "openai", "model": "gpt-5.4", "reasoning": "medium"},
+        "summarizer": {"provider": "openai", "model": "gpt-5.4-nano", "reasoning": "off"},
+        "critics": [
+            {"provider": "openai", "model": "gpt-5.4", "reasoning": "high"},
+            {"provider": "openai", "model": "gpt-5.4", "reasoning": "high"},
+        ],
+    },
+    "max-openai": {
+        "defaults": {
+            "provider": "openai",
+            "model": "gpt-5.4",
+            "reasoning": "high",
+        },
+        "scientist": {"provider": "openai", "model": "gpt-5.4", "reasoning": "max"},
+        "coder": {"provider": "openai", "model": "gpt-5.4-mini", "reasoning": "high"},
+        "ingestor": {"provider": "openai", "model": "gpt-5.4-mini", "reasoning": "high"},
+        "report": {"provider": "openai", "model": "gpt-5.4-mini", "reasoning": "high"},
+        "summarizer": {"provider": "openai", "model": "gpt-5.4-mini", "reasoning": "off"},
+        "critics": [
+            {"provider": "openai", "model": "gpt-5.4", "reasoning": "max"},
+            {"provider": "openai", "model": "gpt-5.4", "reasoning": "max"},
+        ],
+    },
+}
+_OPENAI_PRESETS["medium-openai"] = _OPENAI_PRESETS["default-openai"]
+
+BUILTIN_PRESETS.update(_OPENAI_PRESETS)
+
 
 CC_EFFORT_MAP: dict[str, str] = {
     "minimal": "low",
@@ -175,8 +253,36 @@ class ModelConfig(BaseModel):
 
         Loads the preset, then layers per-agent model overrides from the
         YAML models block on top. summaries=False always nullifies the summarizer.
+
+        If exp_config.provider is set, tries "{preset}-{provider}" first (e.g.
+        "default-openai"), then falls back to the base preset with the defaults
+        provider overridden.
         """
-        mc = cls.builtin_preset(exp_config.preset)
+        preset_name = exp_config.preset
+        provider = getattr(exp_config, "provider", None)
+
+        if provider and provider != "anthropic":
+            variant = f"{preset_name}-{provider}"
+            if variant in BUILTIN_PRESETS:
+                preset_name = variant
+            else:
+                # Fall back: load base preset but override defaults.provider
+                mc = cls.builtin_preset(preset_name)
+                mc.defaults = mc.defaults.model_copy(update={"provider": provider})
+                # Continue with overrides below
+                if exp_config.models is not None:
+                    overrides = exp_config.models
+                    for field in cls._AGENT_FIELDS:
+                        agent_override = getattr(overrides, field, None)
+                        if agent_override is not None:
+                            setattr(mc, field, agent_override)
+                    if overrides.critics:
+                        mc.critics = list(overrides.critics)
+                if not exp_config.summaries:
+                    mc.summarizer = None
+                return mc
+
+        mc = cls.builtin_preset(preset_name)
 
         if exp_config.models is not None:
             overrides = exp_config.models
