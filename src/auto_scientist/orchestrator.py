@@ -286,12 +286,6 @@ class Orchestrator:
         self.output_dir = output_dir.resolve()
         self.max_iterations = max_iterations
         self.model_config = model_config or ModelConfig.builtin_preset("default")
-
-        # Patch broken Codex models before anything reads the config
-        from auto_scientist.sdk_backend import apply_codex_model_overrides
-
-        apply_codex_model_overrides(self.model_config)
-
         self.interactive = interactive
         self.max_consecutive_failures = max_consecutive_failures
         self.config: DomainConfig | None = None
@@ -1622,11 +1616,8 @@ class Orchestrator:
                 if done_entries:
                     done_summary = done_entries[-1][1]
                 else:
-                    assessment_text = ""
-                    if result.rounds:
-                        assessment_text = result.rounds[-1].critic_output.overall_assessment
-                    done_summary = assessment_text
-                self._live.collapse_panel(panel, done_summary or f"{len(result.rounds)} round(s)")
+                    done_summary = result.critic_output.overall_assessment
+                self._live.collapse_panel(panel, done_summary or "Critique complete")
 
             async def _summarized_stop_debate(persona_index, persona):
                 name = persona["name"]
@@ -1972,10 +1963,7 @@ class Orchestrator:
             if done_entries:
                 done_summary = done_entries[-1][1]
             else:
-                assessment = ""
-                if result.rounds:
-                    assessment = result.rounds[-1].critic_output.overall_assessment
-                done_summary = assessment
+                done_summary = result.critic_output.overall_assessment
             self._live.collapse_panel(panel, done_summary or "Debate complete")
 
         async def _summarized_debate(persona_index, persona):

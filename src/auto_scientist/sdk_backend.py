@@ -74,23 +74,29 @@ _CODEX_EFFORT_MAP: dict[str, str] = {
 # Monkey-patch: make parse_message return None for unknown types
 # ---------------------------------------------------------------------------
 
-_original_parse_message = _parser_mod.parse_message
+if hasattr(_parser_mod, "parse_message"):
+    _original_parse_message = _parser_mod.parse_message
 
+    def _tolerant_parse_message(data: dict[str, Any]) -> Any:
+        """parse_message wrapper that returns None for unknown message types."""
+        try:
+            return _original_parse_message(data)
+        except MessageParseError as exc:
+            if "Unknown message type" in str(exc):
+                msg_type = data.get("type", "<missing>")
+                logger.debug(f"Skipping unknown SDK message type: {msg_type}")
+                return None
+            raise
 
-def _tolerant_parse_message(data: dict[str, Any]) -> Any:
-    """parse_message wrapper that returns None for unknown message types."""
-    try:
-        return _original_parse_message(data)
-    except MessageParseError as exc:
-        if "Unknown message type" in str(exc):
-            msg_type = data.get("type", "<missing>")
-            logger.debug(f"Skipping unknown SDK message type: {msg_type}")
-            return None
-        raise
-
-
-_parser_mod.parse_message = _tolerant_parse_message  # type: ignore[assignment]
-_client_mod.parse_message = _tolerant_parse_message  # type: ignore[assignment]
+    _parser_mod.parse_message = _tolerant_parse_message  # type: ignore[assignment]
+    if hasattr(_client_mod, "parse_message"):
+        _client_mod.parse_message = _tolerant_parse_message  # type: ignore[assignment]
+    else:
+        logger.warning("claude_code_sdk._internal.client.parse_message not found; patch skipped")
+else:
+    logger.warning(
+        "claude_code_sdk._internal.message_parser.parse_message not found; patch skipped"
+    )
 
 
 # ---------------------------------------------------------------------------
@@ -102,35 +108,38 @@ _client_mod.parse_message = _tolerant_parse_message  # type: ignore[assignment]
 # causing LimitOverrunError -> "failed reading from stdio transport".
 # Fix: raise the limit to 1 MB when spawning the app-server subprocess.
 
-_original_stdio_connect = _codex_transport_mod.StdioTransport.connect
+if hasattr(_codex_transport_mod, "StdioTransport") and hasattr(
+    _codex_transport_mod.StdioTransport, "connect"
+):
+    _original_stdio_connect = _codex_transport_mod.StdioTransport.connect
 
+    async def _stdio_connect_with_large_limit(self: Any) -> None:
+        """StdioTransport.connect() with a 1 MB StreamReader limit."""
+        if self._proc is not None:
+            return
+        try:
+            self._proc = await asyncio.wait_for(
+                asyncio.create_subprocess_exec(
+                    *self._command,
+                    stdin=asyncio.subprocess.PIPE,
+                    stdout=asyncio.subprocess.PIPE,
+                    stderr=asyncio.subprocess.DEVNULL,
+                    cwd=self._cwd,
+                    env=self._env,
+                    limit=1024 * 1024,
+                ),
+                timeout=self._connect_timeout,
+            )
+        except Exception as exc:
+            from codex_app_server_sdk.errors import CodexTransportError
 
-async def _stdio_connect_with_large_limit(self: Any) -> None:
-    """StdioTransport.connect() with a 1 MB StreamReader limit."""
-    if self._proc is not None:
-        return
-    try:
-        self._proc = await asyncio.wait_for(
-            asyncio.create_subprocess_exec(
-                *self._command,
-                stdin=asyncio.subprocess.PIPE,
-                stdout=asyncio.subprocess.PIPE,
-                stderr=asyncio.subprocess.DEVNULL,
-                cwd=self._cwd,
-                env=self._env,
-                limit=1024 * 1024,
-            ),
-            timeout=self._connect_timeout,
-        )
-    except Exception as exc:
-        from codex_app_server_sdk.errors import CodexTransportError
+            raise CodexTransportError(
+                f"failed to start stdio transport command: {self._command!r}"
+            ) from exc
 
-        raise CodexTransportError(
-            f"failed to start stdio transport command: {self._command!r}"
-        ) from exc
-
-
-_codex_transport_mod.StdioTransport.connect = _stdio_connect_with_large_limit  # type: ignore[assignment]
+    _codex_transport_mod.StdioTransport.connect = _stdio_connect_with_large_limit  # type: ignore[assignment]
+else:
+    logger.warning("codex_app_server_sdk.transport.StdioTransport.connect not found; patch skipped")
 
 
 # ---------------------------------------------------------------------------
@@ -365,6 +374,17 @@ class CodexBackend:
         effort = self._resolve_effort(options.extra_args)
         model = options.model
 
+        # Apply model overrides at query time (not globally) to avoid
+        # mutating shared config that gets persisted to disk.
+        replacement = CODEX_MODEL_OVERRIDES.get(model) if model else None
+        if replacement:
+            logger.warning(
+                f"Model {model!r} is unsupported by Codex with ChatGPT subscription. "
+                f"Using {replacement!r} instead. "
+                f"(https://github.com/openai/codex/issues/14266)"
+            )
+            model = replacement
+
         # Build environment for the Codex subprocess.
         # IMPORTANT: create_subprocess_exec replaces the entire env when a
         # dict is passed, so we must start from os.environ and layer overrides.
@@ -475,34 +495,3 @@ def get_backend(provider: str) -> SDKBackend:
     raise ValueError(
         f"No SDK backend for provider {provider!r}. SDK mode requires 'anthropic' or 'openai'."
     )
-
-
-def apply_codex_model_overrides(mc: Any) -> None:
-    """Patch a ModelConfig in-place, replacing broken Codex models.
-
-    Call once at startup so the TUI, agent panels, and actual queries
-    all show the correct (overridden) model name.
-
-    Remove this function when OpenAI fixes the issue:
-    https://github.com/openai/codex/issues/14266
-    """
-    if not CODEX_MODEL_OVERRIDES:
-        return
-
-    def _patch(cfg: Any) -> None:
-        if cfg is None or cfg.provider != "openai" or cfg.mode != "sdk":
-            return
-        replacement = CODEX_MODEL_OVERRIDES.get(cfg.model)
-        if replacement:
-            logger.warning(
-                f"Model {cfg.model!r} is unsupported by Codex with ChatGPT subscription. "
-                f"Overriding to {replacement!r}. "
-                f"(https://github.com/openai/codex/issues/14266)"
-            )
-            cfg.model = replacement
-
-    _patch(mc.defaults)
-    for agent in ("analyst", "scientist", "coder", "ingestor", "report", "summarizer", "assessor"):
-        _patch(getattr(mc, agent, None))
-    for critic in mc.critics:
-        _patch(critic)

@@ -38,12 +38,12 @@ _logger = logging.getLogger(__name__)
 _cleanup_done = False
 
 
-def _kill_process_group() -> None:
-    """Send SIGTERM to our process group (signal-handler path only).
+def _kill_child_processes() -> None:
+    """Terminate direct child processes via ``pgrep -P``.
 
-    Used exclusively from ``_fatal_signal_handler`` where the current
-    process is about to ``os._exit`` anyway, so killing the whole group
-    (which includes ourselves) is acceptable.
+    Targets only our children, so it is safe to call from both signal
+    handlers and atexit without killing sibling processes like git or
+    pre-commit hooks that share our process group.
 
     Idempotent: repeated calls are no-ops after the first.
     """
@@ -52,23 +52,11 @@ def _kill_process_group() -> None:
         return
     _cleanup_done = True
 
+    import subprocess as _sp
+
     # Prevent recursive delivery while we broadcast
     signal.signal(signal.SIGTERM, signal.SIG_IGN)
     signal.signal(signal.SIGHUP, signal.SIG_IGN)
-
-    pgid = os.getpgrp()
-    with suppress(ProcessLookupError, PermissionError, OSError):
-        os.killpg(pgid, signal.SIGTERM)
-
-
-def _kill_child_processes() -> None:
-    """Terminate direct child processes (atexit-safe).
-
-    Unlike ``_kill_process_group`` this targets only our children via
-    ``pgrep -P``, so it is safe to call on normal exit without killing
-    sibling processes like git or pre-commit hooks.
-    """
-    import subprocess as _sp
 
     pid = os.getpid()
     try:
@@ -87,7 +75,7 @@ def _kill_child_processes() -> None:
 
 def _fatal_signal_handler(signum: int, _frame: Any) -> None:
     """Handle SIGHUP / SIGTERM by killing children and exiting."""
-    _kill_process_group()
+    _kill_child_processes()
     # os._exit avoids Python shutdown machinery that can hang
     # during signal handling.  atexit handlers are intentionally
     # skipped since we already cleaned up above.
@@ -493,6 +481,13 @@ def run(
 )
 @click.option("--no-summaries", is_flag=True, help="Disable periodic agent summaries")
 @click.option(
+    "--provider",
+    "-p",
+    default=None,
+    type=click.Choice(["anthropic", "openai"], case_sensitive=False),
+    help="Default provider for SDK agents: anthropic (default) or openai (uses Codex CLI).",
+)
+@click.option(
     "-v",
     "--verbose",
     is_flag=True,
@@ -510,6 +505,7 @@ def resume(
     config_path: str | None,
     preset: str | None,
     no_summaries: bool,
+    provider: str | None,
     verbose: bool,
 ):
     """Resume a previously paused or crashed run.
@@ -652,8 +648,8 @@ def resume(
     state.save(run_dir / "state.json")
 
     # Resolve model config
-    if config_path or preset:
-        model_config = _resolve_model_config(config_path, preset, no_summaries)
+    if config_path or preset or provider:
+        model_config = _resolve_model_config(config_path, preset, no_summaries, provider)
     else:
         saved_mc = run_dir / "model_config.json"
         if saved_mc.exists():

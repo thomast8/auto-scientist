@@ -12,7 +12,6 @@ import logging
 from collections.abc import AsyncIterator
 from typing import Any
 
-from claude_code_sdk import AssistantMessage, ResultMessage, TextBlock, query
 from pydantic import BaseModel, ValidationError
 
 from auto_scientist.sdk_backend import SDKBackend
@@ -68,52 +67,20 @@ def append_block_to_buffer(block: Any, buffer: list[str]) -> None:
 async def safe_query(
     prompt: str,
     options: Any,
-    backend: "SDKBackend | None" = None,
+    backend: SDKBackend,
 ) -> AsyncIterator[Any]:
     """Wrap a backend query, filtering out None messages.
 
-    Backwards-compatible: if backend is None, falls back to legacy
-    claude_code_sdk.query path (yields raw claude_code_sdk Message objects).
-    When backend is provided, yields SDKMessage objects.
+    Yields SDKMessage objects from the backend.
     """
-    if backend is not None:
-        logger.debug(
-            f"SDK query start: model={options.model}, "
-            f"max_turns={options.max_turns}, "
-            f"prompt_len={len(prompt)}"
-        )
-        async for msg in backend.query(prompt=prompt, options=options):
-            if msg is not None:
-                yield msg
-    else:
-        # Legacy path: strip ANTHROPIC_API_KEY and use claude_code_sdk.query
-        import os
-
-        from claude_code_sdk import ClaudeCodeOptions
-
-        if isinstance(options, ClaudeCodeOptions) and (
-            "ANTHROPIC_API_KEY" not in options.env and os.environ.get("ANTHROPIC_API_KEY")
-        ):
-            logger.info(
-                "Stripping ANTHROPIC_API_KEY from SDK subprocess env "
-                "(using Claude Code subscription instead of direct API billing)"
-            )
-            options = ClaudeCodeOptions(
-                **{
-                    field: getattr(options, field)
-                    for field in options.__dataclass_fields__
-                    if field != "env"
-                },
-                env={**options.env, "ANTHROPIC_API_KEY": ""},
-            )
-        logger.debug(
-            f"SDK query start: model={options.model}, "
-            f"max_turns={options.max_turns}, "
-            f"prompt_len={len(prompt)}"
-        )
-        async for legacy_msg in query(prompt=prompt, options=options):
-            if legacy_msg is not None:
-                yield legacy_msg
+    logger.debug(
+        f"SDK query start: model={options.model}, "
+        f"max_turns={options.max_turns}, "
+        f"prompt_len={len(prompt)}"
+    )
+    async for msg in backend.query(prompt=prompt, options=options):
+        if msg is not None:
+            yield msg
 
 
 # ---------------------------------------------------------------------------
@@ -328,50 +295,18 @@ def with_turn_budget(system_prompt: str, max_turns: int, tools: list[str] | None
 async def collect_text_from_query(
     prompt: str,
     options: Any,
-    message_buffer_or_backend: "SDKBackend | list[str] | None" = None,
-    agent_name_or_buffer: "str | list[str] | None" = None,
-    agent_name: str = "Agent",
-    *,
+    backend: SDKBackend,
     message_buffer: list[str] | None = None,
+    agent_name: str = "Agent",
 ) -> tuple[str, dict[str, Any]]:
     """Run an SDK query and collect the text response.
-
-    Supports two call signatures:
-    - New: collect_text_from_query(prompt, sdk_options, backend, message_buffer, agent_name)
-    - Legacy: collect_text_from_query(prompt, claude_options, message_buffer, agent_name)
 
     Returns:
         (text, usage) tuple. Usage dict contains token counts and cost info.
         Also sets ``last_usage`` on the function object so the orchestrator
         can read it after sequential agent phases (coder, ingestor).
     """
-    # Detect call signature by inspecting 3rd arg type
-    backend: Any = None
-    # message_buffer kwarg takes precedence over positional detection
-    _message_buffer: list[str] | None = message_buffer
-
-    if hasattr(message_buffer_or_backend, "query") and callable(
-        getattr(message_buffer_or_backend, "query", None)
-    ):
-        # New signature: (prompt, options, backend, message_buffer?, agent_name?)
-        backend = message_buffer_or_backend
-        if isinstance(agent_name_or_buffer, list):
-            if _message_buffer is None:
-                _message_buffer = agent_name_or_buffer
-        elif isinstance(agent_name_or_buffer, str):
-            agent_name = agent_name_or_buffer
-    elif isinstance(message_buffer_or_backend, list):
-        # Legacy signature: (prompt, options, message_buffer, agent_name?)
-        if _message_buffer is None:
-            _message_buffer = message_buffer_or_backend
-        if isinstance(agent_name_or_buffer, str):
-            agent_name = agent_name_or_buffer
-    # else: both None, use defaults
-
-    # Backwards compatibility: if no backend provided, use legacy claude_code_sdk.query
-    if backend is None:
-        return await _collect_text_legacy(prompt, options, _message_buffer, agent_name)
-
+    _message_buffer = message_buffer
     result_text = ""
     assistant_texts: list[str] = []
     usage: dict[str, Any] = {}
@@ -422,44 +357,6 @@ async def collect_text_from_query(
 
 # Initialize the usage attribute
 collect_text_from_query.last_usage = {}  # type: ignore[attr-defined]
-
-
-async def _collect_text_legacy(
-    prompt: str,
-    options: Any,
-    message_buffer: list[str] | None = None,
-    agent_name: str = "Agent",
-) -> tuple[str, dict[str, Any]]:
-    """Legacy collect_text path using claude_code_sdk.query directly.
-
-    Used when no backend is provided (backwards compatibility during migration).
-    Will be removed once all agents pass backend explicitly.
-    """
-    result_text = ""
-    assistant_texts: list[str] = []
-    usage: dict[str, Any] = {}
-
-    async for message in query(prompt=prompt, options=options):
-        if isinstance(message, ResultMessage):
-            if message.result:
-                result_text = message.result
-            usage = getattr(message, "usage", None) or {}
-            usage["num_turns"] = getattr(message, "num_turns", 0)
-            usage["total_cost_usd"] = getattr(message, "total_cost_usd", None)
-        elif isinstance(message, AssistantMessage):
-            for block in message.content:
-                if isinstance(block, TextBlock):
-                    assistant_texts.append(block.text)
-                if message_buffer is not None:
-                    append_block_to_buffer(block, message_buffer)
-
-    raw = result_text if result_text else "\n".join(assistant_texts)
-
-    if not raw:
-        raise RuntimeError(f"{agent_name} agent returned no output")
-
-    collect_text_from_query.last_usage = usage  # type: ignore[attr-defined]
-    return raw, usage
 
 
 # ── Report structure validation ─────────────────────────────────────────────
