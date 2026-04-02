@@ -221,6 +221,21 @@ class TestRunCommand:
         mock_app_cls.assert_called_once()
         mock_app_cls.return_value.run.assert_called_once()
 
+    @patch("auto_scientist.cli.PipelineApp")
+    @patch("auto_scientist.cli.Orchestrator")
+    def test_run_persists_max_iterations_on_state(self, mock_orch, mock_app_cls, tmp_path):
+        data_file = tmp_path / "data.csv"
+        data_file.write_text("a,b\n1,2\n")
+
+        runner = CliRunner()
+        result = runner.invoke(
+            cli,
+            ["run", "--data", str(data_file), "--goal", "g", "--max-iterations", "7"],
+        )
+
+        assert result.exit_code == 0
+        assert mock_orch.call_args.kwargs["state"].max_iterations == 7
+
     def test_missing_data_fails(self):
         runner = CliRunner()
         result = runner.invoke(cli, ["run", "--goal", "test"])
@@ -484,6 +499,92 @@ class TestResumeCommand:
         assert result.exit_code == 0
         loaded_mc = mock_orch.call_args.kwargs["model_config"]
         assert loaded_mc.defaults.model == "claude-haiku-4-5-20251001"
+
+    @patch("auto_scientist.cli.PipelineApp")
+    @patch("auto_scientist.cli.Orchestrator")
+    def test_resume_uses_saved_max_iterations(self, mock_orch, mock_app_cls, tmp_path):
+        state = ExperimentState(domain="auto", goal="g", phase="iteration", max_iterations=3)
+        state.save(tmp_path / "state.json")
+
+        runner = CliRunner()
+        result = runner.invoke(cli, ["resume", "--state", str(tmp_path)])
+
+        assert result.exit_code == 0
+        assert mock_orch.call_args.kwargs["max_iterations"] == 3
+        assert "restored from original run" in result.output
+
+    @patch("auto_scientist.cli.PipelineApp")
+    @patch("auto_scientist.cli.Orchestrator")
+    def test_resume_explicit_max_iterations_overrides_saved(
+        self, mock_orch, mock_app_cls, tmp_path
+    ):
+        state = ExperimentState(domain="auto", goal="g", phase="iteration", max_iterations=3)
+        state.save(tmp_path / "state.json")
+
+        runner = CliRunner()
+        result = runner.invoke(cli, ["resume", "--state", str(tmp_path), "--max-iterations", "10"])
+
+        assert result.exit_code == 0
+        assert mock_orch.call_args.kwargs["max_iterations"] == 10
+        assert "from --max-iterations" in result.output
+
+    @patch("auto_scientist.cli.PipelineApp")
+    @patch("auto_scientist.cli.Orchestrator")
+    def test_resume_old_state_without_max_iterations_uses_default(
+        self, mock_orch, mock_app_cls, tmp_path
+    ):
+        state = ExperimentState(domain="auto", goal="g", phase="iteration")
+        state.save(tmp_path / "state.json")
+
+        runner = CliRunner()
+        result = runner.invoke(cli, ["resume", "--state", str(tmp_path)])
+
+        assert result.exit_code == 0
+        assert mock_orch.call_args.kwargs["max_iterations"] == 20
+        assert "old format" in result.output
+
+    @patch("auto_scientist.cli.PipelineApp")
+    @patch("auto_scientist.cli.Orchestrator")
+    def test_resume_completed_fork_extends_to_default(self, mock_orch, mock_app_cls, tmp_path):
+        """Forking a completed run should extend max_iterations to default, not restore."""
+        state = ExperimentState(
+            domain="auto", goal="g", phase="stopped", iteration=3, max_iterations=3
+        )
+        state.save(tmp_path / "state.json")
+        # rewind_run needs a v0 dir to exist
+        (tmp_path / "v0").mkdir()
+
+        runner = CliRunner()
+        result = runner.invoke(cli, ["resume", "--state", str(tmp_path), "--fork"])
+
+        assert result.exit_code == 0
+        assert mock_orch.call_args.kwargs["max_iterations"] == 20
+        assert "Extending to 20" in result.output
+
+    def test_resume_old_state_past_default_requires_explicit(self, tmp_path):
+        """Old state at iteration >= 20 must require explicit --max-iterations."""
+        state = ExperimentState(domain="auto", goal="g", phase="iteration", iteration=25)
+        state.save(tmp_path / "state.json")
+
+        runner = CliRunner()
+        result = runner.invoke(cli, ["resume", "--state", str(tmp_path)])
+
+        assert result.exit_code != 0
+        assert "--max-iterations" in result.output
+
+    @patch("auto_scientist.cli.PipelineApp")
+    @patch("auto_scientist.cli.Orchestrator")
+    def test_resume_persists_max_iterations_to_disk(self, mock_orch, mock_app_cls, tmp_path):
+        """Resolved max_iterations should be written to state.json on disk."""
+        state = ExperimentState(domain="auto", goal="g", phase="iteration", max_iterations=3)
+        state.save(tmp_path / "state.json")
+
+        runner = CliRunner()
+        result = runner.invoke(cli, ["resume", "--state", str(tmp_path)])
+
+        assert result.exit_code == 0
+        reloaded = ExperimentState.load(tmp_path / "state.json")
+        assert reloaded.max_iterations == 3
 
 
 class TestResolveSource:

@@ -48,6 +48,7 @@ class ExperimentState(BaseModel):
     raw_data_path: str | None = None
     config_path: str | None = None
     domain_knowledge: str = ""
+    max_iterations: int | None = Field(default=None, ge=1)
     prediction_history: list[PredictionRecord] = Field(default_factory=list)
 
     def save(self, path: Path) -> None:

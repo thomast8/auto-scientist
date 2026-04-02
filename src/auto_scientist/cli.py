@@ -248,6 +248,7 @@ def _run_from_experiment_config(exp_config: ExperimentConfig, data_path: Path) -
         phase="ingestion",
         schedule=exp_config.schedule,
         data_path=str(data_path.resolve()),
+        max_iterations=exp_config.max_iterations,
     )
 
     orchestrator = Orchestrator(
@@ -421,6 +422,7 @@ def run(
         phase="ingestion",
         schedule=schedule,
         data_path=data_abs,
+        max_iterations=max_iterations,
     )
 
     orchestrator = Orchestrator(
@@ -468,7 +470,7 @@ def run(
         "(earlier agents loaded from disk). Requires --fork."
     ),
 )
-@click.option("--max-iterations", default=20, type=int, help="Maximum iteration count")
+@click.option("--max-iterations", default=None, type=int, help="Maximum iteration count")
 @click.option(
     "--output-dir",
     default=None,
@@ -493,12 +495,14 @@ def run(
     is_flag=True,
     help="Show debug log messages on console (always written to debug.log).",
 )
+@click.pass_context
 def resume(
+    ctx: click.Context,
     source: str,
     fork: bool,
     from_iteration: int | None,
     from_agent: str | None,
-    max_iterations: int,
+    max_iterations: int | None,
     output_dir: str | None,
     config_path: str | None,
     preset: str | None,
@@ -539,6 +543,59 @@ def resume(
         raise click.UsageError("--output-dir requires --fork")
 
     src, source_state = _resolve_source(source)
+
+    # --- Resolve max_iterations ---
+    default_max = 20
+    _cli_source = click.core.ParameterSource.COMMANDLINE
+    user_set_max_iter = ctx.get_parameter_source("max_iterations") == _cli_source
+    saved_max = source_state.max_iterations
+    is_completed = source_state.phase in ("stopped", "report")
+
+    if user_set_max_iter:
+        assert max_iterations is not None
+        effective_max = max_iterations
+        console.print(
+            f"Max iterations: {effective_max} (from --max-iterations)",
+            style="bold",
+        )
+    elif is_completed:
+        # Completed run being forked: the original cap is exhausted, so extend
+        # to the default to give new iterations room to run.
+        effective_max = default_max
+        console.print(
+            f"[yellow]Original run completed with max_iterations={saved_max or '?'}. "
+            f"Extending to {effective_max} for the forked run.[/yellow]",
+        )
+        console.print(
+            "[dim]Use --max-iterations to set a different cap.[/dim]",
+        )
+    elif saved_max is not None:
+        effective_max = saved_max
+        console.print(
+            f"Max iterations: {effective_max} (restored from original run)",
+            style="bold",
+        )
+        console.print(
+            "[dim]Use --max-iterations to override.[/dim]",
+        )
+    else:
+        # Old state file without max_iterations saved
+        effective_max = default_max
+        if source_state.iteration >= effective_max:
+            raise click.UsageError(
+                f"No max_iterations in saved state (old format) and current "
+                f"iteration ({source_state.iteration}) already >= default ({effective_max}). "
+                f"Pass --max-iterations explicitly."
+            )
+        console.print(
+            f"[yellow]No max_iterations in saved state (old format). "
+            f"Using default: {effective_max}.[/yellow]",
+        )
+        console.print(
+            "[dim]Use --max-iterations to set a different cap.[/dim]",
+        )
+
+    max_iterations = effective_max
 
     if fork:
         # Determine output directory
@@ -586,6 +643,10 @@ def resume(
                 "This run has already completed. Use --fork to continue "
                 "from a copy (the original run is preserved)."
             )
+
+    # Persist resolved max_iterations so future resumes have it
+    state.max_iterations = max_iterations
+    state.save(run_dir / "state.json")
 
     # Resolve model config
     if config_path or preset:
@@ -649,6 +710,8 @@ def status(source: str):
     click.echo(f"Goal:       {goal_display}")
     click.echo(f"Phase:      {loaded_state.phase}")
     click.echo(f"Iteration:  {loaded_state.iteration}")
+    if loaded_state.max_iterations is not None:
+        click.echo(f"Max iter:   {loaded_state.max_iterations}")
     click.echo(f"Run dir:    {run_dir}")
     if loaded_state.data_path:
         click.echo(f"Data:       {loaded_state.data_path}")
