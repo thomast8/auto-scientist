@@ -260,14 +260,6 @@ def _check_model_exists(provider: str, model: str) -> str | None:
     return None  # unknown provider, skip validation
 
 
-def _truncate_summary(text: str, limit: int = 300) -> str:
-    """Truncate text at a word boundary, avoiding mid-word cuts."""
-    if len(text) <= limit:
-        return text
-    truncated = text[:limit].rsplit(" ", 1)[0]
-    return f"{truncated}..."
-
-
 class Orchestrator:
     """Drives the Ingestion -> Iteration -> Report pipeline.
 
@@ -1477,9 +1469,15 @@ class Orchestrator:
                     panel.add_line(f"[{time_label}] {summary}")
                 seen[name] = len(entries)
 
-                assessment_text = result.critic_output.overall_assessment
-                done_summary = _truncate_summary(assessment_text)
-                self._live.collapse_panel(panel, done_summary or "Critique complete")
+                done_entries = [e for e in collectors[name] if e[2].endswith("done")]
+                if done_entries:
+                    done_summary = done_entries[-1][1]
+                else:
+                    assessment_text = ""
+                    if result.rounds:
+                        assessment_text = result.rounds[-1].critic_output.overall_assessment
+                    done_summary = assessment_text
+                self._live.collapse_panel(panel, done_summary or f"{len(result.rounds)} round(s)")
 
             async def _summarized_stop_debate(persona_index, persona):
                 name = persona["name"]
@@ -1825,8 +1823,10 @@ class Orchestrator:
             if done_entries:
                 done_summary = done_entries[-1][1]
             else:
-                assessment = result.critic_output.overall_assessment
-                done_summary = _truncate_summary(assessment)
+                assessment = ""
+                if result.rounds:
+                    assessment = result.rounds[-1].critic_output.overall_assessment
+                done_summary = assessment
             self._live.collapse_panel(panel, done_summary or "Debate complete")
 
         async def _summarized_debate(persona_index, persona):
