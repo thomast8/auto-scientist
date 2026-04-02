@@ -191,6 +191,65 @@ class TestStatusCommand:
         assert result.exit_code == 0
         assert "--from-agent debate" in result.output
 
+    def test_status_shows_stop_gate_steps(self, tmp_path):
+        """Status shows assessment, stop_debate, stop_revision when present."""
+        state = ExperimentState(domain="auto", goal="test", phase="iteration", iteration=1)
+        state.save(tmp_path / "state.json")
+
+        v00 = tmp_path / "v00"
+        v00.mkdir()
+        (v00 / "analysis.json").write_text("{}")
+        (v00 / "plan.json").write_text('{"should_stop": true}')
+        (v00 / "completeness_assessment.json").write_text("{}")
+        (v00 / "stop_debate.json").write_text("{}")
+        (v00 / "stop_revision_plan.json").write_text("{}")
+        (v00 / "debate.json").write_text("{}")
+
+        runner = CliRunner()
+        result = runner.invoke(cli, ["status", "--from", str(tmp_path)])
+
+        assert result.exit_code == 0
+        assert "assessment" in result.output
+        assert "stop_debate" in result.output
+        assert "stop_revision" in result.output
+
+    def test_status_shows_revision_step(self, tmp_path):
+        """Status shows revision when revision_plan.json exists."""
+        state = ExperimentState(domain="auto", goal="test", phase="iteration", iteration=1)
+        state.save(tmp_path / "state.json")
+
+        v00 = tmp_path / "v00"
+        v00.mkdir()
+        (v00 / "analysis.json").write_text("{}")
+        (v00 / "plan.json").write_text("{}")
+        (v00 / "debate.json").write_text("{}")
+        (v00 / "revision_plan.json").write_text("{}")
+        (v00 / "experiment.py").write_text("")
+
+        runner = CliRunner()
+        result = runner.invoke(cli, ["status", "--from", str(tmp_path)])
+
+        assert result.exit_code == 0
+        assert "revision" in result.output
+        assert "coder" in result.output
+
+    def test_resume_suggests_revision_when_debate_done(self, tmp_path):
+        """When debate exists but revision_plan.json doesn't, suggest revision."""
+        state = ExperimentState(domain="auto", goal="test", phase="iteration", iteration=1)
+        state.save(tmp_path / "state.json")
+
+        v00 = tmp_path / "v00"
+        v00.mkdir()
+        (v00 / "analysis.json").write_text("{}")
+        (v00 / "plan.json").write_text("{}")
+        (v00 / "debate.json").write_text("{}")
+
+        runner = CliRunner()
+        result = runner.invoke(cli, ["status", "--from", str(tmp_path)])
+
+        assert result.exit_code == 0
+        assert "--from-agent revision" in result.output
+
 
 class TestRunCommand:
     @patch("auto_scientist.cli.PipelineApp")

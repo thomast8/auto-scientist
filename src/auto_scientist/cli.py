@@ -464,7 +464,10 @@ def run(
     "--from-agent",
     "from_agent",
     default=None,
-    type=click.Choice(["analyst", "scientist", "debate", "coder"], case_sensitive=False),
+    type=click.Choice(
+        ["analyst", "scientist", "debate", "revision", "coder"],
+        case_sensitive=False,
+    ),
     help=(
         "Resume from this agent within the target iteration "
         "(earlier agents loaded from disk). Requires --fork."
@@ -699,6 +702,8 @@ def status(source: str):
     import json
     import re
 
+    from auto_scientist.resume import _AGENT_ARTIFACTS, STOP_GATE_AGENTS
+
     run_dir, loaded_state = _resolve_source(source)
 
     # Truncate goal to a single display line
@@ -727,13 +732,14 @@ def status(source: str):
     if loaded_state.dead_ends:
         click.echo(f"Dead ends:  {len(loaded_state.dead_ends)}")
 
-    # Show per-iteration agent artifacts
-    agent_artifacts = {
-        "analyst": "analysis.json",
-        "scientist": "plan.json",
-        "debate": "debate.json",
-        "coder": "experiment.py",
-    }
+    # Show per-iteration agent artifacts (granular, including stop gate + revision)
+    step_artifacts: list[tuple[str, str]] = [
+        (agent, artifacts[0])
+        for agent, artifacts in _AGENT_ARTIFACTS.items()
+        if artifacts  # skip coder (no fixed artifact)
+    ]
+    step_artifacts.append(("coder", "experiment.py"))
+
     version_re = re.compile(r"^v(\d+)$")
     try:
         version_dirs = sorted(
@@ -748,12 +754,12 @@ def status(source: str):
         click.echo()
         click.echo("Iterations on disk:")
         for idx, vdir in version_dirs:
-            agents_present = []
-            for agent, artifact in agent_artifacts.items():
+            steps_present = []
+            for step_name, artifact in step_artifacts:
                 if (vdir / artifact).exists():
-                    agents_present.append(agent)
-            agents_str = ", ".join(agents_present) if agents_present else "(empty)"
-            click.echo(f"  v{idx:02d} (--from-iteration {idx}): {agents_str}")
+                    steps_present.append(step_name)
+            steps_str = ", ".join(steps_present) if steps_present else "(empty)"
+            click.echo(f"  v{idx:02d} (--from-iteration {idx}): {steps_str}")
 
         last_idx, last_vdir = version_dirs[-1]
 
@@ -768,16 +774,35 @@ def status(source: str):
             except (json.JSONDecodeError, OSError) as e:
                 click.echo(f"\n(Could not read {plan_path.name}: {e})")
 
-        # Resume suggestion
-        all_agents = list(agent_artifacts.keys())
-        present = {a for a in all_agents if (last_vdir / agent_artifacts[a]).exists()}
-        next_agent = next((a for a in all_agents if a not in present), None)
-        if next_agent:
+        # Resume suggestion: find the next missing step.
+        # Conditional steps: stop gate (only if any stop gate artifact exists),
+        # revision (only if debate ran). Only suggest resumable agents.
+        present = {name for name, artifact in step_artifacts if (last_vdir / artifact).exists()}
+        stop_gate_active = bool(present & STOP_GATE_AGENTS)
+        debate_ran = "debate" in present
+
+        # Steps that are conditional on context
+        conditional_agents = STOP_GATE_AGENTS | (set() if debate_ran else {"revision"})
+
+        expected_steps = [
+            name
+            for name, _ in step_artifacts
+            if name not in conditional_agents
+            or (name in STOP_GATE_AGENTS and stop_gate_active)
+            or (name == "revision" and debate_ran)
+        ]
+        # Only suggest agents that are actually resumable via --from-agent
+        _resumable = {"analyst", "scientist", "debate", "revision", "coder"}
+        next_step = next(
+            (s for s in expected_steps if s not in present and s in _resumable),
+            None,
+        )
+        if next_step:
             click.echo()
             click.echo("Resume examples:")
             click.echo(
                 f"  auto-scientist resume --from {run_dir} --fork "
-                f"--from-iteration {last_idx} --from-agent {next_agent}"
+                f"--from-iteration {last_idx} --from-agent {next_step}"
             )
 
 

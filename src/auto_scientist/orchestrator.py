@@ -661,7 +661,12 @@ class Orchestrator:
         # Consume skip_to_agent (only applies to the first iteration after resume)
         skip_to = self._skip_to_agent
         self._skip_to_agent = None
-        skip_idx = AGENT_ORDER.index(skip_to) if skip_to else 0
+        # Build the set of agents to skip (everything before skip_to)
+        if skip_to:
+            skip_idx = AGENT_ORDER.index(skip_to)
+            agents_to_skip = set(AGENT_ORDER[:skip_idx])
+        else:
+            agents_to_skip = set()
 
         # Mount TUI panels for agents loaded from disk (with full original stats)
         if self._restored_panels:
@@ -670,7 +675,7 @@ class Orchestrator:
             self._restored_panels = None
 
         # Step 1: Analyst observes latest results (or raw data on iteration 0)
-        if skip_idx > 0:
+        if "analyst" in agents_to_skip:
             analysis = self._load_analyst_from_disk(version_dir)
         else:
             analysis = await self._run_analyst()
@@ -679,7 +684,7 @@ class Orchestrator:
             await self._fail_iteration("failed (analyst error)")
             return
 
-        if skip_idx == 0:
+        if "analyst" not in agents_to_skip:
             # Persist analysis for audit trail
             self._persist_artifact(version_dir, "analysis.json", analysis)
 
@@ -690,9 +695,10 @@ class Orchestrator:
 
             # Resolve any pending prediction outcomes from the Analyst
             self._resolve_prediction_outcomes(analysis)
+            self._save_partial_panels(version_dir)
 
         # Step 2: Scientist plans next iteration
-        if skip_idx > 1:
+        if "scientist" in agents_to_skip:
             plan = self._load_scientist_plan_from_disk(version_dir)
         else:
             plan = await self._run_scientist_plan(analysis)
@@ -701,8 +707,12 @@ class Orchestrator:
             await self._fail_iteration("failed (scientist error)")
             return
 
+        if "scientist" not in agents_to_skip:
+            self._save_partial_panels(version_dir)
+
         # Step 3: Stop gate (if Scientist recommends stopping)
-        if plan and plan.get("should_stop"):
+        # Skip entirely when resuming past the stop gate (debate or later)
+        if plan and plan.get("should_stop") and "debate" not in agents_to_skip:
             revised_stop_plan = await self._run_stop_gate(plan, analysis, version_dir)
 
             if revised_stop_plan is None:
@@ -732,12 +742,20 @@ class Orchestrator:
                 # Stop withdrawn - use the new plan and fall through to normal debate
                 logger.info("Scientist withdrew stop after stop gate, continuing")
                 plan = revised_stop_plan
+            self._save_partial_panels(version_dir)
 
-        # Step 4: Debate (subset personas on iteration 0, all on iteration 1+)
-        if skip_idx > 2:
+        # Step 4: Debate + Revision
+        if "debate" in agents_to_skip and "revision" in agents_to_skip:
+            # Both done - load the final (post-revision) plan from disk
             final_plan = self._load_final_plan_from_disk(version_dir)
             if final_plan is None:
                 await self._fail_iteration("failed (could not load plan from disk)")
+                return
+        elif "debate" in agents_to_skip:
+            # Debate done but revision needs to re-run
+            final_plan = await self._resume_from_revision(version_dir, analysis)
+            if final_plan is None:
+                await self._fail_iteration("failed (revision error on resume)")
                 return
         else:
             debate_result = await self._run_debate(plan, analysis)
@@ -762,6 +780,9 @@ class Orchestrator:
                     },
                 )
 
+            # Persist revision artifact (marks revision as completed for resume detection)
+            self._persist_artifact(version_dir, "revision_plan.json", final_plan)
+
             # Apply prediction updates from the final plan (after debate revision)
             if final_plan:
                 self._apply_prediction_updates(final_plan)
@@ -769,6 +790,9 @@ class Orchestrator:
             # Persist the final plan (post-debate revision if applicable)
             if final_plan:
                 self._persist_artifact(version_dir, "plan.json", final_plan)
+
+        if "debate" not in agents_to_skip or "revision" not in agents_to_skip:
+            self._save_partial_panels(version_dir)
 
         # Step 5: Coder implements and runs the plan
         new_script = await self._run_coder(final_plan)
@@ -929,6 +953,38 @@ class Orchestrator:
             summary=summary,
             panels=panels,
         )
+
+    def _save_partial_panels(self, version_dir: Path) -> None:
+        """Snapshot current iteration's completed panels to version_dir/panels.json.
+
+        Called after each agent completes so that if a later agent crashes,
+        the panel data (summaries, lines, token counts) is preserved on disk
+        for resume/fork reconstruction.
+        """
+        container = self._live._current_iteration
+        if container is None:
+            return
+        panels = []
+        for p in getattr(container, "_panels", []):
+            if not p.done:
+                continue
+            panels.append(
+                {
+                    "name": p.panel_name,
+                    "model": p.model,
+                    "style": p.panel_style,
+                    "done_summary": p.done_summary,
+                    "input_tokens": p.input_tokens,
+                    "output_tokens": p.output_tokens,
+                    "thinking_tokens": p.thinking_tokens,
+                    "num_turns": p.num_turns,
+                    "elapsed_seconds": p.elapsed,
+                    "lines": list(p.all_lines),
+                }
+            )
+        if panels:
+            version_dir.mkdir(parents=True, exist_ok=True)
+            (version_dir / "panels.json").write_text(json.dumps(panels, indent=2))
 
     def _save_iteration_manifest(
         self,
@@ -1161,6 +1217,97 @@ class Orchestrator:
 
         logger.info(f"Loaded final plan from {plan_path}")
         return plan
+
+    async def _resume_from_revision(
+        self, version_dir: Path, analysis: dict[str, Any] | None
+    ) -> dict[str, Any] | None:
+        """Load debate data from disk and re-run only the scientist revision.
+
+        Used when resuming from the 'revision' agent: debate completed but
+        the post-debate scientist revision crashed. Uses the pre-built
+        concern_ledger from debate.json (raw debate_results are serialized
+        dicts, not DebateResult objects, so _build_concern_ledger won't work).
+        """
+        from auto_scientist.agents.scientist import run_scientist_revision
+
+        debate_path = version_dir / "debate.json"
+        if not debate_path.exists():
+            logger.error(f"Cannot resume revision: {debate_path} not found")
+            return None
+
+        try:
+            debate_data = json.loads(debate_path.read_text())
+        except (json.JSONDecodeError, OSError) as e:
+            logger.error(f"Cannot load debate data for revision resume: {e}")
+            return None
+
+        original_plan = debate_data.get("original_plan")
+        concern_ledger = debate_data.get("concern_ledger", [])
+
+        if not original_plan:
+            logger.error("debate.json missing original_plan, cannot resume revision")
+            return None
+
+        version = f"v{self.state.iteration:02d}"
+        notebook_path = self.output_dir / NOTEBOOK_FILENAME
+        cfg = self.model_config.resolve("scientist")
+
+        panel = AgentPanel(
+            name="Revision", model=cfg.model, style=AGENT_STYLES.get("Scientist", "cyan")
+        )
+        self._live.add_panel(panel)
+        self._live.update_status(phase="REVISE")
+
+        buffer: list[str] = []
+        try:
+
+            async def _revision_coro(buf):
+                return await run_scientist_revision(
+                    original_plan=original_plan,
+                    concern_ledger=concern_ledger,
+                    analysis=analysis or {},
+                    notebook_path=notebook_path,
+                    version=version,
+                    domain_knowledge=self.state.domain_knowledge,
+                    prediction_history=self.state.prediction_history,
+                    model=cfg.model,
+                    message_buffer=buf,
+                    goal=self.state.goal,
+                    provider=cfg.provider,
+                    reasoning=cfg.reasoning,
+                )
+
+            revised: dict[str, Any] = await self._with_summaries(
+                _revision_coro,
+                "Scientist Revision",
+                buffer,
+                panel=panel,
+            )
+
+            # Write revised notebook entry
+            if revised.get("notebook_entry"):
+                from auto_scientist.notebook import append_entry
+
+                append_entry(notebook_path, revised["notebook_entry"], version, "revision")
+
+            self._collapse(panel, f"strategy={revised.get('strategy', '?')}")
+
+            final_plan = revised
+        except Exception as e:
+            logger.exception(f"Scientist revision error on resume: {e}")
+            panel.error(f"{e}, using original plan")
+            self._live.collapse_panel(panel)
+            final_plan = original_plan
+        finally:
+            self._persist_buffer("scientist_revision", buffer)
+
+        if final_plan:
+            self._persist_artifact(version_dir, "revision_plan.json", final_plan)
+            self._apply_prediction_updates(final_plan)
+            self._persist_artifact(version_dir, "plan.json", final_plan)
+
+        logger.info("Resumed from revision: scientist revision re-run complete")
+        return final_plan
 
     def _notebook_content(self) -> str:
         """Return notebook content."""
