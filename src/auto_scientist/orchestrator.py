@@ -546,6 +546,14 @@ class Orchestrator:
                 await self._run_iteration_body()
                 self.state.save(state_path)
 
+                # Stop immediately on any failure. Don't cascade into
+                # doomed iterations (e.g. analyst can't analyze when the
+                # previous coder never produced results). The user can
+                # resume from the failed iteration.
+                if self.state.consecutive_failures > 0:
+                    self.state.phase = "stopped"
+                    break
+
             # Phase 2: Report (with its own border)
             if self.state.phase == "report":
                 self._live.start_iteration("Report")

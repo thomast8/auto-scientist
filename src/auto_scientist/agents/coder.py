@@ -19,7 +19,7 @@ from auto_scientist.prompts.coder import (
     CODER_SYSTEM,
     CODER_USER,
 )
-from auto_scientist.sdk_backend import SDKOptions, get_backend
+from auto_scientist.sdk_backend import CODEX_SANDBOX_ADDENDUM, SDKOptions, get_backend
 from auto_scientist.sdk_utils import (
     append_block_to_buffer,
     collect_text_from_query,
@@ -90,6 +90,8 @@ async def run_coder(
         run_timeout_minutes=run_timeout_minutes,
         run_command=run_command,
     )
+    if provider == "openai":
+        system_prompt += CODEX_SANDBOX_ADDENDUM
 
     # Build data files section so coder doesn't need to discover files
     if data_files_listing:

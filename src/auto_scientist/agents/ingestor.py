@@ -15,7 +15,7 @@ from pydantic import ValidationError
 from auto_scientist.config import DomainConfig
 from auto_scientist.notebook import NOTEBOOK_FILENAME
 from auto_scientist.prompts.ingestor import INGESTOR_SYSTEM, INGESTOR_USER
-from auto_scientist.sdk_backend import SDKOptions, get_backend
+from auto_scientist.sdk_backend import CODEX_SANDBOX_ADDENDUM, SDKOptions, get_backend
 from auto_scientist.sdk_utils import (
     append_block_to_buffer,
     collect_text_from_query,
@@ -61,9 +61,12 @@ async def run_ingestor(
     mode = "interactive" if interactive else "autonomous"
 
     max_turns = 30
+    system_prompt = INGESTOR_SYSTEM
+    if provider == "openai":
+        system_prompt += CODEX_SANDBOX_ADDENDUM
     backend = get_backend(provider)
     options = SDKOptions(
-        system_prompt=with_turn_budget(INGESTOR_SYSTEM, max_turns, tools),
+        system_prompt=with_turn_budget(system_prompt, max_turns, tools),
         allowed_tools=tools,
         max_turns=max_turns,
         permission_mode="acceptEdits",
