@@ -64,6 +64,59 @@ def _check_provider_auth(provider: str) -> str | None:
         return f"Unknown provider: {provider}"
 
 
+def _check_claude_cli_auth(claude_bin: str) -> str | None:
+    """Check that the Claude Code CLI is logged in. Returns error message or None."""
+    import subprocess
+
+    try:
+        result = subprocess.run(
+            [claude_bin, "auth", "status"],
+            capture_output=True,
+            text=True,
+            timeout=10,
+        )
+        if result.returncode != 0:
+            return (
+                "Claude Code CLI is not logged in (needed by Anthropic SDK agents). "
+                "Run: claude login"
+            )
+        # Parse JSON output to check loggedIn field
+        import json
+
+        try:
+            status = json.loads(result.stdout)
+            if not status.get("loggedIn"):
+                return (
+                    "Claude Code CLI is not logged in (needed by Anthropic SDK agents). "
+                    "Run: claude login"
+                )
+        except (json.JSONDecodeError, KeyError):
+            pass  # If we can't parse, assume OK (returncode was 0)
+    except (subprocess.TimeoutExpired, OSError) as e:
+        logger.warning(f"Could not check Claude CLI auth status: {e}")
+    return None
+
+
+def _check_codex_cli_auth() -> str | None:
+    """Check that the Codex CLI is logged in. Returns error message or None."""
+    import json
+    from pathlib import Path
+
+    auth_path = Path.home() / ".codex" / "auth.json"
+    if not auth_path.exists():
+        return "Codex CLI is not logged in (needed by OpenAI SDK agents). Run: codex login"
+    try:
+        auth = json.loads(auth_path.read_text())
+        has_auth = bool(auth.get("tokens")) or bool(auth.get("OPENAI_API_KEY"))
+        if not has_auth:
+            return (
+                "Codex CLI has no valid credentials (needed by OpenAI SDK agents). Run: codex login"
+            )
+    except (json.JSONDecodeError, OSError) as e:
+        logger.warning(f"Could not read Codex auth file: {e}")
+    return None
+
+
 def _validate_reasoning_configs(mc: ModelConfig) -> list[str]:
     """Validate reasoning configs are compatible with their provider and model.
 
@@ -207,14 +260,6 @@ def _check_model_exists(provider: str, model: str) -> str | None:
     return None  # unknown provider, skip validation
 
 
-def _truncate_summary(text: str, limit: int = 300) -> str:
-    """Truncate text at a word boundary, avoiding mid-word cuts."""
-    if len(text) <= limit:
-        return text
-    truncated = text[:limit].rsplit(" ", 1)[0]
-    return f"{truncated}..."
-
-
 class Orchestrator:
     """Drives the Ingestion -> Iteration -> Report pipeline.
 
@@ -231,7 +276,7 @@ class Orchestrator:
         max_iterations: int = 20,
         model_config: ModelConfig | None = None,
         interactive: bool = False,
-        max_consecutive_failures: int = 5,
+        max_consecutive_failures: int = 3,
         verbose: bool = False,
         skip_to_agent: str | None = None,
         restored_panels: list[dict] | None = None,
@@ -271,13 +316,6 @@ class Orchestrator:
         if parent.exists() and not os.access(parent, os.W_OK):
             errors.append(f"Output directory parent is not writable: {parent}")
 
-        # Claude Code CLI must be installed (powers all main agents)
-        if not shutil.which("claude"):
-            errors.append(
-                "Claude Code CLI not found on PATH. "
-                "Install with: npm install -g @anthropic-ai/claude-code"
-            )
-
         # uv must be installed (runs experiment scripts)
         run_cmd = self.config.run_command if self.config else "uv run {script_path}"
         exe = run_cmd.split()[0] if run_cmd.strip() else ""
@@ -287,17 +325,62 @@ class Orchestrator:
                 f"Install uv with: curl -LsSf https://astral.sh/uv/install.sh | sh"
             )
 
-        # SDK agents must use Anthropic models (they run through claude CLI)
+        # Validate SDK agent provider+mode combinations
         mc = self.model_config
-        sdk_agents = ["analyst", "scientist", "coder", "ingestor", "report"]
-        for agent_name in sdk_agents:
+        sdk_only_agents = ["analyst", "coder", "ingestor", "report", "assessor"]
+        sdk_capable_agents = ["analyst", "scientist", "coder", "ingestor", "report", "assessor"]
+        needs_claude_cli = False
+        needs_codex_cli = False
+
+        for agent_name in sdk_capable_agents:
             cfg = mc.resolve(agent_name)
-            if cfg.provider != "anthropic":
+
+            # SDK-only agents cannot use mode=api
+            if agent_name in sdk_only_agents and cfg.mode == "api":
                 errors.append(
-                    f"{agent_name} uses provider '{cfg.provider}' (model: {cfg.model}), "
-                    f"but SDK agents require provider 'anthropic'. "
-                    f"Non-Anthropic models can only be used for critics and summarizer."
+                    f"{agent_name} uses mode='api', but it requires mode='sdk' "
+                    f"(needs file tools). Remove the mode override or set mode='sdk'."
                 )
+
+            # SDK mode requires anthropic or openai (not google)
+            if cfg.mode == "sdk" and cfg.provider == "google":
+                errors.append(
+                    f"{agent_name} uses mode='sdk' with provider='google', "
+                    f"but no Google coding agent CLI exists. "
+                    f"Use provider='anthropic' or provider='openai' for SDK mode."
+                )
+
+            # Track which CLIs are needed
+            if cfg.mode == "sdk":
+                if cfg.provider == "anthropic":
+                    needs_claude_cli = True
+                elif cfg.provider == "openai":
+                    needs_codex_cli = True
+
+        # Check CLI availability and login status based on actual needs
+        if needs_claude_cli:
+            claude_bin = shutil.which("claude")
+            if not claude_bin:
+                errors.append(
+                    "Claude Code CLI not found on PATH (needed by Anthropic SDK agents). "
+                    "Install with: npm install -g @anthropic-ai/claude-code"
+                )
+            else:
+                err = _check_claude_cli_auth(claude_bin)
+                if err:
+                    errors.append(err)
+
+        if needs_codex_cli:
+            codex_bin = shutil.which("codex")
+            if not codex_bin:
+                errors.append(
+                    "Codex CLI not found on PATH (needed by OpenAI SDK agents). "
+                    "Install with: npm install -g @openai/codex"
+                )
+            else:
+                err = _check_codex_cli_auth()
+                if err:
+                    errors.append(err)
 
         # Validate model names against provider APIs
         model_errors = _validate_model_names(mc)
@@ -310,16 +393,22 @@ class Orchestrator:
         # Collect required providers from model config
         required_providers: set[str] = set()
 
-        # Claude Code SDK powers all main agents, always needs Anthropic
-        required_providers.add("anthropic")
+        # Add providers for SDK agents (API key needed for api mode,
+        # subscription or key for sdk mode)
+        for agent_name in sdk_capable_agents:
+            cfg = mc.resolve(agent_name)
+            if cfg.mode == "api":
+                required_providers.add(cfg.provider)
+            # SDK mode: CLI handles auth (subscription or key), skip API key check
 
-        # Summarizer always uses OpenAI directly
+        # Summarizer uses direct API
         if mc.summarizer is not None:
-            required_providers.add("openai")
+            required_providers.add(mc.summarizer.provider)
 
-        # Critics use their configured provider
+        # Critics use their configured provider (api mode by default)
         for critic in mc.critics:
-            required_providers.add(critic.provider)
+            if critic.mode == "api":
+                required_providers.add(critic.provider)
 
         # Validate each provider by trying to instantiate its SDK client
         for provider in sorted(required_providers):
@@ -372,43 +461,63 @@ class Orchestrator:
 
                 canonical_data_dir = await self._run_ingestion()
 
-                self.state.data_path = str(canonical_data_dir)
-                self.data_path = canonical_data_dir
+                if canonical_data_dir is None:
+                    self.state.phase = "stopped"
+                    self.state.save(state_path)
+                    iter_summary = await self._generate_iteration_summary()
+                    self._save_iteration_manifest(
+                        "Ingestion", "failed (ingestor error)", "red", iter_summary
+                    )
+                    self._live.end_iteration("failed (ingestor error)", "red", iter_summary)
+                    self._live.flush_completed()
+                else:
+                    self.state.data_path = str(canonical_data_dir)
+                    self.data_path = canonical_data_dir
 
-                # Load config if produced by ingestor
-                config_path = self.output_dir / "domain_config.json"
-                if config_path.exists():
-                    config_data = json.loads(config_path.read_text())
-                    self.config = DomainConfig.model_validate(config_data)
-                    self.state.config_path = str(config_path)
+                    # Load config if produced by ingestor
+                    config_path = self.output_dir / "domain_config.json"
+                    if config_path.exists():
+                        config_data = json.loads(config_path.read_text())
+                        self.config = DomainConfig.model_validate(config_data)
+                        self.state.config_path = str(config_path)
 
-                self.state.phase = "iteration"
-                self.state.save(state_path)
-                logger.info("Ingestion complete, entering iteration phase")
+                    self.state.phase = "iteration"
+                    self.state.save(state_path)
+                    logger.info("Ingestion complete, entering iteration phase")
 
-                iter_summary = await self._generate_iteration_summary()
-                self._save_iteration_manifest("Ingestion", "done", "green", iter_summary)
-                self._live.end_iteration("done", "green", iter_summary)
-                self._live.flush_completed()
+                    iter_summary = await self._generate_iteration_summary()
+                    self._save_iteration_manifest("Ingestion", "done", "green", iter_summary)
+                    self._live.end_iteration("done", "green", iter_summary)
+                    self._live.flush_completed()
 
             # Phase 1: Unified iteration loop
             while self.state.phase == "iteration":
-                if self.state.iteration >= self.max_iterations:
-                    self._live.add_rule(
-                        Rule(
-                            f"Reached max iterations ({self.max_iterations}). Stopping.",
-                            style="yellow",
-                        )
-                    )
-                    self._live.flush_completed()
-                    self.state.phase = "report"
-                    break
-
                 if self.state.should_stop_on_failures(self.max_consecutive_failures):
                     self._live.add_rule(
                         Rule(
                             f"Hit {self.max_consecutive_failures} consecutive failures. Stopping.",
                             style="red",
+                        )
+                    )
+                    self._live.flush_completed()
+                    self.state.phase = "stopped"
+                    break
+
+                # When the latest version has no results, the analyst
+                # cannot proceed and would just cascade into another
+                # failure. Stop before wasting a doomed iteration.
+                # When results exist, let the threshold above govern.
+                if self.state.consecutive_failures > 0:
+                    latest = self.state.versions[-1] if self.state.versions else None
+                    if latest and latest.results_path is None:
+                        self.state.phase = "stopped"
+                        break
+
+                if self.state.iteration >= self.max_iterations:
+                    self._live.add_rule(
+                        Rule(
+                            f"Reached max iterations ({self.max_iterations}). Stopping.",
+                            style="yellow",
                         )
                     )
                     self._live.flush_completed()
@@ -442,18 +551,17 @@ class Orchestrator:
                     await self._resolve_final_predictions()
                     self.state.save(state_path)
 
-                await self._run_report()
+                report_ok = await self._run_report()
                 self.state.phase = "stopped"
                 self.state.save(state_path)
 
+                if report_ok:
+                    label, style = "done", "green"
+                else:
+                    label, style = "failed (report error)", "red"
                 iter_summary = await self._generate_iteration_summary()
-                self._save_iteration_manifest(
-                    "Report",
-                    "done",
-                    "green",
-                    iter_summary,
-                )
-                self._live.end_iteration("done", "green", iter_summary)
+                self._save_iteration_manifest("Report", label, style, iter_summary)
+                self._live.end_iteration(label, style, iter_summary)
                 self._live.flush_completed()
 
             logger.info("Run finished successfully")
@@ -461,7 +569,7 @@ class Orchestrator:
             self._live.wait_for_dismiss()
             self._live.stop()
 
-    async def _run_ingestion(self) -> Path:
+    async def _run_ingestion(self) -> Path | None:
         """Phase 0: Canonicalize raw data into experiments/data/."""
         from auto_scientist.agents.ingestor import run_ingestor
 
@@ -491,6 +599,7 @@ class Orchestrator:
                 config_path=config_path,
                 model=cfg.model,
                 message_buffer=buf,
+                provider=cfg.provider,
             )
 
         buffer: list[str] = []
@@ -504,6 +613,12 @@ class Orchestrator:
             data_files = sorted(canonical_data_dir.iterdir())
             file_list = ", ".join(f.name for f in data_files)
             self._collapse(panel, f"Canonicalized {len(data_files)} files: {file_list}")
+        except Exception as e:
+            logger.exception(f"Ingestor error: {e}")
+            panel.error(str(e))
+            self._live.collapse_panel(panel)
+            self.state.record_failure()
+            return None
         finally:
             self._persist_buffer("ingestor", buffer)
 
@@ -542,7 +657,12 @@ class Orchestrator:
         # Consume skip_to_agent (only applies to the first iteration after resume)
         skip_to = self._skip_to_agent
         self._skip_to_agent = None
-        skip_idx = AGENT_ORDER.index(skip_to) if skip_to else 0
+        # Build the set of agents to skip (everything before skip_to)
+        if skip_to:
+            skip_idx = AGENT_ORDER.index(skip_to)
+            agents_to_skip = set(AGENT_ORDER[:skip_idx])
+        else:
+            agents_to_skip = set()
 
         # Mount TUI panels for agents loaded from disk (with full original stats)
         if self._restored_panels:
@@ -551,7 +671,7 @@ class Orchestrator:
             self._restored_panels = None
 
         # Step 1: Analyst observes latest results (or raw data on iteration 0)
-        if skip_idx > 0:
+        if "analyst" in agents_to_skip:
             analysis = self._load_analyst_from_disk(version_dir)
         else:
             analysis = await self._run_analyst()
@@ -560,7 +680,7 @@ class Orchestrator:
             await self._fail_iteration("failed (analyst error)")
             return
 
-        if skip_idx == 0:
+        if "analyst" not in agents_to_skip:
             # Persist analysis for audit trail
             self._persist_artifact(version_dir, "analysis.json", analysis)
 
@@ -571,9 +691,10 @@ class Orchestrator:
 
             # Resolve any pending prediction outcomes from the Analyst
             self._resolve_prediction_outcomes(analysis)
+            self._save_partial_panels(version_dir)
 
         # Step 2: Scientist plans next iteration
-        if skip_idx > 1:
+        if "scientist" in agents_to_skip:
             plan = self._load_scientist_plan_from_disk(version_dir)
         else:
             plan = await self._run_scientist_plan(analysis)
@@ -582,8 +703,12 @@ class Orchestrator:
             await self._fail_iteration("failed (scientist error)")
             return
 
+        if "scientist" not in agents_to_skip:
+            self._save_partial_panels(version_dir)
+
         # Step 3: Stop gate (if Scientist recommends stopping)
-        if plan and plan.get("should_stop"):
+        # Skip entirely when resuming past the stop gate (debate or later)
+        if plan and plan.get("should_stop") and "debate" not in agents_to_skip:
             revised_stop_plan = await self._run_stop_gate(plan, analysis, version_dir)
 
             if revised_stop_plan is None:
@@ -613,12 +738,20 @@ class Orchestrator:
                 # Stop withdrawn - use the new plan and fall through to normal debate
                 logger.info("Scientist withdrew stop after stop gate, continuing")
                 plan = revised_stop_plan
+            self._save_partial_panels(version_dir)
 
-        # Step 4: Debate (subset personas on iteration 0, all on iteration 1+)
-        if skip_idx > 2:
+        # Step 4: Debate + Revision
+        if "debate" in agents_to_skip and "revision" in agents_to_skip:
+            # Both done - load the final (post-revision) plan from disk
             final_plan = self._load_final_plan_from_disk(version_dir)
             if final_plan is None:
                 await self._fail_iteration("failed (could not load plan from disk)")
+                return
+        elif "debate" in agents_to_skip:
+            # Debate done but revision needs to re-run
+            final_plan = await self._resume_from_revision(version_dir, analysis)
+            if final_plan is None:
+                await self._fail_iteration("failed (revision error on resume)")
                 return
         else:
             debate_result = await self._run_debate(plan, analysis)
@@ -643,6 +776,9 @@ class Orchestrator:
                     },
                 )
 
+            # Persist revision artifact (marks revision as completed for resume detection)
+            self._persist_artifact(version_dir, "revision_plan.json", final_plan)
+
             # Apply prediction updates from the final plan (after debate revision)
             if final_plan:
                 self._apply_prediction_updates(final_plan)
@@ -650,6 +786,9 @@ class Orchestrator:
             # Persist the final plan (post-debate revision if applicable)
             if final_plan:
                 self._persist_artifact(version_dir, "plan.json", final_plan)
+
+        if "debate" not in agents_to_skip or "revision" not in agents_to_skip:
+            self._save_partial_panels(version_dir)
 
         # Step 5: Coder implements and runs the plan
         new_script = await self._run_coder(final_plan)
@@ -810,6 +949,38 @@ class Orchestrator:
             summary=summary,
             panels=panels,
         )
+
+    def _save_partial_panels(self, version_dir: Path) -> None:
+        """Snapshot current iteration's completed panels to version_dir/panels.json.
+
+        Called after each agent completes so that if a later agent crashes,
+        the panel data (summaries, lines, token counts) is preserved on disk
+        for resume/fork reconstruction.
+        """
+        container = self._live._current_iteration
+        if container is None:
+            return
+        panels = []
+        for p in getattr(container, "_panels", []):
+            if not p.done:
+                continue
+            panels.append(
+                {
+                    "name": p.panel_name,
+                    "model": p.model,
+                    "style": p.panel_style,
+                    "done_summary": p.done_summary,
+                    "input_tokens": p.input_tokens,
+                    "output_tokens": p.output_tokens,
+                    "thinking_tokens": p.thinking_tokens,
+                    "num_turns": p.num_turns,
+                    "elapsed_seconds": p.elapsed,
+                    "lines": list(p.all_lines),
+                }
+            )
+        if panels:
+            version_dir.mkdir(parents=True, exist_ok=True)
+            (version_dir / "panels.json").write_text(json.dumps(panels, indent=2))
 
     def _save_iteration_manifest(
         self,
@@ -1043,6 +1214,97 @@ class Orchestrator:
         logger.info(f"Loaded final plan from {plan_path}")
         return plan
 
+    async def _resume_from_revision(
+        self, version_dir: Path, analysis: dict[str, Any] | None
+    ) -> dict[str, Any] | None:
+        """Load debate data from disk and re-run only the scientist revision.
+
+        Used when resuming from the 'revision' agent: debate completed but
+        the post-debate scientist revision crashed. Uses the pre-built
+        concern_ledger from debate.json (raw debate_results are serialized
+        dicts, not DebateResult objects, so _build_concern_ledger won't work).
+        """
+        from auto_scientist.agents.scientist import run_scientist_revision
+
+        debate_path = version_dir / "debate.json"
+        if not debate_path.exists():
+            logger.error(f"Cannot resume revision: {debate_path} not found")
+            return None
+
+        try:
+            debate_data = json.loads(debate_path.read_text())
+        except (json.JSONDecodeError, OSError) as e:
+            logger.error(f"Cannot load debate data for revision resume: {e}")
+            return None
+
+        original_plan = debate_data.get("original_plan")
+        concern_ledger = debate_data.get("concern_ledger", [])
+
+        if not original_plan:
+            logger.error("debate.json missing original_plan, cannot resume revision")
+            return None
+
+        version = f"v{self.state.iteration:02d}"
+        notebook_path = self.output_dir / NOTEBOOK_FILENAME
+        cfg = self.model_config.resolve("scientist")
+
+        panel = AgentPanel(
+            name="Revision", model=cfg.model, style=AGENT_STYLES.get("Scientist", "cyan")
+        )
+        self._live.add_panel(panel)
+        self._live.update_status(phase="REVISE")
+
+        buffer: list[str] = []
+        try:
+
+            async def _revision_coro(buf):
+                return await run_scientist_revision(
+                    original_plan=original_plan,
+                    concern_ledger=concern_ledger,
+                    analysis=analysis or {},
+                    notebook_path=notebook_path,
+                    version=version,
+                    domain_knowledge=self.state.domain_knowledge,
+                    prediction_history=self.state.prediction_history,
+                    model=cfg.model,
+                    message_buffer=buf,
+                    goal=self.state.goal,
+                    provider=cfg.provider,
+                    reasoning=cfg.reasoning,
+                )
+
+            revised: dict[str, Any] = await self._with_summaries(
+                _revision_coro,
+                "Scientist Revision",
+                buffer,
+                panel=panel,
+            )
+
+            # Write revised notebook entry
+            if revised.get("notebook_entry"):
+                from auto_scientist.notebook import append_entry
+
+                append_entry(notebook_path, revised["notebook_entry"], version, "revision")
+
+            self._collapse(panel, f"strategy={revised.get('strategy', '?')}")
+
+            final_plan = revised
+        except Exception as e:
+            logger.exception(f"Scientist revision error on resume: {e}")
+            panel.error(f"{e}, using original plan")
+            self._live.collapse_panel(panel)
+            final_plan = original_plan
+        finally:
+            self._persist_buffer("scientist_revision", buffer)
+
+        if final_plan:
+            self._persist_artifact(version_dir, "revision_plan.json", final_plan)
+            self._apply_prediction_updates(final_plan)
+            self._persist_artifact(version_dir, "plan.json", final_plan)
+
+        logger.info("Resumed from revision: scientist revision re-run complete")
+        return final_plan
+
     def _notebook_content(self) -> str:
         """Return notebook content."""
         return read_notebook(self.output_dir / NOTEBOOK_FILENAME)
@@ -1073,6 +1335,7 @@ class Orchestrator:
                     data_dir=self.data_path,
                     model=cfg.model,
                     message_buffer=buf,
+                    provider=cfg.provider,
                 )
 
             analysis: dict[str, Any] | None = await self._with_summaries(
@@ -1133,6 +1396,7 @@ class Orchestrator:
                     domain_knowledge=domain_knowledge,
                     model=cfg.model,
                     message_buffer=buf,
+                    provider=cfg.provider,
                 )
 
             analysis: dict[str, Any] = await self._with_summaries(
@@ -1183,6 +1447,8 @@ class Orchestrator:
                     model=cfg.model,
                     message_buffer=buf,
                     goal=self.state.goal,
+                    provider=cfg.provider,
+                    reasoning=cfg.reasoning,
                 )
 
             plan: dict[str, Any] = await self._with_summaries(
@@ -1258,6 +1524,7 @@ class Orchestrator:
                     prediction_history=self.state.prediction_history,
                     model=cfg.model,
                     message_buffer=buf,
+                    provider=cfg.provider,
                 )
 
             assessment: dict[str, Any] = await self._with_summaries(
@@ -1345,8 +1612,11 @@ class Orchestrator:
                     panel.add_line(f"[{time_label}] {summary}")
                 seen[name] = len(entries)
 
-                assessment_text = result.critic_output.overall_assessment
-                done_summary = _truncate_summary(assessment_text)
+                done_entries = [e for e in collectors[name] if e[2].endswith("done")]
+                if done_entries:
+                    done_summary = done_entries[-1][1]
+                else:
+                    done_summary = result.critic_output.overall_assessment
                 self._live.collapse_panel(panel, done_summary or "Critique complete")
 
             async def _summarized_stop_debate(persona_index, persona):
@@ -1419,12 +1689,13 @@ class Orchestrator:
                 failed_msgs = [str(r) for r in raw_results if isinstance(r, BaseException)]
                 logger.error(
                     f"All {len(raw_results)} stop debates failed. "
-                    f"Stop gate returning None. Errors: {failed_msgs}"
+                    f"Upholding scientist's stop decision. Errors: {failed_msgs}"
                 )
                 self._live.log(
-                    f"STOP DEBATE: all {len(raw_results)} debates failed, stop gate cannot validate"
+                    f"STOP DEBATE: all {len(raw_results)} debates failed, "
+                    f"upholding scientist's stop decision"
                 )
-                return None
+                return plan
 
             self._live.log(f"STOP DEBATE: received {len(debate_results)} critique(s)")
 
@@ -1473,6 +1744,7 @@ class Orchestrator:
                     model=revision_cfg.model,
                     message_buffer=buf,
                     goal=self.state.goal,
+                    provider=revision_cfg.provider,
                 )
 
             revised: dict[str, Any] = await self._with_summaries(
@@ -1691,8 +1963,7 @@ class Orchestrator:
             if done_entries:
                 done_summary = done_entries[-1][1]
             else:
-                assessment = result.critic_output.overall_assessment
-                done_summary = _truncate_summary(assessment)
+                done_summary = result.critic_output.overall_assessment
             self._live.collapse_panel(panel, done_summary or "Debate complete")
 
         async def _summarized_debate(persona_index, persona):
@@ -1840,6 +2111,8 @@ class Orchestrator:
                     model=cfg.model,
                     message_buffer=buf,
                     goal=self.state.goal,
+                    provider=cfg.provider,
+                    reasoning=cfg.reasoning,
                 )
 
             revised: dict[str, Any] = await self._with_summaries(
@@ -1885,21 +2158,24 @@ class Orchestrator:
         run_timeout = self.config.run_timeout_minutes if self.config else 120
         run_cmd = self.config.run_command if self.config else "uv run {script_path}"
 
+        cfg = self.model_config.resolve("coder")
+
         # Resolve the executable to an absolute path so the coder's Bash
         # subprocess can find it even when ~/.local/bin isn't in PATH.
-        parts = run_cmd.split()
-        if parts:
-            exe = parts[0]
-            abs_exe = shutil.which(exe)
-            if abs_exe and abs_exe != exe:
-                run_cmd = abs_exe + run_cmd[len(exe) :]
-            elif not abs_exe:
-                logger.warning(
-                    f"Executable '{exe}' not found on PATH; "
-                    f"coder may fail to run the experiment script"
-                )
-
-        cfg = self.model_config.resolve("coder")
+        # Skip for Codex: its seatbelt sandbox has its own filesystem,
+        # so host absolute paths (e.g. /Users/.../python3) don't exist there.
+        if cfg.provider != "openai":
+            parts = run_cmd.split()
+            if parts:
+                exe = parts[0]
+                abs_exe = shutil.which(exe)
+                if abs_exe and abs_exe != exe:
+                    run_cmd = abs_exe + run_cmd[len(exe) :]
+                elif not abs_exe:
+                    logger.warning(
+                        f"Executable '{exe}' not found on PATH; "
+                        f"coder may fail to run the experiment script"
+                    )
 
         # Pre-compute data directory listing so coder doesn't waste turns
         data_dir = Path(data_path) if data_path else None
@@ -1934,6 +2210,7 @@ class Orchestrator:
                     run_timeout_minutes=run_timeout,
                     run_command=run_cmd,
                     data_files_listing=data_files_listing,
+                    provider=cfg.provider,
                 )
 
             new_script: Path | None = await self._with_summaries(
@@ -2185,7 +2462,7 @@ class Orchestrator:
         if results_path.exists():
             version_entry.results_path = str(results_path)
 
-    async def _run_report(self) -> None:
+    async def _run_report(self) -> bool:
         """Phase 2: Generate final summary report."""
         from auto_scientist.agents.report import run_report
 
@@ -2206,15 +2483,19 @@ class Orchestrator:
                     output_dir=self.output_dir,
                     model=cfg.model,
                     message_buffer=buf,
+                    provider=cfg.provider,
                 )
 
             report_content = await self._with_summaries(_report_coro, "Report", buffer, panel=panel)
             report_path = self.output_dir / "report.md"
             report_path.write_text(report_content)
             self._collapse(panel, f"Written to {report_path}")
+            return True
         except Exception as e:
             logger.exception(f"Report error: {e}")
             panel.error(str(e))
             self._live.collapse_panel(panel)
+            self.state.record_failure()
+            return False
         finally:
             self._persist_buffer("report", buffer)

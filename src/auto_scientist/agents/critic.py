@@ -19,7 +19,6 @@ import logging
 import random
 from typing import Any
 
-from claude_code_sdk import ClaudeCodeOptions
 from pydantic import BaseModel
 
 from auto_scientist.agent_result import AgentResult
@@ -40,6 +39,7 @@ from auto_scientist.prompts.critic import (
     PERSONAS,
     get_model_index_for_debate,
 )
+from auto_scientist.sdk_backend import SDKOptions, get_backend
 from auto_scientist.sdk_utils import (
     OutputValidationError,
     collect_text_from_query,
@@ -71,9 +71,41 @@ async def _query_critic(
     response_schema: type[BaseModel] | None = None,
     message_buffer: list[str] | None = None,
 ) -> AgentResult:
-    """Dispatch a prompt to the appropriate provider with web search enabled."""
-    # For direct-API providers, prepend system_prompt to the user prompt
-    # (these APIs accept a single prompt string).
+    """Dispatch a prompt to the appropriate provider and mode.
+
+    Routes based on config.mode first:
+    - mode='sdk': use the backend abstraction (Claude Code or Codex)
+    - mode='api': use direct API calls (OpenAI, Google, Anthropic)
+    """
+    if config.mode == "sdk" and config.provider in ("anthropic", "openai"):
+        # SDK mode: use the backend abstraction
+        extra_args: dict[str, str | None] = {"setting-sources": ""}
+        if config.reasoning and config.reasoning.level != "off":
+            extra_args.update(reasoning_to_cc_extra_args(config.reasoning))
+        max_turns = 5
+        allowed_tools = ["WebSearch"]
+        backend = get_backend(config.provider)
+        options = SDKOptions(
+            model=config.model,
+            system_prompt=with_turn_budget(system_prompt, max_turns, allowed_tools),
+            allowed_tools=allowed_tools,
+            max_turns=max_turns,
+            extra_args=extra_args,
+        )
+        text, usage = await collect_text_from_query(prompt, options, backend, message_buffer)
+        in_tok = (
+            usage.get("input_tokens", 0)
+            + usage.get("cache_creation_input_tokens", 0)
+            + usage.get("cache_read_input_tokens", 0)
+        )
+        return AgentResult(
+            text=text,
+            input_tokens=in_tok,
+            output_tokens=usage.get("output_tokens", 0),
+            thinking_tokens=usage.get("thinking_tokens", 0),
+        )
+
+    # API mode: direct provider API calls
     effective_prompt = f"{system_prompt}\n\n{prompt}" if system_prompt else prompt
 
     if config.provider == "openai":
@@ -93,20 +125,21 @@ async def _query_critic(
             response_schema=response_schema,
         )
     elif config.provider == "anthropic":
-        extra_args: dict[str, str | None] = {"setting-sources": ""}
+        # Anthropic in API mode falls back to SDK (no direct API web search yet)
+        extra_args_api: dict[str, str | None] = {"setting-sources": ""}
         if config.reasoning and config.reasoning.level != "off":
-            extra_args.update(reasoning_to_cc_extra_args(config.reasoning))
-        max_turns = 5  # Allows 1-2 web searches + structured JSON response + buffer
+            extra_args_api.update(reasoning_to_cc_extra_args(config.reasoning))
+        max_turns = 5
         allowed_tools = ["WebSearch"]
-        options = ClaudeCodeOptions(
+        backend = get_backend("anthropic")
+        options = SDKOptions(
             model=config.model,
             system_prompt=with_turn_budget(system_prompt, max_turns, allowed_tools),
             allowed_tools=allowed_tools,
             max_turns=max_turns,
-            extra_args=extra_args,
+            extra_args=extra_args_api,
         )
-        text, usage = await collect_text_from_query(prompt, options, message_buffer)
-        # SDK splits input tokens across cache buckets
+        text, usage = await collect_text_from_query(prompt, options, backend, message_buffer)
         in_tok = (
             usage.get("input_tokens", 0)
             + usage.get("cache_creation_input_tokens", 0)
@@ -119,7 +152,7 @@ async def _query_critic(
             thinking_tokens=usage.get("thinking_tokens", 0),
         )
     else:
-        raise ValueError(f"Unknown critic provider: {config.provider!r}")
+        raise ValueError(f"Unsupported mode/provider: {config.mode}/{config.provider!r}")
 
 
 # ---------------------------------------------------------------------------

@@ -281,6 +281,7 @@ async def run_with_summaries(
         nonlocal elapsed
         current_interval = interval
         last_seen_len = 0
+        waiting_emitted = False
 
         while True:
             await asyncio.sleep(current_interval)
@@ -288,6 +289,15 @@ async def run_with_summaries(
 
             buf_len = len(message_buffer)
             if buf_len == 0:
+                # No content yet.  The panel's animated description dots
+                # and elapsed-time footer already show the agent is alive,
+                # so we only log here for diagnostics.
+                if not waiting_emitted and elapsed >= interval * 2:
+                    waiting_emitted = True
+                    logger.debug(
+                        f"{agent_name} [{label_prefix}{int(elapsed)}s]: "
+                        "buffer still empty, waiting for model response"
+                    )
                 continue
 
             if buf_len == last_seen_len:

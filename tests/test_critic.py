@@ -120,12 +120,12 @@ def plan():
 
 @pytest.fixture
 def openai_critic():
-    return AgentModelConfig(provider="openai", model="gpt-4o")
+    return AgentModelConfig(provider="openai", model="gpt-4o", mode="api")
 
 
 @pytest.fixture
 def google_critic():
-    return AgentModelConfig(provider="google", model="gemini-2.5-pro")
+    return AgentModelConfig(provider="google", model="gemini-2.5-pro", mode="api")
 
 
 @pytest.fixture
@@ -333,6 +333,7 @@ class TestRunDebate:
             provider="openai",
             model="o4-mini",
             reasoning=ReasoningConfig(level="high"),
+            mode="api",
         )
         with patch(
             OPENAI_PATH,
@@ -417,7 +418,7 @@ class TestCriticValidation:
     @pytest.mark.asyncio
     async def test_valid_json_parsed_to_critic_output(self, plan):
         """Valid structured JSON is parsed into CriticOutput."""
-        critic = AgentModelConfig(provider="openai", model="gpt-4o")
+        critic = AgentModelConfig(provider="openai", model="gpt-4o", mode="api")
         with patch(
             OPENAI_PATH,
             new_callable=AsyncMock,
@@ -436,7 +437,7 @@ class TestCriticValidation:
     @pytest.mark.asyncio
     async def test_invalid_json_preserves_raw_text_as_concern(self, plan):
         """Invalid JSON falls back with raw text preserved as a PARSE ERROR concern."""
-        critic = AgentModelConfig(provider="openai", model="gpt-4o")
+        critic = AgentModelConfig(provider="openai", model="gpt-4o", mode="api")
         with patch(
             OPENAI_PATH,
             new_callable=AsyncMock,
@@ -597,7 +598,7 @@ class TestResponseSchemaPassthrough:
     @pytest.mark.asyncio
     async def test_critic_passes_response_schema_to_provider(self, plan):
         """Critic structured query passes response_schema=CriticOutput to provider."""
-        critic = AgentModelConfig(provider="openai", model="gpt-4o")
+        critic = AgentModelConfig(provider="openai", model="gpt-4o", mode="api")
         with patch(
             OPENAI_PATH,
             new_callable=AsyncMock,

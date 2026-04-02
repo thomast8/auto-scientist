@@ -127,6 +127,20 @@ It proved that dose has zero direct effect on outlet clarity (fully mediated thr
 | Variables placed | 10/10 |
 | Testable predictions | 18 (44% confirmed, 44% refuted) |
 
+### Backend Comparison: Anthropic vs OpenAI
+
+Same toy function problem, same prompts, same critic panel, different LLM backends. The Anthropic backend (Opus 4.6 as scientist) found the exact generating formula in 5 iterations. The OpenAI backend (GPT-5.4 as scientist) ran for 12 iterations, settled on the wrong frequency, and concluded the problem was unsolvable. Full writeup: [docs/comparison-anthropic-vs-openai-toy-function.md](docs/comparison-anthropic-vs-openai-toy-function.md).
+
+The core difference wasn't the critics (identical) or the prompts (identical); it was the scientist model's ability to commit to specific numerical hypotheses and select the right analytical tool at the right moment. The stronger scientist created a positive feedback loop with the debate structure, while the weaker one got trapped in stop-withdraw cycles that wasted 7 iterations.
+
+| | Anthropic (Opus 4.6) | OpenAI (GPT-5.4) |
+|---|---|---|
+| Iterations | 5 | 12 |
+| Final RMSE | **0.440** (noise floor) | 1.190 |
+| Frequency identified | 1.500 (correct) | 1.571 (wrong) |
+| Stop proposals | 1 (maintained) | 5 (4 withdrawn) |
+| Conclusion | Exact recovery | "Not uniquely recoverable" |
+
 ## Usage
 
 ### TUI Launcher

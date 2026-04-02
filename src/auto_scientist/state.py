@@ -48,6 +48,7 @@ class ExperimentState(BaseModel):
     raw_data_path: str | None = None
     config_path: str | None = None
     domain_knowledge: str = ""
+    max_iterations: int | None = Field(default=None, ge=1)
     prediction_history: list[PredictionRecord] = Field(default_factory=list)
 
     def save(self, path: Path) -> None:
@@ -77,6 +78,6 @@ class ExperimentState(BaseModel):
         """Reset consecutive failure counter on success."""
         self.consecutive_failures = 0
 
-    def should_stop_on_failures(self, max_consecutive: int = 5) -> bool:
+    def should_stop_on_failures(self, max_consecutive: int = 3) -> bool:
         """Check if we've hit the consecutive failure cap."""
         return self.consecutive_failures >= max_consecutive

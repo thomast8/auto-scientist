@@ -91,11 +91,12 @@ plan as given.
     `python -c "import py_compile; py_compile.compile('<script_path>', doraise=True)"`
 
 11. Run the script:
-    `timeout {run_timeout_minutes}m {run_command} \
-     > results.txt 2>stderr.txt; echo $? > exitcode.txt`
+    `{run_command} > results.txt 2>stderr.txt; echo $? > exitcode.txt`
     Separate stdout and stderr so that results.txt contains only the script's
     output (which the Analyst will read), and stderr.txt contains error info
     for your debugging. Read exitcode.txt to determine the exit code.
+    Set a timeout on the Bash tool call ({run_timeout_minutes} minutes) to
+    prevent runaway execution. Do NOT use a shell-level `timeout` command.
 
 12. If the exit code is 0, the script succeeded. Write run_result.json and
     stop. Do not re-run because you dislike the metrics, the results look
@@ -104,8 +105,9 @@ plan as given.
     next iteration. Re-running to improve results is their job, not yours.
 
 13. If the exit code is non-zero:
-    - Exit code 124 means timeout. Note this for run_result.json. Do not retry
-      on timeout (the approach likely needs rethinking by the Scientist).
+    - If the Bash tool timed out, note this in run_result.json (timed_out: true).
+      Do not retry on timeout (the approach likely needs rethinking by the
+      Scientist).
     - Otherwise, read stderr.txt to diagnose the runtime error, fix the
       script, and re-run. Only fix code bugs (import errors, type errors,
       missing files, etc.), never change the methodology or approach.
@@ -210,8 +212,7 @@ Version directory (already exists): {version_dir}
 3. Verify syntax by running:
    `python -c "import py_compile; py_compile.compile('{new_script_path}', doraise=True)"`
 4. Run the script:
-   `timeout {run_timeout_minutes}m {run_command} \
-    > results.txt 2>stderr.txt; echo $? > exitcode.txt`
+   `{run_command} > results.txt 2>stderr.txt; echo $? > exitcode.txt`
 5. If exit code is 0, go straight to step 6 (do not re-run for bad metrics)
    If non-zero and not timeout, fix the code bug and re-run
 6. Write run_result.json to: {version_dir}/run_result.json

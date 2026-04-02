@@ -122,9 +122,12 @@ class TestVersionEntry:
 
     def test_serialization_roundtrip(self):
         entry = VersionEntry(
-            version="v03", iteration=3, script_path="/tmp/s.py",
+            version="v03",
+            iteration=3,
+            script_path="/tmp/s.py",
             results_path="/tmp/r.txt",
-            hypothesis="Test hypothesis", status="completed",
+            hypothesis="Test hypothesis",
+            status="completed",
         )
         json_str = entry.model_dump_json()
         loaded = VersionEntry.model_validate_json(json_str)
@@ -135,7 +138,9 @@ class TestVersionEntry:
     def test_all_statuses(self):
         for status in ["pending", "running", "completed", "failed", "crashed"]:
             entry = VersionEntry(
-                version="v01", iteration=1, script_path="/tmp/s.py",
+                version="v01",
+                iteration=1,
+                script_path="/tmp/s.py",
                 status=status,
             )
             assert entry.status == status
@@ -190,6 +195,7 @@ class TestDiscoveryPhaseMigration:
 # PredictionRecord
 # ---------------------------------------------------------------------------
 
+
 class TestPredictionRecord:
     def test_defaults(self):
         r = PredictionRecord(
@@ -223,6 +229,7 @@ class TestPredictionRecord:
 # ---------------------------------------------------------------------------
 # ExperimentState - prediction_history
 # ---------------------------------------------------------------------------
+
 
 class TestExperimentStatePredictions:
     def test_defaults_to_empty(self):
@@ -259,3 +266,21 @@ class TestExperimentStatePredictions:
         path.write_text(json.dumps(data))
         loaded = ExperimentState.load(path)
         assert loaded.prediction_history == []
+
+    def test_max_iterations_defaults_to_none(self):
+        state = ExperimentState(domain="test", goal="g")
+        assert state.max_iterations is None
+
+    def test_max_iterations_roundtrip(self, tmp_path):
+        state = ExperimentState(domain="test", goal="g", max_iterations=5)
+        path = tmp_path / "state.json"
+        state.save(path)
+        loaded = ExperimentState.load(path)
+        assert loaded.max_iterations == 5
+
+    def test_backward_compat_missing_max_iterations(self, tmp_path):
+        data = {"domain": "test", "goal": "g", "phase": "iteration", "iteration": 0}
+        path = tmp_path / "state.json"
+        path.write_text(json.dumps(data))
+        loaded = ExperimentState.load(path)
+        assert loaded.max_iterations is None

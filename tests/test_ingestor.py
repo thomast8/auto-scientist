@@ -5,7 +5,6 @@ import json
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
-from claude_code_sdk import ResultMessage
 
 from auto_scientist.agents.ingestor import run_ingestor
 
@@ -81,11 +80,16 @@ class TestRunIngestorConfigPath:
         (data_dir / "output.csv").write_text("a,b\n1,2\n")
 
         config_path = output_dir / "domain_config.json"
-        config_path.write_text(json.dumps({
-            "name": "test", "description": "d",
-            "data_paths": ["data/output.csv"],
-            "run_command": "uv run {script_path}",
-        }))
+        config_path.write_text(
+            json.dumps(
+                {
+                    "name": "test",
+                    "description": "d",
+                    "data_paths": ["data/output.csv"],
+                    "run_command": "uv run {script_path}",
+                }
+            )
+        )
 
         mock_query.return_value = AsyncMock(
             __aiter__=lambda self: self,
@@ -93,7 +97,9 @@ class TestRunIngestorConfigPath:
         )
 
         await run_ingestor(
-            raw_data, output_dir, "test goal",
+            raw_data,
+            output_dir,
+            "test goal",
             config_path=config_path,
         )
         mock_query.assert_called_once()
@@ -111,11 +117,16 @@ class TestRunIngestorConfigPath:
         (data_dir / "output.csv").write_text("a,b\n1,2\n")
 
         config_path = output_dir / "domain_config.json"
-        config_path.write_text(json.dumps({
-            "name": "test", "description": "d",
-            "data_paths": ["data/output.csv"],
-            "run_command": "uv run {script_path}",
-        }))
+        config_path.write_text(
+            json.dumps(
+                {
+                    "name": "test",
+                    "description": "d",
+                    "data_paths": ["data/output.csv"],
+                    "run_command": "uv run {script_path}",
+                }
+            )
+        )
 
         mock_query.return_value = AsyncMock(
             __aiter__=lambda self: self,
@@ -123,7 +134,9 @@ class TestRunIngestorConfigPath:
         )
 
         await run_ingestor(
-            raw_data, output_dir, "test goal",
+            raw_data,
+            output_dir,
+            "test goal",
             config_path=config_path,
         )
 
@@ -158,7 +171,7 @@ class TestRunIngestorMessageProcessing:
     @patch("auto_scientist.agents.ingestor.safe_query")
     async def test_assistant_message_printed(self, mock_query, tmp_path, capsys):
         """AssistantMessage text blocks should be printed to stdout."""
-        from claude_code_sdk import AssistantMessage, ResultMessage, TextBlock
+        from auto_scientist.sdk_backend import SDKMessage
 
         raw_data = tmp_path / "data.csv"
         raw_data.write_text("a,b\n1,2\n")
@@ -168,16 +181,13 @@ class TestRunIngestorMessageProcessing:
         data_dir.mkdir()
         (data_dir / "output.csv").write_text("a,b\n1,2\n")
 
-        assistant_msg = MagicMock(spec=AssistantMessage)
-        text_block = MagicMock(spec=TextBlock)
+        text_block = MagicMock()
         text_block.text = "Processing your data files..."
-        assistant_msg.content = [text_block]
-
-        result_msg = MagicMock(spec=ResultMessage)
+        del text_block.name  # TextBlock-like
 
         async def fake_query(**kwargs):
-            yield assistant_msg
-            yield result_msg
+            yield SDKMessage(type="assistant", content_blocks=[text_block])
+            yield SDKMessage(type="result", usage={})
 
         mock_query.side_effect = fake_query
 
@@ -192,7 +202,7 @@ class TestRunIngestorMessageBuffer:
     @patch("auto_scientist.agents.ingestor.safe_query")
     async def test_populates_buffer_instead_of_printing(self, mock_query, tmp_path, capsys):
         """When message_buffer is provided, text goes to buffer, not stdout."""
-        from claude_code_sdk import AssistantMessage, ResultMessage, TextBlock
+        from auto_scientist.sdk_backend import SDKMessage
 
         raw_data = tmp_path / "data.csv"
         raw_data.write_text("a,b\n1,2\n")
@@ -202,16 +212,13 @@ class TestRunIngestorMessageBuffer:
         data_dir.mkdir()
         (data_dir / "output.csv").write_text("a,b\n1,2\n")
 
-        assistant_msg = MagicMock(spec=AssistantMessage)
-        text_block = MagicMock(spec=TextBlock)
+        text_block = MagicMock()
         text_block.text = "Processing your data files..."
-        assistant_msg.content = [text_block]
-
-        result_msg = MagicMock(spec=ResultMessage)
+        del text_block.name
 
         async def fake_query(**kwargs):
-            yield assistant_msg
-            yield result_msg
+            yield SDKMessage(type="assistant", content_blocks=[text_block])
+            yield SDKMessage(type="result", usage={})
 
         mock_query.side_effect = fake_query
 
@@ -228,7 +235,7 @@ class TestRunIngestorToolBlockBuffer:
     @pytest.mark.asyncio
     @patch("auto_scientist.agents.ingestor.safe_query")
     async def test_tool_use_captured_in_buffer(self, mock_query, tmp_path):
-        from claude_code_sdk import AssistantMessage, ResultMessage, ToolUseBlock
+        from auto_scientist.sdk_backend import SDKMessage
 
         raw_data = tmp_path / "data.csv"
         raw_data.write_text("a,b\n1,2\n")
@@ -238,17 +245,13 @@ class TestRunIngestorToolBlockBuffer:
         data_dir.mkdir()
         (data_dir / "output.csv").write_text("a,b\n1,2\n")
 
-        tool_block = MagicMock(spec=ToolUseBlock)
+        tool_block = MagicMock()
         tool_block.name = "Bash"
         tool_block.input = {"command": "head -5 data.csv"}
 
-        assistant_msg = MagicMock(spec=AssistantMessage)
-        assistant_msg.content = [tool_block]
-        result_msg = MagicMock(spec=ResultMessage)
-
         async def fake_query(**kwargs):
-            yield assistant_msg
-            yield result_msg
+            yield SDKMessage(type="assistant", content_blocks=[tool_block])
+            yield SDKMessage(type="result", usage={})
 
         mock_query.side_effect = fake_query
 
@@ -373,13 +376,11 @@ class TestIngestorRetry:
             await run_ingestor(raw_data, output_dir, "test goal")
 
 
-def _make_result_msg(session_id: str = "test-session-123") -> MagicMock:
-    """Create a mock ResultMessage with session_id."""
-    msg = MagicMock(spec=ResultMessage)
-    msg.session_id = session_id
-    msg.usage = {}
-    msg.num_turns = 1
-    return msg
+def _make_result_msg(session_id: str = "test-session-123"):
+    """Create an SDKMessage result with session_id."""
+    from auto_scientist.sdk_backend import SDKMessage
+
+    return SDKMessage(type="result", usage={}, session_id=session_id)
 
 
 class TestIngestorConfigValidation:
@@ -398,12 +399,16 @@ class TestIngestorConfigValidation:
         (data_dir / "output.csv").write_text("a,b\n1,2\n")
 
         config_path = output_dir / "domain_config.json"
-        config_path.write_text(json.dumps({
-            "name": "test",
-            "description": "Test domain",
-            "data_paths": ["data/output.csv"],
-            "run_command": "uv run {script_path}",
-        }))
+        config_path.write_text(
+            json.dumps(
+                {
+                    "name": "test",
+                    "description": "Test domain",
+                    "data_paths": ["data/output.csv"],
+                    "run_command": "uv run {script_path}",
+                }
+            )
+        )
 
         async def fake_query(**kwargs):
             yield _make_result_msg()
@@ -411,7 +416,10 @@ class TestIngestorConfigValidation:
         mock_query.side_effect = fake_query
 
         result = await run_ingestor(
-            raw_data, output_dir, "test goal", config_path=config_path,
+            raw_data,
+            output_dir,
+            "test goal",
+            config_path=config_path,
         )
         assert result == data_dir
 
@@ -429,12 +437,16 @@ class TestIngestorConfigValidation:
 
         config_path = output_dir / "domain_config.json"
         # First write: invalid (dict instead of list)
-        config_path.write_text(json.dumps({
-            "name": "test",
-            "description": "Test domain",
-            "data_paths": {"file1": "data/output.csv"},
-            "run_command": "uv run {script_path}",
-        }))
+        config_path.write_text(
+            json.dumps(
+                {
+                    "name": "test",
+                    "description": "Test domain",
+                    "data_paths": {"file1": "data/output.csv"},
+                    "run_command": "uv run {script_path}",
+                }
+            )
+        )
 
         call_count = 0
 
@@ -443,12 +455,16 @@ class TestIngestorConfigValidation:
             call_count += 1
             if call_count == 2:
                 # On resume, write valid config
-                config_path.write_text(json.dumps({
-                    "name": "test",
-                    "description": "Test domain",
-                    "data_paths": ["data/output.csv"],
-                    "run_command": "uv run {script_path}",
-                }))
+                config_path.write_text(
+                    json.dumps(
+                        {
+                            "name": "test",
+                            "description": "Test domain",
+                            "data_paths": ["data/output.csv"],
+                            "run_command": "uv run {script_path}",
+                        }
+                    )
+                )
                 # Verify session resume was used
                 options = kwargs.get("options")
                 assert options is not None
@@ -458,7 +474,10 @@ class TestIngestorConfigValidation:
         mock_query.side_effect = fake_query
 
         result = await run_ingestor(
-            raw_data, output_dir, "test goal", config_path=config_path,
+            raw_data,
+            output_dir,
+            "test goal",
+            config_path=config_path,
         )
         assert result == data_dir
         assert call_count == 2
@@ -477,12 +496,16 @@ class TestIngestorConfigValidation:
 
         config_path = output_dir / "domain_config.json"
         # Always invalid: dict instead of list
-        config_path.write_text(json.dumps({
-            "name": "test",
-            "description": "Test domain",
-            "data_paths": {"file1": "data/output.csv"},
-            "run_command": "uv run {script_path}",
-        }))
+        config_path.write_text(
+            json.dumps(
+                {
+                    "name": "test",
+                    "description": "Test domain",
+                    "data_paths": {"file1": "data/output.csv"},
+                    "run_command": "uv run {script_path}",
+                }
+            )
+        )
 
         async def fake_query(**kwargs):
             yield _make_result_msg()
@@ -491,7 +514,10 @@ class TestIngestorConfigValidation:
 
         with pytest.raises(RuntimeError, match="config validation failed after"):
             await run_ingestor(
-                raw_data, output_dir, "test goal", config_path=config_path,
+                raw_data,
+                output_dir,
+                "test goal",
+                config_path=config_path,
             )
 
     @pytest.mark.asyncio
@@ -515,18 +541,25 @@ class TestIngestorConfigValidation:
             call_count += 1
             if call_count == 2:
                 # On retry, write valid config
-                config_path.write_text(json.dumps({
-                    "name": "test",
-                    "description": "Test domain",
-                    "data_paths": ["data/output.csv"],
-                    "run_command": "uv run {script_path}",
-                }))
+                config_path.write_text(
+                    json.dumps(
+                        {
+                            "name": "test",
+                            "description": "Test domain",
+                            "data_paths": ["data/output.csv"],
+                            "run_command": "uv run {script_path}",
+                        }
+                    )
+                )
             yield _make_result_msg()
 
         mock_query.side_effect = fake_query
 
         result = await run_ingestor(
-            raw_data, output_dir, "test goal", config_path=config_path,
+            raw_data,
+            output_dir,
+            "test goal",
+            config_path=config_path,
         )
         assert result == data_dir
         assert call_count == 2

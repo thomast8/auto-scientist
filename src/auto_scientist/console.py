@@ -1387,9 +1387,22 @@ class PipelineApp(App):
             self._force_quit()
 
     def _force_quit(self) -> None:
-        """Cancel the pipeline and exit."""
+        """Cancel the pipeline and exit.
+
+        Schedules cancellation of all asyncio tasks on the worker event loop,
+        waits briefly for SDK transport cleanup (subprocess termination) to
+        complete, then exits the Textual app.
+        """
         if self._worker_loop is not None and self._worker_loop.is_running():
             self._worker_loop.call_soon_threadsafe(self._cancel_all_tasks)
+            # Give the worker thread time to propagate cancellation through
+            # the SDK transports, which terminate their child processes in
+            # ``finally`` blocks.  Without this pause, Textual's exit can
+            # tear down the process before cleanup completes, orphaning SDK
+            # subprocesses (claude CLI, codex app-server).
+            import time
+
+            time.sleep(1.0)
         self.exit()
 
     def _cancel_all_tasks(self) -> None:

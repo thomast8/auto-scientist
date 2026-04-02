@@ -25,15 +25,45 @@ _VERSION_DIR_RE = re.compile(r"^v(\d{2})$")
 # Artifacts to remove when rewinding: report output + run-wide logs that will be regenerated
 _FINAL_ARTIFACTS = ("report.md", "console.log", "debug.log")
 
-# Canonical agent execution order within an iteration
-AGENT_ORDER: list[str] = ["analyst", "scientist", "debate", "coder"]
+# Canonical agent execution order within an iteration.
+# Stop gate sub-steps (assessment, stop_debate, stop_revision) are conditional:
+# they only run when the scientist recommends stopping.
+AGENT_ORDER: list[str] = [
+    "analyst",
+    "scientist",
+    "assessment",
+    "stop_debate",
+    "stop_revision",
+    "debate",
+    "revision",
+    "coder",
+]
+
+# Stop gate agents are conditional (only present when should_stop=True)
+STOP_GATE_AGENTS: frozenset[str] = frozenset({"assessment", "stop_debate", "stop_revision"})
+
+# Agents that re-prescribe predictions (scientist or anything after it that
+# re-plans): keep evaluated predictions, discard prescribed-only ones.
+_REPLANNING_AGENTS: frozenset[str] = frozenset(
+    {
+        "scientist",
+        "assessment",
+        "stop_debate",
+        "stop_revision",
+        "debate",
+        "revision",
+    }
+)
 
 # Files each agent produces in the version directory.
-# Note: debate also overwrites plan.json; coder produces unpredictable files.
 _AGENT_ARTIFACTS: dict[str, list[str]] = {
     "analyst": ["analysis.json"],
     "scientist": ["plan.json"],
+    "assessment": ["completeness_assessment.json"],
+    "stop_debate": ["stop_debate.json"],
+    "stop_revision": ["stop_revision_plan.json"],
     "debate": ["debate.json"],
+    "revision": ["revision_plan.json"],
     "coder": [],
 }
 
@@ -41,7 +71,11 @@ _AGENT_ARTIFACTS: dict[str, list[str]] = {
 _AGENT_BUFFER_PREFIXES: dict[str, list[str]] = {
     "analyst": ["analyst_"],
     "scientist": ["scientist_"],
-    "debate": ["debate_", "scientist_revision_"],
+    "assessment": ["completeness_assessment_"],
+    "stop_debate": ["stop_debate_"],
+    "stop_revision": ["stop_revision_"],
+    "debate": ["debate_"],
+    "revision": ["scientist_revision_"],
     "coder": ["coder_"],
 }
 
@@ -49,7 +83,11 @@ _AGENT_BUFFER_PREFIXES: dict[str, list[str]] = {
 _AGENT_NOTEBOOK_SOURCES: dict[str, list[str]] = {
     "analyst": [],
     "scientist": ["scientist"],
-    "debate": ["revision"],
+    "assessment": [],
+    "stop_debate": [],
+    "stop_revision": ["stop_revision", "stop_gate"],
+    "debate": [],
+    "revision": ["revision"],
     "coder": [],
 }
 
@@ -66,6 +104,72 @@ class RewindResult:
     restored_panels: list[dict] | None = None
 
 
+def _extract_done_summary(agent: str, version_dir: Path) -> str:
+    """Extract a human-readable summary from an agent's artifact file.
+
+    Returns an empty string if no meaningful summary can be extracted.
+    """
+    try:
+        if agent == "analyst":
+            artifact = version_dir / "analysis.json"
+            if not artifact.exists():
+                return ""
+            analysis = json.loads(artifact.read_text())
+            # Prefer data_summary, fall back to a brief from key findings
+            ds: str = analysis.get("data_summary") or ""
+            if ds:
+                return ds[:300]
+            # Build from structured fields if data_summary is missing
+            parts = []
+            if analysis.get("patterns_observed"):
+                parts.append(str(analysis["patterns_observed"])[:200])
+            if analysis.get("next_unknowns"):
+                parts.append(f"unknowns: {analysis['next_unknowns'][:100]}")
+            return ", ".join(parts)[:300] if parts else ""
+
+        if agent == "scientist":
+            artifact = version_dir / "plan.json"
+            if not artifact.exists():
+                return ""
+            plan = json.loads(artifact.read_text())
+            parts = []
+            if plan.get("should_stop"):
+                parts.append(f"should_stop=True: {plan.get('stop_reason', '')}")
+            else:
+                if plan.get("strategy"):
+                    parts.append(f"strategy={plan['strategy']}")
+                if plan.get("hypothesis"):
+                    parts.append(plan["hypothesis"][:200])
+            return ", ".join(parts) if parts else ""
+
+        if agent == "assessment":
+            artifact = version_dir / "completeness_assessment.json"
+            if not artifact.exists():
+                return ""
+            assessment = json.loads(artifact.read_text())
+            coverage = assessment.get("overall_coverage", "?")
+            gaps = [
+                sq["question"][:60]
+                for sq in assessment.get("sub_questions", [])
+                if sq.get("coverage") in ("shallow", "unexplored")
+            ]
+            summary = f"coverage={coverage}"
+            if gaps:
+                summary += f", gaps: {', '.join(gaps[:3])}"
+            return summary[:300]
+
+        if agent == "revision":
+            artifact = version_dir / "revision_plan.json"
+            if not artifact.exists():
+                return ""
+            plan = json.loads(artifact.read_text())
+            return f"strategy={plan.get('strategy', '?')}"
+
+    except (json.JSONDecodeError, OSError) as e:
+        logger.warning(f"Could not read artifact for {agent} panel summary: {e}")
+    return ""
+
+
 def _build_panels_from_buffers(
     run_dir: Path,
     iteration: int,
@@ -77,9 +181,34 @@ def _build_panels_from_buffers(
     When the manifest doesn't have panel records for the current iteration
     (because it never completed), this reconstructs minimal panel data from
     the buffer files and artifact files on disk.
+
+    Prefers panels.json (written incrementally by the orchestrator as each
+    agent completes) over artifact-based reconstruction when available.
     """
+    version_tag = f"{iteration:02d}"
+    version_dir = run_dir / f"v{version_tag}"
+
+    # Check for incrementally-saved panel snapshots first
+    panels_path = version_dir / "panels.json"
+    if panels_path.exists():
+        try:
+            saved_panels: list[dict] = json.loads(panels_path.read_text())
+            if isinstance(saved_panels, list) and saved_panels:
+                logger.info(f"Loaded {len(saved_panels)} panel(s) from {panels_path}")
+                return saved_panels
+        except (json.JSONDecodeError, OSError) as e:
+            logger.warning(f"Could not load {panels_path}, falling back to buffers: {e}")
+
+    # Fallback: reconstruct from buffer files and artifacts
     agent_idx = AGENT_ORDER.index(from_agent)
     agents_to_restore = AGENT_ORDER[:agent_idx]
+
+    # Map AGENT_ORDER names to model config keys (they differ for some agents)
+    _config_key = {
+        "assessment": "assessor",
+        "revision": "scientist",
+        "stop_revision": "scientist",
+    }
 
     # Load model config to get agent model names
     model_names: dict[str, str] = {}
@@ -91,7 +220,7 @@ def _build_panels_from_buffers(
             raw = json.loads(config_path.read_text())
             mc = ModelConfig._from_dict(raw)
             for agent in agents_to_restore:
-                cfg = mc.resolve(agent)
+                cfg = mc.resolve(_config_key.get(agent, agent))
                 model_names[agent] = cfg.model
         except (json.JSONDecodeError, OSError, KeyError, ValueError) as e:
             logger.warning(f"Could not load model config from {config_path}: {e}")
@@ -100,17 +229,69 @@ def _build_panels_from_buffers(
     agent_panel_info = {
         "analyst": {"panel_name": "Analyst", "style": "green", "buffer_prefix": "analyst_"},
         "scientist": {"panel_name": "Scientist", "style": "cyan", "buffer_prefix": "scientist_"},
+        "assessment": {
+            "panel_name": "Assessor",
+            "style": "blue",
+            "buffer_prefix": "completeness_assessment_",
+        },
+        "revision": {
+            "panel_name": "Revision",
+            "style": "cyan",
+            "buffer_prefix": "scientist_revision_",
+        },
     }
 
     panels: list[dict] = []
-    version_tag = f"{iteration:02d}"
     buffers_dir = run_dir / "buffers"
-    version_dir = run_dir / f"v{version_tag}"
+
+    # Resolve critic model label from config
+    critic_label = "unknown"
+    if config_path.exists():
+        try:
+            from auto_scientist.model_config import ModelConfig
+
+            mc = ModelConfig._from_dict(json.loads(config_path.read_text()))
+            if mc.critics:
+                c = mc.critics[0]
+                critic_label = f"{c.provider}:{c.model}"
+        except (json.JSONDecodeError, OSError, KeyError, ValueError):
+            pass
+
+    # Regex to extract persona name from critic buffer filenames
+    # e.g. "stop_debate_depth_challenger_05.txt" -> "Depth Challenger"
+    # e.g. "debate_methodologist_05.txt" -> "Methodologist"
+    _stop_debate_re = re.compile(rf"^stop_debate_(.+)_{version_tag}\.txt$")
+    _debate_re = re.compile(rf"^debate_(.+)_{version_tag}\.txt$")
 
     for agent in agents_to_restore:
+        # Handle critic panels (stop_debate / debate) by scanning buffer files
+        if agent in ("stop_debate", "debate"):
+            pattern = _stop_debate_re if agent == "stop_debate" else _debate_re
+            if buffers_dir.is_dir():
+                for buf_file in sorted(buffers_dir.iterdir()):
+                    m = pattern.match(buf_file.name)
+                    if not m:
+                        continue
+                    persona_slug = m.group(1)
+                    persona_name = persona_slug.replace("_", " ").title()
+                    panels.append(
+                        {
+                            "name": f"Critic/{persona_name}",
+                            "model": critic_label,
+                            "style": "yellow",
+                            "done_summary": f"{persona_name} loaded from disk",
+                            "input_tokens": 0,
+                            "output_tokens": 0,
+                            "thinking_tokens": 0,
+                            "num_turns": 0,
+                            "elapsed_seconds": 0,
+                            "lines": [],
+                        }
+                    )
+            continue
+
         info = agent_panel_info.get(agent)
         if not info:
-            # debate and coder panels are too complex to reconstruct from artifacts
             logger.debug(f"Skipping panel reconstruction for '{agent}' (not supported)")
             continue
 
@@ -121,34 +302,7 @@ def _build_panels_from_buffers(
             lines = buf_path.read_text().splitlines()
 
         # Build a meaningful done_summary from the artifact
-        done_summary = ""
-        if agent == "analyst":
-            artifact = version_dir / "analysis.json"
-            if artifact.exists():
-                try:
-                    analysis = json.loads(artifact.read_text())
-                    ds = analysis.get("data_summary", "")
-                    if ds:
-                        done_summary = ds[:300]
-                except (json.JSONDecodeError, OSError) as e:
-                    logger.warning(f"Could not read {artifact} for panel summary: {e}")
-        elif agent == "scientist":
-            artifact = version_dir / "plan.json"
-            if artifact.exists():
-                try:
-                    plan = json.loads(artifact.read_text())
-                    parts = []
-                    if plan.get("should_stop"):
-                        parts.append(f"should_stop=True: {plan.get('stop_reason', '')}")
-                    else:
-                        if plan.get("strategy"):
-                            parts.append(f"strategy={plan['strategy']}")
-                        if plan.get("hypothesis"):
-                            hyp = plan["hypothesis"]
-                            parts.append(hyp[:200])
-                    done_summary = ", ".join(parts) if parts else ""
-                except (json.JSONDecodeError, OSError) as e:
-                    logger.warning(f"Could not read {artifact} for panel summary: {e}")
+        done_summary = _extract_done_summary(agent, version_dir)
 
         if not done_summary and lines:
             done_summary = lines[-1][:300]
@@ -297,10 +451,18 @@ def _reconstruct_domain_knowledge(run_dir: Path, target_iteration: int) -> str:
 def _validate_agent_prerequisites(version_dir: Path, from_agent: str) -> None:
     """Check that all artifacts from agents before from_agent exist on disk.
 
+    Stop gate agents and revision are conditional, so their artifacts are
+    only required when they actually exist on disk.
+
     Raises ValueError if any required artifact is missing.
     """
+    # Agents whose artifacts are conditional (only present in some iterations)
+    conditional_agents = STOP_GATE_AGENTS | {"revision"}
+
     agent_idx = AGENT_ORDER.index(from_agent)
     for agent in AGENT_ORDER[:agent_idx]:
+        if agent in conditional_agents:
+            continue
         for artifact in _AGENT_ARTIFACTS[agent]:
             path = version_dir / artifact
             if not path.exists():
@@ -313,19 +475,29 @@ def _validate_agent_prerequisites(version_dir: Path, from_agent: str) -> None:
 def _clean_version_dir_for_agent(version_dir: Path, from_agent: str) -> None:
     """Remove artifacts from from_agent onward, keeping earlier agents' output.
 
-    Special handling for plan.json when resuming from debate: the on-disk
-    plan.json is the post-debate revision, so we restore the pre-debate
-    original from debate.json["original_plan"].
+    Special handling for plan.json when resuming from debate or revision:
+    the on-disk plan.json may be the post-debate revision, so we restore
+    the pre-debate original from debate.json["original_plan"].
     """
     agent_idx = AGENT_ORDER.index(from_agent)
 
-    # Compute files to keep (from agents strictly before from_agent)
+    # Compute files to keep (from agents strictly before from_agent).
+    # Skip conditional agents whose artifacts may not exist.
+    conditional_agents = STOP_GATE_AGENTS | {"revision"}
     files_to_keep: set[str] = set()
     for agent in AGENT_ORDER[:agent_idx]:
-        files_to_keep.update(_AGENT_ARTIFACTS[agent])
+        if agent in conditional_agents:
+            # Only keep conditional artifacts that actually exist
+            for artifact in _AGENT_ARTIFACTS[agent]:
+                if (version_dir / artifact).exists():
+                    files_to_keep.add(artifact)
+        else:
+            files_to_keep.update(_AGENT_ARTIFACTS[agent])
 
-    # Special case: when resuming from debate, restore the pre-debate plan
-    if from_agent == "debate":
+    # When resuming from debate or revision, restore the pre-debate plan
+    # from debate.json["original_plan"] (plan.json may have been overwritten
+    # by the revision step)
+    if from_agent in ("debate", "revision"):
         debate_path = version_dir / "debate.json"
         if debate_path.exists():
             try:
@@ -450,7 +622,7 @@ def rewind_run(
     state.dead_ends = []
 
     # --- Prediction history trimming ---
-    if from_agent and from_agent in ("scientist", "debate"):
+    if from_agent and from_agent in _REPLANNING_AGENTS:
         # Keep predictions from before this iteration + predictions evaluated
         # at this iteration (analyst ran). Remove predictions prescribed at
         # this iteration (scientist will re-prescribe).
@@ -571,9 +743,19 @@ def rewind_run(
         # Extract panel records for agents loaded from disk
         if from_agent:
             agent_idx = AGENT_ORDER.index(from_agent)
-            # Map panel names to agent order indices
-            # Analyst -> 0, Scientist -> 1, Critic/* -> 2, Coder -> 3
-            panel_agent_idx = {"Analyst": 0, "Scientist": 1, "Coder": 3}
+            # Map panel names to AGENT_ORDER indices.
+            # Critic/* panels (both stop-debate and normal debate) default
+            # to the debate index; this is approximate but sufficient for
+            # determining which panels to restore in the TUI.
+            _debate_idx = AGENT_ORDER.index("debate")
+            panel_agent_idx = {
+                "Analyst": AGENT_ORDER.index("analyst"),
+                "Scientist": AGENT_ORDER.index("scientist"),
+                "Assessor": AGENT_ORDER.index("assessment"),
+                "Stop Revision": AGENT_ORDER.index("stop_revision"),
+                "Revision": AGENT_ORDER.index("revision"),
+                "Coder": AGENT_ORDER.index("coder"),
+            }
 
             for r in records:
                 if r.iteration == effective_iteration:
@@ -582,7 +764,7 @@ def rewind_run(
                         for p in r.panels
                         if panel_agent_idx.get(
                             p.name.split("/")[0],
-                            2,  # Critic/* defaults to debate idx
+                            _debate_idx,  # Critic/* defaults to debate idx
                         )
                         < agent_idx
                     ]

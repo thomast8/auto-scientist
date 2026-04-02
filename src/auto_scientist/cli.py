@@ -1,6 +1,12 @@
 """CLI entry point: run, resume, status commands."""
 
+import atexit
+import logging
+import os
+import signal
+from contextlib import suppress
 from pathlib import Path
+from typing import Any, Literal, cast
 
 import click
 from dotenv import load_dotenv
@@ -14,9 +20,82 @@ from auto_scientist.state import ExperimentState
 
 load_dotenv()
 
+_logger = logging.getLogger(__name__)
+
+
+# ---------------------------------------------------------------------------
+# Process cleanup: kill SDK subprocesses on unexpected exit
+# ---------------------------------------------------------------------------
+# When auto-scientist is killed by SIGHUP (terminal closed) or SIGTERM,
+# Python's default handler terminates immediately with no cleanup.  This
+# orphans SDK subprocesses (claude CLI, codex app-server) that may be
+# executing experiment scripts at 100 % CPU.
+#
+# Fix: install signal handlers that kill the process group before exiting
+# and an atexit handler as a safety net for crashes / normal exit.
+# ---------------------------------------------------------------------------
+
+_cleanup_done = False
+
+
+def _kill_child_processes() -> None:
+    """Terminate direct child processes via ``pgrep -P``.
+
+    Targets only our children, so it is safe to call from both signal
+    handlers and atexit without killing sibling processes like git or
+    pre-commit hooks that share our process group.
+
+    Idempotent: repeated calls are no-ops after the first.
+    """
+    global _cleanup_done  # noqa: PLW0603 - intentional module-level flag
+    if _cleanup_done:
+        return
+    _cleanup_done = True
+
+    import subprocess as _sp
+
+    # Prevent recursive delivery while we broadcast
+    signal.signal(signal.SIGTERM, signal.SIG_IGN)
+    signal.signal(signal.SIGHUP, signal.SIG_IGN)
+
+    pid = os.getpid()
+    try:
+        result = _sp.run(
+            ["pgrep", "-P", str(pid)],
+            capture_output=True,
+            text=True,
+            timeout=2,
+        )
+        for line in result.stdout.strip().splitlines():
+            with suppress(ProcessLookupError, PermissionError, ValueError, OSError):
+                os.kill(int(line.strip()), signal.SIGTERM)
+    except Exception:  # noqa: BLE001 - best-effort cleanup
+        pass
+
+
+def _fatal_signal_handler(signum: int, _frame: Any) -> None:
+    """Handle SIGHUP / SIGTERM by killing children and exiting."""
+    _kill_child_processes()
+    # os._exit avoids Python shutdown machinery that can hang
+    # during signal handling.  atexit handlers are intentionally
+    # skipped since we already cleaned up above.
+    os._exit(128 + signum)
+
+
+def _install_cleanup_handlers() -> None:
+    """Register signal and atexit handlers for child-process cleanup.
+
+    Must be called from the main thread before any SDK subprocesses are
+    spawned.
+    """
+    signal.signal(signal.SIGHUP, _fatal_signal_handler)
+    signal.signal(signal.SIGTERM, _fatal_signal_handler)
+    atexit.register(_kill_child_processes)
+
 
 def _run_orchestrator(orchestrator: Orchestrator) -> None:
     """Run the orchestrator with user-friendly error handling."""
+    _install_cleanup_handlers()
     try:
         app = PipelineApp(orchestrator)
         app.run()
@@ -42,12 +121,11 @@ def _run_orchestrator(orchestrator: Orchestrator) -> None:
                 parts.append(
                     "    Fix: check the model ID at https://ai.google.dev/gemini-api/docs/models"
                 )
-            elif "require provider 'anthropic'" in issue:
+            elif "require provider" in issue and "SDK" in issue:
                 parts.append(f"  - {issue}")
                 parts.append(
-                    "    Fix: SDK agents (analyst, scientist, coder, ingestor, report) must use "
-                    "Anthropic models (claude-*). Use non-Anthropic models only for critics "
-                    "and summarizer."
+                    "    Fix: SDK agents must use 'anthropic' or 'openai' provider. "
+                    "Use --provider to switch, or override per-agent in YAML config."
                 )
             elif "authentication failed" in issue.lower() or "API_KEY" in issue:
                 parts.append(f"  - {issue}")
@@ -102,16 +180,29 @@ def _resolve_model_config(
     config_path: str | None,
     preset: str | None,
     no_summaries: bool = False,
+    provider: str | None = None,
 ) -> ModelConfig:
     """Resolve ModelConfig from CLI flags (TOML configs only)."""
     if config_path and preset:
         raise click.UsageError("--config and --preset are mutually exclusive")
+
+    # Resolve preset name, applying provider variant if applicable
+    preset_name = preset or "default"
+    if provider and provider != "anthropic":
+        variant = f"{preset_name}-{provider}"
+        from auto_scientist.model_config import BUILTIN_PRESETS
+
+        if variant in BUILTIN_PRESETS:
+            preset_name = variant
+
     if config_path:
         model_config = ModelConfig.from_toml(Path(config_path))
-    elif preset:
-        model_config = ModelConfig.builtin_preset(preset)
     else:
-        model_config = ModelConfig.builtin_preset("default")
+        model_config = ModelConfig.builtin_preset(preset_name)
+
+    # If provider variant didn't exist, override defaults.provider
+    if provider and provider != "anthropic" and not preset_name.endswith(f"-{provider}"):
+        model_config.defaults = model_config.defaults.model_copy(update={"provider": provider})
 
     if no_summaries:
         model_config.summarizer = None
@@ -145,6 +236,7 @@ def _run_from_experiment_config(exp_config: ExperimentConfig, data_path: Path) -
         phase="ingestion",
         schedule=exp_config.schedule,
         data_path=str(data_path.resolve()),
+        max_iterations=exp_config.max_iterations,
     )
 
     orchestrator = Orchestrator(
@@ -220,6 +312,13 @@ def cli(ctx: click.Context, config_path: str | None):
     help="Output directory for experiment runs",
 )
 @click.option(
+    "--provider",
+    "-p",
+    default=None,
+    type=click.Choice(["anthropic", "openai"], case_sensitive=False),
+    help="Default provider for SDK agents: anthropic (default) or openai (uses Codex CLI).",
+)
+@click.option(
     "-v",
     "--verbose",
     is_flag=True,
@@ -237,6 +336,7 @@ def run(
     schedule: str | None,
     interactive: bool,
     output_dir: str,
+    provider: str | None,
     verbose: bool,
 ):
     """Run autonomous scientific investigation from raw data."""
@@ -265,6 +365,8 @@ def run(
             exp_config.verbose = verbose
         if ctx.get_parameter_source("no_summaries") == _cli and no_summaries:
             exp_config.summaries = False
+        if ctx.get_parameter_source("provider") == _cli and provider is not None:
+            exp_config.provider = cast("Literal['anthropic', 'openai']", provider)
 
         # Override data/goal only if explicitly provided on CLI
         data_cli_override = ctx.get_parameter_source("data") == _cli
@@ -291,7 +393,7 @@ def run(
     if not Path(data).exists():
         raise click.UsageError(f"Path '{data}' does not exist.")
 
-    model_config = _resolve_model_config(config_path, preset, no_summaries)
+    model_config = _resolve_model_config(config_path, preset, no_summaries, provider)
 
     data_abs = str(Path(data).resolve())
 
@@ -308,6 +410,7 @@ def run(
         phase="ingestion",
         schedule=schedule,
         data_path=data_abs,
+        max_iterations=max_iterations,
     )
 
     orchestrator = Orchestrator(
@@ -349,13 +452,16 @@ def run(
     "--from-agent",
     "from_agent",
     default=None,
-    type=click.Choice(["analyst", "scientist", "debate", "coder"], case_sensitive=False),
+    type=click.Choice(
+        ["analyst", "scientist", "debate", "revision", "coder"],
+        case_sensitive=False,
+    ),
     help=(
         "Resume from this agent within the target iteration "
         "(earlier agents loaded from disk). Requires --fork."
     ),
 )
-@click.option("--max-iterations", default=20, type=int, help="Maximum iteration count")
+@click.option("--max-iterations", default=None, type=int, help="Maximum iteration count")
 @click.option(
     "--output-dir",
     default=None,
@@ -375,21 +481,31 @@ def run(
 )
 @click.option("--no-summaries", is_flag=True, help="Disable periodic agent summaries")
 @click.option(
+    "--provider",
+    "-p",
+    default=None,
+    type=click.Choice(["anthropic", "openai"], case_sensitive=False),
+    help="Default provider for SDK agents: anthropic (default) or openai (uses Codex CLI).",
+)
+@click.option(
     "-v",
     "--verbose",
     is_flag=True,
     help="Show debug log messages on console (always written to debug.log).",
 )
+@click.pass_context
 def resume(
+    ctx: click.Context,
     source: str,
     fork: bool,
     from_iteration: int | None,
     from_agent: str | None,
-    max_iterations: int,
+    max_iterations: int | None,
     output_dir: str | None,
     config_path: str | None,
     preset: str | None,
     no_summaries: bool,
+    provider: str | None,
     verbose: bool,
 ):
     """Resume a previously paused or crashed run.
@@ -426,6 +542,59 @@ def resume(
         raise click.UsageError("--output-dir requires --fork")
 
     src, source_state = _resolve_source(source)
+
+    # --- Resolve max_iterations ---
+    default_max = 20
+    _cli_source = click.core.ParameterSource.COMMANDLINE
+    user_set_max_iter = ctx.get_parameter_source("max_iterations") == _cli_source
+    saved_max = source_state.max_iterations
+    is_completed = source_state.phase in ("stopped", "report")
+
+    if user_set_max_iter:
+        assert max_iterations is not None
+        effective_max = max_iterations
+        console.print(
+            f"Max iterations: {effective_max} (from --max-iterations)",
+            style="bold",
+        )
+    elif is_completed:
+        # Completed run being forked: the original cap is exhausted, so extend
+        # to the default to give new iterations room to run.
+        effective_max = default_max
+        console.print(
+            f"[yellow]Original run completed with max_iterations={saved_max or '?'}. "
+            f"Extending to {effective_max} for the forked run.[/yellow]",
+        )
+        console.print(
+            "[dim]Use --max-iterations to set a different cap.[/dim]",
+        )
+    elif saved_max is not None:
+        effective_max = saved_max
+        console.print(
+            f"Max iterations: {effective_max} (restored from original run)",
+            style="bold",
+        )
+        console.print(
+            "[dim]Use --max-iterations to override.[/dim]",
+        )
+    else:
+        # Old state file without max_iterations saved
+        effective_max = default_max
+        if source_state.iteration >= effective_max:
+            raise click.UsageError(
+                f"No max_iterations in saved state (old format) and current "
+                f"iteration ({source_state.iteration}) already >= default ({effective_max}). "
+                f"Pass --max-iterations explicitly."
+            )
+        console.print(
+            f"[yellow]No max_iterations in saved state (old format). "
+            f"Using default: {effective_max}.[/yellow]",
+        )
+        console.print(
+            "[dim]Use --max-iterations to set a different cap.[/dim]",
+        )
+
+    max_iterations = effective_max
 
     if fork:
         # Determine output directory
@@ -474,9 +643,13 @@ def resume(
                 "from a copy (the original run is preserved)."
             )
 
+    # Persist resolved max_iterations so future resumes have it
+    state.max_iterations = max_iterations
+    state.save(run_dir / "state.json")
+
     # Resolve model config
-    if config_path or preset:
-        model_config = _resolve_model_config(config_path, preset, no_summaries)
+    if config_path or preset or provider:
+        model_config = _resolve_model_config(config_path, preset, no_summaries, provider)
     else:
         saved_mc = run_dir / "model_config.json"
         if saved_mc.exists():
@@ -525,6 +698,8 @@ def status(source: str):
     import json
     import re
 
+    from auto_scientist.resume import _AGENT_ARTIFACTS, STOP_GATE_AGENTS
+
     run_dir, loaded_state = _resolve_source(source)
 
     # Truncate goal to a single display line
@@ -536,6 +711,8 @@ def status(source: str):
     click.echo(f"Goal:       {goal_display}")
     click.echo(f"Phase:      {loaded_state.phase}")
     click.echo(f"Iteration:  {loaded_state.iteration}")
+    if loaded_state.max_iterations is not None:
+        click.echo(f"Max iter:   {loaded_state.max_iterations}")
     click.echo(f"Run dir:    {run_dir}")
     if loaded_state.data_path:
         click.echo(f"Data:       {loaded_state.data_path}")
@@ -551,13 +728,14 @@ def status(source: str):
     if loaded_state.dead_ends:
         click.echo(f"Dead ends:  {len(loaded_state.dead_ends)}")
 
-    # Show per-iteration agent artifacts
-    agent_artifacts = {
-        "analyst": "analysis.json",
-        "scientist": "plan.json",
-        "debate": "debate.json",
-        "coder": "experiment.py",
-    }
+    # Show per-iteration agent artifacts (granular, including stop gate + revision)
+    step_artifacts: list[tuple[str, str]] = [
+        (agent, artifacts[0])
+        for agent, artifacts in _AGENT_ARTIFACTS.items()
+        if artifacts  # skip coder (no fixed artifact)
+    ]
+    step_artifacts.append(("coder", "experiment.py"))
+
     version_re = re.compile(r"^v(\d+)$")
     try:
         version_dirs = sorted(
@@ -572,12 +750,12 @@ def status(source: str):
         click.echo()
         click.echo("Iterations on disk:")
         for idx, vdir in version_dirs:
-            agents_present = []
-            for agent, artifact in agent_artifacts.items():
+            steps_present = []
+            for step_name, artifact in step_artifacts:
                 if (vdir / artifact).exists():
-                    agents_present.append(agent)
-            agents_str = ", ".join(agents_present) if agents_present else "(empty)"
-            click.echo(f"  v{idx:02d} (--from-iteration {idx}): {agents_str}")
+                    steps_present.append(step_name)
+            steps_str = ", ".join(steps_present) if steps_present else "(empty)"
+            click.echo(f"  v{idx:02d} (--from-iteration {idx}): {steps_str}")
 
         last_idx, last_vdir = version_dirs[-1]
 
@@ -592,16 +770,35 @@ def status(source: str):
             except (json.JSONDecodeError, OSError) as e:
                 click.echo(f"\n(Could not read {plan_path.name}: {e})")
 
-        # Resume suggestion
-        all_agents = list(agent_artifacts.keys())
-        present = {a for a in all_agents if (last_vdir / agent_artifacts[a]).exists()}
-        next_agent = next((a for a in all_agents if a not in present), None)
-        if next_agent:
+        # Resume suggestion: find the next missing step.
+        # Conditional steps: stop gate (only if any stop gate artifact exists),
+        # revision (only if debate ran). Only suggest resumable agents.
+        present = {name for name, artifact in step_artifacts if (last_vdir / artifact).exists()}
+        stop_gate_active = bool(present & STOP_GATE_AGENTS)
+        debate_ran = "debate" in present
+
+        # Steps that are conditional on context
+        conditional_agents = STOP_GATE_AGENTS | (set() if debate_ran else {"revision"})
+
+        expected_steps = [
+            name
+            for name, _ in step_artifacts
+            if name not in conditional_agents
+            or (name in STOP_GATE_AGENTS and stop_gate_active)
+            or (name == "revision" and debate_ran)
+        ]
+        # Only suggest agents that are actually resumable via --from-agent
+        _resumable = {"analyst", "scientist", "debate", "revision", "coder"}
+        next_step = next(
+            (s for s in expected_steps if s not in present and s in _resumable),
+            None,
+        )
+        if next_step:
             click.echo()
             click.echo("Resume examples:")
             click.echo(
                 f"  auto-scientist resume --from {run_dir} --fork "
-                f"--from-iteration {last_idx} --from-agent {next_agent}"
+                f"--from-iteration {last_idx} --from-agent {next_step}"
             )
 
 

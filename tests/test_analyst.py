@@ -13,19 +13,17 @@ class TestRunAnalyst:
     """Tests for the agent runner, mocking the claude_code_sdk query."""
 
     @pytest.mark.asyncio
-    @patch("auto_scientist.sdk_utils.query")
+    @patch("auto_scientist.sdk_backend.claude_query")
     async def test_returns_parsed_json(self, mock_query, tmp_path):
         analysis = {
-
-
             "key_metrics": {"rmse": 0.5},
             "improvements": ["better"],
             "regressions": [],
             "observations": ["noted"],
-
         }
 
         from claude_code_sdk import ResultMessage
+
         result_msg = MagicMock(spec=ResultMessage)
         result_msg.result = json.dumps(analysis)
 
@@ -48,16 +46,18 @@ class TestRunAnalyst:
         assert result["key_metrics"]["rmse"] == 0.5
 
     @pytest.mark.asyncio
-    @patch("auto_scientist.sdk_utils.query")
+    @patch("auto_scientist.sdk_backend.claude_query")
     async def test_handles_markdown_fenced_json(self, mock_query, tmp_path):
         analysis = {
             "key_metrics": {},
-            "improvements": [], "regressions": [], "observations": [],
-
+            "improvements": [],
+            "regressions": [],
+            "observations": [],
         }
         fenced = f"```json\n{json.dumps(analysis)}\n```"
 
         from claude_code_sdk import ResultMessage
+
         result_msg = MagicMock(spec=ResultMessage)
         result_msg.result = fenced
 
@@ -71,14 +71,17 @@ class TestRunAnalyst:
         notebook_path = tmp_path / "notebook.md"
 
         result = await run_analyst(
-            results_path=results_path, plot_paths=[], notebook_path=notebook_path,
+            results_path=results_path,
+            plot_paths=[],
+            notebook_path=notebook_path,
         )
         assert isinstance(result, dict)
 
     @pytest.mark.asyncio
-    @patch("auto_scientist.sdk_utils.query")
+    @patch("auto_scientist.sdk_backend.claude_query")
     async def test_raises_on_empty_output(self, mock_query, tmp_path):
         from claude_code_sdk import ResultMessage
+
         result_msg = MagicMock(spec=ResultMessage)
         result_msg.result = ""
 
@@ -93,25 +96,26 @@ class TestRunAnalyst:
 
         with pytest.raises(RuntimeError, match="returned no output"):
             await run_analyst(
-                results_path=results_path, plot_paths=[], notebook_path=notebook_path,
+                results_path=results_path,
+                plot_paths=[],
+                notebook_path=notebook_path,
             )
 
     @pytest.mark.asyncio
-    @patch("auto_scientist.sdk_utils.query")
+    @patch("auto_scientist.sdk_backend.claude_query")
     async def test_accepts_data_dir_param(self, mock_query, tmp_path):
         """run_analyst should accept a data_dir parameter."""
         analysis = {
-
             "key_metrics": {},
             "improvements": [],
             "regressions": [],
             "observations": ["2 CSV files found"],
-
             "domain_knowledge": "Environmental sensor data",
             "data_summary": {"files": [], "total_rows": 0},
         }
 
         from claude_code_sdk import ResultMessage
+
         result_msg = MagicMock(spec=ResultMessage)
         result_msg.result = json.dumps(analysis)
 
@@ -134,16 +138,18 @@ class TestRunAnalyst:
         assert result["domain_knowledge"] == "Environmental sensor data"
 
     @pytest.mark.asyncio
-    @patch("auto_scientist.sdk_utils.query")
+    @patch("auto_scientist.sdk_backend.claude_query")
     async def test_data_dir_in_prompt(self, mock_query, tmp_path):
         """When data_dir is provided, it should appear in the prompt."""
         analysis = {
             "key_metrics": {},
-            "improvements": [], "regressions": [], "observations": [],
-
+            "improvements": [],
+            "regressions": [],
+            "observations": [],
         }
 
         from claude_code_sdk import ResultMessage
+
         result_msg = MagicMock(spec=ResultMessage)
         result_msg.result = json.dumps(analysis)
 
@@ -169,16 +175,14 @@ class TestRunAnalyst:
         assert str(data_dir) in captured_prompt["prompt"]
 
     @pytest.mark.asyncio
-    @patch("auto_scientist.sdk_utils.query")
+    @patch("auto_scientist.sdk_backend.claude_query")
     async def test_iteration0_output_shape(self, mock_query, tmp_path):
         """Iteration 0 output: success_score null, optional domain_knowledge/data_summary."""
         analysis = {
-
             "key_metrics": {},
             "improvements": [],
             "regressions": [],
             "observations": ["200 rows, 2 float columns"],
-
             "domain_knowledge": "This dataset contains sensor readings",
             "data_summary": {
                 "files": [{"name": "data.csv", "rows": 200, "columns": ["x", "y"]}],
@@ -187,6 +191,7 @@ class TestRunAnalyst:
         }
 
         from claude_code_sdk import ResultMessage
+
         result_msg = MagicMock(spec=ResultMessage)
         result_msg.result = json.dumps(analysis)
 
@@ -197,7 +202,7 @@ class TestRunAnalyst:
 
         data_dir = tmp_path / "data"
         data_dir.mkdir()
-        (data_dir / "data.csv").write_text("x,y\n" + "\n".join(f"{i},{i*2}" for i in range(200)))
+        (data_dir / "data.csv").write_text("x,y\n" + "\n".join(f"{i},{i * 2}" for i in range(200)))
         notebook_path = tmp_path / "notebook.md"
 
         result = await run_analyst(
@@ -210,15 +215,17 @@ class TestRunAnalyst:
         assert result["data_summary"]["total_rows"] == 200
 
     @pytest.mark.asyncio
-    @patch("auto_scientist.sdk_utils.query")
+    @patch("auto_scientist.sdk_backend.claude_query")
     async def test_missing_results_file_uses_fallback(self, mock_query, tmp_path):
         analysis = {
             "key_metrics": {},
-            "improvements": [], "regressions": [], "observations": [],
-
+            "improvements": [],
+            "regressions": [],
+            "observations": [],
         }
 
         from claude_code_sdk import ResultMessage
+
         result_msg = MagicMock(spec=ResultMessage)
         result_msg.result = json.dumps(analysis)
 
@@ -231,17 +238,20 @@ class TestRunAnalyst:
         notebook_path = tmp_path / "notebook.md"
 
         result = await run_analyst(
-            results_path=results_path, plot_paths=[], notebook_path=notebook_path,
+            results_path=results_path,
+            plot_paths=[],
+            notebook_path=notebook_path,
         )
         assert "success_score" not in result
 
     @pytest.mark.asyncio
-    @patch("auto_scientist.sdk_utils.query")
+    @patch("auto_scientist.sdk_backend.claude_query")
     async def test_populates_message_buffer(self, mock_query, tmp_path):
         analysis = {
             "key_metrics": {},
-            "improvements": [], "regressions": [], "observations": [],
-
+            "improvements": [],
+            "regressions": [],
+            "observations": [],
         }
 
         from claude_code_sdk import AssistantMessage, ResultMessage, TextBlock
@@ -266,19 +276,22 @@ class TestRunAnalyst:
 
         buf: list[str] = []
         await run_analyst(
-            results_path=results_path, plot_paths=[], notebook_path=notebook_path,
+            results_path=results_path,
+            plot_paths=[],
+            notebook_path=notebook_path,
             message_buffer=buf,
         )
         assert len(buf) == 1
         assert "Analyzing the data..." in buf[0]
 
     @pytest.mark.asyncio
-    @patch("auto_scientist.sdk_utils.query")
+    @patch("auto_scientist.sdk_backend.claude_query")
     async def test_fallback_to_assistant_text(self, mock_query, tmp_path):
         analysis = {
             "key_metrics": {},
-            "improvements": [], "regressions": [], "observations": [],
-
+            "improvements": [],
+            "regressions": [],
+            "observations": [],
         }
 
         from claude_code_sdk import AssistantMessage, ResultMessage, TextBlock
@@ -302,20 +315,24 @@ class TestRunAnalyst:
         notebook_path = tmp_path / "notebook.md"
 
         result = await run_analyst(
-            results_path=results_path, plot_paths=[], notebook_path=notebook_path,
+            results_path=results_path,
+            plot_paths=[],
+            notebook_path=notebook_path,
         )
         assert "success_score" not in result
 
     @pytest.mark.asyncio
-    @patch("auto_scientist.sdk_utils.query")
+    @patch("auto_scientist.sdk_backend.claude_query")
     async def test_iteration0_uses_data_dir(self, mock_query, tmp_path):
         analysis = {
             "key_metrics": {},
-            "improvements": [], "regressions": [], "observations": [],
-
+            "improvements": [],
+            "regressions": [],
+            "observations": [],
         }
 
         from claude_code_sdk import ResultMessage
+
         result_msg = MagicMock(spec=ResultMessage)
         result_msg.result = json.dumps(analysis)
 
@@ -333,21 +350,27 @@ class TestRunAnalyst:
         notebook_path = tmp_path / "notebook.md"
 
         await run_analyst(
-            results_path=None, plot_paths=[], notebook_path=notebook_path,
+            results_path=None,
+            plot_paths=[],
+            notebook_path=notebook_path,
             data_dir=data_dir,
         )
         assert "<data_directory>" in captured_prompt["prompt"]
 
     @pytest.mark.asyncio
-    @patch("auto_scientist.sdk_utils.query")
+    @patch("auto_scientist.sdk_backend.claude_query")
     async def test_options_configuration(self, mock_query, tmp_path):
         from claude_code_sdk import ResultMessage
-        result_msg = MagicMock(spec=ResultMessage)
-        result_msg.result = json.dumps({
-            "key_metrics": {},
-            "improvements": [], "regressions": [], "observations": [],
 
-        })
+        result_msg = MagicMock(spec=ResultMessage)
+        result_msg.result = json.dumps(
+            {
+                "key_metrics": {},
+                "improvements": [],
+                "regressions": [],
+                "observations": [],
+            }
+        )
 
         captured_opts = {}
 
@@ -362,7 +385,9 @@ class TestRunAnalyst:
         notebook_path = tmp_path / "notebook.md"
 
         await run_analyst(
-            results_path=results_path, plot_paths=[], notebook_path=notebook_path,
+            results_path=results_path,
+            plot_paths=[],
+            notebook_path=notebook_path,
         )
         opts = captured_opts["options"]
         assert opts.allowed_tools == ["Read", "Glob"]
@@ -373,16 +398,18 @@ class TestAnalystRetry:
     """Tests for the retry-on-validation-failure behavior."""
 
     @pytest.mark.asyncio
-    @patch("auto_scientist.sdk_utils.query")
+    @patch("auto_scientist.sdk_backend.claude_query")
     async def test_retry_on_invalid_json_then_succeed(self, mock_query, tmp_path):
         """First attempt returns invalid JSON, second returns valid."""
         valid_analysis = {
             "key_metrics": {},
-            "improvements": [], "regressions": [], "observations": ["ok"],
-
+            "improvements": [],
+            "regressions": [],
+            "observations": ["ok"],
         }
 
         from claude_code_sdk import ResultMessage
+
         call_count = 0
 
         async def fake_query(**kwargs):
@@ -402,22 +429,26 @@ class TestAnalystRetry:
         notebook_path = tmp_path / "notebook.md"
 
         result = await run_analyst(
-            results_path=results_path, plot_paths=[], notebook_path=notebook_path,
+            results_path=results_path,
+            plot_paths=[],
+            notebook_path=notebook_path,
         )
         assert result["observations"] == ["ok"]
         assert call_count == 2
 
     @pytest.mark.asyncio
-    @patch("auto_scientist.sdk_utils.query")
+    @patch("auto_scientist.sdk_backend.claude_query")
     async def test_retry_on_schema_violation_then_succeed(self, mock_query, tmp_path):
         """First attempt returns JSON missing required fields, second is valid."""
         valid_analysis = {
             "key_metrics": {},
-            "improvements": [], "regressions": [], "observations": [],
-
+            "improvements": [],
+            "regressions": [],
+            "observations": [],
         }
 
         from claude_code_sdk import ResultMessage
+
         call_count = 0
 
         async def fake_query(**kwargs):
@@ -437,12 +468,14 @@ class TestAnalystRetry:
         notebook_path = tmp_path / "notebook.md"
 
         await run_analyst(
-            results_path=results_path, plot_paths=[], notebook_path=notebook_path,
+            results_path=results_path,
+            plot_paths=[],
+            notebook_path=notebook_path,
         )
         assert call_count == 2
 
     @pytest.mark.asyncio
-    @patch("auto_scientist.sdk_utils.query")
+    @patch("auto_scientist.sdk_backend.claude_query")
     async def test_exhausts_retries_raises(self, mock_query, tmp_path):
         """All attempts return invalid output; raises OutputValidationError."""
         from claude_code_sdk import ResultMessage
@@ -460,20 +493,24 @@ class TestAnalystRetry:
 
         with pytest.raises(OutputValidationError, match="Analyst"):
             await run_analyst(
-                results_path=results_path, plot_paths=[], notebook_path=notebook_path,
+                results_path=results_path,
+                plot_paths=[],
+                notebook_path=notebook_path,
             )
 
     @pytest.mark.asyncio
-    @patch("auto_scientist.sdk_utils.query")
+    @patch("auto_scientist.sdk_backend.claude_query")
     async def test_correction_hint_in_retry_prompt(self, mock_query, tmp_path):
         """On retry, the prompt should include a validation_error correction hint."""
         valid_analysis = {
             "key_metrics": {},
-            "improvements": [], "regressions": [], "observations": [],
-
+            "improvements": [],
+            "regressions": [],
+            "observations": [],
         }
 
         from claude_code_sdk import ResultMessage
+
         captured_prompts = []
 
         async def fake_query(**kwargs):
@@ -492,7 +529,9 @@ class TestAnalystRetry:
         notebook_path = tmp_path / "notebook.md"
 
         await run_analyst(
-            results_path=results_path, plot_paths=[], notebook_path=notebook_path,
+            results_path=results_path,
+            plot_paths=[],
+            notebook_path=notebook_path,
         )
         assert len(captured_prompts) == 2
         assert "<validation_error>" in captured_prompts[1]

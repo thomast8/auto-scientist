@@ -643,3 +643,76 @@ class TestAgentLevelResume:
         (run_dir / "v02" / "plan.json").unlink()
         with pytest.raises(ValueError, match="required artifact 'plan.json' not found"):
             rewind_run(run_dir, 2, from_agent="debate")
+
+    # --- revision resume tests ---
+
+    def test_from_agent_revision_keeps_debate_and_analysis(self, run_dir):
+        """Resuming from revision keeps analysis + debate, restores pre-debate plan."""
+        result = rewind_run(run_dir, 2, from_agent="revision")
+        assert result.from_agent == "revision"
+
+        vdir = run_dir / "v02"
+        assert (vdir / "analysis.json").exists()
+        assert (vdir / "debate.json").exists()
+        # plan.json should be restored to the pre-debate original
+        assert (vdir / "plan.json").exists()
+        plan = json.loads((vdir / "plan.json").read_text())
+        assert plan["hypothesis"] == "Original 2"
+        # Coder artifacts should be gone
+        assert not (vdir / "experiment.py").exists()
+
+    def test_from_agent_revision_deletes_revision_plan(self, run_dir):
+        """Resuming from revision deletes revision_plan.json if present."""
+        vdir = run_dir / "v02"
+        (vdir / "revision_plan.json").write_text('{"hypothesis": "old revision"}')
+        rewind_run(run_dir, 2, from_agent="revision")
+        assert not (vdir / "revision_plan.json").exists()
+
+    def test_from_agent_revision_buffers(self, run_dir):
+        """Revision resume keeps analyst + scientist + debate buffers, removes revision + coder."""
+        rewind_run(run_dir, 2, from_agent="revision")
+        buffers = run_dir / "buffers"
+        remaining = sorted(f.name for f in buffers.iterdir())
+        assert "analyst_02.txt" in remaining
+        assert "scientist_02.txt" in remaining
+        assert "debate_methodologist_02.txt" in remaining
+        assert "scientist_revision_02.txt" not in remaining
+        assert "coder_02.txt" not in remaining
+
+    def test_from_agent_revision_notebook_strip(self, run_dir):
+        """Resuming from revision strips revision entries but keeps scientist and debate."""
+        rewind_run(run_dir, 2, from_agent="revision")
+        notebook = (run_dir / NOTEBOOK_FILENAME).read_text()
+        # v02 scientist entry should be kept (before revision)
+        assert 'version="v02" source="scientist"' in notebook
+        # v02 revision entry should be removed (being re-run)
+        assert 'version="v02" source="revision"' not in notebook
+
+    def test_from_agent_revision_prediction_trimming(self, run_dir):
+        """Resuming from revision removes predictions prescribed at target iteration."""
+        result = rewind_run(run_dir, 2, from_agent="revision")
+        prescribed_iters = [p.iteration_prescribed for p in result.state.prediction_history]
+        assert 0 in prescribed_iters
+        assert 1 in prescribed_iters
+        assert 2 not in prescribed_iters
+
+    def test_from_agent_revision_prerequisite_skips_conditionals(self, run_dir):
+        """Resuming from revision doesn't require stop gate artifacts."""
+        # No stop gate artifacts exist - that's fine, they're conditional
+        result = rewind_run(run_dir, 2, from_agent="revision")
+        assert result.from_agent == "revision"
+
+    # --- stop gate agent resume tests ---
+
+    def test_from_agent_stop_gate_agents_accepted(self, run_dir):
+        """Stop gate agent names are valid --from-agent values."""
+        for agent in ("assessment", "stop_debate", "stop_revision"):
+            result = rewind_run(run_dir, 2, from_agent=agent)
+            assert result.from_agent == agent
+
+    def test_from_agent_coder_keeps_revision_plan_if_present(self, run_dir):
+        """Resuming from coder keeps revision_plan.json if present."""
+        vdir = run_dir / "v02"
+        (vdir / "revision_plan.json").write_text('{"hypothesis": "revised"}')
+        rewind_run(run_dir, 2, from_agent="coder")
+        assert (vdir / "revision_plan.json").exists()

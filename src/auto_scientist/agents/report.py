@@ -9,9 +9,8 @@ Returns the report content as a string; the orchestrator handles file writing.
 import logging
 from pathlib import Path
 
-from claude_code_sdk import AssistantMessage, ClaudeCodeOptions, ResultMessage, TextBlock
-
 from auto_scientist.prompts.report import REPORT_SYSTEM, REPORT_USER
+from auto_scientist.sdk_backend import SDKOptions, get_backend
 from auto_scientist.sdk_utils import (
     append_block_to_buffer,
     collect_text_from_query,
@@ -35,6 +34,7 @@ async def run_report(
     output_dir: Path,
     model: str | None = None,
     message_buffer: list[str] | None = None,
+    provider: str = "anthropic",
 ) -> str:
     """Generate the final experiment report.
 
@@ -60,7 +60,8 @@ async def run_report(
 
     max_turns = 10
     allowed_tools = ["Read", "Glob"]
-    options = ClaudeCodeOptions(
+    backend = get_backend(provider)
+    options = SDKOptions(
         system_prompt=with_turn_budget(REPORT_SYSTEM, max_turns, allowed_tools),
         allowed_tools=allowed_tools,
         max_turns=max_turns,
@@ -80,18 +81,18 @@ async def run_report(
         report_parts: list[str] = []
 
         try:
-            async for message in safe_query(prompt=effective_prompt, options=options):
-                if isinstance(message, AssistantMessage):
-                    for block in message.content:
+            async for message in safe_query(
+                prompt=effective_prompt, options=options, backend=backend
+            ):
+                if message.type == "assistant":
+                    for block in message.content_blocks:
                         if message_buffer is not None:
                             append_block_to_buffer(block, message_buffer)
-                        if isinstance(block, TextBlock):
+                        if hasattr(block, "text") and not hasattr(block, "name"):
                             report_parts.append(block.text)
-                elif isinstance(message, ResultMessage):
-                    session_id = getattr(message, "session_id", None)
-                    usage = getattr(message, "usage", None) or {}
-                    usage["num_turns"] = getattr(message, "num_turns", 0)
-                    usage["total_cost_usd"] = getattr(message, "total_cost_usd", None)
+                elif message.type == "result":
+                    session_id = message.session_id
+                    usage = message.usage
                     collect_text_from_query.last_usage = usage  # type: ignore[attr-defined]
         except Exception as e:
             if attempt == MAX_ATTEMPTS - 1:
@@ -144,7 +145,7 @@ async def run_report(
                 )
                 retry_max_turns = 10
                 retry_allowed_tools = ["Read", "Glob"]
-                options = ClaudeCodeOptions(
+                options = SDKOptions(
                     system_prompt=with_turn_budget(
                         REPORT_SYSTEM, retry_max_turns, retry_allowed_tools
                     ),

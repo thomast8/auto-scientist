@@ -48,7 +48,7 @@ class TestOrchestratorInit:
         o = Orchestrator(state=base_state, data_path=tmp_path, output_dir=tmp_path)
         assert o.max_iterations == 20
         assert len(o.model_config.critics) == 2
-        assert o.max_consecutive_failures == 5
+        assert o.max_consecutive_failures == 3
 
     def test_custom_values(self, base_state, tmp_path):
         mc = ModelConfig(
@@ -147,7 +147,8 @@ class TestValidatePrerequisites:
         o = self._make_orchestrator(tmp_path, state=state, data_path=None)
         o._validate_prerequisites()  # should not raise
 
-    def test_missing_anthropic_auth(self, tmp_path, monkeypatch):
+    def test_missing_anthropic_auth_api_mode(self, tmp_path, monkeypatch):
+        """API-mode agents still need API key validation."""
         data = tmp_path / "data.csv"
         data.write_text("x")
         monkeypatch.setattr(
@@ -155,7 +156,12 @@ class TestValidatePrerequisites:
             self._mock_auth_fail("anthropic"),
         )
         monkeypatch.setattr("shutil.which", lambda name: "/usr/bin/claude")
-        o = self._make_orchestrator(tmp_path, data_path=data)
+        mc = ModelConfig(
+            defaults=AgentModelConfig(model="claude-sonnet-4-6"),
+            scientist=AgentModelConfig(model="claude-sonnet-4-6", mode="api"),
+            critics=[],
+        )
+        o = self._make_orchestrator(tmp_path, data_path=data, mc=mc)
         with pytest.raises(RuntimeError, match="Anthropic SDK authentication failed"):
             o._validate_prerequisites()
 
@@ -176,7 +182,8 @@ class TestValidatePrerequisites:
         with pytest.raises(RuntimeError, match="OpenAI SDK authentication failed"):
             o._validate_prerequisites()
 
-    def test_missing_google_key_for_critic(self, tmp_path, monkeypatch):
+    def test_missing_google_key_for_api_critic(self, tmp_path, monkeypatch):
+        """Google critic in api mode needs an API key."""
         data = tmp_path / "data.csv"
         data.write_text("x")
         monkeypatch.setattr(
@@ -186,7 +193,7 @@ class TestValidatePrerequisites:
         monkeypatch.setattr("shutil.which", lambda name: "/usr/bin/claude")
         mc = ModelConfig(
             defaults=AgentModelConfig(model="claude-sonnet-4-6"),
-            critics=[AgentModelConfig(provider="google", model="gemini-2.5-pro")],
+            critics=[AgentModelConfig(provider="google", model="gemini-2.5-pro", mode="api")],
         )
         o = self._make_orchestrator(tmp_path, data_path=data, mc=mc)
         with pytest.raises(RuntimeError, match="Google SDK authentication failed"):
@@ -195,14 +202,15 @@ class TestValidatePrerequisites:
     def test_multiple_errors_reported_at_once(self, tmp_path, monkeypatch):
         monkeypatch.setattr(
             "auto_scientist.orchestrator._check_provider_auth",
-            self._mock_auth_fail("anthropic"),
+            self._mock_auth_fail("openai"),
         )
         monkeypatch.setattr("shutil.which", lambda name: None)
+        # Default preset has summarizer with provider=openai (api mode)
         o = self._make_orchestrator(tmp_path)  # data.csv doesn't exist
         with pytest.raises(RuntimeError, match="Data path does not exist") as exc_info:
             o._validate_prerequisites()
         msg = str(exc_info.value)
-        assert "Anthropic SDK authentication failed" in msg
+        # Multiple errors should be reported: data path + CLI not found
         assert "Claude Code CLI not found" in msg
 
     def test_missing_claude_cli(self, tmp_path, monkeypatch):
@@ -214,8 +222,8 @@ class TestValidatePrerequisites:
         with pytest.raises(RuntimeError, match="Claude Code CLI not found"):
             o._validate_prerequisites()
 
-    def test_non_anthropic_sdk_agent_rejected(self, tmp_path, monkeypatch):
-        """SDK agents (analyst, coder, etc.) must use Anthropic models."""
+    def test_google_sdk_agent_rejected(self, tmp_path, monkeypatch):
+        """SDK agents cannot use Google provider (no Google coding CLI)."""
         data = tmp_path / "data.csv"
         data.write_text("x")
         monkeypatch.setattr("auto_scientist.orchestrator._check_provider_auth", self._mock_auth_ok)
@@ -225,21 +233,37 @@ class TestValidatePrerequisites:
             critics=[],
         )
         o = self._make_orchestrator(tmp_path, data_path=data, mc=mc)
-        with pytest.raises(RuntimeError, match="require provider 'anthropic'"):
+        with pytest.raises(RuntimeError, match="no Google coding agent CLI exists"):
             o._validate_prerequisites()
 
-    def test_non_anthropic_critic_allowed(self, tmp_path, monkeypatch):
-        """Critics can use non-Anthropic models."""
+    def test_non_anthropic_critic_allowed_in_api_mode(self, tmp_path, monkeypatch):
+        """Critics can use non-Anthropic models in API mode."""
         data = tmp_path / "data.csv"
         data.write_text("x")
         monkeypatch.setattr("auto_scientist.orchestrator._check_provider_auth", self._mock_auth_ok)
         monkeypatch.setattr("shutil.which", lambda name: "/usr/bin/claude")
         mc = ModelConfig(
             defaults=AgentModelConfig(model="claude-sonnet-4-6"),
-            critics=[AgentModelConfig(provider="google", model="gemini-2.5-pro")],
+            critics=[AgentModelConfig(provider="google", model="gemini-2.5-pro", mode="api")],
         )
         o = self._make_orchestrator(tmp_path, data_path=data, mc=mc)
         o._validate_prerequisites()  # should not raise
+
+    def test_openai_sdk_agent_needs_codex_cli(self, tmp_path, monkeypatch):
+        """OpenAI SDK agents need the Codex CLI on PATH."""
+        data = tmp_path / "data.csv"
+        data.write_text("x")
+        monkeypatch.setattr("auto_scientist.orchestrator._check_provider_auth", self._mock_auth_ok)
+        monkeypatch.setattr(
+            "shutil.which", lambda name: "/usr/bin/claude" if name == "claude" else None
+        )
+        mc = ModelConfig(
+            defaults=AgentModelConfig(provider="openai", model="gpt-5.4-mini"),
+            critics=[],
+        )
+        o = self._make_orchestrator(tmp_path, data_path=data, mc=mc)
+        with pytest.raises(RuntimeError, match="Codex CLI not found"):
+            o._validate_prerequisites()
 
 
 class TestValidateModelNames:
@@ -522,6 +546,30 @@ class TestRunIngestion:
         assert result == canonical
         mock_ingestor.assert_called_once()
 
+    @pytest.mark.asyncio
+    @patch(
+        "auto_scientist.agents.ingestor.run_ingestor",
+        new_callable=AsyncMock,
+        side_effect=RuntimeError("LLM error"),
+    )
+    async def test_error_returns_none_and_records_failure(self, _mock_ingestor, tmp_path):
+        """Ingestor error returns None instead of raising, records failure."""
+        state = ExperimentState(
+            domain="test",
+            goal="g",
+            phase="ingestion",
+            data_path=str(tmp_path / "raw.csv"),
+        )
+        o = Orchestrator(
+            state=state,
+            data_path=tmp_path / "raw.csv",
+            output_dir=tmp_path / "experiments",
+        )
+        result = await o._run_ingestion()
+
+        assert result is None
+        assert state.consecutive_failures == 1
+
 
 class TestPhaseTransitions:
     @pytest.mark.asyncio
@@ -542,31 +590,7 @@ class TestPhaseTransitions:
 
         with (
             patch.object(o, "_validate_prerequisites"),
-            patch.object(o, "_run_report", new_callable=AsyncMock),
-        ):
-            await o.run()
-
-        assert state.phase == "stopped"
-
-    @pytest.mark.asyncio
-    async def test_consecutive_failures_triggers_report(self, tmp_path):
-        state = ExperimentState(
-            domain="test",
-            goal="g",
-            phase="iteration",
-            consecutive_failures=5,
-        )
-        o = Orchestrator(
-            state=state,
-            data_path=tmp_path,
-            output_dir=tmp_path,
-            max_consecutive_failures=5,
-        )
-        o.config = DomainConfig(name="t", description="d", data_paths=[])
-
-        with (
-            patch.object(o, "_validate_prerequisites"),
-            patch.object(o, "_run_report", new_callable=AsyncMock),
+            patch.object(o, "_run_report", new_callable=AsyncMock, return_value=True),
         ):
             await o.run()
 
@@ -597,7 +621,7 @@ class TestPhaseTransitions:
         with (
             patch.object(o, "_validate_prerequisites"),
             patch.object(o, "_run_ingestion", new_callable=AsyncMock, return_value=canonical),
-            patch.object(o, "_run_report", new_callable=AsyncMock),
+            patch.object(o, "_run_report", new_callable=AsyncMock, return_value=True),
         ):
             await o.run()
 
@@ -622,11 +646,120 @@ class TestPhaseTransitions:
 
         with (
             patch.object(o, "_validate_prerequisites"),
-            patch.object(o, "_run_report", new_callable=AsyncMock) as mock_report,
+            patch.object(
+                o, "_run_report", new_callable=AsyncMock, return_value=True
+            ) as mock_report,
         ):
             await o.run()
 
         mock_report.assert_called_once()
+        assert state.phase == "stopped"
+
+    @pytest.mark.asyncio
+    async def test_consecutive_failures_stops_without_report(self, tmp_path):
+        """Consecutive failures go straight to stopped, skipping report."""
+        state = ExperimentState(
+            domain="test",
+            goal="g",
+            phase="iteration",
+            consecutive_failures=3,
+        )
+        o = Orchestrator(
+            state=state,
+            data_path=tmp_path,
+            output_dir=tmp_path,
+            max_consecutive_failures=3,
+        )
+        o.config = DomainConfig(name="t", description="d", data_paths=[])
+
+        with (
+            patch.object(o, "_validate_prerequisites"),
+            patch.object(
+                o, "_run_report", new_callable=AsyncMock, return_value=True
+            ) as mock_report,
+        ):
+            await o.run()
+
+        mock_report.assert_not_called()
+        assert state.phase == "stopped"
+
+    @pytest.mark.asyncio
+    async def test_failure_with_results_path_does_not_stop(self, tmp_path):
+        """When latest version has results_path, a failure should not stop immediately."""
+        state = ExperimentState(
+            domain="test",
+            goal="g",
+            phase="iteration",
+            iteration=2,
+            consecutive_failures=1,
+            versions=[
+                VersionEntry(
+                    version="v01",
+                    iteration=1,
+                    script_path=str(tmp_path / "v01" / "experiment.py"),
+                    results_path=str(tmp_path / "v01" / "results.txt"),
+                    status="failed",
+                ),
+            ],
+        )
+        o = Orchestrator(
+            state=state,
+            data_path=tmp_path,
+            output_dir=tmp_path,
+            max_iterations=3,
+            max_consecutive_failures=3,
+        )
+        o.config = DomainConfig(name="t", description="d", data_paths=[])
+
+        with (
+            patch.object(o, "_validate_prerequisites"),
+            patch.object(o, "_run_iteration_body", new_callable=AsyncMock) as mock_iter,
+        ):
+            # Simulate iteration body completing (resetting consecutive_failures)
+            async def fake_iter():
+                state.consecutive_failures = 0
+                state.iteration = 3
+
+            mock_iter.side_effect = fake_iter
+            await o.run()
+
+        # The loop should have called _run_iteration_body (not stopped early)
+        mock_iter.assert_called_once()
+
+    @pytest.mark.asyncio
+    async def test_failure_without_results_path_stops(self, tmp_path):
+        """When latest version has no results_path, failure stops immediately."""
+        state = ExperimentState(
+            domain="test",
+            goal="g",
+            phase="iteration",
+            iteration=2,
+            consecutive_failures=1,
+            versions=[
+                VersionEntry(
+                    version="v01",
+                    iteration=1,
+                    script_path="",
+                    status="failed",
+                ),
+            ],
+        )
+        o = Orchestrator(
+            state=state,
+            data_path=tmp_path,
+            output_dir=tmp_path,
+            max_consecutive_failures=3,
+        )
+        o.config = DomainConfig(name="t", description="d", data_paths=[])
+
+        with (
+            patch.object(o, "_validate_prerequisites"),
+            patch.object(o, "_run_iteration_body", new_callable=AsyncMock) as mock_iter,
+        ):
+            await o.run()
+
+        # Should have stopped without running another iteration
+        mock_iter.assert_not_called()
         assert state.phase == "stopped"
 
 
@@ -1862,22 +1995,22 @@ class TestRunReportOrchestrator:
     async def test_calls_run_report(self, orchestrator, tmp_path):
         orchestrator.output_dir.mkdir(parents=True, exist_ok=True)
 
-        report_path = orchestrator.output_dir / "report.md"
-
         with patch(
             "auto_scientist.agents.report.run_report",
             new_callable=AsyncMock,
-            return_value=report_path,
+            return_value="# Report\nDone.",
         ) as mock_report:
-            await orchestrator._run_report()
+            result = await orchestrator._run_report()
 
         mock_report.assert_called_once()
         call_kwargs = mock_report.call_args.kwargs
         assert call_kwargs["state"] is orchestrator.state
         assert call_kwargs["output_dir"] == orchestrator.output_dir
+        assert result is True
 
     @pytest.mark.asyncio
-    async def test_error_does_not_raise(self, orchestrator, tmp_path):
+    async def test_error_returns_false_and_records_failure(self, orchestrator, tmp_path):
+        """Report error returns False and records failure instead of raising."""
         orchestrator.output_dir.mkdir(parents=True, exist_ok=True)
 
         with patch(
@@ -1885,10 +2018,10 @@ class TestRunReportOrchestrator:
             new_callable=AsyncMock,
             side_effect=RuntimeError("Report failed"),
         ):
-            await orchestrator._run_report()
+            result = await orchestrator._run_report()
 
-        # Error is handled internally (logged + panel error state), not raised
-        # The test passes if no exception propagates
+        assert result is False
+        assert orchestrator.state.consecutive_failures == 1
 
 
 class TestRunFullOrchestration:
@@ -1915,7 +2048,7 @@ class TestRunFullOrchestration:
 
         with (
             patch.object(o, "_validate_prerequisites"),
-            patch.object(o, "_run_report", new_callable=AsyncMock),
+            patch.object(o, "_run_report", new_callable=AsyncMock, return_value=True),
         ):
             await o.run()
 
@@ -1959,7 +2092,7 @@ class TestRunFullOrchestration:
             patch.object(o, "_run_scientist_revision", new_callable=AsyncMock, return_value=None),
             patch.object(o, "_run_coder", new_callable=AsyncMock, return_value=script_path),
             patch.object(o, "_read_run_result", return_value=run_result),
-            patch.object(o, "_run_report", new_callable=AsyncMock),
+            patch.object(o, "_run_report", new_callable=AsyncMock, return_value=True),
         ):
             await o.run()
 
@@ -2001,7 +2134,7 @@ class TestRunIngestionFull:
                 new_callable=AsyncMock,
                 return_value=canonical,
             ),
-            patch.object(o, "_run_report", new_callable=AsyncMock),
+            patch.object(o, "_run_report", new_callable=AsyncMock, return_value=True),
         ):
             await o.run()
 
@@ -2040,7 +2173,7 @@ class TestRunIngestionFull:
                 new_callable=AsyncMock,
                 return_value=canonical,
             ),
-            patch.object(o, "_run_report", new_callable=AsyncMock),
+            patch.object(o, "_run_report", new_callable=AsyncMock, return_value=True),
         ):
             await o.run()
 
@@ -2097,7 +2230,7 @@ class TestSummaryIntegration:
             patch.object(o, "_run_scientist_plan", new_callable=AsyncMock, return_value=plan),
             patch.object(o, "_run_coder", new_callable=AsyncMock, return_value=script_path),
             patch.object(o, "_read_run_result", return_value=run_result),
-            patch.object(o, "_run_report", new_callable=AsyncMock),
+            patch.object(o, "_run_report", new_callable=AsyncMock, return_value=True),
             patch(
                 "auto_scientist.orchestrator.run_with_summaries", new_callable=AsyncMock
             ) as mock_rws,
@@ -2155,7 +2288,7 @@ class TestSummaryIntegration:
                 return_value=script_path,
             ),
             patch.object(o, "_read_run_result", return_value=run_result),
-            patch.object(o, "_run_report", new_callable=AsyncMock),
+            patch.object(o, "_run_report", new_callable=AsyncMock, return_value=True),
             patch(
                 "auto_scientist.orchestrator.run_with_summaries", new_callable=AsyncMock
             ) as mock_rws,

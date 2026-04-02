@@ -13,19 +13,13 @@ import logging
 from pathlib import Path
 from typing import Any
 
-from claude_code_sdk import (
-    AssistantMessage,
-    ClaudeCodeOptions,
-    ResultMessage,
-    query,
-)
-
 from auto_scientist.prompts.coder import (
     CODER_HAS_PREVIOUS,
     CODER_NO_PREVIOUS,
     CODER_SYSTEM,
     CODER_USER,
 )
+from auto_scientist.sdk_backend import CODEX_SANDBOX_ADDENDUM, SDKOptions, get_backend
 from auto_scientist.sdk_utils import (
     append_block_to_buffer,
     collect_text_from_query,
@@ -62,6 +56,7 @@ async def run_coder(
     run_timeout_minutes: int = 120,
     run_command: str = "uv run {script_path}",
     data_files_listing: str = "",
+    provider: str = "anthropic",
 ) -> Path:
     """Implement the scientist's plan as a runnable experiment script.
 
@@ -90,11 +85,19 @@ async def run_coder(
     else:
         previous_script_section = CODER_NO_PREVIOUS
 
+    # Codex seatbelt sandbox: uv panics (SCDynamicStore access denied).
+    # Replace uv run with python3 BEFORE formatting prompts so both system
+    # and user prompts get the corrected command.
+    if provider == "openai" and "uv run" in run_command:
+        run_command = run_command.replace("uv run", "python3", 1)
+
     system_prompt = CODER_SYSTEM.format(
         data_path=data_path or "(not specified)",
         run_timeout_minutes=run_timeout_minutes,
         run_command=run_command,
     )
+    if provider == "openai":
+        system_prompt += CODEX_SANDBOX_ADDENDUM
 
     # Build data files section so coder doesn't need to discover files
     if data_files_listing:
@@ -121,7 +124,8 @@ async def run_coder(
 
     max_turns = 50
     allowed_tools = ["Read", "Write", "Edit", "Bash", "Glob", "Grep"]
-    options = ClaudeCodeOptions(
+    backend = get_backend(provider)
+    options = SDKOptions(
         system_prompt=with_turn_budget(system_prompt, max_turns, allowed_tools),
         allowed_tools=allowed_tools,
         max_turns=max_turns,
@@ -136,14 +140,13 @@ async def run_coder(
         effective_prompt = user_prompt + correction_hint
 
         try:
-            async for message in query(prompt=effective_prompt, options=options):
-                if isinstance(message, AssistantMessage):
+            async for message in backend.query(prompt=effective_prompt, options=options):
+                if message.type == "assistant":
                     if message_buffer is not None:
-                        for block in message.content:
+                        for block in message.content_blocks:
                             append_block_to_buffer(block, message_buffer)
-                elif isinstance(message, ResultMessage):
-                    usage = getattr(message, "usage", None) or {}
-                    usage["num_turns"] = getattr(message, "num_turns", 0)
+                elif message.type == "result":
+                    usage = message.usage
                     collect_text_from_query.last_usage = usage  # type: ignore[attr-defined]
         except Exception as e:
             if attempt == MAX_ATTEMPTS - 1:

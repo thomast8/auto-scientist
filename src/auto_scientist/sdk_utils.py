@@ -1,81 +1,60 @@
-"""Utilities for working with claude_code_sdk.
+"""Utilities for working with SDK backends (Claude Code SDK and Codex SDK).
 
-Monkey-patches the SDK's message parser at import time so that unknown message
-types (e.g., rate_limit_event) are silently skipped instead of crashing the
-stream. This keeps the async generator in client.py alive through events the
-SDK doesn't yet handle.
+Provides output validation, retry utilities, and helper functions that work
+with the unified SDKMessage type from sdk_backend.py.
 
-Also provides output validation and retry utilities for agent output parsing.
+The monkey-patch for unknown message types now lives in sdk_backend.py
+(ClaudeBackend-specific).
 """
 
 import json
 import logging
-import os
 from collections.abc import AsyncIterator
 from typing import Any
 
-import claude_code_sdk._internal.client as _client_mod
-import claude_code_sdk._internal.message_parser as _parser_mod
-from claude_code_sdk import (
-    AssistantMessage,
-    ClaudeCodeOptions,
-    Message,
-    ResultMessage,
-    TextBlock,
-    query,
-)
-from claude_code_sdk._errors import MessageParseError
 from pydantic import BaseModel, ValidationError
+
+from auto_scientist.sdk_backend import SDKBackend
 
 logger = logging.getLogger(__name__)
 
-# ---------------------------------------------------------------------------
-# Monkey-patch: make parse_message return None for unknown types
-# ---------------------------------------------------------------------------
-_original_parse_message = _parser_mod.parse_message
-
-
-def _tolerant_parse_message(data: dict[str, Any]) -> Message | None:
-    """parse_message wrapper that returns None for unknown message types."""
-    try:
-        return _original_parse_message(data)
-    except MessageParseError as exc:
-        if "Unknown message type" in str(exc):
-            msg_type = data.get("type", "<missing>")
-            logger.debug(f"Skipping unknown SDK message type: {msg_type}")
-            return None
-        raise
-
-
-# Patch both the module-level function and the reference imported by client.py
-_parser_mod.parse_message = _tolerant_parse_message  # type: ignore[assignment]
-_client_mod.parse_message = _tolerant_parse_message  # type: ignore[assignment]
-
 
 # ---------------------------------------------------------------------------
-# Public helper
+# Public helpers
 # ---------------------------------------------------------------------------
+
+
 def append_block_to_buffer(block: Any, buffer: list[str]) -> None:
     """Append a content block's text to a message buffer.
 
     Handles TextBlock (text), ToolUseBlock (tool name + truncated input),
     and ToolResultBlock (truncated output). Silently skips unknown types.
     Also logs each block to debug.log for post-mortem analysis.
-    """
-    from claude_code_sdk import TextBlock, ToolResultBlock, ToolUseBlock
 
-    if isinstance(block, TextBlock):
+    Works with both Claude Code SDK block types (via attribute checks)
+    and any future block types that follow the same interface.
+    """
+    if hasattr(block, "text") and not hasattr(block, "name"):
+        # TextBlock-like: has .text but not .name
         buffer.append(block.text)
         preview = block.text[:300].replace("\n", " ")
         logger.debug(f"[text] {preview}")
-    elif isinstance(block, ToolUseBlock):
+    elif hasattr(block, "name") and hasattr(block, "input"):
+        # ToolUseBlock-like: has .name and .input
         input_str = str(block.input)
         if len(input_str) > 200:
             input_str = input_str[:200] + "..."
         entry = f"[Tool: {block.name}] {input_str}"
         buffer.append(entry)
         logger.debug(entry)
-    elif isinstance(block, ToolResultBlock):
+    elif hasattr(block, "thinking"):
+        # ThinkingBlock-like: has .thinking attribute (not .text)
+        thinking_preview = block.thinking[:300].replace("\n", " ")
+        entry = f"[Thinking] {thinking_preview}"
+        buffer.append(entry)
+        logger.debug(f"[thinking] {thinking_preview}")
+    elif hasattr(block, "content") and hasattr(block, "is_error"):
+        # ToolResultBlock-like: has .content and .is_error
         content = str(block.content) if block.content else ""
         if len(content) > 200:
             content = content[:200] + "..."
@@ -85,33 +64,21 @@ def append_block_to_buffer(block: Any, buffer: list[str]) -> None:
         logger.debug(entry)
 
 
-async def safe_query(prompt: str, options: ClaudeCodeOptions) -> AsyncIterator[Message]:
-    """Wrap claude_code_sdk.query, filtering out None (unknown message types).
+async def safe_query(
+    prompt: str,
+    options: Any,
+    backend: SDKBackend,
+) -> AsyncIterator[Any]:
+    """Wrap a backend query, filtering out None messages.
 
-    Strips ANTHROPIC_API_KEY from the subprocess environment so SDK agents use
-    the Claude Code subscription (Max plan) instead of direct API billing.  The
-    key is still available in the parent process for direct Anthropic client
-    calls (e.g. anthropic_client.py).
+    Yields SDKMessage objects from the backend.
     """
-    if "ANTHROPIC_API_KEY" not in options.env and os.environ.get("ANTHROPIC_API_KEY"):
-        logger.info(
-            "Stripping ANTHROPIC_API_KEY from SDK subprocess env "
-            "(using Claude Code subscription instead of direct API billing)"
-        )
-        options = ClaudeCodeOptions(
-            **{
-                field: getattr(options, field)
-                for field in options.__dataclass_fields__
-                if field != "env"
-            },
-            env={**options.env, "ANTHROPIC_API_KEY": ""},
-        )
     logger.debug(
         f"SDK query start: model={options.model}, "
         f"max_turns={options.max_turns}, "
         f"prompt_len={len(prompt)}"
     )
-    async for msg in query(prompt=prompt, options=options):
+    async for msg in backend.query(prompt=prompt, options=options):
         if msg is not None:
             yield msg
 
@@ -181,6 +148,29 @@ def _strip_markdown_fencing(raw: str) -> str:
     return raw
 
 
+def _find_json_object(text: str, *, require_dict: bool = False) -> tuple[Any, int, int] | None:
+    """Scan *text* for the first valid JSON object or array.
+
+    Tries ``raw_decode`` at every ``{`` (and ``[`` unless *require_dict*)
+    position until one succeeds.
+    Returns ``(parsed, start_idx, end_idx)`` or ``None``.
+
+    When *require_dict* is True only ``{`` positions are tried.  This avoids
+    false-positive matches on JSON arrays like ``[0]`` embedded in Python
+    expressions (e.g. ``rows[0]``) that appear in Codex shell-command output
+    before the actual JSON object.
+    """
+    decoder = json.JSONDecoder()
+    for i, ch in enumerate(text):
+        if ch == "{" or (ch == "[" and not require_dict):
+            try:
+                parsed, length = decoder.raw_decode(text, i)
+                return parsed, i, i + length
+            except json.JSONDecodeError:
+                continue
+    return None
+
+
 def validate_json_output(
     raw: str,
     model_cls: type[BaseModel],
@@ -191,24 +181,57 @@ def validate_json_output(
     Returns model_dump() dict on success.
     Raises OutputValidationError on JSON parse or schema validation failure.
 
-    Uses raw_decode() to extract the first JSON object, tolerating
-    trailing text that models sometimes append after the JSON.
+    Uses a two-phase approach:
+    1. Fast path: strip markdown fencing, then raw_decode from position 0.
+    2. Slow path (on failure): scan every ``{``/``[`` with raw_decode until
+       one parses. This handles Codex output where shell commands containing
+       braces appear before the actual JSON.
     """
     cleaned = _strip_markdown_fencing(raw)
+
+    # Fast path: try raw_decode from the start (works for clean output)
+    parsed = None
     try:
-        parsed, end_idx = json.JSONDecoder().raw_decode(cleaned)
-        trailing = cleaned[end_idx:].strip()
-        if trailing:
+        decoded, end_idx = json.JSONDecoder().raw_decode(cleaned)
+        # BaseModel always maps to a JSON object (dict).  If the fast path
+        # decoded something else (e.g. ``[0]`` from Python indexing in Codex
+        # shell output), reject it and fall through to the slow path.
+        if isinstance(decoded, dict):
+            parsed = decoded
+            trailing = cleaned[end_idx:].strip()
+            if trailing:
+                logger.warning(
+                    f"{agent_name}: raw_decode ignored {len(trailing)} chars of trailing content: "
+                    f"{trailing[:200]!r}"
+                )
+        else:
             logger.warning(
-                f"{agent_name}: raw_decode ignored {len(trailing)} chars of trailing content: "
-                f"{trailing[:200]!r}"
+                f"{agent_name}: fast-path decoded {type(decoded).__name__}, "
+                f"expected dict - trying slow path"
             )
-    except json.JSONDecodeError as e:
+    except json.JSONDecodeError:
+        pass
+
+    if parsed is None:
+        # Slow path: scan for the first valid JSON object.
+        # Use require_dict=True since Pydantic BaseModel always maps to a
+        # dict, skipping false-positive array matches from shell/Python code.
+        result = _find_json_object(cleaned, require_dict=True)
+        if result is not None:
+            parsed, start_idx, _end_idx = result
+            logger.warning(
+                f"{agent_name}: found JSON at position {start_idx} after "
+                f"skipping non-JSON content: {cleaned[:start_idx][:200]!r}"
+            )
+
+    if parsed is None:
         raise OutputValidationError(
             raw_output=raw,
-            validation_error=e,
+            validation_error=json.JSONDecodeError(
+                "No valid JSON object found in output", raw[:500], 0
+            ),
             agent_name=agent_name,
-        ) from e
+        )
 
     try:
         validated = model_cls.model_validate(parsed)
@@ -271,37 +294,54 @@ def with_turn_budget(system_prompt: str, max_turns: int, tools: list[str] | None
 
 async def collect_text_from_query(
     prompt: str,
-    options: ClaudeCodeOptions,
+    options: Any,
+    backend: SDKBackend,
     message_buffer: list[str] | None = None,
     agent_name: str = "Agent",
 ) -> tuple[str, dict[str, Any]]:
     """Run an SDK query and collect the text response.
-
-    Prefers ResultMessage.result; falls back to concatenated AssistantMessage
-    TextBlocks. Raises RuntimeError if no text is produced.
 
     Returns:
         (text, usage) tuple. Usage dict contains token counts and cost info.
         Also sets ``last_usage`` on the function object so the orchestrator
         can read it after sequential agent phases (coder, ingestor).
     """
+    _message_buffer = message_buffer
     result_text = ""
     assistant_texts: list[str] = []
     usage: dict[str, Any] = {}
+    has_streaming = False
 
-    async for message in query(prompt=prompt, options=options):
-        if isinstance(message, ResultMessage):
+    async for message in backend.query(prompt=prompt, options=options):
+        if message.type == "result":
             if message.result:
                 result_text = message.result
-            usage = getattr(message, "usage", None) or {}
-            usage["num_turns"] = getattr(message, "num_turns", 0)
-            usage["total_cost_usd"] = getattr(message, "total_cost_usd", None)
-        elif isinstance(message, AssistantMessage):
-            for block in message.content:
-                if isinstance(block, TextBlock):
+            usage = message.usage
+        elif message.type == "stream":
+            # Partial content deltas (Claude backend with include_partial_messages).
+            # Populate only the message_buffer so the summarizer sees real-time
+            # progress.  Final text is still collected from the complete
+            # AssistantMessage below.
+            has_streaming = True
+            if _message_buffer is not None:
+                for block in message.content_blocks:
+                    append_block_to_buffer(block, _message_buffer)
+        elif message.type == "assistant":
+            for block in message.content_blocks:
+                is_text = hasattr(block, "text") and not hasattr(block, "name")
+                is_thinking = hasattr(block, "thinking")
+
+                # Always collect complete text for final output extraction.
+                if is_text:
                     assistant_texts.append(block.text)
-                if message_buffer is not None:
-                    append_block_to_buffer(block, message_buffer)
+
+                if _message_buffer is not None:
+                    # When streaming delivered text/thinking via deltas,
+                    # skip them here to avoid double-counting in the buffer.
+                    # Tool use/result blocks are NOT streamed, so always add them.
+                    if has_streaming and (is_text or is_thinking):
+                        continue
+                    append_block_to_buffer(block, _message_buffer)
 
     raw = result_text if result_text else "\n".join(assistant_texts)
 

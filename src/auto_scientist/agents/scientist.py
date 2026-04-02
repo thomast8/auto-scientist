@@ -10,8 +10,7 @@ import logging
 from pathlib import Path
 from typing import Any
 
-from claude_code_sdk import ClaudeCodeOptions
-
+from auto_scientist.model_config import ReasoningConfig, reasoning_to_cc_extra_args
 from auto_scientist.prompts.scientist import (
     SCIENTIST_REVISION_SYSTEM,
     SCIENTIST_REVISION_USER,
@@ -19,6 +18,7 @@ from auto_scientist.prompts.scientist import (
     SCIENTIST_USER,
 )
 from auto_scientist.schemas import ScientistPlanOutput
+from auto_scientist.sdk_backend import SDKOptions, get_backend
 from auto_scientist.sdk_utils import (
     OutputValidationError,
     collect_text_from_query,
@@ -160,6 +160,8 @@ async def run_scientist(
     model: str | None = None,
     message_buffer: list[str] | None = None,
     goal: str = "",
+    provider: str = "anthropic",
+    reasoning: ReasoningConfig | None = None,
 ) -> dict[str, Any]:
     """Formulate hypothesis and plan based on analysis.
 
@@ -205,15 +207,20 @@ async def run_scientist(
         f"Schema:\n{json.dumps(SCIENTIST_PLAN_SCHEMA, indent=2)}"
     )
 
+    extra_args: dict[str, str | None] = {"setting-sources": ""}
+    if reasoning and reasoning.level != "off":
+        extra_args.update(reasoning_to_cc_extra_args(reasoning))
+
     max_turns = 10
-    options = ClaudeCodeOptions(
+    backend = get_backend(provider)
+    options = SDKOptions(
         system_prompt=with_turn_budget(
             system_prompt + json_instruction, max_turns, SCIENTIST_TOOLS
         ),
         allowed_tools=SCIENTIST_TOOLS,
         max_turns=max_turns,
         model=model,
-        extra_args={"setting-sources": ""},
+        extra_args=extra_args,
     )
 
     correction_hint = ""
@@ -224,6 +231,7 @@ async def run_scientist(
             raw, _usage = await collect_text_from_query(
                 effective_prompt,
                 options,
+                backend,
                 message_buffer,
                 agent_name="Scientist",
             )
@@ -255,6 +263,8 @@ async def run_scientist_revision(
     model: str | None = None,
     message_buffer: list[str] | None = None,
     goal: str = "",
+    provider: str = "anthropic",
+    reasoning: ReasoningConfig | None = None,
 ) -> dict[str, Any]:
     """Revise the plan after a critic debate.
 
@@ -269,6 +279,7 @@ async def run_scientist_revision(
         model: Model override.
         message_buffer: Optional buffer for streaming messages.
         goal: The user's investigation goal.
+        reasoning: Reasoning/effort config for the model.
 
     Returns:
         Revised plan dict (same schema as the initial plan).
@@ -296,15 +307,20 @@ async def run_scientist_revision(
         f"Schema:\n{json.dumps(SCIENTIST_PLAN_SCHEMA, indent=2)}"
     )
 
+    extra_args: dict[str, str | None] = {"setting-sources": ""}
+    if reasoning and reasoning.level != "off":
+        extra_args.update(reasoning_to_cc_extra_args(reasoning))
+
     max_turns = 10
-    options = ClaudeCodeOptions(
+    backend = get_backend(provider)
+    options = SDKOptions(
         system_prompt=with_turn_budget(
             SCIENTIST_REVISION_SYSTEM + json_instruction, max_turns, SCIENTIST_TOOLS
         ),
         allowed_tools=SCIENTIST_TOOLS,
         max_turns=max_turns,
         model=model,
-        extra_args={"setting-sources": ""},
+        extra_args=extra_args,
     )
 
     correction_hint = ""
@@ -315,6 +331,7 @@ async def run_scientist_revision(
             raw, _usage = await collect_text_from_query(
                 effective_prompt,
                 options,
+                backend,
                 message_buffer,
                 agent_name="Scientist revision",
             )
