@@ -1,6 +1,6 @@
 """Ingestor agent: Phase 0 data canonicalization.
 
-Uses claude_code_sdk for a persistent session (may need multi-round human Q&A).
+Uses the SDK backend for a persistent session (may need multi-round human Q&A).
 Tools: Bash (data inspection, conversion), Read/Write, Glob, Grep.
 When interactive: also AskUserQuestion.
 Produces: canonical dataset in {output_dir}/data/.

@@ -114,7 +114,7 @@ implementation detail that only the Coder needs.
 ### Agent Details
 
 **Ingestor Agent** (Phase 0):
-- Uses `safe_query()` for persistent session (may need multi-round human Q&A)
+- Uses the SDK backend for a persistent session (may need interactive human Q&A)
 - Tools: Bash (data inspection, conversion), Read/Write, Glob, Grep
 - Produces: canonical dataset in experiments/data/ + slim DomainConfig JSON
 - In `--interactive` mode, uses AskUserQuestion to clarify with the user

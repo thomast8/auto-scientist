@@ -316,10 +316,13 @@ class Orchestrator:
         if parent.exists() and not os.access(parent, os.W_OK):
             errors.append(f"Output directory parent is not writable: {parent}")
 
-        # uv must be installed (runs experiment scripts)
+        # uv must be installed (runs experiment scripts) - unless the coder
+        # uses OpenAI/Codex, which rewrites uv run -> python3 in the prompt.
+        coder_cfg = self.model_config.resolve("coder")
+        coder_uses_codex = coder_cfg.provider == "openai" and coder_cfg.mode == "sdk"
         run_cmd = self.config.run_command if self.config else "uv run {script_path}"
         exe = run_cmd.split()[0] if run_cmd.strip() else ""
-        if exe and not shutil.which(exe):
+        if exe and not coder_uses_codex and not shutil.which(exe):
             errors.append(
                 f"'{exe}' not found on PATH (needed for run_command: {run_cmd}). "
                 f"Install uv with: curl -LsSf https://astral.sh/uv/install.sh | sh"
@@ -355,6 +358,19 @@ class Orchestrator:
                 if cfg.provider == "anthropic":
                     needs_claude_cli = True
                 elif cfg.provider == "openai":
+                    needs_codex_cli = True
+
+        # Also validate critic configs for SDK prerequisites
+        for i, critic_cfg in enumerate(mc.critics):
+            if critic_cfg.mode == "sdk" and critic_cfg.provider == "google":
+                errors.append(
+                    f"critic[{i}] uses mode='sdk' with provider='google', "
+                    f"but no Google coding agent CLI exists."
+                )
+            if critic_cfg.mode == "sdk":
+                if critic_cfg.provider == "anthropic":
+                    needs_claude_cli = True
+                elif critic_cfg.provider == "openai":
                     needs_codex_cli = True
 
         # Check CLI availability and login status based on actual needs
@@ -501,6 +517,7 @@ class Orchestrator:
                     )
                     self._live.flush_completed()
                     self.state.phase = "stopped"
+                    self.state.save(state_path)
                     break
 
                 # When the latest version has no results, the analyst
@@ -511,6 +528,7 @@ class Orchestrator:
                     latest = self.state.versions[-1] if self.state.versions else None
                     if latest and latest.results_path is None:
                         self.state.phase = "stopped"
+                        self.state.save(state_path)
                         break
 
                 if self.state.iteration >= self.max_iterations:
@@ -1689,13 +1707,13 @@ class Orchestrator:
                 failed_msgs = [str(r) for r in raw_results if isinstance(r, BaseException)]
                 logger.error(
                     f"All {len(raw_results)} stop debates failed. "
-                    f"Upholding scientist's stop decision. Errors: {failed_msgs}"
+                    f"Continuing investigation (unvalidated stop). Errors: {failed_msgs}"
                 )
                 self._live.log(
                     f"STOP DEBATE: all {len(raw_results)} debates failed, "
-                    f"upholding scientist's stop decision"
+                    f"continuing investigation (stop not validated)"
                 )
-                return plan
+                return None
 
             self._live.log(f"STOP DEBATE: received {len(debate_results)} critique(s)")
 
