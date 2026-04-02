@@ -375,17 +375,37 @@ async def collect_text_from_query(
     result_text = ""
     assistant_texts: list[str] = []
     usage: dict[str, Any] = {}
+    has_streaming = False
 
     async for message in backend.query(prompt=prompt, options=options):
         if message.type == "result":
             if message.result:
                 result_text = message.result
             usage = message.usage
+        elif message.type == "stream":
+            # Partial content deltas (Claude backend with include_partial_messages).
+            # Populate only the message_buffer so the summarizer sees real-time
+            # progress.  Final text is still collected from the complete
+            # AssistantMessage below.
+            has_streaming = True
+            if _message_buffer is not None:
+                for block in message.content_blocks:
+                    append_block_to_buffer(block, _message_buffer)
         elif message.type == "assistant":
             for block in message.content_blocks:
-                if hasattr(block, "text") and not hasattr(block, "name"):
+                is_text = hasattr(block, "text") and not hasattr(block, "name")
+                is_thinking = hasattr(block, "thinking")
+
+                # Always collect complete text for final output extraction.
+                if is_text:
                     assistant_texts.append(block.text)
+
                 if _message_buffer is not None:
+                    # When streaming delivered text/thinking via deltas,
+                    # skip them here to avoid double-counting in the buffer.
+                    # Tool use/result blocks are NOT streamed, so always add them.
+                    if has_streaming and (is_text or is_thinking):
+                        continue
                     append_block_to_buffer(block, _message_buffer)
 
     raw = result_text if result_text else "\n".join(assistant_texts)

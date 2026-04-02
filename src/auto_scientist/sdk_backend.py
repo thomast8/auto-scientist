@@ -116,9 +116,16 @@ class SDKOptions:
 
 @dataclass
 class SDKMessage:
-    """Unified message envelope for both SDK backends."""
+    """Unified message envelope for both SDK backends.
 
-    type: Literal["assistant", "result"]
+    Types:
+        assistant: Complete message from the model (text, tool use, thinking blocks).
+        result: Final result with usage stats and session info.
+        stream: Partial content delta from streaming (text/thinking chunks).
+                Only populated to message_buffer, not used for final output.
+    """
+
+    type: Literal["assistant", "result", "stream"]
     text: str | None = None
     content_blocks: list[Any] = field(default_factory=list)
     usage: dict[str, Any] = field(default_factory=dict)
@@ -135,6 +142,33 @@ class SDKBackend(Protocol):
 # ---------------------------------------------------------------------------
 # Claude Code SDK Backend
 # ---------------------------------------------------------------------------
+
+
+# Minimum characters to accumulate before yielding a stream chunk.
+# Avoids per-token buffer noise while keeping summarizer updates timely.
+_STREAM_CHUNK_SIZE = 200
+
+
+def _extract_stream_delta(event: dict[str, Any]) -> tuple[str, str] | None:
+    """Extract a text or thinking delta from a raw Anthropic stream event.
+
+    Returns:
+        ("text", delta_string) or ("thinking", delta_string), or None if
+        the event is not a content delta we care about.
+    """
+    if event.get("type") != "content_block_delta":
+        return None
+    delta = event.get("delta", {})
+    delta_type = delta.get("type")
+    if delta_type == "text_delta":
+        text = delta.get("text", "")
+        if text:
+            return ("text", text)
+    elif delta_type == "thinking_delta":
+        thinking = delta.get("thinking", "")
+        if thinking:
+            return ("thinking", thinking)
+    return None
 
 
 class ClaudeBackend:
@@ -166,6 +200,7 @@ class ClaudeBackend:
             "max_turns": options.max_turns,
             "permission_mode": options.permission_mode,
             "extra_args": dict(options.extra_args),
+            "include_partial_messages": True,
         }
         if options.model:
             kwargs["model"] = options.model
@@ -179,7 +214,14 @@ class ClaudeBackend:
         return ClaudeCodeOptions(**kwargs)
 
     async def query(self, prompt: str, options: SDKOptions) -> AsyncIterator[SDKMessage]:
-        """Run a Claude Code SDK query, yielding unified SDKMessages."""
+        """Run a Claude Code SDK query, yielding unified SDKMessages.
+
+        With ``include_partial_messages`` enabled, the CLI also emits
+        ``StreamEvent`` objects carrying raw Anthropic API content deltas.
+        We accumulate text and thinking deltas into ~200-char chunks and
+        yield them as ``SDKMessage(type="stream")`` so the summarizer gets
+        real-time buffer content instead of sitting idle.
+        """
         cc_opts = self._build_claude_options(options)
 
         logger.debug(
@@ -187,11 +229,26 @@ class ClaudeBackend:
             f"max_turns={cc_opts.max_turns}, prompt_len={len(prompt)}"
         )
 
+        # Accumulators for streaming deltas (flushed at chunk boundaries)
+        text_acc = ""
+        thinking_acc = ""
+
         async for msg in claude_query(prompt=prompt, options=cc_opts):
             if msg is None:
                 continue
 
             if isinstance(msg, AssistantMessage):
+                # Flush any remaining accumulated stream content before
+                # yielding the complete message (avoids lost tail).
+                if text_acc:
+                    block = type("_SyntheticTextBlock", (), {"text": text_acc})()
+                    yield SDKMessage(type="stream", content_blocks=[block])
+                    text_acc = ""
+                if thinking_acc:
+                    block = type("_SyntheticThinkingBlock", (), {"thinking": thinking_acc})()
+                    yield SDKMessage(type="stream", content_blocks=[block])
+                    thinking_acc = ""
+
                 yield SDKMessage(
                     type="assistant",
                     content_blocks=list(msg.content),
@@ -206,6 +263,28 @@ class ClaudeBackend:
                     usage=usage,
                     session_id=getattr(msg, "session_id", None),
                 )
+            elif hasattr(msg, "event"):
+                # StreamEvent - extract text/thinking deltas and accumulate
+                try:
+                    parsed = _extract_stream_delta(msg.event)
+                except Exception:
+                    continue
+                if parsed is None:
+                    continue
+
+                kind, delta = parsed
+                if kind == "text":
+                    text_acc += delta
+                    if len(text_acc) >= _STREAM_CHUNK_SIZE:
+                        block = type("_SyntheticTextBlock", (), {"text": text_acc})()
+                        yield SDKMessage(type="stream", content_blocks=[block])
+                        text_acc = ""
+                elif kind == "thinking":
+                    thinking_acc += delta
+                    if len(thinking_acc) >= _STREAM_CHUNK_SIZE:
+                        block = type("_SyntheticThinkingBlock", (), {"thinking": thinking_acc})()
+                        yield SDKMessage(type="stream", content_blocks=[block])
+                        thinking_acc = ""
 
 
 # ---------------------------------------------------------------------------

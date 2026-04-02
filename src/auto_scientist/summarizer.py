@@ -289,18 +289,15 @@ async def run_with_summaries(
 
             buf_len = len(message_buffer)
             if buf_len == 0:
-                # No content yet; emit a one-time status so the user
-                # knows the agent is alive (handles extended thinking
-                # and coarse-grained Codex streaming).
+                # No content yet.  The panel's animated description dots
+                # and elapsed-time footer already show the agent is alive,
+                # so we only log here for diagnostics.
                 if not waiting_emitted and elapsed >= interval * 2:
                     waiting_emitted = True
-                    label = f"{label_prefix}{int(elapsed)}s"
-                    if summary_collector is not None:
-                        summary_collector.append(
-                            (agent_name, "Waiting for model response...", label)
-                        )
-                    else:
-                        logger.info(f"{agent_name} [{label}]: Waiting for model response...")
+                    logger.debug(
+                        f"{agent_name} [{label_prefix}{int(elapsed)}s]: "
+                        "buffer still empty, waiting for model response"
+                    )
                 continue
 
             if buf_len == last_seen_len:
