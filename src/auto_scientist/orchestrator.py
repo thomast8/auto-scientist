@@ -509,6 +509,16 @@ class Orchestrator:
                     self.state.phase = "stopped"
                     break
 
+                # When the latest version has no results, the analyst
+                # cannot proceed and would just cascade into another
+                # failure. Stop before wasting a doomed iteration.
+                # When results exist, let the threshold above govern.
+                if self.state.consecutive_failures > 0:
+                    latest = self.state.versions[-1] if self.state.versions else None
+                    if latest and latest.results_path is None:
+                        self.state.phase = "stopped"
+                        break
+
                 if self.state.iteration >= self.max_iterations:
                     self._live.add_rule(
                         Rule(
@@ -537,14 +547,6 @@ class Orchestrator:
 
                 await self._run_iteration_body()
                 self.state.save(state_path)
-
-                # Stop immediately on any failure. Don't cascade into
-                # doomed iterations (e.g. analyst can't analyze when the
-                # previous coder never produced results). The user can
-                # resume from the failed iteration.
-                if self.state.consecutive_failures > 0:
-                    self.state.phase = "stopped"
-                    break
 
             # Phase 2: Report (with its own border)
             if self.state.phase == "report":
@@ -2168,21 +2170,24 @@ class Orchestrator:
         run_timeout = self.config.run_timeout_minutes if self.config else 120
         run_cmd = self.config.run_command if self.config else "uv run {script_path}"
 
+        cfg = self.model_config.resolve("coder")
+
         # Resolve the executable to an absolute path so the coder's Bash
         # subprocess can find it even when ~/.local/bin isn't in PATH.
-        parts = run_cmd.split()
-        if parts:
-            exe = parts[0]
-            abs_exe = shutil.which(exe)
-            if abs_exe and abs_exe != exe:
-                run_cmd = abs_exe + run_cmd[len(exe) :]
-            elif not abs_exe:
-                logger.warning(
-                    f"Executable '{exe}' not found on PATH; "
-                    f"coder may fail to run the experiment script"
-                )
-
-        cfg = self.model_config.resolve("coder")
+        # Skip for Codex: its seatbelt sandbox has its own filesystem,
+        # so host absolute paths (e.g. /Users/.../python3) don't exist there.
+        if cfg.provider != "openai":
+            parts = run_cmd.split()
+            if parts:
+                exe = parts[0]
+                abs_exe = shutil.which(exe)
+                if abs_exe and abs_exe != exe:
+                    run_cmd = abs_exe + run_cmd[len(exe) :]
+                elif not abs_exe:
+                    logger.warning(
+                        f"Executable '{exe}' not found on PATH; "
+                        f"coder may fail to run the experiment script"
+                    )
 
         # Pre-compute data directory listing so coder doesn't waste turns
         data_dir = Path(data_path) if data_path else None

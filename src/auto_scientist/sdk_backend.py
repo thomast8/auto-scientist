@@ -47,19 +47,16 @@ CODEX_MODEL_OVERRIDES: dict[str, str] = {
 CODEX_SANDBOX_ADDENDUM = """\
 
 <sandbox_environment>
-IMPORTANT: You are running inside a sandboxed environment where `uv` is
-broken and will always crash. This overrides any earlier instructions that
-mention `uv run`. Wherever the instructions say to use `uv run`, use the
-fallback below instead.
+You are running inside a sandboxed environment where `uv` is not available.
+The run command in the task instructions already uses `python3` instead.
 
-To run any Python script (ingest.py, experiment.py, etc.):
-1. Read the PEP 723 metadata block from the script to find dependencies
+Before running any script, install its dependencies:
+1. Read the PEP 723 metadata block at the top of the script to find dependencies
 2. Install them: `pip install <dep1> <dep2> ...`
-3. Run with: `python3 <script_path>`
+3. Then run the script using the command from the task instructions
 
 The script must still declare dependencies in the PEP 723 block for
-reproducibility outside this environment, but execution always uses
-pip + python3 here.
+reproducibility outside this environment.
 </sandbox_environment>
 """
 

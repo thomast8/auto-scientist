@@ -683,6 +683,85 @@ class TestPhaseTransitions:
         mock_report.assert_not_called()
         assert state.phase == "stopped"
 
+    @pytest.mark.asyncio
+    async def test_failure_with_results_path_does_not_stop(self, tmp_path):
+        """When latest version has results_path, a failure should not stop immediately."""
+        state = ExperimentState(
+            domain="test",
+            goal="g",
+            phase="iteration",
+            iteration=2,
+            consecutive_failures=1,
+            versions=[
+                VersionEntry(
+                    version="v01",
+                    iteration=1,
+                    script_path=str(tmp_path / "v01" / "experiment.py"),
+                    results_path=str(tmp_path / "v01" / "results.txt"),
+                    status="failed",
+                ),
+            ],
+        )
+        o = Orchestrator(
+            state=state,
+            data_path=tmp_path,
+            output_dir=tmp_path,
+            max_iterations=3,
+            max_consecutive_failures=3,
+        )
+        o.config = DomainConfig(name="t", description="d", data_paths=[])
+
+        with (
+            patch.object(o, "_validate_prerequisites"),
+            patch.object(o, "_run_iteration_body", new_callable=AsyncMock) as mock_iter,
+        ):
+            # Simulate iteration body completing (resetting consecutive_failures)
+            async def fake_iter():
+                state.consecutive_failures = 0
+                state.iteration = 3
+
+            mock_iter.side_effect = fake_iter
+            await o.run()
+
+        # The loop should have called _run_iteration_body (not stopped early)
+        mock_iter.assert_called_once()
+
+    @pytest.mark.asyncio
+    async def test_failure_without_results_path_stops(self, tmp_path):
+        """When latest version has no results_path, failure stops immediately."""
+        state = ExperimentState(
+            domain="test",
+            goal="g",
+            phase="iteration",
+            iteration=2,
+            consecutive_failures=1,
+            versions=[
+                VersionEntry(
+                    version="v01",
+                    iteration=1,
+                    script_path="",
+                    status="failed",
+                ),
+            ],
+        )
+        o = Orchestrator(
+            state=state,
+            data_path=tmp_path,
+            output_dir=tmp_path,
+            max_consecutive_failures=3,
+        )
+        o.config = DomainConfig(name="t", description="d", data_paths=[])
+
+        with (
+            patch.object(o, "_validate_prerequisites"),
+            patch.object(o, "_run_iteration_body", new_callable=AsyncMock) as mock_iter,
+        ):
+            await o.run()
+
+        # Should have stopped without running another iteration
+        mock_iter.assert_not_called()
+        assert state.phase == "stopped"
+
 
 class TestIteration0:
     """Iteration 0 flow: analyst initial, scientist, debate (subset personas), coder runs."""

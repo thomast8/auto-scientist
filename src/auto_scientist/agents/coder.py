@@ -85,6 +85,12 @@ async def run_coder(
     else:
         previous_script_section = CODER_NO_PREVIOUS
 
+    # Codex seatbelt sandbox: uv panics (SCDynamicStore access denied).
+    # Replace uv run with python3 BEFORE formatting prompts so both system
+    # and user prompts get the corrected command.
+    if provider == "openai" and "uv run" in run_command:
+        run_command = run_command.replace("uv run", "python3", 1)
+
     system_prompt = CODER_SYSTEM.format(
         data_path=data_path or "(not specified)",
         run_timeout_minutes=run_timeout_minutes,

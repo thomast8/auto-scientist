@@ -234,8 +234,133 @@ class TestRunCoder:
         user = captured_opts["prompt"]
         assert "run_result.json" in system
         assert "timed_out" in system
-        assert "60" in user
+        # run_timeout_minutes appears in the system prompt (Bash tool timeout hint)
+        assert "60" in system
+        # run_command appears in both system and user prompts (the actual run step)
         assert "uv run" in user
+        assert "uv run" in system
+
+    @pytest.mark.asyncio
+    @patch("auto_scientist.agents.coder.get_backend")
+    async def test_openai_provider_replaces_uv_with_python3(self, mock_get_backend, tmp_path):
+        """Codex coder gets python3 instead of uv run for sandbox compatibility."""
+        captured = {}
+
+        async def fake_query(prompt, options):
+            captured["prompt"] = prompt
+            captured["system"] = options.system_prompt
+            script_path = tmp_path / "v01" / "experiment.py"
+            script_path.parent.mkdir(parents=True, exist_ok=True)
+            script_path.write_text("print('ok')")
+            yield _result_msg()
+
+        mock_backend = MagicMock()
+        mock_backend.query = fake_query
+        mock_get_backend.return_value = mock_backend
+
+        await run_coder(
+            plan={"hypothesis": "test", "changes": []},
+            previous_script=tmp_path / "nonexistent" / "experiment.py",
+            output_dir=tmp_path,
+            version="v01",
+            provider="openai",
+        )
+
+        # User prompt should have python3, not uv run
+        assert "python3" in captured["prompt"]
+        assert "uv run" not in captured["prompt"]
+        # System prompt actionable step should also have python3
+        assert "python3 {script_path}" in captured["system"]
+
+    @pytest.mark.asyncio
+    @patch("auto_scientist.sdk_backend.claude_query")
+    async def test_anthropic_provider_keeps_uv_run(self, mock_query, tmp_path):
+        """Claude coder keeps uv run (uv works fine on the host)."""
+        captured_opts = {}
+
+        async def fake_query(**kwargs):
+            captured_opts.update(kwargs)
+            script_path = tmp_path / "v01" / "experiment.py"
+            script_path.parent.mkdir(parents=True, exist_ok=True)
+            script_path.write_text("print('ok')")
+            yield MagicMock(
+                spec_set=["result", "usage", "num_turns", "total_cost_usd", "session_id"]
+            )
+
+        mock_query.side_effect = fake_query
+
+        await run_coder(
+            plan={"hypothesis": "test", "changes": []},
+            previous_script=tmp_path / "nonexistent" / "experiment.py",
+            output_dir=tmp_path,
+            version="v01",
+            provider="anthropic",
+        )
+
+        user = captured_opts["prompt"]
+        system = captured_opts["options"].system_prompt
+        assert "uv run" in user
+        assert "uv run" in system
+        assert "python3" not in user
+
+    @pytest.mark.asyncio
+    @patch("auto_scientist.agents.coder.get_backend")
+    async def test_openai_custom_run_command_without_uv_unchanged(self, mock_get_backend, tmp_path):
+        """Custom run_command that doesn't use uv is passed through for Codex."""
+        captured = {}
+
+        async def fake_query(prompt, options):
+            captured["prompt"] = prompt
+            script_path = tmp_path / "v01" / "experiment.py"
+            script_path.parent.mkdir(parents=True, exist_ok=True)
+            script_path.write_text("print('ok')")
+            yield _result_msg()
+
+        mock_backend = MagicMock()
+        mock_backend.query = fake_query
+        mock_get_backend.return_value = mock_backend
+
+        await run_coder(
+            plan={"hypothesis": "test", "changes": []},
+            previous_script=tmp_path / "nonexistent" / "experiment.py",
+            output_dir=tmp_path,
+            version="v01",
+            run_command="python3 {script_path}",
+            provider="openai",
+        )
+
+        # Custom python3 command should pass through unchanged
+        assert "python3" in captured["prompt"]
+
+    @pytest.mark.asyncio
+    @patch("auto_scientist.agents.coder.get_backend")
+    async def test_no_timeout_wrapper_in_prompts(self, mock_get_backend, tmp_path):
+        """Run command should not be wrapped with shell-level timeout."""
+        captured = {}
+
+        async def fake_query(prompt, options):
+            captured["prompt"] = prompt
+            captured["system"] = options.system_prompt
+            script_path = tmp_path / "v01" / "experiment.py"
+            script_path.parent.mkdir(parents=True, exist_ok=True)
+            script_path.write_text("print('ok')")
+            yield _result_msg()
+
+        mock_backend = MagicMock()
+        mock_backend.query = fake_query
+        mock_get_backend.return_value = mock_backend
+
+        await run_coder(
+            plan={"hypothesis": "test", "changes": []},
+            previous_script=tmp_path / "nonexistent" / "experiment.py",
+            output_dir=tmp_path,
+            version="v01",
+            provider="openai",
+        )
+
+        # Neither prompt should contain `timeout Nm` shell wrapper
+        assert "timeout 120m" not in captured["prompt"]
+        assert "timeout 120m" not in captured["system"]
 
 
 class TestCoderMessageBuffer:
