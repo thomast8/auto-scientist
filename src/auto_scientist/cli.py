@@ -1,7 +1,12 @@
 """CLI entry point: run, resume, status commands."""
 
+import atexit
+import logging
+import os
+import signal
+from contextlib import suppress
 from pathlib import Path
-from typing import Literal, cast
+from typing import Any, Literal, cast
 
 import click
 from dotenv import load_dotenv
@@ -15,9 +20,94 @@ from auto_scientist.state import ExperimentState
 
 load_dotenv()
 
+_logger = logging.getLogger(__name__)
+
+
+# ---------------------------------------------------------------------------
+# Process cleanup: kill SDK subprocesses on unexpected exit
+# ---------------------------------------------------------------------------
+# When auto-scientist is killed by SIGHUP (terminal closed) or SIGTERM,
+# Python's default handler terminates immediately with no cleanup.  This
+# orphans SDK subprocesses (claude CLI, codex app-server) that may be
+# executing experiment scripts at 100 % CPU.
+#
+# Fix: install signal handlers that kill the process group before exiting
+# and an atexit handler as a safety net for crashes / normal exit.
+# ---------------------------------------------------------------------------
+
+_cleanup_done = False
+
+
+def _kill_process_group() -> None:
+    """Send SIGTERM to our process group (signal-handler path only).
+
+    Used exclusively from ``_fatal_signal_handler`` where the current
+    process is about to ``os._exit`` anyway, so killing the whole group
+    (which includes ourselves) is acceptable.
+
+    Idempotent: repeated calls are no-ops after the first.
+    """
+    global _cleanup_done  # noqa: PLW0603 - intentional module-level flag
+    if _cleanup_done:
+        return
+    _cleanup_done = True
+
+    # Prevent recursive delivery while we broadcast
+    signal.signal(signal.SIGTERM, signal.SIG_IGN)
+    signal.signal(signal.SIGHUP, signal.SIG_IGN)
+
+    pgid = os.getpgrp()
+    with suppress(ProcessLookupError, PermissionError, OSError):
+        os.killpg(pgid, signal.SIGTERM)
+
+
+def _kill_child_processes() -> None:
+    """Terminate direct child processes (atexit-safe).
+
+    Unlike ``_kill_process_group`` this targets only our children via
+    ``pgrep -P``, so it is safe to call on normal exit without killing
+    sibling processes like git or pre-commit hooks.
+    """
+    import subprocess as _sp
+
+    pid = os.getpid()
+    try:
+        result = _sp.run(
+            ["pgrep", "-P", str(pid)],
+            capture_output=True,
+            text=True,
+            timeout=2,
+        )
+        for line in result.stdout.strip().splitlines():
+            with suppress(ProcessLookupError, PermissionError, ValueError, OSError):
+                os.kill(int(line.strip()), signal.SIGTERM)
+    except Exception:  # noqa: BLE001 - best-effort cleanup
+        pass
+
+
+def _fatal_signal_handler(signum: int, _frame: Any) -> None:
+    """Handle SIGHUP / SIGTERM by killing children and exiting."""
+    _kill_process_group()
+    # os._exit avoids Python shutdown machinery that can hang
+    # during signal handling.  atexit handlers are intentionally
+    # skipped since we already cleaned up above.
+    os._exit(128 + signum)
+
+
+def _install_cleanup_handlers() -> None:
+    """Register signal and atexit handlers for child-process cleanup.
+
+    Must be called from the main thread before any SDK subprocesses are
+    spawned.
+    """
+    signal.signal(signal.SIGHUP, _fatal_signal_handler)
+    signal.signal(signal.SIGTERM, _fatal_signal_handler)
+    atexit.register(_kill_child_processes)
+
 
 def _run_orchestrator(orchestrator: Orchestrator) -> None:
     """Run the orchestrator with user-friendly error handling."""
+    _install_cleanup_handlers()
     try:
         app = PipelineApp(orchestrator)
         app.run()
