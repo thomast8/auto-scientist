@@ -29,7 +29,7 @@ Both Critics and Scientist have web search during debate to verify claims and lo
 
 - **Iteration 0**: Explore raw data, characterize distributions, establish baselines
 - **Iteration 1**: Define top-level success criteria, formulate first hypothesis with testable predictions
-- **Iteration 2+**: Full scientific loop with analysis, planning, multi-round debate, implementation, and evaluation
+- **Iteration 2+**: Full scientific loop with analysis, planning, critique, implementation, and evaluation
 
 The Scientist decides when to stop based on scientific judgment (goal satisfied, noise floor reached, diminishing returns), not a fixed threshold.
 
@@ -246,7 +246,7 @@ models:
 | `high` | Quality | opus-4-6 (high reasoning) | Gemini 3.1 Pro + GPT-5.4 (high) |
 | `max` | Maximum | opus-4-6 (max reasoning) | Gemini 3.1 Pro + GPT-5.4 (max) |
 
-All core agents (analyst, scientist, coder, ingestor, report) run through the [Claude Code SDK](https://docs.anthropic.com/en/docs/claude-code), which uses your Claude Code subscription instead of per-token API billing. No `ANTHROPIC_API_KEY` is needed. Only the critics support non-Anthropic providers (OpenAI, Google), which do require their respective API keys and are billed per-token.
+All core agents run through either the [Claude Code SDK](https://docs.anthropic.com/en/docs/claude-code) (Anthropic, default) or [Codex CLI](https://github.com/openai/codex) (OpenAI), using your subscription instead of per-token API billing. Use `--provider openai` to switch to the Codex backend. Critics support mixed providers (OpenAI, Google) via direct API calls, which require their respective API keys and are billed per-token.
 
 ## CLI Reference
 
@@ -258,6 +258,7 @@ All core agents (analyst, scientist, coder, ingestor, report) run through the [C
 | `--goal <text>` | *(required without YAML)* | Investigation goal |
 | `-c, --config <path>` | | YAML config file |
 | `--preset <name>` | `default` | Model preset |
+| `-p, --provider <name>` | `anthropic` | SDK backend: `anthropic` or `openai` |
 | `--max-iterations <int>` | `20` | Maximum iterations |
 | `--output-dir <path>` | `experiments` | Output directory |
 | `--schedule <window>` | | Time window, e.g. `"22:00-06:00"` |
@@ -279,6 +280,7 @@ Resume a paused, crashed, or completed run. By default resumes in-place. With `-
 | `--max-iterations <int>` | `20` | Maximum iteration count |
 | `-c, --config <path>` | | Override model config |
 | `--preset <name>` | | Override preset |
+| `-p, --provider <name>` | | Override SDK backend: `anthropic` or `openai` |
 | `--no-summaries` | | Disable agent progress summaries |
 | `-v, --verbose` | | Debug logging |
 
@@ -330,10 +332,11 @@ uv run ruff check src/ tests/
 
 ## Requirements
 
-- Python >= 3.11
+- Python >= 3.12
 - [uv](https://docs.astral.sh/uv/)
-- [Claude Code CLI](https://docs.anthropic.com/en/docs/claude-code) (`npm install -g @anthropic-ai/claude-code`)
-- API keys: `OPENAI_API_KEY` and `GOOGLE_API_KEY` (optional, for non-Anthropic critics). Core agents use Claude Code (subscription-based, no per-token cost)
+- [Claude Code CLI](https://docs.anthropic.com/en/docs/claude-code) (`npm install -g @anthropic-ai/claude-code`) for Anthropic backend
+- [Codex CLI](https://github.com/openai/codex) (`npm install -g @openai/codex`) for OpenAI backend (optional)
+- API keys: `OPENAI_API_KEY` (for OpenAI critics or Codex backend), `GOOGLE_API_KEY` (optional, for Google critics)
 
 ## Architecture
 

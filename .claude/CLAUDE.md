@@ -28,8 +28,8 @@ Orchestrator flow: Ingest -> Analyst -> Scientist (plan) -> criteria update -> s
 ### Information Boundaries
 - Only the Coder sees Python code
 - The Scientist plans from analysis JSON + notebook (no code)
-- Critic and Scientist (during debate) share the full evidence base (analysis JSON, prediction history, notebook, domain knowledge); neither sees experiment scripts
-- After debate, the Scientist revises the plan; Coder gets only the revised plan (no critique)
+- Critics and Scientist share the full evidence base (analysis JSON, prediction history, notebook, domain knowledge); neither sees experiment scripts
+- After critique, the Scientist revises the plan; Coder gets only the revised plan (no critique)
 - results.txt is compiled by the script itself (print statements), no LLM post-processing
 
 ### Key Components
@@ -50,7 +50,7 @@ Orchestrator flow: Ingest -> Analyst -> Scientist (plan) -> criteria update -> s
 - `docs/architecture.md` - Full architecture specification
 
 ## Development
-- Python >= 3.11, managed with `uv`
+- Python >= 3.12, managed with `uv`
 - Run tests: `uv run pytest`
 - CLI: `uv run auto-scientist run --data ... --goal "..."`
 - Lint: `uv run ruff check src/ tests/`
