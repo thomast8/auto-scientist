@@ -8,6 +8,7 @@ Monkey-patches the Claude Code SDK message parser at import time so that
 unknown message types are silently skipped instead of crashing the stream.
 """
 
+import asyncio
 import logging
 import os
 from collections.abc import AsyncIterator
@@ -17,6 +18,7 @@ from typing import Any, Literal, Protocol
 
 import claude_code_sdk._internal.client as _client_mod
 import claude_code_sdk._internal.message_parser as _parser_mod
+import codex_app_server_sdk.transport as _codex_transport_mod
 from claude_code_sdk import (
     AssistantMessage,
     ClaudeCodeOptions,
@@ -92,6 +94,46 @@ def _tolerant_parse_message(data: dict[str, Any]) -> Any:
 
 _parser_mod.parse_message = _tolerant_parse_message  # type: ignore[assignment]
 _client_mod.parse_message = _tolerant_parse_message  # type: ignore[assignment]
+
+
+# ---------------------------------------------------------------------------
+# Monkey-patch: raise asyncio StreamReader limit for Codex stdio transport
+# ---------------------------------------------------------------------------
+# Python's asyncio.StreamReader.readline() has a 64 KiB default limit.
+# The Codex app-server echoes input content in its JSON-RPC responses,
+# so large prompts (>~65 KB) produce stdout lines that exceed the limit,
+# causing LimitOverrunError -> "failed reading from stdio transport".
+# Fix: raise the limit to 1 MB when spawning the app-server subprocess.
+
+_original_stdio_connect = _codex_transport_mod.StdioTransport.connect
+
+
+async def _stdio_connect_with_large_limit(self: Any) -> None:
+    """StdioTransport.connect() with a 1 MB StreamReader limit."""
+    if self._proc is not None:
+        return
+    try:
+        self._proc = await asyncio.wait_for(
+            asyncio.create_subprocess_exec(
+                *self._command,
+                stdin=asyncio.subprocess.PIPE,
+                stdout=asyncio.subprocess.PIPE,
+                stderr=asyncio.subprocess.DEVNULL,
+                cwd=self._cwd,
+                env=self._env,
+                limit=1024 * 1024,
+            ),
+            timeout=self._connect_timeout,
+        )
+    except Exception as exc:
+        from codex_app_server_sdk.errors import CodexTransportError
+
+        raise CodexTransportError(
+            f"failed to start stdio transport command: {self._command!r}"
+        ) from exc
+
+
+_codex_transport_mod.StdioTransport.connect = _stdio_connect_with_large_limit  # type: ignore[assignment]
 
 
 # ---------------------------------------------------------------------------
