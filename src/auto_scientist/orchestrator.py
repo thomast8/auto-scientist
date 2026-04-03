@@ -32,6 +32,7 @@ from auto_scientist.model_config import AgentModelConfig, ModelConfig
 from auto_scientist.notebook import NOTEBOOK_FILENAME, append_entry, read_notebook
 from auto_scientist.runner import RunResult
 from auto_scientist.scheduler import wait_for_window
+from auto_scientist.sdk_backend import CODEX_MODEL_OVERRIDES
 from auto_scientist.state import ExperimentState, VersionEntry
 from auto_scientist.summarizer import run_with_summaries, summarize_results
 
@@ -603,7 +604,9 @@ class Orchestrator:
 
         cfg = self.model_config.resolve("ingestor")
         panel = AgentPanel(
-            name="Ingestor", model=cfg.model, style=AGENT_STYLES.get("Ingestor", "bright_red")
+            name="Ingestor",
+            model=self._display_model(cfg),
+            style=AGENT_STYLES.get("Ingestor", "bright_red"),
         )
         self._live.add_panel(panel)
         self._live.update_status(phase="INGESTION")
@@ -864,6 +867,19 @@ class Orchestrator:
         logger.info(f"Iteration {self.state.iteration} complete: status={version_entry.status}")
         self.state.iteration += 1
 
+    @staticmethod
+    def _display_model(cfg: AgentModelConfig) -> str:
+        """Return the model name that will actually be used at runtime.
+
+        SDK-mode agents go through the Codex backend, which silently swaps
+        unsupported models (see CODEX_MODEL_OVERRIDES).  Show the effective
+        model so the banner isn't misleading.
+        """
+        model = cfg.model
+        if cfg.mode == "sdk":
+            model = CODEX_MODEL_OVERRIDES.get(model, model)
+        return model
+
     def _build_startup_banner(self) -> Panel:
         """Build the Rich startup banner with run config and model info."""
         mc = self.model_config
@@ -889,7 +905,7 @@ class Orchestrator:
             style = AGENT_STYLES.get(display_name, "")
             table.add_row(
                 Text(display_name, style=style),
-                Text(f"{cfg.model}  [{cfg.reasoning.level}]", style=style),
+                Text(f"{self._display_model(cfg)}  [{cfg.reasoning.level}]", style=style),
             )
 
         for i, critic in enumerate(mc.critics):
@@ -897,7 +913,7 @@ class Orchestrator:
             table.add_row(
                 Text(label, style="yellow"),
                 Text(
-                    f"{critic.provider}:{critic.model}  [{critic.reasoning.level}]",
+                    f"{critic.provider}:{self._display_model(critic)}  [{critic.reasoning.level}]",
                     style="yellow",
                 ),
             )
@@ -908,14 +924,14 @@ class Orchestrator:
             style = AGENT_STYLES.get(display_name, "")
             table.add_row(
                 Text(display_name, style=style),
-                Text(f"{cfg.model}  [{cfg.reasoning.level}]", style=style),
+                Text(f"{self._display_model(cfg)}  [{cfg.reasoning.level}]", style=style),
             )
 
         if mc.summarizer:
             s = mc.summarizer
             table.add_row(
                 Text("Summarizer", style="dim"),
-                Text(f"{s.provider}:{s.model}  [{s.reasoning.level}]", style="dim"),
+                Text(f"{s.provider}:{self._display_model(s)}  [{s.reasoning.level}]", style="dim"),
             )
 
         return Panel(table, title="Auto-Scientist", title_align="left", border_style="bold")
@@ -1267,7 +1283,9 @@ class Orchestrator:
         cfg = self.model_config.resolve("scientist")
 
         panel = AgentPanel(
-            name="Revision", model=cfg.model, style=AGENT_STYLES.get("Scientist", "cyan")
+            name="Revision",
+            model=self._display_model(cfg),
+            style=AGENT_STYLES.get("Scientist", "cyan"),
         )
         self._live.add_panel(panel)
         self._live.update_status(phase="REVISE")
@@ -1337,7 +1355,9 @@ class Orchestrator:
         cfg = self.model_config.resolve("analyst")
 
         panel = AgentPanel(
-            name="Analyst", model=cfg.model, style=AGENT_STYLES.get("Analyst", "green")
+            name="Analyst",
+            model=self._display_model(cfg),
+            style=AGENT_STYLES.get("Analyst", "green"),
         )
         self._live.add_panel(panel)
         self._live.update_status(phase="ANALYZE")
@@ -1399,7 +1419,9 @@ class Orchestrator:
         cfg = self.model_config.resolve("analyst")
 
         panel = AgentPanel(
-            name="Analyst", model=cfg.model, style=AGENT_STYLES.get("Analyst", "green")
+            name="Analyst",
+            model=self._display_model(cfg),
+            style=AGENT_STYLES.get("Analyst", "green"),
         )
         self._live.add_panel(panel)
         self._live.update_status(phase="ANALYZE")
@@ -1448,7 +1470,9 @@ class Orchestrator:
         cfg = self.model_config.resolve("scientist")
 
         panel = AgentPanel(
-            name="Scientist", model=cfg.model, style=AGENT_STYLES.get("Scientist", "cyan")
+            name="Scientist",
+            model=self._display_model(cfg),
+            style=AGENT_STYLES.get("Scientist", "cyan"),
         )
         self._live.add_panel(panel)
         self._live.update_status(phase="PLAN")
@@ -1527,7 +1551,9 @@ class Orchestrator:
         # --- Step 3a: Completeness Assessment ---
         cfg = self.model_config.resolve("assessor")
         panel = AgentPanel(
-            name="Assessor", model=cfg.model, style=AGENT_STYLES.get("Assessor", "blue")
+            name="Assessor",
+            model=self._display_model(cfg),
+            style=AGENT_STYLES.get("Assessor", "blue"),
         )
         self._live.add_panel(panel)
         self._live.update_status(phase="ASSESS")
@@ -1595,7 +1621,7 @@ class Orchestrator:
                 collectors[name] = []
                 config_idx = i % len(self.model_config.critics)
                 critic_cfg = self.model_config.critics[config_idx]
-                critic_label = f"{critic_cfg.provider}:{critic_cfg.model}"
+                critic_label = f"{critic_cfg.provider}:{self._display_model(critic_cfg)}"
                 stop_panel = AgentPanel(
                     name=f"Critic/{name}",
                     model=critic_label,
@@ -1746,7 +1772,7 @@ class Orchestrator:
         revision_cfg = self.model_config.resolve("scientist")
         revision_panel = AgentPanel(
             name="Stop Revision",
-            model=revision_cfg.model,
+            model=self._display_model(revision_cfg),
             style=AGENT_STYLES.get("Scientist", "cyan"),
         )
         self._live.add_panel(revision_panel)
@@ -1948,7 +1974,7 @@ class Orchestrator:
                 len(self.model_config.critics),
             )
             config = self.model_config.critics[model_idx]
-            label = f"{config.provider}:{config.model}"
+            label = f"{config.provider}:{self._display_model(config)}"
             panel = AgentPanel(
                 name=f"Critic/{name}", model=label, style=AGENT_STYLES.get("Critic", "yellow")
             )
@@ -2123,7 +2149,9 @@ class Orchestrator:
         cfg = self.model_config.resolve("scientist")
 
         panel = AgentPanel(
-            name="Revision", model=cfg.model, style=AGENT_STYLES.get("Scientist", "cyan")
+            name="Revision",
+            model=self._display_model(cfg),
+            style=AGENT_STYLES.get("Scientist", "cyan"),
         )
         self._live.add_panel(panel)
         self._live.update_status(phase="REVISE")
@@ -2222,7 +2250,9 @@ class Orchestrator:
             data_files_listing = ""
 
         panel = AgentPanel(
-            name="Coder", model=cfg.model, style=AGENT_STYLES.get("Coder", "magenta1")
+            name="Coder",
+            model=self._display_model(cfg),
+            style=AGENT_STYLES.get("Coder", "magenta1"),
         )
         self._live.add_panel(panel)
         self._live.update_status(phase="IMPLEMENT")
@@ -2503,7 +2533,9 @@ class Orchestrator:
         notebook_path = self.output_dir / NOTEBOOK_FILENAME
 
         cfg = self.model_config.resolve("report")
-        panel = AgentPanel(name="Report", model=cfg.model, style=AGENT_STYLES.get("Report", "blue"))
+        panel = AgentPanel(
+            name="Report", model=self._display_model(cfg), style=AGENT_STYLES.get("Report", "blue")
+        )
         self._live.add_panel(panel)
         self._live.update_status(phase="REPORT")
 
