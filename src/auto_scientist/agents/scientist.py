@@ -52,8 +52,8 @@ def _build_scientist_tools_and_mcp(
     """Build the tools list and MCP servers dict for a Scientist invocation.
 
     Both Claude and Codex backends get the same stdio MCP server config.
-    Claude passes it via mcp_servers; the CodexBackend translates it to
-    .codex/config.toml automatically.
+    Claude passes it via mcp_servers; the CodexBackend writes it to
+    an isolated ``$CODEX_HOME/config.toml`` automatically.
     """
     tools = list(SCIENTIST_BASE_TOOLS)
     mcp_servers: dict[str, Any] = {}

@@ -11,6 +11,8 @@ unknown message types are silently skipped instead of crashing the stream.
 import asyncio
 import logging
 import os
+import shutil
+import tempfile
 from collections.abc import AsyncIterator
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -396,8 +398,23 @@ _CODEX_APPROVAL_POLICY: Any = "never"
 class CodexBackend:
     """Wraps codex_app_server_sdk behind the SDKBackend interface."""
 
-    def _resolve_sandbox(self, allowed_tools: list[str] | tuple[str, ...]) -> str:
-        """Map allowed tools to Codex sandbox mode."""
+    @staticmethod
+    def _resolve_sandbox(
+        allowed_tools: list[str] | tuple[str, ...],
+        has_mcp: bool = False,
+    ) -> str:
+        """Map allowed tools to Codex sandbox mode.
+
+        MCP servers run as child subprocesses of the Codex app-server.
+        The read-only and workspace-write sandboxes block subprocess
+        creation, which prevents MCP servers from starting.  When MCP
+        servers are configured we must use danger-full-access; the
+        security boundary is maintained by the allowed_tools list, not
+        the sandbox.
+        """
+        if has_mcp:
+            logger.debug("Sandbox escalated to danger-full-access for MCP subprocess spawning")
+            return "danger-full-access"
         write_tools = {"Write", "Edit", "Bash"}
         if write_tools & set(allowed_tools):
             return "workspace-write"
@@ -419,15 +436,19 @@ class CodexBackend:
         return _CODEX_EFFORT_MAP.get(effort, effort)
 
     @staticmethod
-    def _write_codex_mcp_config(mcp_servers: dict[str, Any], cwd: Path) -> None:
-        """Translate mcp_servers dict into a .codex/config.toml for Codex CLI.
+    def _write_codex_mcp_config(mcp_servers: dict[str, Any], codex_home: Path) -> bool:
+        """Write MCP server config to ``$CODEX_HOME/config.toml``.
 
-        Codex reads MCP server config from ``<cwd>/.codex/config.toml``.
+        Codex reads config from ``$CODEX_HOME/config.toml`` (defaults to
+        ``~/.codex/config.toml``).  We write to an isolated temp directory
+        so the subprocess sees only the servers we configure, not the
+        host machine's global MCP servers, AGENTS.md, skills, or rules.
+
         Only stdio servers with ``command`` + ``args`` are supported.
+
+        Returns True if any servers were written, False if all were skipped.
         """
-        config_dir = cwd / ".codex"
-        config_dir.mkdir(parents=True, exist_ok=True)
-        config_path = config_dir / "config.toml"
+        config_path = codex_home / "config.toml"
 
         lines: list[str] = []
         for name, cfg in mcp_servers.items():
@@ -447,10 +468,11 @@ class CodexBackend:
         if lines:
             config_path.write_text("\n".join(lines))
             logger.debug(f"Wrote Codex MCP config to {config_path}")
+            return True
+        return False
 
     async def query(self, prompt: str, options: SDKOptions) -> AsyncIterator[SDKMessage]:
         """Run a Codex SDK query, yielding unified SDKMessages."""
-        sandbox_mode = self._resolve_sandbox(options.allowed_tools)
         effort = self._resolve_effort(options.extra_args)
         model = options.model
 
@@ -465,13 +487,32 @@ class CodexBackend:
             )
             model = replacement
 
-        # Build environment for the Codex subprocess.
-        # IMPORTANT: create_subprocess_exec replaces the entire env when a
-        # dict is passed, so we must start from os.environ and layer overrides.
-        env: dict[str, str] | None = None
-        needs_env = bool(options.env) or os.environ.get("OPENAI_API_KEY")
-        if needs_env:
-            env = {**os.environ, **options.env}
+        # Isolate the Codex subprocess from the host's ~/.codex/ directory.
+        # Without this, the subprocess inherits the host's AGENTS.md,
+        # MCP servers, skills, rules, model defaults, and personality.
+        codex_home = Path(tempfile.mkdtemp(prefix="codex_home_"))
+        try:
+            # Copy auth.json so ChatGPT subscription auth works in isolation.
+            real_auth = Path.home() / ".codex" / "auth.json"
+            if real_auth.exists():
+                shutil.copy2(real_auth, codex_home / "auth.json")
+
+            # Write MCP server config to the isolated home (not cwd).
+            # Only stdio servers are written; non-stdio are skipped.
+            has_mcp = False
+            if options.mcp_servers:
+                has_mcp = self._write_codex_mcp_config(options.mcp_servers, codex_home)
+
+            sandbox_mode = self._resolve_sandbox(options.allowed_tools, has_mcp=has_mcp)
+
+            # Build environment for the Codex subprocess.
+            # IMPORTANT: create_subprocess_exec replaces the entire env when a
+            # dict is passed, so we must start from os.environ and layer overrides.
+            env: dict[str, str] = {
+                **os.environ,
+                **options.env,
+                "CODEX_HOME": str(codex_home),
+            }
             if "OPENAI_API_KEY" not in options.env and os.environ.get("OPENAI_API_KEY"):
                 logger.info(
                     "Stripping OPENAI_API_KEY from Codex subprocess env "
@@ -479,41 +520,35 @@ class CodexBackend:
                 )
                 env["OPENAI_API_KEY"] = ""
 
-        # Build thread config
-        thread_config = ThreadConfig(
-            model=model,
-            base_instructions=options.system_prompt,
-            sandbox=sandbox_mode,  # type: ignore[arg-type]
-            approval_policy=_CODEX_APPROVAL_POLICY,
-        )
-        if options.cwd:
-            thread_config.cwd = str(options.cwd)
+            # Build thread config
+            thread_config = ThreadConfig(
+                model=model,
+                base_instructions=options.system_prompt,
+                sandbox=sandbox_mode,  # type: ignore[arg-type]
+                approval_policy=_CODEX_APPROVAL_POLICY,
+            )
+            if options.cwd:
+                thread_config.cwd = str(options.cwd)
 
-        # Build turn overrides
-        turn_overrides = TurnOverrides()
-        if effort:
-            turn_overrides.effort = effort  # type: ignore[assignment]
+            # Build turn overrides
+            turn_overrides = TurnOverrides()
+            if effort:
+                turn_overrides.effort = effort  # type: ignore[assignment]
 
-        logger.debug(
-            f"CodexBackend query: model={model}, "
-            f"sandbox={sandbox_mode}, effort={effort}, prompt_len={len(prompt)}"
-        )
+            logger.debug(
+                f"CodexBackend query: model={model}, "
+                f"sandbox={sandbox_mode}, effort={effort}, prompt_len={len(prompt)}"
+            )
 
-        # Write MCP server config so Codex picks it up at startup
-        codex_cwd = Path(options.cwd) if options.cwd else Path.cwd()
-        codex_config_path: Path | None = None
-        if options.mcp_servers:
-            self._write_codex_mcp_config(options.mcp_servers, codex_cwd)
-            codex_config_path = codex_cwd / ".codex" / "config.toml"
-
-        # Connect and run using chat() for streaming (enables progress
-        # summaries) instead of chat_once() which blocks until turn completes.
-        client = CodexClient.connect_stdio(
-            cwd=str(codex_cwd),
-            env=env,
-            inactivity_timeout=600.0,
-        )
-        try:
+            # Connect and run using chat() for streaming (enables progress
+            # summaries) instead of chat_once() which blocks until turn completes.
+            codex_cwd = Path(options.cwd) if options.cwd else Path.cwd()
+            client: CodexClient | None = None
+            client = CodexClient.connect_stdio(
+                cwd=str(codex_cwd),
+                env=env,
+                inactivity_timeout=600.0,
+            )
             await client.start()
 
             chat_kwargs: dict[str, Any] = {"turn_overrides": turn_overrides}
@@ -562,16 +597,12 @@ class CodexBackend:
                 f"Codex query failed (model={model}, sandbox={sandbox_mode}): {e}"
             ) from e
         finally:
-            try:
-                await client.close()
-            except Exception:
-                logger.debug("Error closing Codex client", exc_info=True)
-            if codex_config_path and codex_config_path.exists():
+            if client is not None:
                 try:
-                    codex_config_path.unlink()
-                    logger.debug(f"Cleaned up Codex MCP config: {codex_config_path}")
-                except OSError:
-                    logger.debug("Failed to clean up Codex MCP config", exc_info=True)
+                    await client.close()
+                except Exception:
+                    logger.debug("Error closing Codex client", exc_info=True)
+            shutil.rmtree(codex_home, ignore_errors=True)
 
 
 # ---------------------------------------------------------------------------

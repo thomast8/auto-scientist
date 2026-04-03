@@ -336,11 +336,15 @@ class TestCodexBackend:
         """Write/Edit/Bash tools map to workspace-write sandbox mode."""
         from auto_scientist.sdk_backend import CodexBackend
 
-        backend = CodexBackend()
-        assert backend._resolve_sandbox(["Read", "Write", "Edit", "Bash"]) == "workspace-write"
-        assert backend._resolve_sandbox(["Read", "Glob"]) == "read-only"
-        assert backend._resolve_sandbox(["WebSearch"]) == "read-only"
-        assert backend._resolve_sandbox([]) == "read-only"
+        assert CodexBackend._resolve_sandbox(["Read", "Write", "Edit", "Bash"]) == "workspace-write"
+        assert CodexBackend._resolve_sandbox(["Read", "Glob"]) == "read-only"
+        assert CodexBackend._resolve_sandbox(["WebSearch"]) == "read-only"
+        assert CodexBackend._resolve_sandbox([]) == "read-only"
+        # MCP servers need full access for subprocess spawning
+        assert CodexBackend._resolve_sandbox(["WebSearch"], has_mcp=True) == "danger-full-access"
+        assert (
+            CodexBackend._resolve_sandbox(["Read", "Write"], has_mcp=True) == "danger-full-access"
+        )
 
     def test_maps_reasoning_effort(self):
         """ReasoningConfig effort levels map to Codex effort strings."""
@@ -457,10 +461,12 @@ class TestCodexBackend:
 
         call_kwargs = mock_connect.call_args
         env = call_kwargs.kwargs.get("env")
-        assert env is not None, "env must be passed when OPENAI_API_KEY needs stripping"
+        assert env is not None, "env must always be passed (CODEX_HOME isolation)"
         assert env["OPENAI_API_KEY"] == ""
         # Must include parent PATH so subprocess can find the codex binary
         assert "PATH" in env
+        # CODEX_HOME must always be set for isolation
+        assert "CODEX_HOME" in env
 
     @pytest.mark.asyncio
     async def test_session_resumption(self):
@@ -503,7 +509,7 @@ class TestCodexBackend:
         assert chat_kwargs_captured.get("thread_id") == "thr-existing"
 
     def test_writes_codex_mcp_config(self, tmp_path):
-        """CodexBackend writes .codex/config.toml for stdio MCP servers."""
+        """CodexBackend writes config.toml directly in codex_home."""
         from auto_scientist.sdk_backend import CodexBackend
 
         backend = CodexBackend()
@@ -516,9 +522,117 @@ class TestCodexBackend:
         }
         backend._write_codex_mcp_config(mcp_servers, tmp_path)
 
-        config_path = tmp_path / ".codex" / "config.toml"
-        assert config_path.exists()
+        config_path = tmp_path / "config.toml"
+        assert config_path.exists(), "config.toml should be written directly in codex_home"
+        assert not (tmp_path / ".codex").exists(), "should NOT create .codex/ subdir"
         content = config_path.read_text()
         assert "[mcp_servers.predictions]" in content
         assert 'command = "python3"' in content
         assert "/path/to/server.py" in content
+
+    @pytest.mark.asyncio
+    async def test_codex_home_always_isolates(self):
+        """CODEX_HOME is always set in the subprocess env for isolation."""
+        from auto_scientist.sdk_backend import CodexBackend, SDKOptions
+
+        steps = [self._make_mock_step("ok", "thr-1")]
+        mock_client = self._make_mock_client(steps)
+
+        backend = CodexBackend()
+        opts = SDKOptions(system_prompt="", allowed_tools=[], max_turns=5)
+
+        with patch(
+            "auto_scientist.sdk_backend.CodexClient.connect_stdio",
+            return_value=mock_client,
+        ) as mock_connect:
+            async for _ in backend.query("test", opts):
+                pass
+
+        env = mock_connect.call_args.kwargs.get("env")
+        assert env is not None, "env must always be passed"
+        assert "CODEX_HOME" in env, "CODEX_HOME must be set for isolation"
+        assert env["CODEX_HOME"] != str(Path.home() / ".codex"), (
+            "CODEX_HOME must NOT point to the real ~/.codex"
+        )
+
+    @pytest.mark.asyncio
+    async def test_codex_home_copies_auth(self, tmp_path):
+        """Auth.json is copied to isolated CODEX_HOME for subscription auth."""
+        from auto_scientist.sdk_backend import CodexBackend, SDKOptions
+
+        steps = [self._make_mock_step("ok", "thr-1")]
+        mock_client = self._make_mock_client(steps)
+
+        backend = CodexBackend()
+        opts = SDKOptions(system_prompt="", allowed_tools=[], max_turns=5)
+
+        # Create a fake auth.json in a fake home
+        fake_home = tmp_path / "fake_home"
+        fake_codex = fake_home / ".codex"
+        fake_codex.mkdir(parents=True)
+        (fake_codex / "auth.json").write_text('{"auth_mode": "test"}')
+
+        with (
+            patch(
+                "auto_scientist.sdk_backend.CodexClient.connect_stdio",
+                return_value=mock_client,
+            ) as mock_connect,
+            patch("auto_scientist.sdk_backend.Path.home", return_value=fake_home),
+            patch("auto_scientist.sdk_backend.shutil.rmtree"),
+        ):
+            async for _ in backend.query("test", opts):
+                pass
+
+        codex_home = Path(mock_connect.call_args.kwargs["env"]["CODEX_HOME"])
+        auth_copy = codex_home / "auth.json"
+        assert auth_copy.exists(), "auth.json must be copied to isolated CODEX_HOME"
+        assert auth_copy.read_text() == '{"auth_mode": "test"}'
+        # Manual cleanup since we patched rmtree
+        import shutil
+
+        shutil.rmtree(codex_home, ignore_errors=True)
+
+    @pytest.mark.asyncio
+    async def test_codex_home_contains_mcp_config(self):
+        """When MCP servers are provided, config.toml exists in CODEX_HOME."""
+        from auto_scientist.sdk_backend import CodexBackend, SDKOptions
+
+        steps = [self._make_mock_step("ok", "thr-1")]
+        mock_client = self._make_mock_client(steps)
+
+        backend = CodexBackend()
+        mcp = {
+            "predictions": {
+                "type": "stdio",
+                "command": "python3",
+                "args": ["/fake/server.py", "/fake/data.json"],
+            }
+        }
+        opts = SDKOptions(system_prompt="", allowed_tools=[], max_turns=5, mcp_servers=mcp)
+
+        codex_homes_seen: list[str] = []
+
+        def capture_connect(**kwargs):
+            codex_homes_seen.append(kwargs.get("env", {}).get("CODEX_HOME", ""))
+            return mock_client
+
+        with (
+            patch(
+                "auto_scientist.sdk_backend.CodexClient.connect_stdio",
+                side_effect=capture_connect,
+            ),
+            patch("auto_scientist.sdk_backend.shutil.rmtree"),
+        ):
+            async for _ in backend.query("test", opts):
+                pass
+
+        assert codex_homes_seen, "connect_stdio must have been called"
+        codex_home = Path(codex_homes_seen[0])
+        config_path = codex_home / "config.toml"
+        assert config_path.exists(), "config.toml must be written in CODEX_HOME"
+        content = config_path.read_text()
+        assert "[mcp_servers.predictions]" in content
+        # Clean up manually since we patched rmtree
+        import shutil
+
+        shutil.rmtree(codex_home, ignore_errors=True)
