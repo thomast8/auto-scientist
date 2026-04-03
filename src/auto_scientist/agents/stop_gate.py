@@ -27,10 +27,10 @@ from auto_scientist.prompts.stop_gate import (
     STOP_REVISION_SYSTEM,
     STOP_REVISION_USER,
 )
+from auto_scientist.retry import QueryResult, agent_retry_loop
 from auto_scientist.schemas import CompletenessAssessmentOutput, ScientistPlanOutput
 from auto_scientist.sdk_backend import SDKOptions, get_backend
 from auto_scientist.sdk_utils import (
-    OutputValidationError,
     collect_text_from_query,
     validate_json_output,
     with_turn_budget,
@@ -38,8 +38,6 @@ from auto_scientist.sdk_utils import (
 from auto_scientist.state import PredictionRecord
 
 logger = logging.getLogger(__name__)
-
-MAX_ATTEMPTS = 3
 
 
 # ---------------------------------------------------------------------------
@@ -98,35 +96,33 @@ async def run_completeness_assessment(
         extra_args={"setting-sources": ""},
     )
 
-    correction_hint = ""
-    for attempt in range(MAX_ATTEMPTS):
-        effective_prompt = user_prompt + correction_hint
-
-        try:
-            raw, _usage, _session_id = await collect_text_from_query(
-                effective_prompt,
-                options,
-                backend,
-                message_buffer,
-                agent_name="Completeness Assessment",
+    async def _query(prompt: str, resume_session_id: str | None) -> QueryResult:
+        opts = options
+        if resume_session_id is not None:
+            opts = SDKOptions(
+                system_prompt=options.system_prompt,
+                allowed_tools=options.allowed_tools,
+                max_turns=options.max_turns,
+                model=options.model,
+                extra_args=options.extra_args,
+                resume=resume_session_id,
             )
-        except Exception as e:
-            if attempt == MAX_ATTEMPTS - 1:
-                raise
-            logger.warning(f"Assessment attempt {attempt + 1}: SDK error ({e}), retrying")
-            continue
+        raw, usage, sid = await collect_text_from_query(
+            prompt, opts, backend, message_buffer, agent_name="Completeness Assessment"
+        )
+        return QueryResult(raw_output=raw, session_id=sid, usage=usage)
 
-        try:
-            return validate_json_output(
-                raw, CompletenessAssessmentOutput, "Completeness Assessment"
-            )
-        except OutputValidationError as e:
-            if attempt == MAX_ATTEMPTS - 1:
-                raise
-            correction_hint = f"\n\n{e.correction_prompt()}"
-            logger.warning(f"Assessment attempt {attempt + 1} failed, retrying: {e}")
+    def _validate(result: QueryResult) -> dict[str, Any]:
+        return validate_json_output(
+            result.raw_output, CompletenessAssessmentOutput, "Completeness Assessment"
+        )
 
-    raise RuntimeError("Completeness Assessment: exhausted retries")  # safety net
+    return await agent_retry_loop(
+        query_fn=_query,
+        validate_fn=_validate,
+        prompt=user_prompt,
+        agent_name="Completeness Assessment",
+    )
 
 
 # ---------------------------------------------------------------------------
@@ -149,33 +145,30 @@ async def _query_stop_agent(
     """
     from auto_scientist.agents.critic import _query_critic
 
-    correction_hint = ""
-    for attempt in range(MAX_ATTEMPTS):
-        effective_prompt = user_prompt + correction_hint
-        try:
-            result = await _query_critic(
-                config,
-                effective_prompt,
-                system_prompt=system_prompt,
-                response_schema=output_model,
-                message_buffer=message_buffer,
-            )
-        except Exception as e:
-            if attempt == MAX_ATTEMPTS - 1:
-                raise
-            logger.warning(f"{label} attempt {attempt + 1}: SDK error ({e}), retrying")
-            continue
+    last_agent_result: list[Any] = []
 
-        try:
-            parsed = validate_json_output(result.text, output_model, label)
-            return output_model.model_validate(parsed), result
-        except OutputValidationError as e:
-            if attempt == MAX_ATTEMPTS - 1:
-                raise
-            correction_hint = f"\n\n{e.correction_prompt()}"
-            logger.warning(f"{label} attempt {attempt + 1} failed, retrying: {e}")
+    async def _query(prompt: str, resume_session_id: str | None) -> QueryResult:
+        result = await _query_critic(
+            config,
+            prompt,
+            system_prompt=system_prompt,
+            response_schema=output_model,
+            message_buffer=message_buffer,
+        )
+        last_agent_result.clear()
+        last_agent_result.append(result)
+        return QueryResult(raw_output=result.text, session_id=None, usage={})
 
-    raise RuntimeError(f"{label}: exhausted retries")  # safety net
+    def _validate(result: QueryResult) -> tuple[Any, Any]:
+        parsed = validate_json_output(result.raw_output, output_model, label)
+        return output_model.model_validate(parsed), last_agent_result[0]
+
+    return await agent_retry_loop(
+        query_fn=_query,
+        validate_fn=_validate,
+        prompt=user_prompt,
+        agent_name=label,
+    )
 
 
 async def run_single_stop_debate(
@@ -296,30 +289,28 @@ async def run_scientist_stop_revision(
         extra_args={"setting-sources": ""},
     )
 
-    correction_hint = ""
-    for attempt in range(MAX_ATTEMPTS):
-        effective_prompt = user_prompt + correction_hint
-
-        try:
-            raw, _usage, _session_id = await collect_text_from_query(
-                effective_prompt,
-                options,
-                backend,
-                message_buffer,
-                agent_name="Stop Revision",
+    async def _query(prompt: str, resume_session_id: str | None) -> QueryResult:
+        opts = options
+        if resume_session_id is not None:
+            opts = SDKOptions(
+                system_prompt=options.system_prompt,
+                allowed_tools=options.allowed_tools,
+                max_turns=options.max_turns,
+                model=options.model,
+                extra_args=options.extra_args,
+                resume=resume_session_id,
             )
-        except Exception as e:
-            if attempt == MAX_ATTEMPTS - 1:
-                raise
-            logger.warning(f"Stop revision attempt {attempt + 1}: SDK error ({e}), retrying")
-            continue
+        raw, usage, sid = await collect_text_from_query(
+            prompt, opts, backend, message_buffer, agent_name="Stop Revision"
+        )
+        return QueryResult(raw_output=raw, session_id=sid, usage=usage)
 
-        try:
-            return validate_json_output(raw, ScientistPlanOutput, "Stop Revision")
-        except OutputValidationError as e:
-            if attempt == MAX_ATTEMPTS - 1:
-                raise
-            correction_hint = f"\n\n{e.correction_prompt()}"
-            logger.warning(f"Stop revision attempt {attempt + 1} failed, retrying: {e}")
+    def _validate(result: QueryResult) -> dict[str, Any]:
+        return validate_json_output(result.raw_output, ScientistPlanOutput, "Stop Revision")
 
-    raise RuntimeError("Stop Revision: exhausted retries")  # safety net
+    return await agent_retry_loop(
+        query_fn=_query,
+        validate_fn=_validate,
+        prompt=user_prompt,
+        agent_name="Stop Revision",
+    )
