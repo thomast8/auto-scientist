@@ -292,7 +292,7 @@ def prepare_turn_budget(
     """Build system prompt, allowed tools, and turn budget for SDK mode.
 
     Detects deferred tools (WebSearch, AskUserQuestion) that require
-    ToolSearch to resolve their schema in Claude Code --bare mode.
+    ToolSearch to resolve their schema in Claude Code SDK subprocesses.
     When deferred tools are present and provider is anthropic, adds
     ToolSearch to allowed_tools and bumps max_turns by 1.
 
