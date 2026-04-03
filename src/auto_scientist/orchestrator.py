@@ -586,6 +586,12 @@ class Orchestrator:
         finally:
             self._live.wait_for_dismiss()
             self._live.stop()
+            try:
+                from auto_scientist.sdk_backend import cleanup_sessions
+
+                cleanup_sessions()
+            except Exception:
+                logger.debug("Session cleanup failed", exc_info=True)
 
     async def _run_ingestion(self) -> Path | None:
         """Phase 0: Canonicalize raw data into experiments/data/."""
