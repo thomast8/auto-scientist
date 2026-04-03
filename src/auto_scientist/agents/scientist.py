@@ -10,6 +10,7 @@ import logging
 from pathlib import Path
 from typing import Any
 
+from auto_scientist.agents.prediction_tool import build_prediction_mcp_server
 from auto_scientist.model_config import ReasoningConfig, reasoning_to_cc_extra_args
 from auto_scientist.prompts.scientist import (
     SCIENTIST_REVISION_SYSTEM,
@@ -31,7 +32,26 @@ logger = logging.getLogger(__name__)
 
 MAX_ATTEMPTS = 3
 
-SCIENTIST_TOOLS = ["WebSearch"]
+SCIENTIST_BASE_TOOLS = ["WebSearch"]
+SCIENTIST_MCP_TOOL = "mcp__predictions__read_predictions"
+
+
+def _build_scientist_tools_and_mcp(
+    prediction_history: list[PredictionRecord] | None,
+    provider: str,
+) -> tuple[list[str], dict[str, Any]]:
+    """Build the tools list and MCP servers dict for a Scientist invocation.
+
+    Only includes the MCP prediction tool when there are predictions to query
+    and the backend supports MCP (Claude only, not Codex).
+    """
+    tools = list(SCIENTIST_BASE_TOOLS)
+    mcp_servers: dict[str, Any] = {}
+    if prediction_history and provider == "anthropic":
+        mcp_servers["predictions"] = build_prediction_mcp_server(prediction_history)
+        tools.append(SCIENTIST_MCP_TOOL)
+    return tools, mcp_servers
+
 
 # JSON schema for structured output (injected into the prompt for LLM guidance)
 SCIENTIST_PLAN_SCHEMA = {
@@ -83,32 +103,99 @@ SCIENTIST_PLAN_SCHEMA = {
 }
 
 
-def _format_predictions_for_prompt(
-    prediction_history: list[PredictionRecord] | None,
-) -> str:
-    """Format prediction history as reasoning trajectories for the Scientist prompt.
+def _get_display_text(rec: PredictionRecord) -> str:
+    """Return the summary text for a prediction, falling back to truncated evidence.
 
-    Builds a forest from follows_from links and renders each tree as a
-    trajectory chain showing the reasoning flow across iterations.
+    Sanitizes output to ensure single-line (collapses newlines, hard-truncates).
     """
-    if not prediction_history:
-        return "(no prediction history yet)"
+    text = rec.summary or rec.evidence or rec.prediction
+    # Collapse newlines for one-line-per-prediction guarantee
+    text = " ".join(text.split())
+    if len(text) > 100:
+        return text[:100] + "..."
+    return text
 
-    # Build parent→children index using pred_id
+
+def _build_prediction_forest(
+    prediction_history: list[PredictionRecord],
+) -> tuple[dict[str, PredictionRecord], dict[str | None, list[PredictionRecord]]]:
+    """Build parent-to-children index from follows_from links.
+
+    Returns (by_id, children) where children[None] contains root predictions.
+    """
     by_id: dict[str, PredictionRecord] = {}
     children: dict[str | None, list[PredictionRecord]] = {None: []}
     for rec in prediction_history:
         if rec.pred_id:
             by_id[rec.pred_id] = rec
-
-    # Classify each record as root or child
     for rec in prediction_history:
         parent = rec.follows_from
         if parent and parent in by_id:
             children.setdefault(parent, []).append(rec)
         else:
             children[None].append(rec)
+    return by_id, children
 
+
+def _format_compact_tree(
+    prediction_history: list[PredictionRecord] | None,
+) -> str:
+    """Format prediction history as a compact one-line-per-prediction tree.
+
+    Each prediction gets a single line with status, summary, and implication.
+    The full detail is available via the read_predictions MCP tool.
+    """
+    if not prediction_history:
+        return "(no prediction history yet)"
+
+    _by_id, children = _build_prediction_forest(prediction_history)
+    visited: set[str] = set()
+
+    def _render_compact(rec: PredictionRecord, indent: int) -> list[str]:
+        if rec.pred_id and rec.pred_id in visited:
+            return []
+        if rec.pred_id:
+            visited.add(rec.pred_id)
+
+        prefix = "  " * indent
+        tag = rec.pred_id or f"v{rec.iteration_prescribed:02d}"
+        display = _get_display_text(rec)
+        lines = []
+
+        if rec.outcome == "pending":
+            lines.append(f"{prefix}[{tag}] PENDING: {rec.prediction}")
+        elif rec.outcome == "confirmed":
+            lines.append(f"{prefix}[{tag}] CONFIRMED: {display} -> {rec.if_confirmed}")
+        elif rec.outcome == "refuted":
+            lines.append(f"{prefix}[{tag}] DEAD END: {display}")
+        elif rec.outcome == "inconclusive":
+            lines.append(f"{prefix}[{tag}] INCONCLUSIVE: {display}")
+
+        for child in children.get(rec.pred_id, []):
+            lines.extend(_render_compact(child, indent + 1))
+        return lines
+
+    header = "== PREDICTION TREE (use read_predictions tool for full detail) =="
+    all_lines = [header]
+    for root in children[None]:
+        all_lines.extend(_render_compact(root, 0))
+
+    return "\n".join(all_lines)
+
+
+def _format_predictions_for_prompt(
+    prediction_history: list[PredictionRecord] | None,
+) -> str:
+    """Format prediction history as full-detail reasoning trajectories.
+
+    Used by the stop gate, critic debate, and compare_personas script.
+    Builds a forest from follows_from links and renders each tree as a
+    trajectory chain showing the reasoning flow across iterations.
+    """
+    if not prediction_history:
+        return "(no prediction history yet)"
+
+    _by_id, children = _build_prediction_forest(prediction_history)
     visited: set[str] = set()
 
     def _render_record(rec: PredictionRecord, indent: int) -> list[str]:
@@ -194,7 +281,7 @@ async def run_scientist(
             json.dumps(analysis, indent=2) if analysis else "(no analysis yet - first iteration)"
         ),
         notebook_content=notebook_content or "(empty notebook - first iteration)",
-        prediction_history=_format_predictions_for_prompt(prediction_history),
+        prediction_history=_format_compact_tree(prediction_history),
         version=version,
     )
 
@@ -211,16 +298,17 @@ async def run_scientist(
     if reasoning and reasoning.level != "off":
         extra_args.update(reasoning_to_cc_extra_args(reasoning))
 
-    max_turns = 10
+    tools, mcp_servers = _build_scientist_tools_and_mcp(prediction_history, provider)
+
+    max_turns = 15
     backend = get_backend(provider)
     options = SDKOptions(
-        system_prompt=with_turn_budget(
-            system_prompt + json_instruction, max_turns, SCIENTIST_TOOLS
-        ),
-        allowed_tools=SCIENTIST_TOOLS,
+        system_prompt=with_turn_budget(system_prompt + json_instruction, max_turns, tools),
+        allowed_tools=tools,
         max_turns=max_turns,
         model=model,
         extra_args=extra_args,
+        mcp_servers=mcp_servers,
     )
 
     correction_hint = ""
@@ -296,7 +384,7 @@ async def run_scientist_revision(
         notebook_content=notebook_content or "(empty notebook)",
         original_plan=json.dumps(original_plan, indent=2),
         concern_ledger=ledger_text,
-        prediction_history=_format_predictions_for_prompt(prediction_history),
+        prediction_history=_format_compact_tree(prediction_history),
         version=version,
     )
 
@@ -311,16 +399,19 @@ async def run_scientist_revision(
     if reasoning and reasoning.level != "off":
         extra_args.update(reasoning_to_cc_extra_args(reasoning))
 
-    max_turns = 10
+    tools, mcp_servers = _build_scientist_tools_and_mcp(prediction_history, provider)
+
+    max_turns = 15
     backend = get_backend(provider)
     options = SDKOptions(
         system_prompt=with_turn_budget(
-            SCIENTIST_REVISION_SYSTEM + json_instruction, max_turns, SCIENTIST_TOOLS
+            SCIENTIST_REVISION_SYSTEM + json_instruction, max_turns, tools
         ),
-        allowed_tools=SCIENTIST_TOOLS,
+        allowed_tools=tools,
         max_turns=max_turns,
         model=model,
         extra_args=extra_args,
+        mcp_servers=mcp_servers,
     )
 
     correction_hint = ""

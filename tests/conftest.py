@@ -42,6 +42,14 @@ if "claude_code_sdk" not in sys.modules:
     mock_sdk.ToolResultBlock = type("ToolResultBlock", (), {})
     mock_sdk.ToolPermissionContext = type("ToolPermissionContext", (), {})
     mock_sdk.query = MagicMock()
+    mock_sdk.McpSdkServerConfig = type("McpSdkServerConfig", (dict,), {})
+    mock_sdk.create_sdk_mcp_server = lambda name, version="1.0.0", tools=None: {
+        "type": "sdk",
+        "name": name,
+        "instance": MagicMock(),
+    }
+    mock_sdk.tool = lambda name, desc, schema: lambda fn: fn  # passthrough decorator
+    mock_sdk.SdkMcpTool = type("SdkMcpTool", (), {})
 
     sys.modules["claude_code_sdk"] = mock_sdk
 

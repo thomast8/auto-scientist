@@ -296,7 +296,8 @@ Produce a JSON object with these exact keys and types:
       "pred_id": str,
       "prediction": str,
       "outcome": str,
-      "evidence": str
+      "evidence": str,
+      "summary": str
     }}
   ],
   "domain_knowledge": str,
@@ -318,6 +319,9 @@ observations: notable patterns from plots/results, factual. Use for
   patterns), not for numeric values that belong in key_metrics.
 prediction_outcomes: from script's HYPOTHESIS TESTS section. Each outcome is
   "confirmed", "refuted", or "inconclusive" with the specific evidence.
+  "summary" is a one-line condensation of the evidence (under 100 characters)
+  for compact display. Focus on the key number or finding, e.g.,
+  "Cr r_s near zero; Ni dominates at 0.613" or "RF R^2=0.80 vs EN 0.47".
 
 domain_knowledge: (optional) structural description of the dataset: variable
   types, ranges, distributions, noise characteristics, data format. Must NOT

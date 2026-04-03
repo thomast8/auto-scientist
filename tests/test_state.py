@@ -225,6 +225,41 @@ class TestPredictionRecord:
         assert r.outcome == "refuted"
         assert r.follows_from == "initial hypothesis"
 
+    def test_summary_defaults_to_empty(self):
+        r = PredictionRecord(
+            iteration_prescribed=1,
+            prediction="test",
+            diagnostic="d",
+            if_confirmed="c",
+            if_refuted="r",
+        )
+        assert r.summary == ""
+
+    def test_summary_roundtrip(self):
+        r = PredictionRecord(
+            iteration_prescribed=1,
+            prediction="test",
+            diagnostic="d",
+            if_confirmed="c",
+            if_refuted="r",
+            summary="Cr-corrosion r_s near zero; Ni dominates at 0.613",
+        )
+        json_str = r.model_dump_json()
+        loaded = PredictionRecord.model_validate_json(json_str)
+        assert loaded.summary == "Cr-corrosion r_s near zero; Ni dominates at 0.613"
+
+    def test_summary_backward_compat(self):
+        """Loading JSON without summary field should default to empty string."""
+        data = {
+            "iteration_prescribed": 1,
+            "prediction": "test",
+            "diagnostic": "d",
+            "if_confirmed": "c",
+            "if_refuted": "r",
+        }
+        r = PredictionRecord.model_validate(data)
+        assert r.summary == ""
+
 
 # ---------------------------------------------------------------------------
 # ExperimentState - prediction_history

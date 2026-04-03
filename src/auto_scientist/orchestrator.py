@@ -2315,6 +2315,7 @@ class Orchestrator:
                 return False
             record.outcome = normalized
             record.evidence = outcome.get("evidence", "")
+            record.summary = outcome.get("summary", "")
             record.iteration_evaluated = self.state.iteration
             return True
 

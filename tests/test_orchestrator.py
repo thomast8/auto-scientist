@@ -2529,3 +2529,37 @@ class TestResolvePredictionOutcomes:
         orchestrator._resolve_prediction_outcomes(analysis)
         assert orchestrator.state.prediction_history[0].outcome == "confirmed"
         assert orchestrator.state.prediction_history[1].outcome == "pending"
+
+    def test_copies_summary_when_present(self, orchestrator):
+        orchestrator.state.iteration = 1
+        self._add_pending(orchestrator, "Cr correlation strongest", pred_id="0.1")
+        analysis = {
+            "prediction_outcomes": [
+                {
+                    "pred_id": "0.1",
+                    "prediction": "Cr correlation strongest",
+                    "outcome": "refuted",
+                    "evidence": "Ni dominates at r_s=0.613; Cr near zero",
+                    "summary": "Cr r_s near zero; Ni dominates at 0.613",
+                },
+            ],
+        }
+        orchestrator._resolve_prediction_outcomes(analysis)
+        expected = "Cr r_s near zero; Ni dominates at 0.613"
+        assert orchestrator.state.prediction_history[0].summary == expected
+
+    def test_summary_defaults_empty_when_absent(self, orchestrator):
+        orchestrator.state.iteration = 1
+        self._add_pending(orchestrator, "spline fits better", pred_id="0.1")
+        analysis = {
+            "prediction_outcomes": [
+                {
+                    "pred_id": "0.1",
+                    "prediction": "spline fits better",
+                    "outcome": "confirmed",
+                    "evidence": "RMSE 0.31 vs 0.58",
+                },
+            ],
+        }
+        orchestrator._resolve_prediction_outcomes(analysis)
+        assert orchestrator.state.prediction_history[0].summary == ""

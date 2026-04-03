@@ -31,6 +31,7 @@ class PredictionRecord(BaseModel):
     follows_from: str | None = None
     outcome: Literal["pending", "confirmed", "refuted", "inconclusive"] = "pending"
     evidence: str = ""
+    summary: str = ""  # One-line compact summary for tree display
 
 
 class ExperimentState(BaseModel):

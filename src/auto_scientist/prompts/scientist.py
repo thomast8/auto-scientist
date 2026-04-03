@@ -795,9 +795,13 @@ SCIENTIST_USER = """\
 
 <task>
 1. Understand the current state from the analysis and notebook
-2. Review prediction history: which trajectories are active, what was
-   confirmed or refuted, and whether any refuted predictions deserve
-   re-examination under new conditions
+2. Use read_predictions to inspect all pending predictions and any
+   recently resolved predictions relevant to your hypothesis. Examine
+   which trajectories are active, what was confirmed or refuted, and
+   whether any refuted predictions deserve re-examination under new
+   conditions. If read_predictions is not available, the compact tree
+   above is your condensed prediction summary (details like diagnostics,
+   evidence, and implications are omitted).
 3. Formulate a clear hypothesis about what to change and why
 4. Create a detailed implementation plan with prioritized changes
 5. Define testable predictions that test your reasoning (link to prior
@@ -1080,6 +1084,11 @@ SCIENTIST_REVISION_USER = """\
 Produce a revised plan incorporating valid concerns from the ledger.
 Output a complete plan (all fields), not just changes. Preserve or
 update the testable_predictions from the original plan.
+
+Use read_predictions to inspect any prediction referenced in the concerns
+or that you need full context on. If read_predictions is not available,
+the compact tree above is your condensed prediction summary (details like diagnostics,
+   evidence, and implications are omitted).
 
 The new version is: {version}
 </task>

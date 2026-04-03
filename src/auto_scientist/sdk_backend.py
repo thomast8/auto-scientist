@@ -160,6 +160,7 @@ class SDKOptions:
     extra_args: dict[str, str | None] = field(default_factory=dict)
     resume: str | None = None
     env: dict[str, str] = field(default_factory=dict)
+    mcp_servers: dict[str, Any] = field(default_factory=dict)
 
 
 @dataclass
@@ -258,6 +259,8 @@ class ClaudeBackend:
             kwargs["resume"] = options.resume
         if env:
             kwargs["env"] = env
+        if options.mcp_servers:
+            kwargs["mcp_servers"] = options.mcp_servers
 
         return ClaudeCodeOptions(**kwargs)
 
@@ -370,6 +373,12 @@ class CodexBackend:
 
     async def query(self, prompt: str, options: SDKOptions) -> AsyncIterator[SDKMessage]:
         """Run a Codex SDK query, yielding unified SDKMessages."""
+        if options.mcp_servers:
+            logger.warning(
+                "MCP servers are not supported by the Codex backend; ignoring %d server(s): %s",
+                len(options.mcp_servers),
+                ", ".join(options.mcp_servers.keys()),
+            )
         sandbox_mode = self._resolve_sandbox(options.allowed_tools)
         effort = self._resolve_effort(options.extra_args)
         model = options.model

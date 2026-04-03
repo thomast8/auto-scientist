@@ -255,6 +255,14 @@ _DEFERRED_TOOL_DESCRIPTIONS: dict[str, str] = {
         "Optional: allowed_domains (list[str]), blocked_domains (list[str])."
     ),
     "AskUserQuestion": ("AskUserQuestion(question: str) - Ask the user a clarifying question."),
+    "mcp__predictions__read_predictions": (
+        "mcp__predictions__read_predictions(pred_ids?: list[str], filter?: str, iteration?: int) "
+        "- Query prediction history for full detail. "
+        "pred_ids: specific IDs like ['2.1','3.4']. "
+        "filter: 'pending'|'refuted'|'confirmed'|'inconclusive'|'active_chains'. "
+        "iteration: predictions from a specific iteration. "
+        "No args returns all predictions."
+    ),
 }
 
 

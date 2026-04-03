@@ -46,6 +46,24 @@ class TestSDKOptions:
         assert opts.resume == "session-123"
         assert opts.env == {"MY_VAR": "val"}
 
+    def test_mcp_servers_defaults_to_empty(self):
+        from auto_scientist.sdk_backend import SDKOptions
+
+        opts = SDKOptions(system_prompt="test", allowed_tools=[], max_turns=5)
+        assert opts.mcp_servers == {}
+
+    def test_mcp_servers_stored(self):
+        from auto_scientist.sdk_backend import SDKOptions
+
+        mock_server = {"type": "sdk", "name": "predictions", "instance": object()}
+        opts = SDKOptions(
+            system_prompt="test",
+            allowed_tools=[],
+            max_turns=5,
+            mcp_servers={"predictions": mock_server},
+        )
+        assert opts.mcp_servers == {"predictions": mock_server}
+
 
 # ---------------------------------------------------------------------------
 # SDKMessage
@@ -146,6 +164,33 @@ class TestClaudeBackend:
         assert cc_opts.max_turns == 30
         assert cc_opts.model == "claude-sonnet-4-6"
         assert cc_opts.permission_mode == "acceptEdits"
+
+    def test_passes_mcp_servers_when_present(self):
+        from auto_scientist.sdk_backend import ClaudeBackend, SDKOptions
+
+        mock_server = {"type": "sdk", "name": "predictions", "instance": object()}
+        backend = ClaudeBackend()
+        opts = SDKOptions(
+            system_prompt="test",
+            allowed_tools=[],
+            max_turns=5,
+            mcp_servers={"predictions": mock_server},
+        )
+        with patch("auto_scientist.sdk_backend.ClaudeCodeOptions") as mock_cls:
+            backend._build_claude_options(opts)
+            call_kwargs = mock_cls.call_args.kwargs
+            assert call_kwargs["mcp_servers"] == {"predictions": mock_server}
+
+    def test_omits_mcp_servers_when_empty(self):
+        from auto_scientist.sdk_backend import ClaudeBackend, SDKOptions
+
+        backend = ClaudeBackend()
+        opts = SDKOptions(system_prompt="test", allowed_tools=[], max_turns=5)
+        # When mcp_servers is empty, it should not be passed to ClaudeCodeOptions
+        with patch("auto_scientist.sdk_backend.ClaudeCodeOptions") as mock_cls:
+            backend._build_claude_options(opts)
+            call_kwargs = mock_cls.call_args.kwargs
+            assert "mcp_servers" not in call_kwargs
 
     @pytest.mark.asyncio
     async def test_maps_assistant_message_to_sdk_message(self):
@@ -412,3 +457,33 @@ class TestCodexBackend:
         assert result_msgs[0].result == "continued"
         # Verify thread_id was passed for resumption
         assert chat_kwargs_captured.get("thread_id") == "thr-existing"
+
+    @pytest.mark.asyncio
+    async def test_warns_when_mcp_servers_present(self, caplog):
+        """CodexBackend logs a warning when mcp_servers is non-empty."""
+        import logging
+
+        from auto_scientist.sdk_backend import CodexBackend, SDKOptions
+
+        steps = [self._make_mock_step("ok", "thr-1")]
+        mock_client = self._make_mock_client(steps)
+
+        backend = CodexBackend()
+        opts = SDKOptions(
+            system_prompt="test",
+            allowed_tools=[],
+            max_turns=5,
+            mcp_servers={"predictions": {"type": "sdk"}},
+        )
+
+        with (
+            patch(
+                "auto_scientist.sdk_backend.CodexClient.connect_stdio",
+                return_value=mock_client,
+            ),
+            caplog.at_level(logging.WARNING, logger="auto_scientist.sdk_backend"),
+        ):
+            async for _ in backend.query("test", opts):
+                pass
+
+        assert any("mcp" in record.message.lower() for record in caplog.records)
