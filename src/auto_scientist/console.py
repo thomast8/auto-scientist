@@ -50,7 +50,7 @@ from textual.widgets._collapsible import CollapsibleTitle
 from textual.worker import Worker, WorkerState
 
 from auto_scientist.latex_to_unicode import latex_to_unicode
-from auto_scientist.preferences import load_theme, save_theme
+from auto_scientist.preferences import default_theme, save_theme
 
 logger = logging.getLogger(__name__)
 
@@ -1225,9 +1225,7 @@ class PipelineApp(App):
         yield Footer()
 
     def on_mount(self) -> None:
-        saved_theme = load_theme()
-        if saved_theme in self.available_themes:
-            self.theme = saved_theme
+        self.theme = default_theme()
         self.title = "Auto-Scientist"
         self._live._app = self
         self._orchestrator._live = self._live
@@ -1535,9 +1533,7 @@ class ShowApp(App):
         yield Footer()
 
     def on_mount(self) -> None:
-        saved_theme = load_theme()
-        if saved_theme in self.available_themes:
-            self.theme = saved_theme
+        self.theme = default_theme()
         self.title = f"Auto-Scientist — {self._run_title}"
 
         run_area = self.query_one("#run-area")

@@ -1011,7 +1011,10 @@ class TestThemeCycling:
             async def run(self):
                 pass
 
-        with patch("auto_scientist.preferences.PREFS_PATH", prefs_path):
+        with (
+            patch("auto_scientist.preferences.PREFS_PATH", prefs_path),
+            patch("auto_scientist.preferences.system_is_dark", return_value=False),
+        ):
             app = PipelineApp(FakeOrch())
             async with app.run_test() as pilot:
                 await pilot.pause()
