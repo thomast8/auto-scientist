@@ -1,20 +1,25 @@
-"""In-process MCP tool for querying prediction history on demand.
+"""MCP tool for querying prediction history on demand.
 
-Provides `build_prediction_mcp_server()` which creates an MCP server with a
-`read_predictions` tool that the Scientist agent can call to inspect specific
-predictions without having the full history dumped into its prompt.
+Provides `build_prediction_mcp_server()` which creates an stdio MCP server
+config that the Claude Code CLI can connect to. The server reads predictions
+from a temporary JSON file and exposes a `read_predictions` tool.
+
+Also provides `_handle_read_predictions()` for direct use in tests.
 """
 
 from __future__ import annotations
 
+import json
+import logging
+import tempfile
+from pathlib import Path
 from typing import Any
-
-from claude_code_sdk import McpSdkServerConfig, create_sdk_mcp_server, tool
 
 from auto_scientist.state import PredictionRecord
 
-# JSON Schema for the tool input (full schema, not simple type mapping,
-# because we need optional params and enums).
+logger = logging.getLogger(__name__)
+
+# JSON Schema for the tool input.
 _READ_PREDICTIONS_SCHEMA: dict[str, Any] = {
     "type": "object",
     "properties": {
@@ -116,7 +121,6 @@ async def _handle_read_predictions(
                 ]
             }
         if missing:
-            # Prepend a note about missing IDs so the Scientist knows
             missing_note = f"Note: IDs not found: {', '.join(missing)}\n\n"
             formatted = missing_note + "\n\n".join(_format_record_detail(r) for r in selected)
             return {"content": [{"type": "text", "text": formatted}]}
@@ -152,25 +156,30 @@ async def _handle_read_predictions(
 
 def build_prediction_mcp_server(
     prediction_history: list[PredictionRecord],
-) -> McpSdkServerConfig:
-    """Create an in-process MCP server with a read_predictions tool.
+) -> dict[str, Any]:
+    """Create an stdio MCP server config for the read_predictions tool.
 
-    The tool captures ``prediction_history`` by reference, so mutations
-    by the orchestrator are visible in real-time during an agent's turn.
+    Writes predictions to a temp JSON file and returns a stdio server config
+    that launches a Python subprocess serving them via the ``mcp`` library.
+    The Claude Code CLI connects to this server via stdin/stdout.
+
+    Returns a dict suitable for ``ClaudeCodeOptions.mcp_servers``.
     """
+    # Write predictions to a temp file the subprocess can read
+    predictions_data = [r.model_dump() for r in prediction_history]
+    with tempfile.NamedTemporaryFile(
+        mode="w",
+        suffix=".json",
+        prefix="predictions_",
+        delete=False,
+    ) as tmp:
+        json.dump(predictions_data, tmp)
+    logger.debug(f"Wrote {len(prediction_history)} predictions to {tmp.name}")
 
-    @tool(
-        "read_predictions",
-        "Read full detail for specific predictions from the prediction history. "
-        "Use this to inspect evidence, diagnostics, and implications for any "
-        "prediction shown in the compact tree summary.",
-        _READ_PREDICTIONS_SCHEMA,
-    )
-    async def read_predictions(args: dict[str, Any]) -> dict[str, Any]:
-        return await _handle_read_predictions(prediction_history, args)
-
-    return create_sdk_mcp_server(
-        name="predictions",
-        version="1.0.0",
-        tools=[read_predictions],
-    )
+    # Return stdio server config pointing to the MCP server script
+    server_script = str(Path(__file__).parent / "_prediction_mcp_server.py")
+    return {
+        "type": "stdio",
+        "command": "python3",
+        "args": [server_script, tmp.name],
+    }

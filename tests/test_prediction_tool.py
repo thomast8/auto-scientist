@@ -1,5 +1,8 @@
 """Tests for the read_predictions MCP tool."""
 
+import json
+from pathlib import Path
+
 import pytest
 
 from auto_scientist.agents.prediction_tool import (
@@ -170,8 +173,14 @@ class TestHandleReadPredictions:
 
 
 class TestBuildPredictionMcpServer:
-    def test_creates_server(self, sample_history):
+    def test_creates_stdio_server(self, sample_history):
         server = build_prediction_mcp_server(sample_history)
         assert server is not None
-        assert server["type"] == "sdk"
-        assert server["name"] == "predictions"
+        assert server["type"] == "stdio"
+        assert server["command"] == "python3"
+        assert "_prediction_mcp_server.py" in server["args"][0]
+        # Verify the temp file was written with correct data
+        predictions_path = server["args"][1]
+        data = json.loads(Path(predictions_path).read_text())
+        assert len(data) == len(sample_history)
+        assert data[0]["pred_id"] == "0.1"
