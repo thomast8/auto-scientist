@@ -1,8 +1,9 @@
-"""Pre-flight validation logic for the orchestrator pipeline.
+"""Pre-flight validation for the orchestrator pipeline.
 
-All functions here validate environment, auth, model config, etc. before
-the pipeline starts. They are pure functions with no dependency on the
-Orchestrator class.
+Validates environment (PATH, executables), provider authentication
+(API keys, CLI login status), model availability, and reasoning config
+compatibility before the pipeline starts. Functions may perform subprocess
+calls, network requests, and filesystem checks.
 """
 
 import json
