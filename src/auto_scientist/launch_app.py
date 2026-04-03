@@ -947,12 +947,12 @@ class LaunchApp(App[ExperimentConfig | None]):
         import shutil
 
         from auto_scientist.model_config import ModelConfig
-        from auto_scientist.orchestrator import (
-            _check_claude_cli_auth,
-            _check_codex_cli_auth,
-            _check_provider_auth,
-            _validate_model_names,
-            _validate_reasoning_configs,
+        from auto_scientist.validation import (
+            check_claude_cli_auth,
+            check_codex_cli_auth,
+            check_provider_auth,
+            validate_model_names,
+            validate_reasoning_configs,
         )
 
         mc = ModelConfig.from_experiment_config(config)
@@ -984,7 +984,7 @@ class LaunchApp(App[ExperimentConfig | None]):
                     needs_codex_cli = True
 
         for provider in sorted(api_providers):
-            err = _check_provider_auth(provider)
+            err = check_provider_auth(provider)
             if err:
                 errors.append(err)
 
@@ -997,7 +997,7 @@ class LaunchApp(App[ExperimentConfig | None]):
                     "Install: npm install -g @anthropic-ai/claude-code"
                 )
             else:
-                err = _check_claude_cli_auth(claude_bin)
+                err = check_claude_cli_auth(claude_bin)
                 if err:
                     errors.append(err)
 
@@ -1009,15 +1009,15 @@ class LaunchApp(App[ExperimentConfig | None]):
                     "Install: npm install -g @openai/codex"
                 )
             else:
-                err = _check_codex_cli_auth()
+                err = check_codex_cli_auth()
                 if err:
                     errors.append(err)
 
         # Check model names exist
-        errors.extend(_validate_model_names(mc))
+        errors.extend(validate_model_names(mc))
 
         # Check reasoning configs are valid for provider/model
-        errors.extend(_validate_reasoning_configs(mc))
+        errors.extend(validate_reasoning_configs(mc))
 
         return errors
 
