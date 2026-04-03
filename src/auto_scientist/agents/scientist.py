@@ -17,10 +17,10 @@ from auto_scientist.prompts.scientist import (
     SCIENTIST_SYSTEM,
     SCIENTIST_USER,
 )
+from auto_scientist.retry import QueryResult, agent_retry_loop
 from auto_scientist.schemas import ScientistPlanOutput
 from auto_scientist.sdk_backend import SDKOptions, get_backend
 from auto_scientist.sdk_utils import (
-    OutputValidationError,
     collect_text_from_query,
     validate_json_output,
     with_turn_budget,
@@ -28,8 +28,6 @@ from auto_scientist.sdk_utils import (
 from auto_scientist.state import PredictionRecord
 
 logger = logging.getLogger(__name__)
-
-MAX_ATTEMPTS = 3
 
 SCIENTIST_TOOLS = ["WebSearch"]
 
@@ -223,33 +221,31 @@ async def run_scientist(
         extra_args=extra_args,
     )
 
-    correction_hint = ""
-    for attempt in range(MAX_ATTEMPTS):
-        effective_prompt = user_prompt + correction_hint
-
-        try:
-            raw, _usage, _session_id = await collect_text_from_query(
-                effective_prompt,
-                options,
-                backend,
-                message_buffer,
-                agent_name="Scientist",
+    async def _query(prompt: str, resume_session_id: str | None) -> QueryResult:
+        opts = options
+        if resume_session_id is not None:
+            opts = SDKOptions(
+                system_prompt=options.system_prompt,
+                allowed_tools=options.allowed_tools,
+                max_turns=options.max_turns,
+                model=options.model,
+                extra_args=options.extra_args,
+                resume=resume_session_id,
             )
-        except Exception as e:
-            if attempt == MAX_ATTEMPTS - 1:
-                raise
-            logger.warning(f"Scientist attempt {attempt + 1}: SDK error ({e}), retrying")
-            continue
+        raw, usage, session_id = await collect_text_from_query(
+            prompt, opts, backend, message_buffer, agent_name="Scientist"
+        )
+        return QueryResult(raw_output=raw, session_id=session_id, usage=usage)
 
-        try:
-            return validate_json_output(raw, ScientistPlanOutput, "Scientist")
-        except OutputValidationError as e:
-            if attempt == MAX_ATTEMPTS - 1:
-                raise
-            correction_hint = f"\n\n{e.correction_prompt()}"
-            logger.warning(f"Scientist attempt {attempt + 1} failed, retrying: {e}")
+    def _validate(result: QueryResult) -> dict[str, Any]:
+        return validate_json_output(result.raw_output, ScientistPlanOutput, "Scientist")
 
-    raise RuntimeError("Scientist: exhausted retries")  # unreachable
+    return await agent_retry_loop(
+        query_fn=_query,
+        validate_fn=_validate,
+        prompt=user_prompt,
+        agent_name="Scientist",
+    )
 
 
 async def run_scientist_revision(
@@ -323,30 +319,28 @@ async def run_scientist_revision(
         extra_args=extra_args,
     )
 
-    correction_hint = ""
-    for attempt in range(MAX_ATTEMPTS):
-        effective_prompt = user_prompt + correction_hint
-
-        try:
-            raw, _usage, _session_id = await collect_text_from_query(
-                effective_prompt,
-                options,
-                backend,
-                message_buffer,
-                agent_name="Scientist revision",
+    async def _query(prompt: str, resume_session_id: str | None) -> QueryResult:
+        opts = options
+        if resume_session_id is not None:
+            opts = SDKOptions(
+                system_prompt=options.system_prompt,
+                allowed_tools=options.allowed_tools,
+                max_turns=options.max_turns,
+                model=options.model,
+                extra_args=options.extra_args,
+                resume=resume_session_id,
             )
-        except Exception as e:
-            if attempt == MAX_ATTEMPTS - 1:
-                raise
-            logger.warning(f"Scientist revision attempt {attempt + 1}: SDK error ({e}), retrying")
-            continue
+        raw, usage, session_id = await collect_text_from_query(
+            prompt, opts, backend, message_buffer, agent_name="Scientist revision"
+        )
+        return QueryResult(raw_output=raw, session_id=session_id, usage=usage)
 
-        try:
-            return validate_json_output(raw, ScientistPlanOutput, "Scientist revision")
-        except OutputValidationError as e:
-            if attempt == MAX_ATTEMPTS - 1:
-                raise
-            correction_hint = f"\n\n{e.correction_prompt()}"
-            logger.warning(f"Scientist revision attempt {attempt + 1} failed, retrying: {e}")
+    def _validate(result: QueryResult) -> dict[str, Any]:
+        return validate_json_output(result.raw_output, ScientistPlanOutput, "Scientist revision")
 
-    raise RuntimeError("Scientist revision: exhausted retries")  # unreachable
+    return await agent_retry_loop(
+        query_fn=_query,
+        validate_fn=_validate,
+        prompt=user_prompt,
+        agent_name="Scientist revision",
+    )
