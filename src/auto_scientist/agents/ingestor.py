@@ -90,10 +90,9 @@ async def run_ingestor(
     current_options = [options]
 
     async def _query(prompt_text: str, resume_session_id: str | None) -> QueryResult:
-        opts = current_options[0]
         if resume_session_id is not None:
             clarification_max_turns = 10
-            opts = SDKOptions(
+            current_options[0] = SDKOptions(
                 system_prompt=with_turn_budget(INGESTOR_SYSTEM, clarification_max_turns, tools),
                 allowed_tools=tools,
                 max_turns=clarification_max_turns,
@@ -103,9 +102,13 @@ async def run_ingestor(
                 resume=resume_session_id,
                 extra_args={"setting-sources": ""},
             )
-            current_options[0] = opts
+        else:
+            # Fresh start: reset to original options (clears any stale resume).
+            current_options[0] = options
         sid: str | None = None
-        async for msg in safe_query(prompt=prompt_text, options=opts, backend=backend):
+        async for msg in safe_query(
+            prompt=prompt_text, options=current_options[0], backend=backend
+        ):
             if msg.type == "result":
                 sid = msg.session_id
                 usage = msg.usage

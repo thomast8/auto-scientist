@@ -136,6 +136,9 @@ async def run_report(
         return text
 
     def _on_exhausted(result: QueryResult | None, error: Exception) -> str:
+        # SDK/transport errors should propagate, not return stale content.
+        if result is None:
+            raise error
         full_text = last_full_text[0]
         if not full_text:
             raise RuntimeError("Report generation produced no output after 3 attempts")

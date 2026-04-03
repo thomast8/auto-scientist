@@ -92,8 +92,10 @@ async def agent_retry_loop(
                     return on_exhausted(None, e)
                 raise
             logger.warning(f"{agent_name} attempt {attempt + 1}: SDK error ({e}), retrying")
+            # Clear session (can't resume a failed connection) but keep
+            # any correction hint from a prior validation failure so the
+            # next attempt still benefits from the repair prompt.
             session_id = None
-            correction_hint = ""
             continue
 
         try:

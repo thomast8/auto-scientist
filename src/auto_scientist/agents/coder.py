@@ -168,6 +168,9 @@ async def run_coder(
         return new_script_path
 
     def _on_exhausted(result: QueryResult | None, error: Exception) -> Path:
+        # SDK/transport errors should propagate, not return stale artifacts.
+        if result is None:
+            raise error
         # If the script exists but has a syntax error, return it anyway;
         # the runner will catch the error.
         if new_script_path.exists():
