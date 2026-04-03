@@ -39,17 +39,15 @@ from auto_scientist.prompts.critic import (
     PERSONAS,
     get_model_index_for_debate,
 )
+from auto_scientist.retry import QueryResult, agent_retry_loop
 from auto_scientist.sdk_backend import SDKOptions, get_backend
 from auto_scientist.sdk_utils import (
-    OutputValidationError,
     collect_text_from_query,
     validate_json_output,
     with_turn_budget,
 )
 
 logger = logging.getLogger(__name__)
-
-MAX_RETRIES = 1  # 1 retry = 2 total attempts
 
 # Exceptions worth retrying (transient network/rate-limit issues).
 # Non-retryable errors (ValueError, TypeError, ImportError, auth errors)
@@ -92,7 +90,9 @@ async def _query_critic(
             max_turns=max_turns,
             extra_args=extra_args,
         )
-        text, usage = await collect_text_from_query(prompt, options, backend, message_buffer)
+        text, usage, _session_id = await collect_text_from_query(
+            prompt, options, backend, message_buffer
+        )
         in_tok = (
             usage.get("input_tokens", 0)
             + usage.get("cache_creation_input_tokens", 0)
@@ -139,7 +139,9 @@ async def _query_critic(
             max_turns=max_turns,
             extra_args=extra_args_api,
         )
-        text, usage = await collect_text_from_query(prompt, options, backend, message_buffer)
+        text, usage, _session_id = await collect_text_from_query(
+            prompt, options, backend, message_buffer
+        )
         in_tok = (
             usage.get("input_tokens", 0)
             + usage.get("cache_creation_input_tokens", 0)
@@ -171,60 +173,63 @@ async def _query_critic_structured(
     """Query a critic and validate the response as structured CriticOutput.
 
     Returns (validated CriticOutput, raw AgentResult).
-    Retries once on validation failure with a correction hint.
+    Uses agent_retry_loop (3 attempts) with selective retryable errors.
     """
-    result = AgentResult(text="")
-    correction_hint = ""
+    last_agent_result: list[AgentResult] = [AgentResult(text="")]
 
-    for attempt in range(MAX_RETRIES + 1):
-        effective_prompt = prompt + correction_hint
-        try:
-            result = await _query_critic(
-                config,
-                effective_prompt,
-                system_prompt=system_prompt,
-                response_schema=CriticOutput,
-                message_buffer=message_buffer,
+    async def _query(prompt_text: str, resume_session_id: str | None) -> QueryResult:
+        result = await _query_critic(
+            config,
+            prompt_text,
+            system_prompt=system_prompt,
+            response_schema=CriticOutput,
+            message_buffer=message_buffer,
+        )
+        last_agent_result[0] = result
+        return QueryResult(raw_output=result.text, session_id=None, usage={})
+
+    def _validate(result: QueryResult) -> tuple[CriticOutput, AgentResult]:
+        validated = validate_json_output(result.raw_output, CriticOutput, "Critic")
+        return CriticOutput(**validated), last_agent_result[0]
+
+    def _on_exhausted(
+        result: QueryResult | None, error: Exception
+    ) -> tuple[CriticOutput, AgentResult]:
+        # SDK/transport errors should propagate, not produce synthetic fallbacks.
+        if result is None:
+            raise error
+        agent_result = last_agent_result[0]
+        logger.error(
+            f"{label} validation failed after retries, preserving raw text as synthetic concern"
+        )
+        if message_buffer is not None:
+            message_buffer.append(
+                f"[WARNING] {label}: critic output could not be parsed after retries. "
+                "Using synthetic fallback; review raw transcript for actual content."
             )
-        except _RETRYABLE_ERRORS as e:
-            if attempt < MAX_RETRIES:
-                logger.warning(f"{label} transient error ({e}), retrying (attempt {attempt + 1})")
-                continue
-            raise
-
-        try:
-            validated = validate_json_output(result.text, CriticOutput, "Critic")
-            return CriticOutput(**validated), result
-        except OutputValidationError as e:
-            if attempt < MAX_RETRIES:
-                correction_hint = f"\n\n{e.correction_prompt()}"
-                logger.warning(f"{label} validation failed, retrying: {e}")
-            else:
-                logger.error(
-                    f"{label} validation failed after retries, "
-                    "preserving raw text as synthetic concern"
+        raw = (agent_result.text or "(empty response)")[:500]
+        fallback = CriticOutput(
+            concerns=[
+                Concern(
+                    claim=f"[SYNTHETIC - PARSE ERROR] {raw}",
+                    severity="high",
+                    confidence="low",
+                    category="other",
                 )
-                if message_buffer is not None:
-                    message_buffer.append(
-                        f"[WARNING] {label}: critic output could not be parsed after retries. "
-                        "Using synthetic fallback; review raw transcript for actual content."
-                    )
-                raw = (result.text or "(empty response)")[:500]
-                fallback = CriticOutput(
-                    concerns=[
-                        Concern(
-                            claim=f"[SYNTHETIC - PARSE ERROR] {raw}",
-                            severity="high",
-                            confidence="low",
-                            category="other",
-                        )
-                    ],
-                    alternative_hypotheses=[],
-                    overall_assessment=result.text or "(empty response)",
-                )
-                return fallback, result
+            ],
+            alternative_hypotheses=[],
+            overall_assessment=agent_result.text or "(empty response)",
+        )
+        return fallback, agent_result
 
-    raise RuntimeError("Unreachable: critic structured query loop exited without return")
+    return await agent_retry_loop(
+        query_fn=_query,
+        validate_fn=_validate,
+        prompt=prompt,
+        agent_name=label,
+        retryable_errors=_RETRYABLE_ERRORS,
+        on_exhausted=_on_exhausted,
+    )
 
 
 # ---------------------------------------------------------------------------

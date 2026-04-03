@@ -14,6 +14,7 @@ from typing import Any
 
 from pydantic import BaseModel, ValidationError
 
+from auto_scientist.retry import ValidationError as RetryValidationError
 from auto_scientist.sdk_backend import SDKBackend
 
 logger = logging.getLogger(__name__)
@@ -88,8 +89,12 @@ async def safe_query(
 # ---------------------------------------------------------------------------
 
 
-class OutputValidationError(Exception):
-    """Raised when an agent's output fails JSON parsing or schema validation."""
+class OutputValidationError(RetryValidationError):
+    """Raised when an agent's output fails JSON parsing or schema validation.
+
+    Subclasses :class:`~auto_scientist.retry.ValidationError` so that the
+    shared ``agent_retry_loop`` catches it automatically.
+    """
 
     def __init__(
         self,
@@ -100,10 +105,13 @@ class OutputValidationError(Exception):
         self.raw_output = raw_output
         self.validation_error = validation_error
         self.agent_name = agent_name
-        super().__init__(f"{agent_name} output validation failed: {validation_error}")
+        # Build the correction hint first, then pass to ValidationError
+        hint = self._build_correction_hint()
+        super().__init__(correction_hint=hint)
+        # Override the default Exception message for nicer repr
+        self.args = (f"{agent_name} output validation failed: {validation_error}",)
 
-    def correction_prompt(self) -> str:
-        """Format a correction hint for the LLM to fix its output."""
+    def _build_correction_hint(self) -> str:
         truncated = self.raw_output[:500]
         if len(self.raw_output) > 500:
             truncated += "..."
@@ -114,6 +122,10 @@ class OutputValidationError(Exception):
             "Please output ONLY valid JSON matching the schema. No markdown fencing.\n"
             "</validation_error>"
         )
+
+    def correction_prompt(self) -> str:
+        """Format a correction hint for the LLM to fix its output."""
+        return self.correction_hint
 
 
 def _strip_markdown_fencing(raw: str) -> str:
@@ -298,11 +310,12 @@ async def collect_text_from_query(
     backend: SDKBackend,
     message_buffer: list[str] | None = None,
     agent_name: str = "Agent",
-) -> tuple[str, dict[str, Any]]:
+) -> tuple[str, dict[str, Any], str | None]:
     """Run an SDK query and collect the text response.
 
     Returns:
-        (text, usage) tuple. Usage dict contains token counts and cost info.
+        (text, usage, session_id) tuple. Usage dict contains token counts and
+        cost info. session_id is the backend session identifier (for resume).
         Also sets ``last_usage`` on the function object so the orchestrator
         can read it after sequential agent phases (coder, ingestor).
     """
@@ -310,6 +323,7 @@ async def collect_text_from_query(
     result_text = ""
     assistant_texts: list[str] = []
     usage: dict[str, Any] = {}
+    session_id: str | None = None
     has_streaming = False
 
     async for message in backend.query(prompt=prompt, options=options):
@@ -317,6 +331,7 @@ async def collect_text_from_query(
             if message.result:
                 result_text = message.result
             usage = message.usage
+            session_id = message.session_id
         elif message.type == "stream":
             # Partial content deltas (Claude backend with include_partial_messages).
             # Populate only the message_buffer so the summarizer sees real-time
@@ -352,7 +367,7 @@ async def collect_text_from_query(
     # (orchestrator's _apply_sdk_usage reads this after sequential agent phases)
     collect_text_from_query.last_usage = usage  # type: ignore[attr-defined]
 
-    return raw, usage
+    return raw, usage, session_id
 
 
 # Initialize the usage attribute
