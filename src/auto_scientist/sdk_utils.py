@@ -256,12 +256,14 @@ _DEFERRED_TOOL_DESCRIPTIONS: dict[str, str] = {
     ),
     "AskUserQuestion": ("AskUserQuestion(question: str) - Ask the user a clarifying question."),
     "mcp__predictions__read_predictions": (
-        "mcp__predictions__read_predictions(pred_ids?: list[str], filter?: str, iteration?: int) "
+        "mcp__predictions__read_predictions("
+        "pred_ids?: list[str], chain?: str, filter?: str, iteration?: int) "
         "- Query prediction history for full detail. "
         "pred_ids: specific IDs like ['2.1','3.4']. "
+        "chain: full ancestor-to-descendant chain for an ID. "
         "filter: 'pending'|'refuted'|'confirmed'|'inconclusive'|'active_chains'. "
         "iteration: predictions from a specific iteration. "
-        "No args returns all predictions."
+        "At least one parameter required."
     ),
 }
 

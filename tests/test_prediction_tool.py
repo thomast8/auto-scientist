@@ -146,21 +146,64 @@ class TestHandleReadPredictions:
         assert "[0.1]" not in text
 
     @pytest.mark.asyncio
-    async def test_no_args_returns_all(self, sample_history):
-        result = await _handle_read_predictions(sample_history, {})
+    async def test_filter_confirmed_returns_subset(self, sample_history):
+        result = await _handle_read_predictions(sample_history, {"filter": "confirmed"})
         text = result["content"][0]["text"]
-        assert "[0.1]" in text
-        assert "[0.2]" in text
-        assert "[1.1]" in text
-        assert "[2.1]" in text
-        assert "[2.2]" in text
-        assert "[3.1]" in text
+        assert "[0.1] CONFIRMED" in text
+        assert "[1.1] CONFIRMED" in text
+        # Refuted prediction 0.2 should not appear as a primary entry
+        assert "[0.2] REFUTED" not in text
 
     @pytest.mark.asyncio
     async def test_empty_history(self):
         result = await _handle_read_predictions([], {})
         text = result["content"][0]["text"]
         assert "no prediction" in text.lower()
+
+    @pytest.mark.asyncio
+    async def test_no_args_returns_error(self, sample_history):
+        """No arguments should return an error, not dump all predictions."""
+        result = await _handle_read_predictions(sample_history, {})
+        text = result["content"][0]["text"]
+        assert "please specify" in text.lower()
+        # Should list available IDs to help the model
+        assert "0.1" in text
+
+    @pytest.mark.asyncio
+    async def test_chain_returns_ancestors_and_descendants(self, sample_history):
+        """chain='1.1' should return 0.2 (ancestor), 1.1 (self), 2.1 (descendant)."""
+        result = await _handle_read_predictions(sample_history, {"chain": "1.1"})
+        text = result["content"][0]["text"]
+        assert "[0.2]" in text  # ancestor (1.1 follows_from 0.2)
+        assert "[1.1]" in text  # self
+        assert "[2.1]" in text  # descendant (2.1 follows_from 1.1)
+        # Should NOT include unrelated predictions
+        assert "[0.1]" not in text
+        assert "[2.2]" not in text
+
+    @pytest.mark.asyncio
+    async def test_chain_unknown_id(self, sample_history):
+        result = await _handle_read_predictions(sample_history, {"chain": "99.99"})
+        text = result["content"][0]["text"]
+        assert "not found" in text.lower()
+
+    @pytest.mark.asyncio
+    async def test_chain_root_prediction(self, sample_history):
+        """chain on a root (no ancestors) returns self + descendants."""
+        result = await _handle_read_predictions(sample_history, {"chain": "0.2"})
+        text = result["content"][0]["text"]
+        assert "[0.2]" in text
+        assert "[1.1]" in text  # child
+        assert "[2.1]" in text  # grandchild
+
+    @pytest.mark.asyncio
+    async def test_chain_leaf_prediction(self, sample_history):
+        """chain on a leaf (no descendants) returns ancestors + self."""
+        result = await _handle_read_predictions(sample_history, {"chain": "2.1"})
+        text = result["content"][0]["text"]
+        assert "[0.2]" in text  # grandparent
+        assert "[1.1]" in text  # parent
+        assert "[2.1]" in text  # self
 
     @pytest.mark.asyncio
     async def test_output_includes_full_detail(self, sample_history):

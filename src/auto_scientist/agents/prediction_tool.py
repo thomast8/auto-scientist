@@ -31,6 +31,14 @@ _READ_PREDICTIONS_SCHEMA: dict[str, Any] = {
                 "Use the bracketed IDs from the prediction tree."
             ),
         },
+        "chain": {
+            "type": "string",
+            "description": (
+                "A prediction ID. Returns the full chain from root ancestor "
+                "to all descendants for that prediction. E.g. chain='2.1' "
+                "returns the root, 2.1, and any children of 2.1."
+            ),
+        },
         "filter": {
             "type": "string",
             "enum": [
@@ -87,6 +95,31 @@ def _get_ancestor_ids(pred_id: str, by_id: dict[str, PredictionRecord]) -> set[s
     return ancestors
 
 
+def _get_descendant_ids(pred_id: str, all_preds: list[PredictionRecord]) -> set[str]:
+    """Walk follows_from links downward, collecting all descendant pred_ids."""
+    descendants: set[str] = set()
+    frontier = {pred_id}
+    while frontier:
+        current = frontier.pop()
+        for rec in all_preds:
+            if rec.follows_from == current and rec.pred_id and rec.pred_id not in descendants:
+                descendants.add(rec.pred_id)
+                frontier.add(rec.pred_id)
+    return descendants
+
+
+def _get_full_chain_ids(
+    pred_id: str,
+    by_id: dict[str, PredictionRecord],
+    all_preds: list[PredictionRecord],
+) -> set[str]:
+    """Get the full chain (ancestors + self + descendants) for a prediction."""
+    chain = {pred_id}
+    chain |= _get_ancestor_ids(pred_id, by_id)
+    chain |= _get_descendant_ids(pred_id, all_preds)
+    return chain
+
+
 async def _handle_read_predictions(
     prediction_history: list[PredictionRecord],
     args: dict[str, Any],
@@ -96,10 +129,26 @@ async def _handle_read_predictions(
         return {"content": [{"type": "text", "text": "No predictions in history yet."}]}
 
     by_id = {r.pred_id: r for r in prediction_history if r.pred_id}
+    available = ", ".join(sorted(by_id.keys()))
 
     pred_ids = args.get("pred_ids")
+    chain_id = args.get("chain")
     status_filter = args.get("filter")
     iteration = args.get("iteration")
+
+    # Require at least one query parameter
+    if not pred_ids and not chain_id and not status_filter and iteration is None:
+        return {
+            "content": [
+                {
+                    "type": "text",
+                    "text": (
+                        "Please specify a query: pred_ids, chain, filter, or iteration. "
+                        f"Available IDs: {available}"
+                    ),
+                }
+            ]
+        }
 
     selected: list[PredictionRecord] = []
 
@@ -113,10 +162,7 @@ async def _handle_read_predictions(
                 "content": [
                     {
                         "type": "text",
-                        "text": (
-                            f"Not found: {', '.join(pred_ids)}. "
-                            f"Available IDs: {', '.join(sorted(by_id.keys()))}"
-                        ),
+                        "text": f"Not found: {', '.join(pred_ids)}. Available IDs: {available}",
                     }
                 ]
             }
@@ -124,6 +170,23 @@ async def _handle_read_predictions(
             missing_note = f"Note: IDs not found: {', '.join(missing)}\n\n"
             formatted = missing_note + "\n\n".join(_format_record_detail(r) for r in selected)
             return {"content": [{"type": "text", "text": formatted}]}
+
+    elif chain_id:
+        if chain_id not in by_id:
+            return {
+                "content": [
+                    {
+                        "type": "text",
+                        "text": f"Not found: {chain_id}. Available IDs: {available}",
+                    }
+                ]
+            }
+        chain_ids = _get_full_chain_ids(chain_id, by_id, prediction_history)
+        # Return in chronological order (by iteration prescribed)
+        selected = sorted(
+            [r for r in prediction_history if r.pred_id in chain_ids],
+            key=lambda r: (r.iteration_prescribed, r.pred_id),
+        )
 
     elif status_filter == "active_chains":
         pending = [r for r in prediction_history if r.outcome == "pending"]
@@ -143,9 +206,6 @@ async def _handle_read_predictions(
 
     elif iteration is not None:
         selected = [r for r in prediction_history if r.iteration_prescribed == iteration]
-
-    else:
-        selected = list(prediction_history)
 
     if not selected:
         return {"content": [{"type": "text", "text": "No predictions match the query."}]}
