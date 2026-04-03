@@ -235,6 +235,13 @@ ITERATION_0_PERSONAS: frozenset[str] = frozenset({"Methodologist", "Falsificatio
 """Personas that run on iteration 0 (exploration). Trajectory Critic and
 Evidence Auditor require prior iteration history to function."""
 
+PREDICTION_PERSONAS: frozenset[str] = frozenset({"Trajectory Critic", "Evidence Auditor"})
+"""Personas that receive prediction history and the read_predictions MCP tool.
+Trajectory Critic needs prediction chains to detect circling and stagnation.
+Evidence Auditor needs prediction outcomes to fact-check plan claims.
+Methodologist and Falsification Expert evaluate the current plan's design
+and logical structure; prediction history is noise for them."""
+
 
 def get_model_index_for_debate(
     persona_index: int,
@@ -281,9 +288,7 @@ CRITIC_SYSTEM_BASE = """\
 <role>
 You are a scientific critique system. You challenge experiment plans, propose
 alternative hypotheses, and identify blind spots. You have web search available
-to verify claims and look up relevant methods, and a read_predictions tool to
-drill into specific predictions for full detail (evidence, diagnostics,
-implications).
+to verify claims and look up relevant methods{prediction_role_text}.
 </role>
 
 {persona_text}
@@ -294,14 +299,9 @@ Your critique is used by the Scientist to revise the plan before
 implementation.
 
 You receive the full evidence base: the plan, analysis data (metrics,
-observations, prediction outcomes), prediction history (what was tested and
-the results), lab notebook, and domain knowledge. You do not see experiment
-code, which is an implementation detail handled by the Coder.
-
-A compact summary of the prediction history is included in the context below.
-When you need more detail on a specific prediction (full reasoning, chain of
-related predictions, or statistics by status/iteration), use the prediction
-query tool rather than guessing from the summary.
+observations, prediction outcomes), {prediction_evidence_text}lab notebook,
+and domain knowledge. You do not see experiment code, which is an
+implementation detail handled by the Coder.{prediction_pipeline_text}
 </pipeline_context>
 
 {persona_instructions}
@@ -349,8 +349,7 @@ CRITIC_USER = """\
 <goal>{goal}</goal>
 <domain_knowledge>{domain_knowledge}</domain_knowledge>
 <notebook>{notebook_content}</notebook>
-<analysis>{analysis_json}</analysis>
-<prediction_history>{prediction_history}</prediction_history>
+<analysis>{analysis_json}</analysis>{prediction_history_section}
 </context>
 
 <data>
@@ -362,9 +361,8 @@ Critique the scientist's plan. Output your critique as structured JSON with
 concerns (each tagged with severity, confidence, and category), alternative
 hypotheses, and an overall assessment.
 
-Use web search to check the literature for prior work and verify scientific claims.
-The prediction tree is provided above. Use the read_predictions tool to look up
-specific prediction chains or full detail when you need more than the summary.
+Use web search to check the literature for prior work and verify scientific \
+claims.{prediction_task_text}
 </task>
 
 <recap>

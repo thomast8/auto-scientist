@@ -46,6 +46,7 @@ from auto_scientist.prompts.critic import (
     DEFAULT_CRITIC_INSTRUCTIONS,
     ITERATION_0_PERSONAS,
     PERSONAS,
+    PREDICTION_PERSONAS,
     get_model_index_for_debate,
 )
 from auto_scientist.sdk_backend import SDKOptions, get_backend
@@ -309,15 +310,21 @@ async def run_single_critic_debate(
 
     label = f"{config.provider}:{config.model}"
 
-    tools, mcp_servers = _build_critic_tools_and_mcp(
-        prediction_history_records, output_dir=output_dir
-    )
+    has_predictions = persona_name in PREDICTION_PERSONAS
 
-    effective_prediction_history = (
-        format_compact_tree(prediction_history_records)
-        if prediction_history_records
-        else prediction_history
-    )
+    if has_predictions:
+        tools, mcp_servers = _build_critic_tools_and_mcp(
+            prediction_history_records, output_dir=output_dir
+        )
+        effective_prediction_history = (
+            format_compact_tree(prediction_history_records)
+            if prediction_history_records
+            else prediction_history
+        )
+    else:
+        tools = list(CRITIC_BASE_TOOLS)
+        mcp_servers = {}
+        effective_prediction_history = ""
 
     critic_system, critic_user = _build_critic_prompt(
         plan,
@@ -328,6 +335,7 @@ async def run_single_critic_debate(
         analysis_json=analysis_json,
         prediction_history=effective_prediction_history,
         goal=goal,
+        has_predictions=has_predictions,
     )
     critic_output, critic_result = await _query_critic_structured(
         config,
@@ -517,21 +525,57 @@ def _build_critic_prompt(
     analysis_json: str = "",
     prediction_history: str = "",
     goal: str = "",
+    has_predictions: bool = True,
 ) -> tuple[str, str]:
     """Build the (system, user) prompt pair sent to critic models.
 
     persona_instructions overrides the default instructions block when provided
     (used by the Trajectory Critic which needs arc-focused instructions).
 
+    When has_predictions is False, prediction-related text (tool references,
+    history section, pipeline context) is omitted from both prompts.
+
     Returns:
         (system_prompt, user_prompt) tuple.
     """
     effective_instructions = persona_instructions or DEFAULT_CRITIC_INSTRUCTIONS
 
+    if has_predictions:
+        prediction_role_text = (
+            ", and a read_predictions tool to\n"
+            "drill into specific predictions for full detail (evidence, diagnostics,\n"
+            "implications)"
+        )
+        prediction_evidence_text = "prediction history (what was tested and\nthe results), "
+        prediction_pipeline_text = (
+            "\nA compact summary of the prediction history is included in the context "
+            "below.\nWhen you need more detail on a specific prediction (full reasoning, "
+            "chain of\nrelated predictions, or statistics by status/iteration), use the "
+            "prediction\nquery tool rather than guessing from the summary."
+        )
+        prediction_history_section = (
+            f"\n<prediction_history>{prediction_history or '(no prediction history yet)'}"
+            "</prediction_history>"
+        )
+        prediction_task_text = (
+            "\nThe prediction tree is provided above. Use the read_predictions tool to "
+            "look up\nspecific prediction chains or full detail when you need more than "
+            "the summary."
+        )
+    else:
+        prediction_role_text = ""
+        prediction_evidence_text = ""
+        prediction_pipeline_text = ""
+        prediction_history_section = ""
+        prediction_task_text = ""
+
     system = CRITIC_SYSTEM_BASE.format(
         persona_text=persona_text,
         persona_instructions=effective_instructions,
         critic_output_schema=json.dumps(CRITIC_OUTPUT_SCHEMA, indent=2),
+        prediction_role_text=prediction_role_text,
+        prediction_evidence_text=prediction_evidence_text,
+        prediction_pipeline_text=prediction_pipeline_text,
     )
 
     user = CRITIC_USER.format(
@@ -539,7 +583,8 @@ def _build_critic_prompt(
         domain_knowledge=domain_knowledge or "(none provided)",
         notebook_content=notebook_content or "(empty)",
         analysis_json=analysis_json or "(no analysis yet)",
-        prediction_history=prediction_history or "(no prediction history yet)",
+        prediction_history_section=prediction_history_section,
         plan_json=json.dumps(plan, indent=2),
+        prediction_task_text=prediction_task_text,
     )
     return system, user
