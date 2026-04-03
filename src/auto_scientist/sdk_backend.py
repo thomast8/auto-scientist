@@ -454,8 +454,10 @@ class CodexBackend:
 
         # Write MCP server config so Codex picks it up at startup
         codex_cwd = Path(options.cwd) if options.cwd else Path.cwd()
+        codex_config_path: Path | None = None
         if options.mcp_servers:
             self._write_codex_mcp_config(options.mcp_servers, codex_cwd)
+            codex_config_path = codex_cwd / ".codex" / "config.toml"
 
         # Connect and run using chat() for streaming (enables progress
         # summaries) instead of chat_once() which blocks until turn completes.
@@ -517,6 +519,12 @@ class CodexBackend:
                 await client.close()
             except Exception:
                 logger.debug("Error closing Codex client", exc_info=True)
+            if codex_config_path and codex_config_path.exists():
+                try:
+                    codex_config_path.unlink()
+                    logger.debug(f"Cleaned up Codex MCP config: {codex_config_path}")
+                except OSError:
+                    logger.debug("Failed to clean up Codex MCP config", exc_info=True)
 
 
 # ---------------------------------------------------------------------------

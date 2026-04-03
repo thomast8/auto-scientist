@@ -1289,6 +1289,7 @@ class Orchestrator:
                     goal=self.state.goal,
                     provider=cfg.provider,
                     reasoning=cfg.reasoning,
+                    output_dir=self.output_dir,
                 )
 
             revised: dict[str, Any] = await self._with_summaries(
@@ -1467,6 +1468,7 @@ class Orchestrator:
                     goal=self.state.goal,
                     provider=cfg.provider,
                     reasoning=cfg.reasoning,
+                    output_dir=self.output_dir,
                 )
 
             plan: dict[str, Any] = await self._with_summaries(
@@ -2131,6 +2133,7 @@ class Orchestrator:
                     goal=self.state.goal,
                     provider=cfg.provider,
                     reasoning=cfg.reasoning,
+                    output_dir=self.output_dir,
                 )
 
             revised: dict[str, Any] = await self._with_summaries(

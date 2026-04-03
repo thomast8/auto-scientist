@@ -39,6 +39,7 @@ SCIENTIST_MCP_TOOL = "mcp__predictions__read_predictions"
 def _build_scientist_tools_and_mcp(
     prediction_history: list[PredictionRecord] | None,
     provider: str,
+    output_dir: Path | None = None,
 ) -> tuple[list[str], dict[str, Any]]:
     """Build the tools list and MCP servers dict for a Scientist invocation.
 
@@ -49,7 +50,9 @@ def _build_scientist_tools_and_mcp(
     tools = list(SCIENTIST_BASE_TOOLS)
     mcp_servers: dict[str, Any] = {}
     if prediction_history:
-        mcp_servers["predictions"] = build_prediction_mcp_server(prediction_history)
+        mcp_servers["predictions"] = build_prediction_mcp_server(
+            prediction_history, output_dir=output_dir
+        )
         tools.append(SCIENTIST_MCP_TOOL)
     return tools, mcp_servers
 
@@ -250,6 +253,7 @@ async def run_scientist(
     goal: str = "",
     provider: str = "anthropic",
     reasoning: ReasoningConfig | None = None,
+    output_dir: Path | None = None,
 ) -> dict[str, Any]:
     """Formulate hypothesis and plan based on analysis.
 
@@ -299,7 +303,9 @@ async def run_scientist(
     if reasoning and reasoning.level != "off":
         extra_args.update(reasoning_to_cc_extra_args(reasoning))
 
-    tools, mcp_servers = _build_scientist_tools_and_mcp(prediction_history, provider)
+    tools, mcp_servers = _build_scientist_tools_and_mcp(
+        prediction_history, provider, output_dir=output_dir
+    )
 
     max_turns = 15
     backend = get_backend(provider)
@@ -354,6 +360,7 @@ async def run_scientist_revision(
     goal: str = "",
     provider: str = "anthropic",
     reasoning: ReasoningConfig | None = None,
+    output_dir: Path | None = None,
 ) -> dict[str, Any]:
     """Revise the plan after a critic debate.
 
@@ -400,7 +407,9 @@ async def run_scientist_revision(
     if reasoning and reasoning.level != "off":
         extra_args.update(reasoning_to_cc_extra_args(reasoning))
 
-    tools, mcp_servers = _build_scientist_tools_and_mcp(prediction_history, provider)
+    tools, mcp_servers = _build_scientist_tools_and_mcp(
+        prediction_history, provider, output_dir=output_dir
+    )
 
     max_turns = 15
     backend = get_backend(provider)

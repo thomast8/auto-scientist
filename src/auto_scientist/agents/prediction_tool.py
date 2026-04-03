@@ -268,76 +268,41 @@ async def _handle_read_predictions(
 
 def build_prediction_mcp_server(
     prediction_history: list[PredictionRecord],
+    output_dir: Path | None = None,
 ) -> dict[str, Any]:
     """Create an stdio MCP server config for the read_predictions tool.
 
-    Writes predictions to a temp JSON file and returns a stdio server config
+    Writes predictions to a JSON file and returns a stdio server config
     that launches a Python subprocess serving them via the ``mcp`` library.
     The Claude Code CLI connects to this server via stdin/stdout.
 
+    When *output_dir* is provided the file is written to
+    ``output_dir/predictions.json`` so the experiment folder stays
+    self-contained and crash-recoverable.  Otherwise a temporary file in
+    the system temp directory is used (useful for tests).
+
     Returns a dict suitable for ``ClaudeCodeOptions.mcp_servers``.
     """
-    # Write predictions to a temp file the subprocess can read
     predictions_data = [r.model_dump() for r in prediction_history]
-    with tempfile.NamedTemporaryFile(
-        mode="w",
-        suffix=".json",
-        prefix="predictions_",
-        delete=False,
-    ) as tmp:
-        json.dump(predictions_data, tmp)
-    logger.debug(f"Wrote {len(prediction_history)} predictions to {tmp.name}")
 
-    # Return stdio server config pointing to the MCP server script
+    if output_dir is not None:
+        predictions_path = output_dir / "predictions.json"
+        predictions_path.write_text(json.dumps(predictions_data))
+    else:
+        with tempfile.NamedTemporaryFile(
+            mode="w",
+            suffix=".json",
+            prefix="predictions_",
+            delete=False,
+        ) as tmp:
+            json.dump(predictions_data, tmp)
+        predictions_path = Path(tmp.name)
+
+    logger.debug(f"Wrote {len(prediction_history)} predictions to {predictions_path}")
+
     server_script = str(Path(__file__).parent / "_prediction_mcp_server.py")
     return {
         "type": "stdio",
         "command": "python3",
-        "args": [server_script, tmp.name],
+        "args": [server_script, str(predictions_path)],
     }
-
-
-def write_codex_mcp_config(
-    prediction_history: list[PredictionRecord],
-    cwd: Path,
-) -> None:
-    """Write a .codex/config.toml with the predictions MCP server.
-
-    Codex reads MCP config from ``<cwd>/.codex/config.toml`` at startup.
-    This writes the predictions MCP server there so Codex agents get the
-    same ``read_predictions`` tool that Claude agents get via mcp_servers.
-    """
-    predictions_data = [r.model_dump() for r in prediction_history]
-    predictions_path = cwd / ".codex" / "predictions.json"
-    predictions_path.parent.mkdir(parents=True, exist_ok=True)
-    predictions_path.write_text(json.dumps(predictions_data))
-
-    server_script = str(Path(__file__).parent / "_prediction_mcp_server.py")
-
-    # Codex config.toml format for stdio MCP servers
-    config_path = cwd / ".codex" / "config.toml"
-
-    # Read existing config if present, preserve non-MCP sections
-    existing = config_path.read_text() if config_path.exists() else ""
-    lines = existing.splitlines()
-    # Remove any existing predictions MCP section
-    filtered: list[str] = []
-    skip = False
-    for line in lines:
-        if line.strip() == "[mcp_servers.predictions]":
-            skip = True
-            continue
-        if skip and line.strip().startswith("["):
-            skip = False
-        if not skip:
-            filtered.append(line)
-
-    # Append predictions MCP server
-    filtered.append("")
-    filtered.append("[mcp_servers.predictions]")
-    filtered.append('command = "python3"')
-    filtered.append(f'args = ["{server_script}", "{predictions_path}"]')
-    filtered.append("")
-
-    config_path.write_text("\n".join(filtered))
-    logger.debug(f"Wrote Codex MCP config to {config_path}")

@@ -242,3 +242,11 @@ class TestBuildPredictionMcpServer:
         data = json.loads(Path(predictions_path).read_text())
         assert len(data) == len(sample_history)
         assert data[0]["pred_id"] == "0.1"
+
+    def test_writes_to_output_dir(self, sample_history, tmp_path):
+        server = build_prediction_mcp_server(sample_history, output_dir=tmp_path)
+        predictions_path = server["args"][1]
+        assert predictions_path == str(tmp_path / "predictions.json")
+        data = json.loads(Path(predictions_path).read_text())
+        assert len(data) == len(sample_history)
+        assert data[0]["pred_id"] == "0.1"
