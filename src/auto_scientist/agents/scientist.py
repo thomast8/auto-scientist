@@ -298,7 +298,7 @@ async def run_scientist(
         f"Schema:\n{json.dumps(SCIENTIST_PLAN_SCHEMA, indent=2)}"
     )
 
-    extra_args: dict[str, str | None] = {"setting-sources": ""}
+    extra_args: dict[str, str | None] = {}
     if reasoning and reasoning.level != "off":
         extra_args.update(reasoning_to_cc_extra_args(reasoning))
 
@@ -402,7 +402,7 @@ async def run_scientist_revision(
         f"Schema:\n{json.dumps(SCIENTIST_PLAN_SCHEMA, indent=2)}"
     )
 
-    extra_args: dict[str, str | None] = {"setting-sources": ""}
+    extra_args: dict[str, str | None] = {}
     if reasoning and reasoning.level != "off":
         extra_args.update(reasoning_to_cc_extra_args(reasoning))
 

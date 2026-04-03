@@ -68,7 +68,7 @@ async def run_report(
         permission_mode="acceptEdits",
         cwd=output_dir,
         model=model,
-        extra_args={"setting-sources": ""},
+        extra_args={},
     )
 
     correction_hint = ""
@@ -155,7 +155,7 @@ async def run_report(
                     cwd=output_dir,
                     model=model,
                     resume=session_id,
-                    extra_args={"setting-sources": ""},
+                    extra_args={},
                 )
             else:
                 logger.warning(

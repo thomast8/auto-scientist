@@ -79,7 +79,7 @@ async def _query_critic(
     """
     if config.mode == "sdk" and config.provider in ("anthropic", "openai"):
         # SDK mode: use the backend abstraction
-        extra_args: dict[str, str | None] = {"setting-sources": ""}
+        extra_args: dict[str, str | None] = {}
         if config.reasoning and config.reasoning.level != "off":
             extra_args.update(reasoning_to_cc_extra_args(config.reasoning))
         max_turns = 5
@@ -126,7 +126,7 @@ async def _query_critic(
         )
     elif config.provider == "anthropic":
         # Anthropic in API mode falls back to SDK (no direct API web search yet)
-        extra_args_api: dict[str, str | None] = {"setting-sources": ""}
+        extra_args_api: dict[str, str | None] = {}
         if config.reasoning and config.reasoning.level != "off":
             extra_args_api.update(reasoning_to_cc_extra_args(config.reasoning))
         max_turns = 5

@@ -132,7 +132,7 @@ async def run_coder(
         permission_mode="acceptEdits",
         cwd=output_dir,
         model=model,
-        extra_args={"setting-sources": ""},
+        extra_args={},
     )
 
     correction_hint = ""

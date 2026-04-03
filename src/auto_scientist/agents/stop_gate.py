@@ -95,7 +95,7 @@ async def run_completeness_assessment(
         allowed_tools=[],
         max_turns=max_turns,
         model=model,
-        extra_args={"setting-sources": ""},
+        extra_args={},
     )
 
     correction_hint = ""
@@ -293,7 +293,7 @@ async def run_scientist_stop_revision(
         allowed_tools=[],
         max_turns=max_turns,
         model=model,
-        extra_args={"setting-sources": ""},
+        extra_args={},
     )
 
     correction_hint = ""

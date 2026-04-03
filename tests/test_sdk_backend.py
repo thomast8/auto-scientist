@@ -1,9 +1,62 @@
 """Tests for SDK backend abstraction (SDKOptions, SDKMessage, backends, factory)."""
 
+import json
 from pathlib import Path
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
+
+# ---------------------------------------------------------------------------
+# _bare_settings
+# ---------------------------------------------------------------------------
+
+
+class TestBareSettings:
+    def test_explicit_api_key_in_env(self):
+        """Agent env with ANTHROPIC_API_KEY -> bare mode, no settings."""
+        from auto_scientist.sdk_backend import _bare_settings
+
+        use_bare, settings = _bare_settings({"ANTHROPIC_API_KEY": "sk-test"})
+        assert use_bare is True
+        assert settings is None
+
+    def test_macos_keychain(self):
+        """On macOS without API key -> bare mode with apiKeyHelper."""
+        from auto_scientist.sdk_backend import _bare_settings
+
+        with patch("auto_scientist.sdk_backend.sys") as mock_sys:
+            mock_sys.platform = "darwin"
+            use_bare, settings = _bare_settings({})
+
+        assert use_bare is True
+        assert settings is not None
+        parsed = json.loads(settings)
+        assert "apiKeyHelper" in parsed
+        assert "security find-generic-password" in parsed["apiKeyHelper"]
+
+    def test_non_macos_with_explicit_env_key(self):
+        """On Linux with ANTHROPIC_API_KEY in agent env -> bare, no settings."""
+        from auto_scientist.sdk_backend import _bare_settings
+
+        with patch("auto_scientist.sdk_backend.sys") as mock_sys:
+            mock_sys.platform = "linux"
+            use_bare, settings = _bare_settings({"ANTHROPIC_API_KEY": "sk-test"})
+
+        assert use_bare is True
+        assert settings is None
+
+    def test_no_auth_raises(self):
+        """No macOS, no API key -> RuntimeError."""
+        from auto_scientist.sdk_backend import _bare_settings
+
+        with (
+            patch("auto_scientist.sdk_backend.sys") as mock_sys,
+            patch.dict("os.environ", {}, clear=True),
+            pytest.raises(RuntimeError, match="Cannot resolve Anthropic auth"),
+        ):
+            mock_sys.platform = "linux"
+            _bare_settings({})
+
 
 # ---------------------------------------------------------------------------
 # SDKOptions
@@ -156,7 +209,7 @@ class TestClaudeBackend:
             model="claude-sonnet-4-6",
             cwd=Path("/tmp"),
             permission_mode="acceptEdits",
-            extra_args={"setting-sources": ""},
+            extra_args={},
         )
         cc_opts = backend._build_claude_options(opts)
         assert cc_opts.system_prompt == "test system"
@@ -230,8 +283,8 @@ class TestClaudeBackend:
         assert messages[1].session_id == "sess-1"
 
     @pytest.mark.asyncio
-    async def test_strips_anthropic_api_key(self):
-        """When ANTHROPIC_API_KEY is in env, ClaudeBackend strips it from subprocess."""
+    async def test_bare_flag_injected(self):
+        """ClaudeBackend injects --bare for subprocess isolation."""
         from auto_scientist.sdk_backend import ClaudeBackend, SDKOptions
 
         async def fake_query(**kwargs):
@@ -243,17 +296,60 @@ class TestClaudeBackend:
 
         with (
             patch("auto_scientist.sdk_backend.claude_query", side_effect=fake_query) as mock_q,
-            patch.dict("os.environ", {"ANTHROPIC_API_KEY": "sk-test"}, clear=False),
+            patch("auto_scientist.sdk_backend._bare_settings", return_value=(True, None)),
         ):
             async for _ in backend.query("test", opts):
                 pass
 
-        # The ClaudeCodeOptions passed to query should have ANTHROPIC_API_KEY stripped
         call_kwargs = mock_q.call_args
         cc_opts = call_kwargs.kwargs.get("options") or call_kwargs[1].get("options")
-        # The env should either not contain ANTHROPIC_API_KEY or have it set to empty
-        if hasattr(cc_opts, "env") and cc_opts.env:
-            assert cc_opts.env.get("ANTHROPIC_API_KEY", "") == ""
+        assert cc_opts.extra_args.get("bare") is None  # None = boolean flag
+        assert "bare" in cc_opts.extra_args
+
+    @pytest.mark.asyncio
+    async def test_bare_settings_passed(self):
+        """When _bare_settings returns settings JSON, it's passed to ClaudeCodeOptions."""
+        from auto_scientist.sdk_backend import ClaudeBackend, SDKOptions
+
+        async def fake_query(**kwargs):
+            return
+            yield
+
+        backend = ClaudeBackend()
+        opts = SDKOptions(system_prompt="", allowed_tools=[], max_turns=5)
+        fake_settings = '{"apiKeyHelper": "echo test"}'
+
+        with (
+            patch("auto_scientist.sdk_backend.claude_query", side_effect=fake_query) as mock_q,
+            patch(
+                "auto_scientist.sdk_backend._bare_settings",
+                return_value=(True, fake_settings),
+            ),
+        ):
+            async for _ in backend.query("test", opts):
+                pass
+
+        call_kwargs = mock_q.call_args
+        cc_opts = call_kwargs.kwargs.get("options") or call_kwargs[1].get("options")
+        assert cc_opts.settings == fake_settings
+
+    @pytest.mark.asyncio
+    async def test_bare_auth_failure_propagates(self):
+        """When _bare_settings raises, ClaudeBackend propagates the error."""
+        from auto_scientist.sdk_backend import ClaudeBackend, SDKOptions
+
+        backend = ClaudeBackend()
+        opts = SDKOptions(system_prompt="", allowed_tools=[], max_turns=5)
+
+        with (
+            patch(
+                "auto_scientist.sdk_backend._bare_settings",
+                side_effect=RuntimeError("no auth"),
+            ),
+            pytest.raises(RuntimeError, match="no auth"),
+        ):
+            async for _ in backend.query("test", opts):
+                pass
 
     @pytest.mark.asyncio
     async def test_skips_none_messages(self):

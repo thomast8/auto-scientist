@@ -116,7 +116,7 @@ async def run_validation():
         mcp_servers={"predictions": mcp_server},
         max_turns=15,
         permission_mode="acceptEdits",
-        extra_args={"setting-sources": ""},
+        extra_args={},
     )
 
     logger.info("Running Scientist agent...")

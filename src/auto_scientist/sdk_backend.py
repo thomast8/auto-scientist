@@ -9,8 +9,10 @@ unknown message types are silently skipped instead of crashing the stream.
 """
 
 import asyncio
+import json
 import logging
 import os
+import sys
 from collections.abc import AsyncIterator
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -59,6 +61,40 @@ The script must still declare dependencies in the PEP 723 block for
 reproducibility outside this environment.
 </sandbox_environment>
 """
+
+# Shell command that extracts the Claude Code OAuth token from the macOS keychain.
+# Used as apiKeyHelper when running in --bare mode (subscription auth).
+# Keychain structure: service="Claude Code-credentials", key path claudeAiOauth.accessToken.
+# If Anthropic changes this format, the helper will fail at runtime.
+_MACOS_API_KEY_HELPER = (
+    "security find-generic-password -s 'Claude Code-credentials' -w"
+    ' | python3 -c "import sys,json;'
+    " print(json.loads(sys.stdin.read())['claudeAiOauth']['accessToken'])\""
+)
+
+
+def _bare_settings(env: dict[str, str]) -> tuple[bool, str | None]:
+    """Resolve auth for --bare isolation mode.
+
+    Returns (use_bare, settings_json).
+    --bare disables keychain reads, so we provide auth via apiKeyHelper
+    (macOS keychain OAuth extraction). Always uses --bare; raises if
+    auth cannot be resolved.
+    """
+    # Explicit API key in agent env overrides everything
+    if env.get("ANTHROPIC_API_KEY"):
+        return True, None
+
+    # macOS: extract OAuth token from keychain via apiKeyHelper (primary path)
+    if sys.platform == "darwin":
+        return True, json.dumps({"apiKeyHelper": _MACOS_API_KEY_HELPER})
+
+    raise RuntimeError(
+        "Cannot resolve Anthropic auth for --bare isolation mode. "
+        "On macOS, subscription auth is extracted from the keychain automatically. "
+        "On other platforms, set ANTHROPIC_API_KEY in the environment."
+    )
+
 
 # Codex effort mapping: our levels -> Codex ReasoningEffort strings
 _CODEX_EFFORT_MAP: dict[str, str] = {
@@ -226,31 +262,34 @@ class ClaudeBackend:
     def _build_claude_options(self, options: SDKOptions) -> ClaudeCodeOptions:
         """Convert SDKOptions to ClaudeCodeOptions."""
         env = dict(options.env)
-
-        # Strip ANTHROPIC_API_KEY so the CLI uses subscription auth
-        if "ANTHROPIC_API_KEY" not in env and os.environ.get("ANTHROPIC_API_KEY"):
-            logger.info(
-                "Stripping ANTHROPIC_API_KEY from SDK subprocess env "
-                "(using Claude Code subscription instead of direct API billing)"
-            )
-            env["ANTHROPIC_API_KEY"] = ""
+        extra_args = dict(options.extra_args)
 
         # When reasoning is "off" (no effort key in extra_args), disable
         # extended thinking via env var.  The Claude Code CLI has no
         # --effort off/none flag; omitting --effort lets the model use
         # adaptive thinking by default.  MAX_THINKING_TOKENS=0 is the
         # only way to fully suppress it.
-        if "effort" not in options.extra_args:
+        if "effort" not in extra_args:
             env["MAX_THINKING_TOKENS"] = "0"
+
+        # --bare isolates SDK subprocesses from the user's personal
+        # Claude Code environment (hooks, plugins, CLAUDE.md, settings).
+        # Auth is provided via apiKeyHelper (macOS keychain) or
+        # ANTHROPIC_API_KEY (env var fallback).
+        use_bare, bare_settings = _bare_settings(env)
+        if use_bare:
+            extra_args["bare"] = None
 
         kwargs: dict[str, Any] = {
             "system_prompt": options.system_prompt,
             "allowed_tools": options.allowed_tools,
             "max_turns": options.max_turns,
             "permission_mode": options.permission_mode,
-            "extra_args": dict(options.extra_args),
+            "extra_args": extra_args,
             "include_partial_messages": True,
         }
+        if bare_settings:
+            kwargs["settings"] = bare_settings
         if options.model:
             kwargs["model"] = options.model
         if options.cwd:

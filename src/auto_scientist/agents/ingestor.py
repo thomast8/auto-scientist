@@ -72,7 +72,7 @@ async def run_ingestor(
         permission_mode="acceptEdits",
         cwd=output_dir,
         model=model,
-        extra_args={"setting-sources": ""},
+        extra_args={},
     )
 
     config_path_str = str(config_path) if config_path else "(not requested)"
@@ -189,7 +189,7 @@ async def run_ingestor(
                         cwd=output_dir,
                         model=model,
                         resume=session_id,
-                        extra_args={"setting-sources": ""},
+                        extra_args={},
                     )
                 else:
                     logger.warning(
