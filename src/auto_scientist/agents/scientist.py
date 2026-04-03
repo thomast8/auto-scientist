@@ -42,12 +42,13 @@ def _build_scientist_tools_and_mcp(
 ) -> tuple[list[str], dict[str, Any]]:
     """Build the tools list and MCP servers dict for a Scientist invocation.
 
-    Only includes the MCP prediction tool when there are predictions to query
-    and the backend supports MCP (Claude only, not Codex).
+    Both Claude and Codex backends get the same stdio MCP server config.
+    Claude passes it via mcp_servers; the CodexBackend translates it to
+    .codex/config.toml automatically.
     """
     tools = list(SCIENTIST_BASE_TOOLS)
     mcp_servers: dict[str, Any] = {}
-    if prediction_history and provider == "anthropic":
+    if prediction_history:
         mcp_servers["predictions"] = build_prediction_mcp_server(prediction_history)
         tools.append(SCIENTIST_MCP_TOOL)
     return tools, mcp_servers

@@ -183,3 +183,49 @@ def build_prediction_mcp_server(
         "command": "python3",
         "args": [server_script, tmp.name],
     }
+
+
+def write_codex_mcp_config(
+    prediction_history: list[PredictionRecord],
+    cwd: Path,
+) -> None:
+    """Write a .codex/config.toml with the predictions MCP server.
+
+    Codex reads MCP config from ``<cwd>/.codex/config.toml`` at startup.
+    This writes the predictions MCP server there so Codex agents get the
+    same ``read_predictions`` tool that Claude agents get via mcp_servers.
+    """
+    predictions_data = [r.model_dump() for r in prediction_history]
+    predictions_path = cwd / ".codex" / "predictions.json"
+    predictions_path.parent.mkdir(parents=True, exist_ok=True)
+    predictions_path.write_text(json.dumps(predictions_data))
+
+    server_script = str(Path(__file__).parent / "_prediction_mcp_server.py")
+
+    # Codex config.toml format for stdio MCP servers
+    config_path = cwd / ".codex" / "config.toml"
+
+    # Read existing config if present, preserve non-MCP sections
+    existing = config_path.read_text() if config_path.exists() else ""
+    lines = existing.splitlines()
+    # Remove any existing predictions MCP section
+    filtered: list[str] = []
+    skip = False
+    for line in lines:
+        if line.strip() == "[mcp_servers.predictions]":
+            skip = True
+            continue
+        if skip and line.strip().startswith("["):
+            skip = False
+        if not skip:
+            filtered.append(line)
+
+    # Append predictions MCP server
+    filtered.append("")
+    filtered.append("[mcp_servers.predictions]")
+    filtered.append('command = "python3"')
+    filtered.append(f'args = ["{server_script}", "{predictions_path}"]')
+    filtered.append("")
+
+    config_path.write_text("\n".join(filtered))
+    logger.debug(f"Wrote Codex MCP config to {config_path}")

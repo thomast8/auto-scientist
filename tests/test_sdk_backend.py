@@ -458,32 +458,23 @@ class TestCodexBackend:
         # Verify thread_id was passed for resumption
         assert chat_kwargs_captured.get("thread_id") == "thr-existing"
 
-    @pytest.mark.asyncio
-    async def test_warns_when_mcp_servers_present(self, caplog):
-        """CodexBackend logs a warning when mcp_servers is non-empty."""
-        import logging
-
-        from auto_scientist.sdk_backend import CodexBackend, SDKOptions
-
-        steps = [self._make_mock_step("ok", "thr-1")]
-        mock_client = self._make_mock_client(steps)
+    def test_writes_codex_mcp_config(self, tmp_path):
+        """CodexBackend writes .codex/config.toml for stdio MCP servers."""
+        from auto_scientist.sdk_backend import CodexBackend
 
         backend = CodexBackend()
-        opts = SDKOptions(
-            system_prompt="test",
-            allowed_tools=[],
-            max_turns=5,
-            mcp_servers={"predictions": {"type": "sdk"}},
-        )
+        mcp_servers = {
+            "predictions": {
+                "type": "stdio",
+                "command": "python3",
+                "args": ["/path/to/server.py", "/path/to/data.json"],
+            }
+        }
+        backend._write_codex_mcp_config(mcp_servers, tmp_path)
 
-        with (
-            patch(
-                "auto_scientist.sdk_backend.CodexClient.connect_stdio",
-                return_value=mock_client,
-            ),
-            caplog.at_level(logging.WARNING, logger="auto_scientist.sdk_backend"),
-        ):
-            async for _ in backend.query("test", opts):
-                pass
-
-        assert any("mcp" in record.message.lower() for record in caplog.records)
+        config_path = tmp_path / ".codex" / "config.toml"
+        assert config_path.exists()
+        content = config_path.read_text()
+        assert "[mcp_servers.predictions]" in content
+        assert 'command = "python3"' in content
+        assert "/path/to/server.py" in content

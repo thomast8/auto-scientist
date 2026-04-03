@@ -371,14 +371,38 @@ class CodexBackend:
             return "none"
         return _CODEX_EFFORT_MAP.get(effort, effort)
 
+    @staticmethod
+    def _write_codex_mcp_config(mcp_servers: dict[str, Any], cwd: Path) -> None:
+        """Translate mcp_servers dict into a .codex/config.toml for Codex CLI.
+
+        Codex reads MCP server config from ``<cwd>/.codex/config.toml``.
+        Only stdio servers with ``command`` + ``args`` are supported.
+        """
+        config_dir = cwd / ".codex"
+        config_dir.mkdir(parents=True, exist_ok=True)
+        config_path = config_dir / "config.toml"
+
+        lines: list[str] = []
+        for name, cfg in mcp_servers.items():
+            srv_type = cfg.get("type", "")
+            if srv_type != "stdio":
+                logger.warning(f"Codex MCP: skipping non-stdio server '{name}' (type={srv_type})")
+                continue
+            command = cfg.get("command", "")
+            args = cfg.get("args", [])
+            lines.append(f"[mcp_servers.{name}]")
+            lines.append(f'command = "{command}"')
+            # Format args as TOML array of strings
+            args_str = ", ".join(f'"{a}"' for a in args)
+            lines.append(f"args = [{args_str}]")
+            lines.append("")
+
+        if lines:
+            config_path.write_text("\n".join(lines))
+            logger.debug(f"Wrote Codex MCP config to {config_path}")
+
     async def query(self, prompt: str, options: SDKOptions) -> AsyncIterator[SDKMessage]:
         """Run a Codex SDK query, yielding unified SDKMessages."""
-        if options.mcp_servers:
-            logger.warning(
-                "MCP servers are not supported by the Codex backend; ignoring %d server(s): %s",
-                len(options.mcp_servers),
-                ", ".join(options.mcp_servers.keys()),
-            )
         sandbox_mode = self._resolve_sandbox(options.allowed_tools)
         effort = self._resolve_effort(options.extra_args)
         model = options.model
@@ -428,10 +452,15 @@ class CodexBackend:
             f"sandbox={sandbox_mode}, effort={effort}, prompt_len={len(prompt)}"
         )
 
+        # Write MCP server config so Codex picks it up at startup
+        codex_cwd = Path(options.cwd) if options.cwd else Path.cwd()
+        if options.mcp_servers:
+            self._write_codex_mcp_config(options.mcp_servers, codex_cwd)
+
         # Connect and run using chat() for streaming (enables progress
         # summaries) instead of chat_once() which blocks until turn completes.
         client = CodexClient.connect_stdio(
-            cwd=str(options.cwd) if options.cwd else None,
+            cwd=str(codex_cwd),
             env=env,
             inactivity_timeout=600.0,
         )
