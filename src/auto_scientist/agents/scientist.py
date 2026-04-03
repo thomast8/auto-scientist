@@ -10,7 +10,7 @@ import logging
 from pathlib import Path
 from typing import Any
 
-from auto_scientist.agents.prediction_tool import build_prediction_mcp_server
+from auto_scientist.agents.prediction_tool import PREDICTION_SPEC, build_prediction_mcp_server
 from auto_scientist.model_config import ReasoningConfig, reasoning_to_cc_extra_args
 from auto_scientist.prompts.scientist import (
     SCIENTIST_REVISION_SYSTEM,
@@ -33,7 +33,6 @@ logger = logging.getLogger(__name__)
 MAX_ATTEMPTS = 3
 
 SCIENTIST_BASE_TOOLS = ["WebSearch"]
-SCIENTIST_MCP_TOOL = "mcp__predictions__read_predictions"
 
 
 def _build_scientist_tools_and_mcp(
@@ -53,7 +52,7 @@ def _build_scientist_tools_and_mcp(
         mcp_servers["predictions"] = build_prediction_mcp_server(
             prediction_history, output_dir=output_dir
         )
-        tools.append(SCIENTIST_MCP_TOOL)
+        tools.append(PREDICTION_SPEC.mcp_tool_name)
     return tools, mcp_servers
 
 

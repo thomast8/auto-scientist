@@ -9,17 +9,19 @@ Also provides `_handle_read_predictions()` for direct use in tests.
 
 from __future__ import annotations
 
-import json
 import logging
-import tempfile
 from pathlib import Path
 from typing import Any
 
+from auto_scientist.agents._mcp_base import MCPToolSpec, build_mcp_server_config, register_mcp_tool
 from auto_scientist.state import PredictionRecord
 
 logger = logging.getLogger(__name__)
 
-# Tool description - self-documenting, no prompt-level instructions needed.
+# ---------------------------------------------------------------------------
+# Tool spec (registered so sdk_utils can auto-discover the description)
+# ---------------------------------------------------------------------------
+
 _READ_PREDICTIONS_DESCRIPTION = (
     "Query the prediction history for detail not shown in the compact tree. "
     "Start with stats=true to see counts by status/iteration, then use "
@@ -28,7 +30,6 @@ _READ_PREDICTIONS_DESCRIPTION = (
     "queries over exhaustive audits."
 )
 
-# JSON Schema for the tool input.
 _READ_PREDICTIONS_SCHEMA: dict[str, Any] = {
     "type": "object",
     "properties": {
@@ -79,6 +80,25 @@ _READ_PREDICTIONS_SCHEMA: dict[str, Any] = {
         },
     },
 }
+
+PREDICTION_SPEC = MCPToolSpec(
+    server_name="predictions",
+    tool_name="read_predictions",
+    description=_READ_PREDICTIONS_DESCRIPTION,
+    input_schema=_READ_PREDICTIONS_SCHEMA,
+    deferred_description=(
+        "mcp__predictions__read_predictions("
+        "stats?, chain?, pred_ids?, filter?, iteration?) "
+        "- Query prediction history for detail beyond the compact tree."
+    ),
+)
+
+register_mcp_tool(PREDICTION_SPEC)
+
+
+# ---------------------------------------------------------------------------
+# Formatting and traversal helpers (used by _handle_read_predictions)
+# ---------------------------------------------------------------------------
 
 
 def _format_record_detail(rec: PredictionRecord) -> str:
@@ -166,6 +186,11 @@ def _build_stats_response(
         lines.append(f"  iter {it}: {', '.join(preds)}")
 
     return {"content": [{"type": "text", "text": "\n".join(lines)}]}
+
+
+# ---------------------------------------------------------------------------
+# Direct handler (for unit tests - same logic as the MCP server subprocess)
+# ---------------------------------------------------------------------------
 
 
 async def _handle_read_predictions(
@@ -266,43 +291,26 @@ async def _handle_read_predictions(
     return {"content": [{"type": "text", "text": formatted}]}
 
 
+# ---------------------------------------------------------------------------
+# Server config builder
+# ---------------------------------------------------------------------------
+
+
 def build_prediction_mcp_server(
     prediction_history: list[PredictionRecord],
     output_dir: Path | None = None,
 ) -> dict[str, Any]:
     """Create an stdio MCP server config for the read_predictions tool.
 
-    Writes predictions to a JSON file and returns a stdio server config
-    that launches a Python subprocess serving them via the ``mcp`` library.
-    The Claude Code CLI connects to this server via stdin/stdout.
+    Delegates to the shared ``build_mcp_server_config()`` for serialization
+    and stdio config generation.
 
-    When *output_dir* is provided the file is written to
-    ``output_dir/predictions.json`` so the experiment folder stays
-    self-contained and crash-recoverable.  Otherwise a temporary file in
-    the system temp directory is used (useful for tests).
-
-    Returns a dict suitable for ``ClaudeCodeOptions.mcp_servers``.
+    Returns a dict suitable for ``SDKOptions.mcp_servers`` values.
     """
-    predictions_data = [r.model_dump() for r in prediction_history]
-
-    if output_dir is not None:
-        predictions_path = output_dir / "predictions.json"
-        predictions_path.write_text(json.dumps(predictions_data))
-    else:
-        with tempfile.NamedTemporaryFile(
-            mode="w",
-            suffix=".json",
-            prefix="predictions_",
-            delete=False,
-        ) as tmp:
-            json.dump(predictions_data, tmp)
-        predictions_path = Path(tmp.name)
-
-    logger.debug(f"Wrote {len(prediction_history)} predictions to {predictions_path}")
-
-    server_script = str(Path(__file__).parent / "_prediction_mcp_server.py")
-    return {
-        "type": "stdio",
-        "command": "python3",
-        "args": [server_script, str(predictions_path)],
-    }
+    server_script = Path(__file__).parent / "_prediction_mcp_server.py"
+    return build_mcp_server_config(
+        data_dicts=[r.model_dump() for r in prediction_history],
+        server_script=server_script,
+        output_dir=output_dir,
+        filename="predictions.json",
+    )

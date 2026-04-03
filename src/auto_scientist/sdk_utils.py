@@ -248,19 +248,24 @@ def validate_json_output(
 # Descriptions for deferred tools (not loaded by default in Claude Code).
 # Including these in the system prompt lets the model call them directly
 # without wasting a turn on ToolSearch.
-_DEFERRED_TOOL_DESCRIPTIONS: dict[str, str] = {
+# MCP tool descriptions are auto-populated from the registry (see _mcp_base.py).
+_STATIC_TOOL_DESCRIPTIONS: dict[str, str] = {
     "WebSearch": (
         "WebSearch(query: str) - Search the web. "
         "Required param: query (string, min 2 chars). "
         "Optional: allowed_domains (list[str]), blocked_domains (list[str])."
     ),
     "AskUserQuestion": ("AskUserQuestion(question: str) - Ask the user a clarifying question."),
-    "mcp__predictions__read_predictions": (
-        "mcp__predictions__read_predictions("
-        "stats?, chain?, pred_ids?, filter?, iteration?) "
-        "- Query prediction history for detail beyond the compact tree."
-    ),
 }
+
+
+def _get_deferred_tool_descriptions() -> dict[str, str]:
+    """Merge static tool descriptions with auto-registered MCP tool descriptions."""
+    from auto_scientist.agents._mcp_base import get_deferred_descriptions
+
+    merged = dict(_STATIC_TOOL_DESCRIPTIONS)
+    merged.update(get_deferred_descriptions())
+    return merged
 
 
 def with_turn_budget(system_prompt: str, max_turns: int, tools: list[str] | None = None) -> str:
@@ -274,10 +279,11 @@ def with_turn_budget(system_prompt: str, max_turns: int, tools: list[str] | None
     parts = [system_prompt]
 
     if tools:
+        descriptions = _get_deferred_tool_descriptions()
         tool_lines = []
         for tool in tools:
-            if tool in _DEFERRED_TOOL_DESCRIPTIONS:
-                tool_lines.append(f"  - {_DEFERRED_TOOL_DESCRIPTIONS[tool]}")
+            if tool in descriptions:
+                tool_lines.append(f"  - {descriptions[tool]}")
             else:
                 tool_lines.append(f"  - {tool}")
         tool_block = "\n".join(tool_lines)

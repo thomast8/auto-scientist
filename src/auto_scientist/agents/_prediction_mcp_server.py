@@ -11,20 +11,11 @@ Usage (by the Claude Code CLI, not directly):
 
 from __future__ import annotations
 
-import asyncio
-import json
-import sys
 from typing import Any
 
-from mcp.server import Server
-from mcp.server.stdio import stdio_server
-from mcp.types import TextContent, Tool
-
-
-def _load_predictions(path: str) -> list[dict[str, Any]]:
-    with open(path) as f:
-        result: list[dict[str, Any]] = json.load(f)
-    return result
+# ---------------------------------------------------------------------------
+# Prediction-specific formatting and traversal
+# ---------------------------------------------------------------------------
 
 
 def _format_record(rec: dict[str, Any]) -> str:
@@ -101,7 +92,12 @@ def _build_stats(predictions: list[dict]) -> str:
     return "\n".join(lines)
 
 
-def _query(predictions: list[dict], args: dict[str, Any]) -> str:
+# ---------------------------------------------------------------------------
+# Query handler (the only prediction-specific logic)
+# ---------------------------------------------------------------------------
+
+
+def _query(predictions: list[dict[str, Any]], args: dict[str, Any]) -> str:
     if not predictions:
         return "No predictions in history yet."
 
@@ -168,97 +164,83 @@ def _query(predictions: list[dict], args: dict[str, Any]) -> str:
     return "\n\n".join(_format_record(r) for r in selected)
 
 
-async def main():
-    if len(sys.argv) < 2:
-        print("Usage: _prediction_mcp_server.py <predictions.json>", file=sys.stderr)
-        sys.exit(1)
-
-    predictions = _load_predictions(sys.argv[1])
-
-    server = Server("predictions")
-
-    @server.list_tools()
-    async def list_tools() -> list[Tool]:
-        return [
-            Tool(
-                name="read_predictions",
-                description=(
-                    "Query the prediction history for detail not shown "
-                    "in the compact tree. Start with stats=true to see "
-                    "counts by status/iteration, then use targeted "
-                    "queries (chain, pred_ids, filter) to inspect "
-                    "specifics. Each call loads results into your "
-                    "context, so prefer fewer targeted queries over "
-                    "exhaustive audits."
-                ),
-                inputSchema={
-                    "type": "object",
-                    "properties": {
-                        "stats": {
-                            "type": "boolean",
-                            "description": (
-                                "Returns counts by status and iteration, "
-                                "plus a one-line summary per prediction. "
-                                "Use this first to orient, then drill "
-                                "into specifics with other parameters."
-                            ),
-                        },
-                        "chain": {
-                            "type": "string",
-                            "description": (
-                                "A prediction ID. Returns the full "
-                                "reasoning chain: root ancestor through "
-                                "this prediction to all descendants. "
-                                "Best for understanding why a particular "
-                                "investigation thread exists."
-                            ),
-                        },
-                        "pred_ids": {
-                            "type": "array",
-                            "items": {"type": "string"},
-                            "description": (
-                                "Specific prediction IDs to retrieve "
-                                "with full detail (evidence, diagnostics, "
-                                "implications)."
-                            ),
-                        },
-                        "filter": {
-                            "type": "string",
-                            "enum": [
-                                "pending",
-                                "refuted",
-                                "confirmed",
-                                "inconclusive",
-                                "active_chains",
-                            ],
-                            "description": (
-                                "Return all predictions with this status. "
-                                "'active_chains' returns pending "
-                                "predictions plus their full ancestor "
-                                "chains."
-                            ),
-                        },
-                        "iteration": {
-                            "type": "integer",
-                            "description": (
-                                "Return predictions prescribed in a specific iteration."
-                            ),
-                        },
-                    },
-                },
-            )
-        ]
-
-    @server.call_tool()
-    async def call_tool(name: str, arguments: dict[str, Any] | None) -> list[TextContent]:
-        if name != "read_predictions":
-            return [TextContent(type="text", text=f"Unknown tool: {name}")]
-        result = _query(predictions, arguments or {})
-        return [TextContent(type="text", text=result)]
-
-    async with stdio_server() as (read_stream, write_stream):
-        await server.run(read_stream, write_stream, server.create_initialization_options())
-
+# ---------------------------------------------------------------------------
+# Entry point - all boilerplate handled by _mcp_base
+# ---------------------------------------------------------------------------
 
 if __name__ == "__main__":
-    asyncio.run(main())
+    from auto_scientist.agents._mcp_base import MCPToolSpec, run_mcp_server_main
+
+    _SPEC = MCPToolSpec(
+        server_name="predictions",
+        tool_name="read_predictions",
+        description=(
+            "Query the prediction history for detail not shown "
+            "in the compact tree. Start with stats=true to see "
+            "counts by status/iteration, then use targeted "
+            "queries (chain, pred_ids, filter) to inspect "
+            "specifics. Each call loads results into your "
+            "context, so prefer fewer targeted queries over "
+            "exhaustive audits."
+        ),
+        input_schema={
+            "type": "object",
+            "properties": {
+                "stats": {
+                    "type": "boolean",
+                    "description": (
+                        "Returns counts by status and iteration, "
+                        "plus a one-line summary per prediction. "
+                        "Use this first to orient, then drill "
+                        "into specifics with other parameters."
+                    ),
+                },
+                "chain": {
+                    "type": "string",
+                    "description": (
+                        "A prediction ID. Returns the full "
+                        "reasoning chain: root ancestor through "
+                        "this prediction to all descendants. "
+                        "Best for understanding why a particular "
+                        "investigation thread exists."
+                    ),
+                },
+                "pred_ids": {
+                    "type": "array",
+                    "items": {"type": "string"},
+                    "description": (
+                        "Specific prediction IDs to retrieve "
+                        "with full detail (evidence, diagnostics, "
+                        "implications)."
+                    ),
+                },
+                "filter": {
+                    "type": "string",
+                    "enum": [
+                        "pending",
+                        "refuted",
+                        "confirmed",
+                        "inconclusive",
+                        "active_chains",
+                    ],
+                    "description": (
+                        "Return all predictions with this status. "
+                        "'active_chains' returns pending "
+                        "predictions plus their full ancestor "
+                        "chains."
+                    ),
+                },
+                "iteration": {
+                    "type": "integer",
+                    "description": ("Return predictions prescribed in a specific iteration."),
+                },
+            },
+        },
+        deferred_description=(
+            "mcp__predictions__read_predictions("
+            "stats?, chain?, pred_ids?, filter?, iteration?) "
+            "- Query prediction history for detail beyond the compact tree."
+        ),
+    )
+
+    run_mcp_server_main("predictions", _SPEC, _query)

@@ -1,6 +1,7 @@
 """Tests for the read_predictions MCP tool."""
 
 import json
+import sys
 from pathlib import Path
 
 import pytest
@@ -235,7 +236,7 @@ class TestBuildPredictionMcpServer:
         server = build_prediction_mcp_server(sample_history)
         assert server is not None
         assert server["type"] == "stdio"
-        assert server["command"] == "python3"
+        assert server["command"] == sys.executable
         assert "_prediction_mcp_server.py" in server["args"][0]
         # Verify the temp file was written with correct data
         predictions_path = server["args"][1]
