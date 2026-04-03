@@ -287,8 +287,8 @@ class TestAgentRetryLoop:
         assert call_count == 3
 
     @pytest.mark.asyncio
-    async def test_correction_hint_resets_after_sdk_error(self):
-        """If a validation failure is followed by an SDK error, correction hint resets."""
+    async def test_correction_hint_preserved_after_sdk_error(self):
+        """If a validation failure is followed by an SDK error, correction hint is kept."""
         attempts = []
 
         async def query_fn(prompt, session_id):
@@ -320,9 +320,9 @@ class TestAgentRetryLoop:
         # Attempt 2: would have had correction hint + session_id, but SDK error
         assert attempts[1]["session_id"] == "s1"
         assert "bad format" in attempts[1]["prompt"]
-        # Attempt 3: after SDK error, fresh start again
+        # Attempt 3: after SDK error, session cleared but hint preserved
         assert attempts[2]["session_id"] is None
-        assert "bad format" not in attempts[2]["prompt"]
+        assert "bad format" in attempts[2]["prompt"]
 
     @pytest.mark.asyncio
     async def test_no_session_id_means_no_resume(self):
