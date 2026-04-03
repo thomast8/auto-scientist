@@ -13,18 +13,16 @@ from pathlib import Path
 from typing import Any
 
 from auto_scientist.prompts.analyst import ANALYST_SYSTEM, ANALYST_USER
+from auto_scientist.retry import QueryResult, agent_retry_loop
 from auto_scientist.schemas import AnalystOutput
 from auto_scientist.sdk_backend import SDKOptions, get_backend
 from auto_scientist.sdk_utils import (
-    OutputValidationError,
     collect_text_from_query,
     validate_json_output,
     with_turn_budget,
 )
 
 logger = logging.getLogger(__name__)
-
-MAX_ATTEMPTS = 3
 
 # JSON schema for structured output (injected into the prompt for LLM guidance)
 ANALYST_SCHEMA = {
@@ -157,30 +155,30 @@ async def run_analyst(
         extra_args={"setting-sources": ""},
     )
 
-    correction_hint = ""
-    for attempt in range(MAX_ATTEMPTS):
-        effective_prompt = user_prompt + correction_hint
-
-        try:
-            raw, _usage, _session_id = await collect_text_from_query(
-                effective_prompt,
-                options,
-                backend,
-                message_buffer,
-                agent_name="Analyst",
+    async def _query(prompt: str, resume_session_id: str | None) -> QueryResult:
+        opts = options
+        if resume_session_id is not None:
+            opts = SDKOptions(
+                system_prompt=options.system_prompt,
+                allowed_tools=options.allowed_tools,
+                max_turns=options.max_turns,
+                permission_mode=options.permission_mode,
+                cwd=options.cwd,
+                model=options.model,
+                extra_args=options.extra_args,
+                resume=resume_session_id,
             )
-        except Exception as e:
-            if attempt == MAX_ATTEMPTS - 1:
-                raise
-            logger.warning(f"Analyst attempt {attempt + 1}: SDK error ({e}), retrying")
-            continue
+        raw, usage, session_id = await collect_text_from_query(
+            prompt, opts, backend, message_buffer, agent_name="Analyst"
+        )
+        return QueryResult(raw_output=raw, session_id=session_id, usage=usage)
 
-        try:
-            return validate_json_output(raw, AnalystOutput, "Analyst")
-        except OutputValidationError as e:
-            if attempt == MAX_ATTEMPTS - 1:
-                raise
-            correction_hint = f"\n\n{e.correction_prompt()}"
-            logger.warning(f"Analyst attempt {attempt + 1} failed, retrying: {e}")
+    def _validate(result: QueryResult) -> dict[str, Any]:
+        return validate_json_output(result.raw_output, AnalystOutput, "Analyst")
 
-    raise RuntimeError("Analyst: exhausted retries")  # unreachable
+    return await agent_retry_loop(
+        query_fn=_query,
+        validate_fn=_validate,
+        prompt=user_prompt,
+        agent_name="Analyst",
+    )
