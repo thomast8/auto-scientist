@@ -2,11 +2,9 @@
 
 import json
 import logging
-import os
 import shutil
-from collections.abc import Callable
 from pathlib import Path
-from typing import Any, Literal
+from typing import Any
 
 from rich.panel import Panel
 from rich.rule import Rule
@@ -14,250 +12,36 @@ from rich.table import Table
 from rich.text import Text
 
 from auto_scientist.config import DomainConfig
-from auto_scientist.console import (
-    AGENT_STYLES,
-    AgentPanel,
-    PipelineLive,
-    console,
-)
-from auto_scientist.iteration_manifest import (
-    MANIFEST_FILENAME,
-    IterationRecord,
-    PanelRecord,
-    append_record,
-    load_manifest,
-)
-from auto_scientist.log_setup import setup_file_logging
-from auto_scientist.model_config import AgentModelConfig, ModelConfig
+from auto_scientist.model_config import ModelConfig
 from auto_scientist.notebook import NOTEBOOK_FILENAME, append_entry, read_notebook
-from auto_scientist.runner import RunResult
+from auto_scientist.persistence import (
+    apply_prediction_updates,
+    build_concern_ledger,
+    evaluate,
+    load_analyst_from_disk,
+    load_final_plan_from_disk,
+    load_scientist_plan_from_disk,
+    persist_artifact,
+    persist_buffer,
+    read_run_result,
+    resolve_prediction_outcomes,
+    restore_iterations_from_manifest,
+    save_iteration_manifest,
+    save_partial_panels,
+)
+from auto_scientist.pipeline_live import (
+    PipelineLive,
+    collapse_panel,
+    generate_iteration_summary,
+    with_summaries,
+)
 from auto_scientist.scheduler import wait_for_window
 from auto_scientist.state import ExperimentState, VersionEntry
 from auto_scientist.summarizer import run_with_summaries, summarize_results
+from auto_scientist.validation import validate_prerequisites
+from auto_scientist.widgets import AGENT_STYLES, AgentPanel, console
 
 logger = logging.getLogger(__name__)
-
-
-def _check_provider_auth(provider: str) -> str | None:
-    """Try to instantiate the SDK client for a provider. Returns error message or None."""
-    if provider == "anthropic":
-        try:
-            from anthropic import Anthropic
-
-            Anthropic()
-            return None
-        except Exception as e:
-            return f"Anthropic SDK authentication failed: {e}"
-    elif provider == "openai":
-        try:
-            from openai import OpenAI
-
-            OpenAI()
-            return None
-        except Exception as e:
-            return f"OpenAI SDK authentication failed: {e}"
-    elif provider == "google":
-        if not os.environ.get("GOOGLE_API_KEY"):
-            return "GOOGLE_API_KEY is not set (required for google provider)"
-        return None
-    else:
-        return f"Unknown provider: {provider}"
-
-
-def _check_claude_cli_auth(claude_bin: str) -> str | None:
-    """Check that the Claude Code CLI is logged in. Returns error message or None."""
-    import subprocess
-
-    try:
-        result = subprocess.run(
-            [claude_bin, "auth", "status"],
-            capture_output=True,
-            text=True,
-            timeout=10,
-        )
-        if result.returncode != 0:
-            return (
-                "Claude Code CLI is not logged in (needed by Anthropic SDK agents). "
-                "Run: claude login"
-            )
-        # Parse JSON output to check loggedIn field
-        import json
-
-        try:
-            status = json.loads(result.stdout)
-            if not status.get("loggedIn"):
-                return (
-                    "Claude Code CLI is not logged in (needed by Anthropic SDK agents). "
-                    "Run: claude login"
-                )
-        except (json.JSONDecodeError, KeyError):
-            pass  # If we can't parse, assume OK (returncode was 0)
-    except (subprocess.TimeoutExpired, OSError) as e:
-        logger.warning(f"Could not check Claude CLI auth status: {e}")
-    return None
-
-
-def _check_codex_cli_auth() -> str | None:
-    """Check that the Codex CLI is logged in. Returns error message or None."""
-    import json
-    from pathlib import Path
-
-    auth_path = Path.home() / ".codex" / "auth.json"
-    if not auth_path.exists():
-        return "Codex CLI is not logged in (needed by OpenAI SDK agents). Run: codex login"
-    try:
-        auth = json.loads(auth_path.read_text())
-        has_auth = bool(auth.get("tokens")) or bool(auth.get("OPENAI_API_KEY"))
-        if not has_auth:
-            return (
-                "Codex CLI has no valid credentials (needed by OpenAI SDK agents). Run: codex login"
-            )
-    except (json.JSONDecodeError, OSError) as e:
-        logger.warning(f"Could not read Codex auth file: {e}")
-    return None
-
-
-def _validate_reasoning_configs(mc: ModelConfig) -> list[str]:
-    """Validate reasoning configs are compatible with their provider and model.
-
-    Returns a list of error messages for invalid configurations.
-    """
-    from auto_scientist.models.anthropic_client import ANTHROPIC_BUDGET_DEFAULTS
-    from auto_scientist.models.google_client import GOOGLE_LEVEL_MAP
-    from auto_scientist.models.openai_client import OPENAI_EFFORT_MAP
-
-    errors: list[str] = []
-
-    # Collect (agent_name, AgentModelConfig) pairs
-    entries: list[tuple[str, AgentModelConfig]] = []
-    for agent_name in ["analyst", "scientist", "coder", "ingestor", "report", "summarizer"]:
-        entries.append((agent_name, mc.resolve(agent_name)))
-    for i, critic in enumerate(mc.critics):
-        entries.append((f"critic[{i}]", critic))
-
-    for agent_name, cfg in entries:
-        r = cfg.reasoning
-        if r.level == "off":
-            continue
-
-        label = f"{agent_name} ({cfg.provider}/{cfg.model}, reasoning={r.level})"
-
-        if cfg.provider == "anthropic":
-            budget = r.budget or ANTHROPIC_BUDGET_DEFAULTS.get(r.level)
-            if budget is None:
-                errors.append(f"{label}: no budget_tokens mapping for level '{r.level}'")
-            elif budget < 1024:
-                errors.append(f"{label}: budget_tokens={budget} is below Anthropic minimum (1024)")
-            elif budget > 128_000:
-                errors.append(f"{label}: budget_tokens={budget} exceeds Anthropic maximum (128000)")
-
-        elif cfg.provider == "openai":
-            effort = OPENAI_EFFORT_MAP.get(r.level)
-            if effort is None:
-                errors.append(f"{label}: no reasoning effort mapping for level '{r.level}'")
-
-        elif cfg.provider == "google":
-            model = cfg.model
-            is_3x = "gemini-3" in model
-            is_25 = "2.5" in model
-
-            if is_3x:
-                mapped = GOOGLE_LEVEL_MAP.get(r.level)
-                if mapped is None:
-                    errors.append(f"{label}: no thinkingLevel mapping for level '{r.level}'")
-                elif mapped in ("MINIMAL", "MEDIUM") and "flash" not in model.lower():
-                    errors.append(
-                        f"{label}: thinkingLevel={mapped} is only valid for Gemini 3 Flash models"
-                    )
-            elif is_25:
-                # Budget-based; just verify we have a default
-                if r.budget is None:
-                    from auto_scientist.models.google_client import GOOGLE_BUDGET_DEFAULTS
-
-                    if r.level not in GOOGLE_BUDGET_DEFAULTS:
-                        errors.append(f"{label}: no thinkingBudget mapping for level '{r.level}'")
-
-    return errors
-
-
-def _validate_model_names(mc: ModelConfig) -> list[str]:
-    """Validate all configured model names against their provider APIs.
-
-    Returns a list of error messages for invalid models.
-    """
-    errors: list[str] = []
-
-    # Collect unique (provider, model) pairs to avoid duplicate checks
-    pairs: dict[tuple[str, str], list[str]] = {}
-    for agent_name in ["analyst", "scientist", "coder", "ingestor", "report"]:
-        cfg = mc.resolve(agent_name)
-        key = (cfg.provider, cfg.model)
-        pairs.setdefault(key, []).append(agent_name)
-
-    for critic in mc.critics:
-        key = (critic.provider, critic.model)
-        pairs.setdefault(key, []).append("critic")
-
-    if mc.summarizer:
-        key = (mc.summarizer.provider, mc.summarizer.model)
-        pairs.setdefault(key, []).append("summarizer")
-
-    # Only validate models for providers that authenticate successfully
-    # (auth failures are reported separately by _check_provider_auth)
-    authenticated_providers: set[str] = set()
-    for provider in {p for p, _ in pairs}:
-        if _check_provider_auth(provider) is None:
-            authenticated_providers.add(provider)
-
-    for (provider, model), agents in pairs.items():
-        if provider not in authenticated_providers:
-            continue
-        err = _check_model_exists(provider, model)
-        if err:
-            agent_list = ", ".join(sorted(set(agents)))
-            errors.append(f"Model '{model}' ({provider}) not found (used by: {agent_list}): {err}")
-
-    return errors
-
-
-def _check_model_exists(provider: str, model: str) -> str | None:
-    """Check if a model exists by querying the provider API.
-
-    Returns an error message if the model doesn't exist, None if it does.
-    Ignores auth errors (handled separately by _check_provider_auth).
-    """
-    if provider == "anthropic":
-        # Anthropic SDK agents run through the Claude Code CLI which handles
-        # its own auth (OAuth/session). The Anthropic SDK's models.retrieve()
-        # requires an API key which may not be set. Skip validation here;
-        # the CLI will catch invalid model names at runtime.
-        return None
-    elif provider == "openai":
-        try:
-            from openai import AuthenticationError, OpenAI
-
-            client = OpenAI()
-            client.models.retrieve(model)
-            return None
-        except AuthenticationError:
-            return None  # auth handled separately
-        except Exception as e:
-            return str(e)
-    elif provider == "google":
-        try:
-            from google import genai
-            from google.genai import errors as genai_errors
-
-            google_client = genai.Client()
-            google_client.models.get(model=model)
-            return None
-        except genai_errors.APIError as e:
-            if e.code == 401 or e.code == 403:
-                return None  # auth handled separately
-            return str(e)
-        except Exception as e:
-            return str(e)
-    return None  # unknown provider, skip validation
 
 
 class Orchestrator:
@@ -296,148 +80,20 @@ class Orchestrator:
         self._skip_to_agent: str | None = skip_to_agent
         self._restored_panels: list[dict] | None = restored_panels
 
-    def _validate_prerequisites(self) -> None:
-        """Validate directories, API keys, and config before starting.
-
-        Raises RuntimeError with all problems at once so the user can fix
-        everything in a single pass.
-        """
-        errors: list[str] = []
-
-        # Data path must exist when starting from ingestion
-        if self.state.phase == "ingestion":
-            if self.data_path is None:
-                errors.append("--data is required for a new run")
-            elif not self.data_path.exists():
-                errors.append(f"Data path does not exist: {self.data_path}")
-
-        # Output dir parent must be writable
-        parent = self.output_dir.parent
-        if parent.exists() and not os.access(parent, os.W_OK):
-            errors.append(f"Output directory parent is not writable: {parent}")
-
-        # uv must be installed (runs experiment scripts) - unless the coder
-        # uses OpenAI/Codex, which rewrites uv run -> python3 in the prompt.
-        coder_cfg = self.model_config.resolve("coder")
-        coder_uses_codex = coder_cfg.provider == "openai" and coder_cfg.mode == "sdk"
-        run_cmd = self.config.run_command if self.config else "uv run {script_path}"
-        exe = run_cmd.split()[0] if run_cmd.strip() else ""
-        if exe and not coder_uses_codex and not shutil.which(exe):
-            errors.append(
-                f"'{exe}' not found on PATH (needed for run_command: {run_cmd}). "
-                f"Install uv with: curl -LsSf https://astral.sh/uv/install.sh | sh"
-            )
-
-        # Validate SDK agent provider+mode combinations
-        mc = self.model_config
-        sdk_only_agents = ["analyst", "coder", "ingestor", "report", "assessor"]
-        sdk_capable_agents = ["analyst", "scientist", "coder", "ingestor", "report", "assessor"]
-        needs_claude_cli = False
-        needs_codex_cli = False
-
-        for agent_name in sdk_capable_agents:
-            cfg = mc.resolve(agent_name)
-
-            # SDK-only agents cannot use mode=api
-            if agent_name in sdk_only_agents and cfg.mode == "api":
-                errors.append(
-                    f"{agent_name} uses mode='api', but it requires mode='sdk' "
-                    f"(needs file tools). Remove the mode override or set mode='sdk'."
-                )
-
-            # SDK mode requires anthropic or openai (not google)
-            if cfg.mode == "sdk" and cfg.provider == "google":
-                errors.append(
-                    f"{agent_name} uses mode='sdk' with provider='google', "
-                    f"but no Google coding agent CLI exists. "
-                    f"Use provider='anthropic' or provider='openai' for SDK mode."
-                )
-
-            # Track which CLIs are needed
-            if cfg.mode == "sdk":
-                if cfg.provider == "anthropic":
-                    needs_claude_cli = True
-                elif cfg.provider == "openai":
-                    needs_codex_cli = True
-
-        # Also validate critic configs for SDK prerequisites
-        for i, critic_cfg in enumerate(mc.critics):
-            if critic_cfg.mode == "sdk" and critic_cfg.provider == "google":
-                errors.append(
-                    f"critic[{i}] uses mode='sdk' with provider='google', "
-                    f"but no Google coding agent CLI exists."
-                )
-            if critic_cfg.mode == "sdk":
-                if critic_cfg.provider == "anthropic":
-                    needs_claude_cli = True
-                elif critic_cfg.provider == "openai":
-                    needs_codex_cli = True
-
-        # Check CLI availability and login status based on actual needs
-        if needs_claude_cli:
-            claude_bin = shutil.which("claude")
-            if not claude_bin:
-                errors.append(
-                    "Claude Code CLI not found on PATH (needed by Anthropic SDK agents). "
-                    "Install with: npm install -g @anthropic-ai/claude-code"
-                )
-            else:
-                err = _check_claude_cli_auth(claude_bin)
-                if err:
-                    errors.append(err)
-
-        if needs_codex_cli:
-            codex_bin = shutil.which("codex")
-            if not codex_bin:
-                errors.append(
-                    "Codex CLI not found on PATH (needed by OpenAI SDK agents). "
-                    "Install with: npm install -g @openai/codex"
-                )
-            else:
-                err = _check_codex_cli_auth()
-                if err:
-                    errors.append(err)
-
-        # Validate model names against provider APIs
-        model_errors = _validate_model_names(mc)
-        errors.extend(model_errors)
-
-        # Validate reasoning configs against provider constraints
-        reasoning_errors = _validate_reasoning_configs(mc)
-        errors.extend(reasoning_errors)
-
-        # Collect required providers from model config
-        required_providers: set[str] = set()
-
-        # Add providers for SDK agents (API key needed for api mode,
-        # subscription or key for sdk mode)
-        for agent_name in sdk_capable_agents:
-            cfg = mc.resolve(agent_name)
-            if cfg.mode == "api":
-                required_providers.add(cfg.provider)
-            # SDK mode: CLI handles auth (subscription or key), skip API key check
-
-        # Summarizer uses direct API
-        if mc.summarizer is not None:
-            required_providers.add(mc.summarizer.provider)
-
-        # Critics use their configured provider (api mode by default)
-        for critic in mc.critics:
-            if critic.mode == "api":
-                required_providers.add(critic.provider)
-
-        # Validate each provider by trying to instantiate its SDK client
-        for provider in sorted(required_providers):
-            err = _check_provider_auth(provider)
-            if err:
-                errors.append(err)
-
-        if errors:
-            raise RuntimeError("Pre-flight check failed:\n  - " + "\n  - ".join(errors))
+    @property
+    def _summary_model(self) -> str | None:
+        """Return the summarizer model name, or None if not configured."""
+        if self.model_config.summarizer is None:
+            return None
+        return self.model_config.summarizer.model
 
     async def run(self) -> None:
         """Execute the full orchestration loop."""
-        self._validate_prerequisites()
+        from auto_scientist.log_setup import setup_file_logging
+
+        validate_prerequisites(
+            self.state, self.data_path, self.output_dir, self.model_config, self.config
+        )
         self.output_dir.mkdir(parents=True, exist_ok=True)
         setup_file_logging(self.output_dir, verbose=self.verbose)
         logger.info(
@@ -465,7 +121,7 @@ class Orchestrator:
             self._live.mount_banner(self._build_startup_banner())
 
         # Restore previous iterations from manifest (for fork / resume)
-        self._restore_iterations_from_manifest()
+        restore_iterations_from_manifest(self._live, self.output_dir)
 
         try:
             # Phase 0: Ingestion (with its own border)
@@ -480,9 +136,15 @@ class Orchestrator:
                 if canonical_data_dir is None:
                     self.state.phase = "stopped"
                     self.state.save(state_path)
-                    iter_summary = await self._generate_iteration_summary()
-                    self._save_iteration_manifest(
-                        "Ingestion", "failed (ingestor error)", "red", iter_summary
+                    iter_summary = await generate_iteration_summary(self._live, self._summary_model)
+                    save_iteration_manifest(
+                        self._live,
+                        self.state,
+                        self.output_dir,
+                        "Ingestion",
+                        "failed (ingestor error)",
+                        "red",
+                        iter_summary,
                     )
                     self._live.end_iteration("failed (ingestor error)", "red", iter_summary)
                     self._live.flush_completed()
@@ -501,8 +163,16 @@ class Orchestrator:
                     self.state.save(state_path)
                     logger.info("Ingestion complete, entering iteration phase")
 
-                    iter_summary = await self._generate_iteration_summary()
-                    self._save_iteration_manifest("Ingestion", "done", "green", iter_summary)
+                    iter_summary = await generate_iteration_summary(self._live, self._summary_model)
+                    save_iteration_manifest(
+                        self._live,
+                        self.state,
+                        self.output_dir,
+                        "Ingestion",
+                        "done",
+                        "green",
+                        iter_summary,
+                    )
                     self._live.end_iteration("done", "green", iter_summary)
                     self._live.flush_completed()
 
@@ -577,8 +247,16 @@ class Orchestrator:
                     label, style = "done", "green"
                 else:
                     label, style = "failed (report error)", "red"
-                iter_summary = await self._generate_iteration_summary()
-                self._save_iteration_manifest("Report", label, style, iter_summary)
+                iter_summary = await generate_iteration_summary(self._live, self._summary_model)
+                save_iteration_manifest(
+                    self._live,
+                    self.state,
+                    self.output_dir,
+                    "Report",
+                    label,
+                    style,
+                    iter_summary,
+                )
                 self._live.end_iteration(label, style, iter_summary)
                 self._live.flush_completed()
 
@@ -622,15 +300,22 @@ class Orchestrator:
 
         buffer: list[str] = []
         try:
-            canonical_data_dir: Path = await self._with_summaries(
+            canonical_data_dir: Path = await with_summaries(
                 _ingestor_coro,
                 "Ingestor",
                 buffer,
                 panel=panel,
+                live=self._live,
+                summary_model=self._summary_model,
             )
             data_files = sorted(canonical_data_dir.iterdir())
             file_list = ", ".join(f.name for f in data_files)
-            self._collapse(panel, f"Canonicalized {len(data_files)} files: {file_list}")
+            collapse_panel(
+                panel,
+                self._live,
+                self._summary_model,
+                f"Canonicalized {len(data_files)} files: {file_list}",
+            )
         except Exception as e:
             logger.exception(f"Ingestor error: {e}")
             panel.error(str(e))
@@ -638,7 +323,7 @@ class Orchestrator:
             self.state.record_failure()
             return None
         finally:
-            self._persist_buffer("ingestor", buffer)
+            persist_buffer(self.output_dir, "ingestor", buffer, self.state.iteration)
 
         return canonical_data_dir
 
@@ -655,8 +340,16 @@ class Orchestrator:
         self.state.record_failure()
         self.state.record_version(version_entry)
         logger.info(f"Iteration {self.state.iteration} complete: status={label}")
-        iter_summary = await self._generate_iteration_summary()
-        self._save_iteration_manifest(self.state.iteration, label, "red", iter_summary)
+        iter_summary = await generate_iteration_summary(self._live, self._summary_model)
+        save_iteration_manifest(
+            self._live,
+            self.state,
+            self.output_dir,
+            self.state.iteration,
+            label,
+            "red",
+            iter_summary,
+        )
         self._live.end_iteration(label, "red", iter_summary)
         self._live.flush_completed()
         self.state.iteration += 1
@@ -690,7 +383,7 @@ class Orchestrator:
 
         # Step 1: Analyst observes latest results (or raw data on iteration 0)
         if "analyst" in agents_to_skip:
-            analysis = self._load_analyst_from_disk(version_dir)
+            analysis = load_analyst_from_disk(version_dir, self.state)
         else:
             analysis = await self._run_analyst()
 
@@ -700,7 +393,7 @@ class Orchestrator:
 
         if "analyst" not in agents_to_skip:
             # Persist analysis for audit trail
-            self._persist_artifact(version_dir, "analysis.json", analysis)
+            persist_artifact(version_dir, "analysis.json", analysis)
 
             # Apply domain_knowledge from Analyst if present
             if analysis.get("domain_knowledge"):
@@ -708,12 +401,12 @@ class Orchestrator:
                 logger.info("Domain knowledge updated from Analyst")
 
             # Resolve any pending prediction outcomes from the Analyst
-            self._resolve_prediction_outcomes(analysis)
-            self._save_partial_panels(version_dir)
+            resolve_prediction_outcomes(analysis, self.state)
+            save_partial_panels(self._live, version_dir)
 
         # Step 2: Scientist plans next iteration
         if "scientist" in agents_to_skip:
-            plan = self._load_scientist_plan_from_disk(version_dir)
+            plan = load_scientist_plan_from_disk(version_dir)
         else:
             plan = await self._run_scientist_plan(analysis)
 
@@ -722,7 +415,7 @@ class Orchestrator:
             return
 
         if "scientist" not in agents_to_skip:
-            self._save_partial_panels(version_dir)
+            save_partial_panels(self._live, version_dir)
 
         # Step 3: Stop gate (if Scientist recommends stopping)
         # Skip entirely when resuming past the stop gate (debate or later)
@@ -744,10 +437,16 @@ class Orchestrator:
                 stop_msg = revised_stop_plan.get("stop_reason", "unknown")
                 logger.info(f"Scientist stop upheld: {stop_msg}")
                 self.state.phase = "report"
-                iter_summary = await self._generate_iteration_summary()
+                iter_summary = await generate_iteration_summary(self._live, self._summary_model)
                 stop_label = f"stopped: {revised_stop_plan.get('stop_reason', 'unknown')}"
-                self._save_iteration_manifest(
-                    self.state.iteration, stop_label, "yellow", iter_summary
+                save_iteration_manifest(
+                    self._live,
+                    self.state,
+                    self.output_dir,
+                    self.state.iteration,
+                    stop_label,
+                    "yellow",
+                    iter_summary,
                 )
                 self._live.end_iteration(stop_label, "yellow", iter_summary)
                 self._live.flush_completed()
@@ -756,12 +455,12 @@ class Orchestrator:
                 # Stop withdrawn - use the new plan and fall through to normal debate
                 logger.info("Scientist withdrew stop after stop gate, continuing")
                 plan = revised_stop_plan
-            self._save_partial_panels(version_dir)
+            save_partial_panels(self._live, version_dir)
 
         # Step 4: Debate + Revision
         if "debate" in agents_to_skip and "revision" in agents_to_skip:
             # Both done - load the final (post-revision) plan from disk
-            final_plan = self._load_final_plan_from_disk(version_dir)
+            final_plan = load_final_plan_from_disk(version_dir, self.state)
             if final_plan is None:
                 await self._fail_iteration("failed (could not load plan from disk)")
                 return
@@ -783,8 +482,8 @@ class Orchestrator:
                 serialized_results = [
                     r.model_dump() if isinstance(r, DebateResult) else r for r in debate_result
                 ]
-                concern_ledger = self._build_concern_ledger(debate_result)
-                self._persist_artifact(
+                concern_ledger = build_concern_ledger(debate_result)
+                persist_artifact(
                     version_dir,
                     "debate.json",
                     {
@@ -795,18 +494,18 @@ class Orchestrator:
                 )
 
             # Persist revision artifact (marks revision as completed for resume detection)
-            self._persist_artifact(version_dir, "revision_plan.json", final_plan)
+            persist_artifact(version_dir, "revision_plan.json", final_plan)
 
             # Apply prediction updates from the final plan (after debate revision)
             if final_plan:
-                self._apply_prediction_updates(final_plan)
+                apply_prediction_updates(final_plan, self.state)
 
             # Persist the final plan (post-debate revision if applicable)
             if final_plan:
-                self._persist_artifact(version_dir, "plan.json", final_plan)
+                persist_artifact(version_dir, "plan.json", final_plan)
 
         if "debate" not in agents_to_skip or "revision" not in agents_to_skip:
-            self._save_partial_panels(version_dir)
+            save_partial_panels(self._live, version_dir)
 
         # Step 5: Coder implements and runs the plan
         new_script = await self._run_coder(final_plan)
@@ -816,7 +515,7 @@ class Orchestrator:
             return
 
         # Step 6: Read run result from Coder's output files
-        run_result = self._read_run_result(new_script.parent)
+        run_result = read_run_result(new_script.parent)
 
         # Log run result
         if run_result.timed_out:
@@ -827,7 +526,7 @@ class Orchestrator:
             self._live.log(f"RUN RESULT: success ({len(run_result.output_files)} output files)")
 
         # Results summary
-        if self._should_summarize() and run_result.success:
+        if self._summary_model and run_result.success:
             results_path = new_script.parent / "results.txt"
             if results_path.exists():
                 try:
@@ -848,14 +547,20 @@ class Orchestrator:
             script_path=str(new_script),
             hypothesis=final_plan.get("hypothesis", "") if final_plan else "",
         )
-        self._evaluate(run_result, version_entry)
+        evaluate(run_result, version_entry, self.state)
         self.state.record_version(version_entry)
 
         # Iteration border color: green=completed, red=failed
         status_style = "red" if version_entry.status != "completed" else "green"
-        iter_summary = await self._generate_iteration_summary()
-        self._save_iteration_manifest(
-            self.state.iteration, version_entry.status, status_style, iter_summary
+        iter_summary = await generate_iteration_summary(self._live, self._summary_model)
+        save_iteration_manifest(
+            self._live,
+            self.state,
+            self.output_dir,
+            self.state.iteration,
+            version_entry.status,
+            status_style,
+            iter_summary,
         )
         self._live.end_iteration(version_entry.status, status_style, iter_summary)
         self._live.flush_completed()
@@ -920,409 +625,6 @@ class Orchestrator:
 
         return Panel(table, title="Auto-Scientist", title_align="left", border_style="bold")
 
-    def _should_summarize(self) -> bool:
-        """Check if summaries are enabled."""
-        return self.model_config.summarizer is not None
-
-    def _collect_iteration_record(
-        self,
-        title: str | int,
-        result_text: str,
-        result_style: str,
-        summary: str,
-    ) -> IterationRecord:
-        """Snapshot current iteration's panel metadata for the manifest."""
-        container = self._live._current_iteration
-        panels = []
-        for p in getattr(container, "_panels", []):
-            panels.append(
-                PanelRecord(
-                    name=p.panel_name,
-                    model=p.model,
-                    style=p.panel_style,
-                    done_summary=p.done_summary,
-                    input_tokens=p.input_tokens,
-                    output_tokens=p.output_tokens,
-                    thinking_tokens=p.thinking_tokens,
-                    num_turns=p.num_turns,
-                    elapsed_seconds=p.elapsed,
-                    lines=list(p.all_lines),
-                )
-            )
-        iteration_key: int | Literal["ingestion", "report"]
-        if isinstance(title, int):
-            iteration_key = self.state.iteration
-            display_title = f"Iteration {title}"
-        elif title == "Report":
-            iteration_key = "report"
-            display_title = "Report"
-        else:
-            iteration_key = "ingestion"
-            display_title = str(title)
-        return IterationRecord(
-            iteration=iteration_key,
-            title=display_title,
-            result_text=result_text,
-            result_style=result_style,
-            summary=summary,
-            panels=panels,
-        )
-
-    def _save_partial_panels(self, version_dir: Path) -> None:
-        """Snapshot current iteration's completed panels to version_dir/panels.json.
-
-        Called after each agent completes so that if a later agent crashes,
-        the panel data (summaries, lines, token counts) is preserved on disk
-        for resume/fork reconstruction.
-        """
-        container = self._live._current_iteration
-        if container is None:
-            return
-        panels = []
-        for p in getattr(container, "_panels", []):
-            if not p.done:
-                continue
-            panels.append(
-                {
-                    "name": p.panel_name,
-                    "model": p.model,
-                    "style": p.panel_style,
-                    "done_summary": p.done_summary,
-                    "input_tokens": p.input_tokens,
-                    "output_tokens": p.output_tokens,
-                    "thinking_tokens": p.thinking_tokens,
-                    "num_turns": p.num_turns,
-                    "elapsed_seconds": p.elapsed,
-                    "lines": list(p.all_lines),
-                }
-            )
-        if panels:
-            version_dir.mkdir(parents=True, exist_ok=True)
-            (version_dir / "panels.json").write_text(json.dumps(panels, indent=2))
-
-    def _save_iteration_manifest(
-        self,
-        title: str | int,
-        result_text: str,
-        result_style: str,
-        summary: str,
-    ) -> None:
-        """Collect and persist an iteration record to the manifest file."""
-        record = self._collect_iteration_record(title, result_text, result_style, summary)
-        append_record(record, self.output_dir / MANIFEST_FILENAME)
-
-    def _restore_iterations_from_manifest(self) -> None:
-        """Mount collapsed iteration panels from a saved manifest.
-
-        Called at startup to show previous iterations in the TUI when
-        resuming or forking. Silently skips if no manifest exists.
-        """
-        manifest_path = self.output_dir / MANIFEST_FILENAME
-        records = load_manifest(manifest_path)
-        if not records:
-            return
-
-        for record in records:
-            self._live.mount_restored_iteration(
-                title=record.title,
-                result_text=record.result_text,
-                result_style=record.result_style,
-                summary=record.summary,
-                panels=[p.model_dump() for p in record.panels],
-            )
-
-    async def _generate_iteration_summary(self) -> str:
-        """Generate a combined recap from all agents' done_summaries for the current iteration."""
-        if not self._should_summarize():
-            return ""
-        container = self._live._current_iteration
-        if container is None:
-            return ""
-        summaries = [
-            (p.panel_name, p.done_summary)
-            for p in getattr(container, "_panels", [])
-            if p.done and p.done_summary
-        ]
-        if not summaries:
-            return ""
-        from auto_scientist.summarizer import summarize_iteration
-
-        return await summarize_iteration(summaries, self._summary_model)
-
-    @property
-    def _summary_model(self) -> str:
-        """Return the summarizer model name."""
-        if self.model_config.summarizer is None:
-            raise RuntimeError("Summarizer not configured")
-        return self.model_config.summarizer.model
-
-    async def _with_summaries(
-        self,
-        coro_fn: Callable[..., Any],
-        agent_name: str,
-        message_buffer: list[str],
-        panel: AgentPanel | None = None,
-    ) -> Any:
-        """Wrap an agent call in run_with_summaries if enabled.
-
-        When a panel is provided, summaries are routed to it via
-        summary_collector callback instead of being printed directly.
-        """
-        if not self._should_summarize():
-            result = await coro_fn(message_buffer)
-            if panel is not None:
-                self._apply_sdk_usage(panel)
-            return result
-
-        if panel is not None:
-            import asyncio
-            import contextlib
-
-            summary_collector: list[tuple[str, str, str]] = []
-            seen = 0
-
-            async def _poll_collector():
-                """Poll collector and push to panel."""
-                nonlocal seen
-                while True:
-                    await asyncio.sleep(0.5)
-                    new_entries = summary_collector[seen:]
-                    for _name, summary, label in new_entries:
-                        panel.add_line(f"[{label}] {summary}")
-                        self._live.refresh()
-                    seen = len(summary_collector)
-
-            poll_task = asyncio.create_task(_poll_collector())
-            try:
-                result = await run_with_summaries(
-                    coro_fn,
-                    agent_name,
-                    self._summary_model,
-                    message_buffer,
-                    summary_collector=summary_collector,
-                )
-                self._apply_sdk_usage(panel)
-            finally:
-                poll_task.cancel()
-                with contextlib.suppress(asyncio.CancelledError):
-                    await poll_task
-                # Flush entries added since last poll drain
-                for _name, summary, label in summary_collector[seen:]:
-                    panel.add_line(f"[{label}] {summary}")
-                self._live.refresh()
-            return result
-
-        return await run_with_summaries(
-            coro_fn,
-            agent_name,
-            self._summary_model,
-            message_buffer,
-        )
-
-    def _collapse(self, panel: AgentPanel, fallback: str = "") -> None:
-        """Collapse a panel, preferring the summarizer's done line over a fallback."""
-        if self._should_summarize() and panel.lines:
-            # Summarizer populated the panel; let complete() use the last line
-            self._live.collapse_panel(panel)
-        else:
-            self._live.collapse_panel(panel, fallback)
-
-    @staticmethod
-    def _apply_sdk_usage(panel: AgentPanel) -> None:
-        """Read token usage from the last SDK query and apply it to a panel."""
-        from auto_scientist.sdk_utils import collect_text_from_query
-
-        usage = getattr(collect_text_from_query, "last_usage", {})
-        if not usage:
-            return
-        # Claude Code SDK splits input tokens across cache buckets:
-        # input_tokens (non-cached) + cache_creation + cache_read = total input
-        in_tok = (
-            usage.get("input_tokens", 0)
-            + usage.get("cache_creation_input_tokens", 0)
-            + usage.get("cache_read_input_tokens", 0)
-        )
-        panel.set_stats(
-            input_tokens=in_tok,
-            output_tokens=usage.get("output_tokens", 0),
-            thinking_tokens=usage.get("thinking_tokens", 0),
-            num_turns=usage.get("num_turns", 0),
-        )
-
-    def _persist_buffer(
-        self,
-        agent_name: str,
-        buffer: list[str],
-        iteration: int | None = None,
-    ) -> None:
-        """Write an agent's message buffer to disk for debugging."""
-        if not buffer:
-            return
-        buffers_dir = self.output_dir / "buffers"
-        buffers_dir.mkdir(exist_ok=True)
-        if iteration is None:
-            iteration = self.state.iteration
-        filename = f"{agent_name.lower().replace(' ', '_')}_{iteration:02d}.txt"
-        (buffers_dir / filename).write_text("\n".join(buffer))
-
-    @staticmethod
-    def _persist_artifact(version_dir: Path, filename: str, data: Any) -> None:
-        """Save a structured JSON artifact to a version directory."""
-        version_dir.mkdir(parents=True, exist_ok=True)
-        (version_dir / filename).write_text(json.dumps(data, indent=2))
-
-    def _load_analyst_from_disk(self, version_dir: Path) -> dict[str, Any] | None:
-        """Load analyst output from disk and replay state side-effects."""
-        analysis_path = version_dir / "analysis.json"
-        if not analysis_path.exists():
-            logger.error(f"Cannot load analyst output: {analysis_path} not found")
-            return None
-        try:
-            analysis: dict[str, Any] = json.loads(analysis_path.read_text())
-        except (json.JSONDecodeError, OSError) as e:
-            logger.error(f"Cannot load analyst output: {e}")
-            return None
-
-        # Replay side-effects
-        if analysis.get("domain_knowledge"):
-            self.state.domain_knowledge = analysis["domain_knowledge"]
-            logger.info("Domain knowledge restored from disk")
-        self._resolve_prediction_outcomes(analysis)
-
-        logger.info(f"Loaded analyst output from {analysis_path}")
-        return analysis
-
-    def _load_scientist_plan_from_disk(self, version_dir: Path) -> dict[str, Any] | None:
-        """Load scientist plan from disk.
-
-        When resuming from debate, rewind_run has already restored the
-        pre-debate plan in plan.json.
-        """
-        plan_path = version_dir / "plan.json"
-        if not plan_path.exists():
-            logger.error(f"Cannot load scientist plan: {plan_path} not found")
-            return None
-        try:
-            plan: dict[str, Any] = json.loads(plan_path.read_text())
-        except (json.JSONDecodeError, OSError) as e:
-            logger.error(f"Cannot load scientist plan: {e}")
-            return None
-
-        logger.info(f"Loaded scientist plan from {plan_path}")
-        return plan
-
-    def _load_final_plan_from_disk(self, version_dir: Path) -> dict[str, Any] | None:
-        """Load the final (post-debate) plan from disk and replay prediction updates.
-
-        Used when resuming from coder: the plan on disk is the post-debate
-        revision, so we also replay _apply_prediction_updates.
-        """
-        plan_path = version_dir / "plan.json"
-        if not plan_path.exists():
-            logger.error(f"Cannot load final plan: {plan_path} not found")
-            return None
-        try:
-            plan: dict[str, Any] = json.loads(plan_path.read_text())
-        except (json.JSONDecodeError, OSError) as e:
-            logger.error(f"Cannot load final plan: {e}")
-            return None
-
-        self._apply_prediction_updates(plan)
-
-        logger.info(f"Loaded final plan from {plan_path}")
-        return plan
-
-    async def _resume_from_revision(
-        self, version_dir: Path, analysis: dict[str, Any] | None
-    ) -> dict[str, Any] | None:
-        """Load debate data from disk and re-run only the scientist revision.
-
-        Used when resuming from the 'revision' agent: debate completed but
-        the post-debate scientist revision crashed. Uses the pre-built
-        concern_ledger from debate.json (raw debate_results are serialized
-        dicts, not DebateResult objects, so _build_concern_ledger won't work).
-        """
-        from auto_scientist.agents.scientist import run_scientist_revision
-
-        debate_path = version_dir / "debate.json"
-        if not debate_path.exists():
-            logger.error(f"Cannot resume revision: {debate_path} not found")
-            return None
-
-        try:
-            debate_data = json.loads(debate_path.read_text())
-        except (json.JSONDecodeError, OSError) as e:
-            logger.error(f"Cannot load debate data for revision resume: {e}")
-            return None
-
-        original_plan = debate_data.get("original_plan")
-        concern_ledger = debate_data.get("concern_ledger", [])
-
-        if not original_plan:
-            logger.error("debate.json missing original_plan, cannot resume revision")
-            return None
-
-        version = f"v{self.state.iteration:02d}"
-        notebook_path = self.output_dir / NOTEBOOK_FILENAME
-        cfg = self.model_config.resolve("scientist")
-
-        panel = AgentPanel(
-            name="Revision", model=cfg.model, style=AGENT_STYLES.get("Scientist", "cyan")
-        )
-        self._live.add_panel(panel)
-        self._live.update_status(phase="REVISE")
-
-        buffer: list[str] = []
-        try:
-
-            async def _revision_coro(buf):
-                return await run_scientist_revision(
-                    original_plan=original_plan,
-                    concern_ledger=concern_ledger,
-                    analysis=analysis or {},
-                    notebook_path=notebook_path,
-                    version=version,
-                    domain_knowledge=self.state.domain_knowledge,
-                    prediction_history=self.state.prediction_history,
-                    model=cfg.model,
-                    message_buffer=buf,
-                    goal=self.state.goal,
-                    provider=cfg.provider,
-                    reasoning=cfg.reasoning,
-                )
-
-            revised: dict[str, Any] = await self._with_summaries(
-                _revision_coro,
-                "Scientist Revision",
-                buffer,
-                panel=panel,
-            )
-
-            # Write revised notebook entry
-            if revised.get("notebook_entry"):
-                from auto_scientist.notebook import append_entry
-
-                append_entry(notebook_path, revised["notebook_entry"], version, "revision")
-
-            self._collapse(panel, f"strategy={revised.get('strategy', '?')}")
-
-            final_plan = revised
-        except Exception as e:
-            logger.exception(f"Scientist revision error on resume: {e}")
-            panel.error(f"{e}, using original plan")
-            self._live.collapse_panel(panel)
-            final_plan = original_plan
-        finally:
-            self._persist_buffer("scientist_revision", buffer)
-
-        if final_plan:
-            self._persist_artifact(version_dir, "revision_plan.json", final_plan)
-            self._apply_prediction_updates(final_plan)
-            self._persist_artifact(version_dir, "plan.json", final_plan)
-
-        logger.info("Resumed from revision: scientist revision re-run complete")
-        return final_plan
-
     def _notebook_content(self) -> str:
         """Return notebook content."""
         return read_notebook(self.output_dir / NOTEBOOK_FILENAME)
@@ -1356,14 +658,16 @@ class Orchestrator:
                     provider=cfg.provider,
                 )
 
-            analysis: dict[str, Any] | None = await self._with_summaries(
+            analysis: dict[str, Any] | None = await with_summaries(
                 _analyst_coro,
                 "Analyst",
                 buffer,
                 panel=panel,
+                live=self._live,
+                summary_model=self._summary_model,
             )
             logger.info("Analyst initial: data characterization complete")
-            self._collapse(panel, "Data characterization complete")
+            collapse_panel(panel, self._live, self._summary_model, "Data characterization complete")
             return analysis
         except Exception as e:
             logger.exception(f"Analyst initial error: {e}")
@@ -1371,7 +675,7 @@ class Orchestrator:
             self._live.collapse_panel(panel)
             return None
         finally:
-            self._persist_buffer("analyst", buffer)
+            persist_buffer(self.output_dir, "analyst", buffer, self.state.iteration)
 
     async def _run_analyst(self) -> dict[str, Any] | None:
         """Invoke the Analyst agent on latest results + plots."""
@@ -1417,16 +721,18 @@ class Orchestrator:
                     provider=cfg.provider,
                 )
 
-            analysis: dict[str, Any] = await self._with_summaries(
+            analysis: dict[str, Any] = await with_summaries(
                 _analyst_coro,
                 "Analyst",
                 buffer,
                 panel=panel,
+                live=self._live,
+                summary_model=self._summary_model,
             )
             logger.info(
                 f"Analyst complete: data_summary={'yes' if analysis.get('data_summary') else 'no'}"
             )
-            self._collapse(panel, "Analysis complete")
+            collapse_panel(panel, self._live, self._summary_model, "Analysis complete")
             return analysis
         except Exception as e:
             logger.exception(f"Analyst error: {e}")
@@ -1434,7 +740,7 @@ class Orchestrator:
             self._live.collapse_panel(panel)
             return None
         finally:
-            self._persist_buffer("analyst", buffer)
+            persist_buffer(self.output_dir, "analyst", buffer, self.state.iteration)
 
     async def _run_scientist_plan(self, analysis: dict | None) -> dict[str, Any] | None:
         """Invoke the Scientist agent to formulate a plan."""
@@ -1469,11 +775,13 @@ class Orchestrator:
                     reasoning=cfg.reasoning,
                 )
 
-            plan: dict[str, Any] = await self._with_summaries(
+            plan: dict[str, Any] = await with_summaries(
                 _scientist_coro,
                 "Scientist",
                 buffer,
                 panel=panel,
+                live=self._live,
+                summary_model=self._summary_model,
             )
 
             # Write the notebook entry from the plan
@@ -1486,8 +794,10 @@ class Orchestrator:
                 f"hypothesis={plan.get('hypothesis', '?')[:100]}, "
                 f"should_stop={plan.get('should_stop', False)}"
             )
-            self._collapse(
+            collapse_panel(
                 panel,
+                self._live,
+                self._summary_model,
                 f"strategy={plan.get('strategy', '?')}, changes={len(plan.get('changes', []))}",
             )
             return plan
@@ -1497,7 +807,7 @@ class Orchestrator:
             self._live.collapse_panel(panel)
             return None
         finally:
-            self._persist_buffer("scientist", buffer)
+            persist_buffer(self.output_dir, "scientist", buffer, self.state.iteration)
 
     async def _run_stop_gate(
         self,
@@ -1545,14 +855,21 @@ class Orchestrator:
                     provider=cfg.provider,
                 )
 
-            assessment: dict[str, Any] = await self._with_summaries(
+            assessment: dict[str, Any] = await with_summaries(
                 _assess_coro,
                 "Completeness Assessment",
                 buffer,
                 panel=panel,
+                live=self._live,
+                summary_model=self._summary_model,
             )
-            self._collapse(panel, f"coverage={assessment.get('overall_coverage', '?')}")
-            self._persist_artifact(version_dir, "completeness_assessment.json", assessment)
+            collapse_panel(
+                panel,
+                self._live,
+                self._summary_model,
+                f"coverage={assessment.get('overall_coverage', '?')}",
+            )
+            persist_artifact(version_dir, "completeness_assessment.json", assessment)
         except Exception as e:
             logger.exception(f"Completeness assessment error: {e}")
             logger.error("Assessment failure aborts stop gate. Debate and revision skipped.")
@@ -1560,7 +877,7 @@ class Orchestrator:
             self._live.collapse_panel(panel)
             return None  # Error -> stop not validated, investigation continues
         finally:
-            self._persist_buffer("completeness_assessment", buffer)
+            persist_buffer(self.output_dir, "completeness_assessment", buffer, self.state.iteration)
 
         # --- Step 3b: Stop Debate ---
         if not self.model_config.critics:
@@ -1616,6 +933,8 @@ class Orchestrator:
                     await asyncio.sleep(0.5)
                     _flush_collectors()
 
+            summary_model = self._summary_model
+
             def _collapse_persona(name, result):
                 panel = stop_panels[name]
                 panel.set_stats(
@@ -1661,7 +980,7 @@ class Orchestrator:
                     result = await run_with_summaries(
                         coro,
                         f"Stop Debate: {name}",
-                        self._summary_model,
+                        summary_model,
                         stop_buffers[name],
                         label_prefix="",
                         summary_collector=collectors[name],
@@ -1701,7 +1020,7 @@ class Orchestrator:
             # Persist buffers regardless of success/failure for debugging
             for label, buf in stop_buffers.items():
                 clean = label.replace(":", "_").replace("/", "_").replace(" ", "_")
-                self._persist_buffer(f"stop_debate_{clean}", buf)
+                persist_buffer(self.output_dir, f"stop_debate_{clean}", buf, self.state.iteration)
 
             if not debate_results and raw_results:
                 failed_msgs = [str(r) for r in raw_results if isinstance(r, BaseException)]
@@ -1725,8 +1044,8 @@ class Orchestrator:
             serialized = [
                 r.model_dump() if isinstance(r, DebateResult) else r for r in debate_results
             ]
-            concern_ledger = self._build_concern_ledger(debate_results)
-            self._persist_artifact(
+            concern_ledger = build_concern_ledger(debate_results)
+            persist_artifact(
                 version_dir,
                 "stop_debate.json",
                 {
@@ -1765,11 +1084,13 @@ class Orchestrator:
                     provider=revision_cfg.provider,
                 )
 
-            revised: dict[str, Any] = await self._with_summaries(
+            revised: dict[str, Any] = await with_summaries(
                 _revision_coro,
                 "Stop Revision",
                 revision_buffer,
                 panel=revision_panel,
+                live=self._live,
+                summary_model=self._summary_model,
             )
 
             # Write notebook entry
@@ -1802,18 +1123,20 @@ class Orchestrator:
             # Apply prediction updates only if stop is upheld (the withdrawn
             # path falls through to normal debate which handles predictions)
             if revised.get("should_stop"):
-                self._apply_prediction_updates(revised)
+                apply_prediction_updates(revised, self.state)
 
-            self._collapse(
+            collapse_panel(
                 revision_panel,
+                self._live,
+                self._summary_model,
                 f"should_stop={revised.get('should_stop', '?')}",
             )
 
             # Persist as stop_revision_plan.json (plan.json will be written by
             # the normal flow on the withdrawn path, or here on the upheld path)
-            self._persist_artifact(version_dir, "stop_revision_plan.json", revised)
+            persist_artifact(version_dir, "stop_revision_plan.json", revised)
             if revised.get("should_stop"):
-                self._persist_artifact(version_dir, "plan.json", revised)
+                persist_artifact(version_dir, "plan.json", revised)
 
             return revised
         except Exception as e:
@@ -1822,7 +1145,7 @@ class Orchestrator:
             self._live.collapse_panel(revision_panel)
             return None  # Error -> stop not validated, investigation continues
         finally:
-            self._persist_buffer("stop_revision", revision_buffer)
+            persist_buffer(self.output_dir, "stop_revision", revision_buffer, self.state.iteration)
 
     async def _run_debate(
         self,
@@ -1861,7 +1184,7 @@ class Orchestrator:
             buffers[persona["name"]] = []
 
         try:
-            if self._should_summarize():
+            if self._summary_model:
                 critiques = await self._run_debate_with_summaries(
                     buffers,
                     plan,
@@ -1893,7 +1216,7 @@ class Orchestrator:
         finally:
             for label, buf in buffers.items():
                 safe_name = f"debate_{label.replace(':', '_').replace('/', '_')}"
-                self._persist_buffer(safe_name, buf)
+                persist_buffer(self.output_dir, safe_name, buf, self.state.iteration)
 
     async def _run_debate_with_summaries(
         self,
@@ -2060,32 +1383,6 @@ class Orchestrator:
             )
         return successful
 
-    @staticmethod
-    def _build_concern_ledger(debate_results: list) -> list[dict[str, Any]]:
-        """Build a concern ledger from structured debate results.
-
-        For each concern in the CriticOutput, attach the persona and model.
-        """
-        from auto_scientist.agents.debate_models import ConcernLedgerEntry, DebateResult
-
-        ledger: list[dict[str, Any]] = []
-        for result in debate_results:
-            if not isinstance(result, DebateResult):
-                continue
-
-            for concern in result.critic_output.concerns:
-                entry = ConcernLedgerEntry(
-                    claim=concern.claim,
-                    severity=concern.severity,
-                    confidence=concern.confidence,
-                    category=concern.category,
-                    persona=result.persona,
-                    critic_model=result.critic_model,
-                )
-                ledger.append(entry.model_dump())
-
-        return ledger
-
     async def _run_scientist_revision(
         self,
         plan: dict | None,
@@ -2104,7 +1401,7 @@ class Orchestrator:
         domain_knowledge = self.state.domain_knowledge
 
         # Build structured concern ledger from debate results
-        concern_ledger = self._build_concern_ledger(debate_result)
+        concern_ledger = build_concern_ledger(debate_result)
 
         cfg = self.model_config.resolve("scientist")
 
@@ -2133,18 +1430,25 @@ class Orchestrator:
                     reasoning=cfg.reasoning,
                 )
 
-            revised: dict[str, Any] = await self._with_summaries(
+            revised: dict[str, Any] = await with_summaries(
                 _revision_coro,
                 "Scientist Revision",
                 buffer,
                 panel=panel,
+                live=self._live,
+                summary_model=self._summary_model,
             )
 
             # Write revised notebook entry
             if revised.get("notebook_entry"):
                 append_entry(notebook_path, revised["notebook_entry"], version, "revision")
 
-            self._collapse(panel, f"strategy={revised.get('strategy', '?')}")
+            collapse_panel(
+                panel,
+                self._live,
+                self._summary_model,
+                f"strategy={revised.get('strategy', '?')}",
+            )
             return revised
         except Exception as e:
             logger.exception(f"Scientist revision error: {e}")
@@ -2152,7 +1456,105 @@ class Orchestrator:
             self._live.collapse_panel(panel)
             return None
         finally:
-            self._persist_buffer("scientist_revision", buffer)
+            persist_buffer(self.output_dir, "scientist_revision", buffer, self.state.iteration)
+
+    async def _resume_from_revision(
+        self, version_dir: Path, analysis: dict[str, Any] | None
+    ) -> dict[str, Any] | None:
+        """Load debate data from disk and re-run only the scientist revision.
+
+        Used when resuming from the 'revision' agent: debate completed but
+        the post-debate scientist revision crashed. Uses the pre-built
+        concern_ledger from debate.json (raw debate_results are serialized
+        dicts, not DebateResult objects, so build_concern_ledger won't work).
+        """
+        from auto_scientist.agents.scientist import run_scientist_revision
+
+        debate_path = version_dir / "debate.json"
+        if not debate_path.exists():
+            logger.error(f"Cannot resume revision: {debate_path} not found")
+            return None
+
+        try:
+            debate_data = json.loads(debate_path.read_text())
+        except (json.JSONDecodeError, OSError) as e:
+            logger.error(f"Cannot load debate data for revision resume: {e}")
+            return None
+
+        original_plan = debate_data.get("original_plan")
+        concern_ledger = debate_data.get("concern_ledger", [])
+
+        if not original_plan:
+            logger.error("debate.json missing original_plan, cannot resume revision")
+            return None
+
+        version = f"v{self.state.iteration:02d}"
+        notebook_path = self.output_dir / NOTEBOOK_FILENAME
+        cfg = self.model_config.resolve("scientist")
+
+        panel = AgentPanel(
+            name="Revision", model=cfg.model, style=AGENT_STYLES.get("Scientist", "cyan")
+        )
+        self._live.add_panel(panel)
+        self._live.update_status(phase="REVISE")
+
+        buffer: list[str] = []
+        try:
+
+            async def _revision_coro(buf):
+                return await run_scientist_revision(
+                    original_plan=original_plan,
+                    concern_ledger=concern_ledger,
+                    analysis=analysis or {},
+                    notebook_path=notebook_path,
+                    version=version,
+                    domain_knowledge=self.state.domain_knowledge,
+                    prediction_history=self.state.prediction_history,
+                    model=cfg.model,
+                    message_buffer=buf,
+                    goal=self.state.goal,
+                    provider=cfg.provider,
+                    reasoning=cfg.reasoning,
+                )
+
+            revised: dict[str, Any] = await with_summaries(
+                _revision_coro,
+                "Scientist Revision",
+                buffer,
+                panel=panel,
+                live=self._live,
+                summary_model=self._summary_model,
+            )
+
+            # Write revised notebook entry
+            if revised.get("notebook_entry"):
+                from auto_scientist.notebook import append_entry
+
+                append_entry(notebook_path, revised["notebook_entry"], version, "revision")
+
+            collapse_panel(
+                panel,
+                self._live,
+                self._summary_model,
+                f"strategy={revised.get('strategy', '?')}",
+            )
+
+            final_plan = revised
+        except Exception as e:
+            logger.exception(f"Scientist revision error on resume: {e}")
+            panel.error(f"{e}, using original plan")
+            self._live.collapse_panel(panel)
+            final_plan = original_plan
+        finally:
+            persist_buffer(self.output_dir, "scientist_revision", buffer, self.state.iteration)
+
+        if final_plan:
+            persist_artifact(version_dir, "revision_plan.json", final_plan)
+            apply_prediction_updates(final_plan, self.state)
+            persist_artifact(version_dir, "plan.json", final_plan)
+
+        logger.info("Resumed from revision: scientist revision re-run complete")
+        return final_plan
 
     async def _run_coder(self, plan: dict | None) -> Path | None:
         """Invoke the Coder agent to implement the plan."""
@@ -2231,13 +1633,15 @@ class Orchestrator:
                     provider=cfg.provider,
                 )
 
-            new_script: Path | None = await self._with_summaries(
+            new_script: Path | None = await with_summaries(
                 _coder_coro,
                 "Coder",
                 buffer,
                 panel=panel,
+                live=self._live,
+                summary_model=self._summary_model,
             )
-            self._collapse(panel, f"Created {new_script}")
+            collapse_panel(panel, self._live, self._summary_model, f"Created {new_script}")
             return new_script
         except Exception as e:
             logger.exception(f"Coder error: {e}")
@@ -2246,239 +1650,16 @@ class Orchestrator:
             self.state.record_failure()
             return None
         finally:
-            self._persist_buffer("coder", buffer)
-
-    _VALID_OUTCOMES = {"confirmed", "refuted", "inconclusive"}
-
-    def _apply_prediction_updates(self, plan: dict[str, Any]) -> None:
-        """Extract testable predictions from the Scientist plan and store as pending records.
-
-        Assigns ordinal pred_ids like "1.1", "1.2" and injects them back into the
-        plan dict so the Coder can include them in HYPOTHESIS TESTS output.
-        Skips malformed or empty prediction entries.
-        """
-        from auto_scientist.state import PredictionRecord
-
-        predictions = plan.get("testable_predictions", [])
-        stored = []
-        for i, pred in enumerate(predictions, 1):
-            if not isinstance(pred, dict):
-                logger.warning(
-                    f"Prediction {i}: expected dict, got {type(pred).__name__}; skipping"
-                )
-                continue
-            text = pred.get("prediction", "")
-            if not text or not isinstance(text, str) or not text.strip():
-                logger.warning(f"Prediction {i}: empty or invalid prediction text; skipping")
-                continue
-            pred_id = f"{self.state.iteration}.{i}"
-            record = PredictionRecord(
-                pred_id=pred_id,
-                iteration_prescribed=self.state.iteration,
-                prediction=text,
-                diagnostic=pred.get("diagnostic", ""),
-                if_confirmed=pred.get("if_confirmed", ""),
-                if_refuted=pred.get("if_refuted", ""),
-                follows_from=pred.get("follows_from"),
-            )
-            self.state.prediction_history.append(record)
-            pred["pred_id"] = pred_id
-            stored.append(pred_id)
-        if stored:
-            logger.info(f"Stored {len(stored)} predictions: {', '.join(stored)}")
-
-    def _resolve_prediction_outcomes(self, analysis: dict[str, Any] | None) -> None:
-        """Match Analyst prediction outcomes against pending records in state.
-
-        Primary matching by pred_id (reliable). Falls back to substring text
-        matching for backward compatibility with a minimum length guard.
-        """
-        if not analysis:
-            return
-        outcomes = analysis.get("prediction_outcomes", [])
-        if not outcomes:
-            return
-
-        pending = [r for r in self.state.prediction_history if r.outcome == "pending"]
-        if not pending:
-            return
-
-        pending_by_id = {r.pred_id: r for r in pending if r.pred_id}
-
-        def _resolve(record, outcome: dict) -> bool:
-            raw_outcome = outcome.get("outcome", "")
-            normalized = raw_outcome.strip().lower() if isinstance(raw_outcome, str) else ""
-            if normalized not in self._VALID_OUTCOMES:
-                logger.warning(
-                    f"Prediction {record.pred_id}: invalid outcome '{raw_outcome}', leaving pending"
-                )
-                return False
-            record.outcome = normalized
-            record.evidence = outcome.get("evidence", "")
-            record.iteration_evaluated = self.state.iteration
-            return True
-
-        for outcome in outcomes:
-            if not isinstance(outcome, dict):
-                logger.warning(
-                    f"Prediction outcome: expected dict, got {type(outcome).__name__}; skipping"
-                )
-                continue
-
-            # Primary: match by pred_id
-            oid = outcome.get("pred_id", "")
-            if oid and oid in pending_by_id:
-                record = pending_by_id[oid]
-                if _resolve(record, outcome):
-                    pending_by_id.pop(oid)
-                    pending.remove(record)
-                    logger.info(f"Prediction {oid}: resolved by ID as '{record.outcome}'")
-                continue
-
-            # Fallback: substring text matching (minimum length guard)
-            outcome_text = outcome.get("prediction", "")
-            outcome_text = outcome_text.lower().strip() if isinstance(outcome_text, str) else ""
-            if len(outcome_text) < 10:
-                logger.warning(
-                    f"Prediction outcome text too short for text matching: '{outcome_text}'"
-                )
-                continue
-
-            best_match = None
-            best_score = 0
-            for record in pending:
-                record_text = record.prediction.lower()
-                if outcome_text in record_text or record_text in outcome_text:
-                    score = len(record_text)
-                    if score > best_score:
-                        best_match = record
-                        best_score = score
-            if best_match:
-                if _resolve(best_match, outcome):
-                    logger.info(
-                        f"Prediction {best_match.pred_id}: "
-                        f"resolved by text fallback as '{best_match.outcome}'"
-                    )
-                    pending.remove(best_match)
-                    pending_by_id.pop(best_match.pred_id, None)
-            else:
-                logger.warning(
-                    f"Prediction outcome unmatched: pred_id='{oid}', text='{outcome_text[:80]}'..."
-                )
+            persist_buffer(self.output_dir, "coder", buffer, self.state.iteration)
 
     async def _resolve_final_predictions(self) -> None:
         """Run the Analyst on the last version to resolve pending predictions."""
         analysis = await self._run_analyst()
         if analysis:
-            self._resolve_prediction_outcomes(analysis)
+            resolve_prediction_outcomes(analysis, self.state)
             if self.state.versions:
                 version_dir = self.output_dir / self.state.versions[-1].version
-                self._persist_artifact(version_dir, "final_analysis.json", analysis)
-
-    _INFRA_FILES = {
-        "run_result.json",
-        "exitcode.txt",
-        "stderr.txt",
-        "analysis.json",
-        "plan.json",
-        "debate.json",
-    }
-
-    def _read_run_result(self, version_dir: Path) -> RunResult:
-        """Read run_result.json and companion files from a version directory.
-
-        Returns a populated RunResult. If run_result.json is missing or
-        malformed, returns a failure RunResult.
-        """
-        run_result_path = version_dir / "run_result.json"
-        if not run_result_path.exists():
-            logger.warning(f"run_result.json missing from {version_dir}")
-            return RunResult(
-                success=False,
-                stderr="Coder did not produce run_result.json",
-            )
-
-        from pydantic import ValidationError
-
-        from auto_scientist.schemas import CoderRunResult
-
-        try:
-            raw = json.loads(run_result_path.read_text())
-            validated = CoderRunResult.model_validate(raw)
-            data = validated.model_dump()
-        except (json.JSONDecodeError, OSError) as e:
-            logger.warning(f"Failed to parse run_result.json: {e}")
-            return RunResult(
-                success=False,
-                stderr=f"Failed to parse run_result.json: {e}",
-            )
-        except ValidationError as e:
-            logger.warning(f"run_result.json schema validation failed: {e}")
-            # Fall back to raw data if schema validation fails
-            data = raw
-
-        # Build stderr from error field + stderr.txt
-        stderr_parts = []
-        if data.get("error"):
-            stderr_parts.append(data["error"])
-        stderr_path = version_dir / "stderr.txt"
-        if stderr_path.exists():
-            try:
-                stderr_parts.append(stderr_path.read_text())
-            except OSError as e:
-                stderr_parts.append(f"(could not read stderr.txt: {e})")
-
-        stderr = "\n".join(stderr_parts)
-
-        # Read stdout from results.txt
-        results_path = version_dir / "results.txt"
-        try:
-            stdout = results_path.read_text() if results_path.exists() else ""
-        except OSError as e:
-            logger.warning(f"Could not read results.txt: {e}")
-            stdout = ""
-
-        # Discover output files (exclude infra files)
-        output_files = [
-            str(f)
-            for f in version_dir.iterdir()
-            if f.suffix in (".png", ".txt", ".csv", ".json") and f.name not in self._INFRA_FILES
-        ]
-
-        return RunResult(
-            success=data.get("success", False),
-            return_code=data.get("return_code", -1),
-            timed_out=data.get("timed_out", False),
-            stdout=stdout,
-            stderr=stderr,
-            output_files=output_files,
-        )
-
-    def _evaluate(self, run_result: RunResult | None, version_entry: VersionEntry) -> None:
-        """Evaluate results and update the version entry."""
-        if run_result is None:
-            version_entry.status = "failed"
-            self.state.record_failure()
-            return
-
-        if run_result.timed_out:
-            version_entry.status = "failed"
-            self.state.record_failure()
-            return
-
-        if not run_result.success:
-            version_entry.status = "failed"
-            self.state.record_failure()
-            return
-
-        # Success path
-        version_entry.status = "completed"
-        self.state.record_success()
-
-        # Set results path if stdout was saved
-        results_path = Path(version_entry.script_path).parent / "results.txt"
-        if results_path.exists():
-            version_entry.results_path = str(results_path)
+                persist_artifact(version_dir, "final_analysis.json", analysis)
 
     async def _run_report(self) -> bool:
         """Phase 2: Generate final summary report."""
@@ -2504,10 +1685,17 @@ class Orchestrator:
                     provider=cfg.provider,
                 )
 
-            report_content = await self._with_summaries(_report_coro, "Report", buffer, panel=panel)
+            report_content = await with_summaries(
+                _report_coro,
+                "Report",
+                buffer,
+                panel=panel,
+                live=self._live,
+                summary_model=self._summary_model,
+            )
             report_path = self.output_dir / "report.md"
             report_path.write_text(report_content)
-            self._collapse(panel, f"Written to {report_path}")
+            collapse_panel(panel, self._live, self._summary_model, f"Written to {report_path}")
             return True
         except Exception as e:
             logger.exception(f"Report error: {e}")
@@ -2516,4 +1704,4 @@ class Orchestrator:
             self.state.record_failure()
             return False
         finally:
-            self._persist_buffer("report", buffer)
+            persist_buffer(self.output_dir, "report", buffer, self.state.iteration)

@@ -11,12 +11,13 @@ from typing import Any, Literal, cast
 import click
 from dotenv import load_dotenv
 
-from auto_scientist.console import PipelineApp, console
+from auto_scientist.app import PipelineApp
 from auto_scientist.experiment_config import ExperimentConfig
 from auto_scientist.launch_app import LaunchApp
 from auto_scientist.model_config import ModelConfig
 from auto_scientist.orchestrator import Orchestrator
 from auto_scientist.state import ExperimentState
+from auto_scientist.widgets import console
 
 load_dotenv()
 
@@ -818,7 +819,7 @@ def show(source: str):
 
       auto-scientist show --from experiments/runs/my-run
     """
-    from auto_scientist.console import ShowApp
+    from auto_scientist.app import ShowApp
     from auto_scientist.iteration_manifest import MANIFEST_FILENAME, load_manifest
 
     run_dir, _ = _resolve_source(source)
