@@ -9,10 +9,8 @@ unknown message types are silently skipped instead of crashing the stream.
 """
 
 import asyncio
-import json
 import logging
 import os
-import sys
 from collections.abc import AsyncIterator
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -62,37 +60,50 @@ reproducibility outside this environment.
 </sandbox_environment>
 """
 
-# Shell command that extracts the Claude Code OAuth token from the macOS keychain.
-# Used as apiKeyHelper when running in --bare mode (subscription auth).
-# Keychain structure: service="Claude Code-credentials", key path claudeAiOauth.accessToken.
-# If Anthropic changes this format, the helper will fail at runtime.
-_MACOS_API_KEY_HELPER = (
-    "security find-generic-password -s 'Claude Code-credentials' -w"
-    ' | python3 -c "import sys,json;'
-    " print(json.loads(sys.stdin.read())['claudeAiOauth']['accessToken'])\""
-)
+# Tools that should never be available to SDK subprocesses.
+# Agent/Skill could recurse into host plugins; we block them explicitly.
+_DISALLOWED_SUBPROCESS_TOOLS = "Agent,Skill"
 
 
-def _bare_settings(env: dict[str, str]) -> tuple[bool, str | None]:
-    """Resolve auth for --bare isolation mode.
+@dataclass(frozen=True)
+class _IsolationConfig:
+    """CLI extra_args and env vars for subprocess isolation."""
 
-    Returns (use_bare, settings_json).
-    --bare disables keychain reads, so we provide auth via apiKeyHelper
-    (macOS keychain OAuth extraction). Always uses --bare; raises if
-    auth cannot be resolved.
+    extra_args: dict[str, str | None]
+    env: dict[str, str]
+
+
+def _isolation_config() -> _IsolationConfig:
+    """Build isolation settings for SDK subprocesses.
+
+    Instead of --bare (which strips all tools except Bash/Edit/Read),
+    we use targeted flags and env vars to isolate from host config
+    while keeping the full tool set (WebSearch, Glob, Grep, Write):
+
+    CLI flags (extra_args):
+    - ``--setting-sources ''`` skips host user/project/local settings,
+      hooks, and CLAUDE.md auto-discovery.
+    - ``--disallowed-tools Agent,Skill`` prevents recursion into host
+      plugins and skill invocations.
+
+    Env vars:
+    - ``CLAUDE_CODE_DISABLE_AUTO_MEMORY=1`` prevents host memory files
+      (MEMORY.md) from leaking into subprocess context.
+    - ``CLAUDE_CODE_DISABLE_CLAUDE_MDS=1`` prevents CLAUDE.md discovery
+      (belt-and-suspenders with --setting-sources '').
+
+    Auth works natively (keychain on macOS, ANTHROPIC_API_KEY env
+    on other platforms) since we no longer block keychain reads.
     """
-    # Explicit API key in agent env overrides everything
-    if env.get("ANTHROPIC_API_KEY"):
-        return True, None
-
-    # macOS: extract OAuth token from keychain via apiKeyHelper (primary path)
-    if sys.platform == "darwin":
-        return True, json.dumps({"apiKeyHelper": _MACOS_API_KEY_HELPER})
-
-    raise RuntimeError(
-        "Cannot resolve Anthropic auth for --bare isolation mode. "
-        "On macOS, subscription auth is extracted from the keychain automatically. "
-        "On other platforms, set ANTHROPIC_API_KEY in the environment."
+    return _IsolationConfig(
+        extra_args={
+            "setting-sources": "",
+            "disallowed-tools": _DISALLOWED_SUBPROCESS_TOOLS,
+        },
+        env={
+            "CLAUDE_CODE_DISABLE_AUTO_MEMORY": "1",
+            "CLAUDE_CODE_DISABLE_CLAUDE_MDS": "1",
+        },
     )
 
 
@@ -272,13 +283,12 @@ class ClaudeBackend:
         if "effort" not in extra_args:
             env["MAX_THINKING_TOKENS"] = "0"
 
-        # --bare isolates SDK subprocesses from the user's personal
-        # Claude Code environment (hooks, plugins, CLAUDE.md, settings).
-        # Auth is provided via apiKeyHelper (macOS keychain) or
-        # ANTHROPIC_API_KEY (env var fallback).
-        use_bare, bare_settings = _bare_settings(env)
-        if use_bare:
-            extra_args["bare"] = None
+        # Isolate SDK subprocesses from the user's personal Claude Code
+        # environment (hooks, plugins, CLAUDE.md, memory, settings) while
+        # keeping the full tool set (WebSearch, Glob, Grep, Write, etc.).
+        isolation = _isolation_config()
+        extra_args.update(isolation.extra_args)
+        env.update(isolation.env)
 
         kwargs: dict[str, Any] = {
             "system_prompt": options.system_prompt,
@@ -288,8 +298,6 @@ class ClaudeBackend:
             "extra_args": extra_args,
             "include_partial_messages": True,
         }
-        if bare_settings:
-            kwargs["settings"] = bare_settings
         if options.model:
             kwargs["model"] = options.model
         if options.cwd:

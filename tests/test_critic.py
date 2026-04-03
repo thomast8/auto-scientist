@@ -756,8 +756,8 @@ class TestCriticMcpIntegration:
         assert PREDICTION_SPEC.mcp_tool_name not in options.allowed_tools
 
     @pytest.mark.asyncio
-    async def test_sdk_max_turns_is_10(self, plan):
-        """SDK path uses max_turns=10."""
+    async def test_sdk_max_turns_includes_toolsearch_bump(self, plan):
+        """SDK path uses max_turns=11 (10 base + 1 for ToolSearch to resolve WebSearch)."""
         critic = AgentModelConfig(provider="anthropic", model="claude-sonnet-4-6")
         mock_sdk = _sdk_critic_mock()
 
@@ -769,7 +769,8 @@ class TestCriticMcpIntegration:
             )
 
         options = mock_sdk.call_args[0][1]
-        assert options.max_turns == 10
+        assert options.max_turns == 11
+        assert "ToolSearch" in options.allowed_tools
 
     @pytest.mark.asyncio
     async def test_api_mode_ignores_records(self, plan):

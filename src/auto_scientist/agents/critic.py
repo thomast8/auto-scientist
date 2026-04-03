@@ -49,8 +49,8 @@ from auto_scientist.sdk_backend import SDKOptions, get_backend
 from auto_scientist.sdk_utils import (
     OutputValidationError,
     collect_text_from_query,
+    prepare_turn_budget,
     validate_json_output,
-    with_turn_budget,
 )
 from auto_scientist.state import PredictionRecord
 
@@ -118,12 +118,15 @@ async def _query_critic(
         if config.reasoning and config.reasoning.level != "off":
             extra_args.update(reasoning_to_cc_extra_args(config.reasoning))
         max_turns = 10
+        budget = prepare_turn_budget(
+            system_prompt, max_turns, effective_tools, provider=config.provider
+        )
         backend = get_backend(config.provider)
         options = SDKOptions(
             model=config.model,
-            system_prompt=with_turn_budget(system_prompt, max_turns, effective_tools),
-            allowed_tools=effective_tools,
-            max_turns=max_turns,
+            system_prompt=budget.system_prompt,
+            allowed_tools=budget.allowed_tools,
+            max_turns=budget.max_turns,
             extra_args=extra_args,
             mcp_servers=mcp_servers or {},
         )
@@ -165,12 +168,15 @@ async def _query_critic(
         if config.reasoning and config.reasoning.level != "off":
             extra_args_api.update(reasoning_to_cc_extra_args(config.reasoning))
         max_turns = 10
+        budget = prepare_turn_budget(
+            system_prompt, max_turns, effective_tools, provider="anthropic"
+        )
         backend = get_backend("anthropic")
         options = SDKOptions(
             model=config.model,
-            system_prompt=with_turn_budget(system_prompt, max_turns, effective_tools),
-            allowed_tools=effective_tools,
-            max_turns=max_turns,
+            system_prompt=budget.system_prompt,
+            allowed_tools=budget.allowed_tools,
+            max_turns=budget.max_turns,
             extra_args=extra_args_api,
             mcp_servers=mcp_servers or {},
         )

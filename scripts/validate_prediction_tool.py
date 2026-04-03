@@ -171,7 +171,7 @@ async def run_scientist_with_tool(
     native MCP support.
     """
     from auto_scientist.sdk_backend import SDKOptions, get_backend
-    from auto_scientist.sdk_utils import with_turn_budget
+    from auto_scientist.sdk_utils import prepare_turn_budget
 
     preds = predictions_at_iteration(state.prediction_history, iteration)
     analysis = analyses.get(iteration - 1, {})
@@ -203,9 +203,9 @@ async def run_scientist_with_tool(
     logger.info(f"Tools: {tools}")
     logger.info(f"MCP servers: {list(mcp_servers.keys()) or 'none'}")
 
-    system_prompt = with_turn_budget(SCIENTIST_SYSTEM + json_instruction, 15, tools)
+    budget = prepare_turn_budget(SCIENTIST_SYSTEM + json_instruction, 15, tools, provider=provider)
 
-    logger.info(f"System: {len(system_prompt):,} | User: {len(user_prompt):,}")
+    logger.info(f"System: {len(budget.system_prompt):,} | User: {len(user_prompt):,}")
 
     print(f"\n{'=' * 80}")
     print(f"SCIENTIST INVOCATION (iter {iteration}, provider={provider})")
@@ -217,9 +217,9 @@ async def run_scientist_with_tool(
 
     backend = get_backend(provider)
     options = SDKOptions(
-        system_prompt=system_prompt,
-        allowed_tools=tools,
-        max_turns=15,
+        system_prompt=budget.system_prompt,
+        allowed_tools=budget.allowed_tools,
+        max_turns=budget.max_turns,
         mcp_servers=mcp_servers,
     )
 

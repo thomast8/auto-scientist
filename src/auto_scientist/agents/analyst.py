@@ -18,8 +18,8 @@ from auto_scientist.sdk_backend import SDKOptions, get_backend
 from auto_scientist.sdk_utils import (
     OutputValidationError,
     collect_text_from_query,
+    prepare_turn_budget,
     validate_json_output,
-    with_turn_budget,
 )
 
 logger = logging.getLogger(__name__)
@@ -146,11 +146,14 @@ async def run_analyst(
     # prompts when running as a sub-agent via the SDK.
     max_turns = 30
     allowed_tools = ["Read", "Glob"]
+    budget = prepare_turn_budget(
+        ANALYST_SYSTEM + json_instruction, max_turns, allowed_tools, provider=provider
+    )
     backend = get_backend(provider)
     options = SDKOptions(
-        system_prompt=with_turn_budget(ANALYST_SYSTEM + json_instruction, max_turns, allowed_tools),
-        allowed_tools=allowed_tools,
-        max_turns=max_turns,
+        system_prompt=budget.system_prompt,
+        allowed_tools=budget.allowed_tools,
+        max_turns=budget.max_turns,
         permission_mode="acceptEdits",
         cwd=cwd,
         model=model,

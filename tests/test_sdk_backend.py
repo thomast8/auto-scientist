@@ -1,61 +1,51 @@
 """Tests for SDK backend abstraction (SDKOptions, SDKMessage, backends, factory)."""
 
-import json
 from pathlib import Path
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
 # ---------------------------------------------------------------------------
-# _bare_settings
+# _isolation_args
 # ---------------------------------------------------------------------------
 
 
-class TestBareSettings:
-    def test_explicit_api_key_in_env(self):
-        """Agent env with ANTHROPIC_API_KEY -> bare mode, no settings."""
-        from auto_scientist.sdk_backend import _bare_settings
+class TestIsolationConfig:
+    def test_returns_setting_sources_empty(self):
+        """Isolation disables host settings/hooks/CLAUDE.md via --setting-sources ''."""
+        from auto_scientist.sdk_backend import _isolation_config
 
-        use_bare, settings = _bare_settings({"ANTHROPIC_API_KEY": "sk-test"})
-        assert use_bare is True
-        assert settings is None
+        cfg = _isolation_config()
+        assert cfg.extra_args["setting-sources"] == ""
 
-    def test_macos_keychain(self):
-        """On macOS without API key -> bare mode with apiKeyHelper."""
-        from auto_scientist.sdk_backend import _bare_settings
+    def test_disallows_agent_and_skill(self):
+        """Agent and Skill tools are blocked to prevent host plugin recursion."""
+        from auto_scientist.sdk_backend import _isolation_config
 
-        with patch("auto_scientist.sdk_backend.sys") as mock_sys:
-            mock_sys.platform = "darwin"
-            use_bare, settings = _bare_settings({})
+        cfg = _isolation_config()
+        assert "Agent" in cfg.extra_args["disallowed-tools"]
+        assert "Skill" in cfg.extra_args["disallowed-tools"]
 
-        assert use_bare is True
-        assert settings is not None
-        parsed = json.loads(settings)
-        assert "apiKeyHelper" in parsed
-        assert "security find-generic-password" in parsed["apiKeyHelper"]
+    def test_no_bare_flag(self):
+        """Isolation does NOT set --bare (which would strip most tools)."""
+        from auto_scientist.sdk_backend import _isolation_config
 
-    def test_non_macos_with_explicit_env_key(self):
-        """On Linux with ANTHROPIC_API_KEY in agent env -> bare, no settings."""
-        from auto_scientist.sdk_backend import _bare_settings
+        cfg = _isolation_config()
+        assert "bare" not in cfg.extra_args
 
-        with patch("auto_scientist.sdk_backend.sys") as mock_sys:
-            mock_sys.platform = "linux"
-            use_bare, settings = _bare_settings({"ANTHROPIC_API_KEY": "sk-test"})
+    def test_disables_auto_memory(self):
+        """Auto-memory is disabled to prevent MEMORY.md leakage."""
+        from auto_scientist.sdk_backend import _isolation_config
 
-        assert use_bare is True
-        assert settings is None
+        cfg = _isolation_config()
+        assert cfg.env["CLAUDE_CODE_DISABLE_AUTO_MEMORY"] == "1"
 
-    def test_no_auth_raises(self):
-        """No macOS, no API key -> RuntimeError."""
-        from auto_scientist.sdk_backend import _bare_settings
+    def test_disables_claude_mds(self):
+        """CLAUDE.md discovery is disabled via env var."""
+        from auto_scientist.sdk_backend import _isolation_config
 
-        with (
-            patch("auto_scientist.sdk_backend.sys") as mock_sys,
-            patch.dict("os.environ", {}, clear=True),
-            pytest.raises(RuntimeError, match="Cannot resolve Anthropic auth"),
-        ):
-            mock_sys.platform = "linux"
-            _bare_settings({})
+        cfg = _isolation_config()
+        assert cfg.env["CLAUDE_CODE_DISABLE_CLAUDE_MDS"] == "1"
 
 
 # ---------------------------------------------------------------------------
@@ -296,60 +286,18 @@ class TestClaudeBackend:
 
         with (
             patch("auto_scientist.sdk_backend.claude_query", side_effect=fake_query) as mock_q,
-            patch("auto_scientist.sdk_backend._bare_settings", return_value=(True, None)),
         ):
             async for _ in backend.query("test", opts):
                 pass
 
         call_kwargs = mock_q.call_args
         cc_opts = call_kwargs.kwargs.get("options") or call_kwargs[1].get("options")
-        assert cc_opts.extra_args.get("bare") is None  # None = boolean flag
-        assert "bare" in cc_opts.extra_args
-
-    @pytest.mark.asyncio
-    async def test_bare_settings_passed(self):
-        """When _bare_settings returns settings JSON, it's passed to ClaudeCodeOptions."""
-        from auto_scientist.sdk_backend import ClaudeBackend, SDKOptions
-
-        async def fake_query(**kwargs):
-            return
-            yield
-
-        backend = ClaudeBackend()
-        opts = SDKOptions(system_prompt="", allowed_tools=[], max_turns=5)
-        fake_settings = '{"apiKeyHelper": "echo test"}'
-
-        with (
-            patch("auto_scientist.sdk_backend.claude_query", side_effect=fake_query) as mock_q,
-            patch(
-                "auto_scientist.sdk_backend._bare_settings",
-                return_value=(True, fake_settings),
-            ),
-        ):
-            async for _ in backend.query("test", opts):
-                pass
-
-        call_kwargs = mock_q.call_args
-        cc_opts = call_kwargs.kwargs.get("options") or call_kwargs[1].get("options")
-        assert cc_opts.settings == fake_settings
-
-    @pytest.mark.asyncio
-    async def test_bare_auth_failure_propagates(self):
-        """When _bare_settings raises, ClaudeBackend propagates the error."""
-        from auto_scientist.sdk_backend import ClaudeBackend, SDKOptions
-
-        backend = ClaudeBackend()
-        opts = SDKOptions(system_prompt="", allowed_tools=[], max_turns=5)
-
-        with (
-            patch(
-                "auto_scientist.sdk_backend._bare_settings",
-                side_effect=RuntimeError("no auth"),
-            ),
-            pytest.raises(RuntimeError, match="no auth"),
-        ):
-            async for _ in backend.query("test", opts):
-                pass
+        # Uses targeted isolation, NOT --bare
+        assert "bare" not in cc_opts.extra_args
+        assert cc_opts.extra_args.get("setting-sources") == ""
+        assert "Agent" in cc_opts.extra_args.get("disallowed-tools", "")
+        assert cc_opts.env.get("CLAUDE_CODE_DISABLE_AUTO_MEMORY") == "1"
+        assert cc_opts.env.get("CLAUDE_CODE_DISABLE_CLAUDE_MDS") == "1"
 
     @pytest.mark.asyncio
     async def test_skips_none_messages(self):

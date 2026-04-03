@@ -23,7 +23,7 @@ from auto_scientist.sdk_backend import CODEX_SANDBOX_ADDENDUM, SDKOptions, get_b
 from auto_scientist.sdk_utils import (
     append_block_to_buffer,
     collect_text_from_query,
-    with_turn_budget,
+    prepare_turn_budget,
 )
 
 logger = logging.getLogger(__name__)
@@ -124,11 +124,12 @@ async def run_coder(
 
     max_turns = 50
     allowed_tools = ["Read", "Write", "Edit", "Bash", "Glob", "Grep"]
+    budget = prepare_turn_budget(system_prompt, max_turns, allowed_tools, provider=provider)
     backend = get_backend(provider)
     options = SDKOptions(
-        system_prompt=with_turn_budget(system_prompt, max_turns, allowed_tools),
-        allowed_tools=allowed_tools,
-        max_turns=max_turns,
+        system_prompt=budget.system_prompt,
+        allowed_tools=budget.allowed_tools,
+        max_turns=budget.max_turns,
         permission_mode="acceptEdits",
         cwd=output_dir,
         model=model,

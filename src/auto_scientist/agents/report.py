@@ -14,9 +14,9 @@ from auto_scientist.sdk_backend import SDKOptions, get_backend
 from auto_scientist.sdk_utils import (
     append_block_to_buffer,
     collect_text_from_query,
+    prepare_turn_budget,
     safe_query,
     validate_report_structure,
-    with_turn_budget,
 )
 from auto_scientist.state import ExperimentState
 
@@ -60,11 +60,12 @@ async def run_report(
 
     max_turns = 10
     allowed_tools = ["Read", "Glob"]
+    budget = prepare_turn_budget(REPORT_SYSTEM, max_turns, allowed_tools, provider=provider)
     backend = get_backend(provider)
     options = SDKOptions(
-        system_prompt=with_turn_budget(REPORT_SYSTEM, max_turns, allowed_tools),
-        allowed_tools=allowed_tools,
-        max_turns=max_turns,
+        system_prompt=budget.system_prompt,
+        allowed_tools=budget.allowed_tools,
+        max_turns=budget.max_turns,
         permission_mode="acceptEdits",
         cwd=output_dir,
         model=model,
@@ -145,12 +146,13 @@ async def run_report(
                 )
                 retry_max_turns = 10
                 retry_allowed_tools = ["Read", "Glob"]
+                retry_budget = prepare_turn_budget(
+                    REPORT_SYSTEM, retry_max_turns, retry_allowed_tools, provider=provider
+                )
                 options = SDKOptions(
-                    system_prompt=with_turn_budget(
-                        REPORT_SYSTEM, retry_max_turns, retry_allowed_tools
-                    ),
-                    allowed_tools=retry_allowed_tools,
-                    max_turns=retry_max_turns,
+                    system_prompt=retry_budget.system_prompt,
+                    allowed_tools=retry_budget.allowed_tools,
+                    max_turns=retry_budget.max_turns,
                     permission_mode="acceptEdits",
                     cwd=output_dir,
                     model=model,

@@ -33,8 +33,8 @@ from auto_scientist.sdk_backend import SDKOptions, get_backend
 from auto_scientist.sdk_utils import (
     OutputValidationError,
     collect_text_from_query,
+    prepare_turn_budget,
     validate_json_output,
-    with_turn_budget,
 )
 from auto_scientist.state import PredictionRecord
 
@@ -102,11 +102,14 @@ async def run_completeness_assessment(
     )
 
     max_turns = 10
+    budget = prepare_turn_budget(
+        ASSESSMENT_SYSTEM + json_instruction, max_turns, tools, provider=provider
+    )
     backend = get_backend(provider)
     options = SDKOptions(
-        system_prompt=with_turn_budget(ASSESSMENT_SYSTEM + json_instruction, max_turns, tools),
-        allowed_tools=tools,
-        max_turns=max_turns,
+        system_prompt=budget.system_prompt,
+        allowed_tools=budget.allowed_tools,
+        max_turns=budget.max_turns,
         model=model,
         extra_args={},
         mcp_servers=mcp_servers,
@@ -335,11 +338,14 @@ async def run_scientist_stop_revision(
     )
 
     max_turns = 15
+    budget = prepare_turn_budget(
+        STOP_REVISION_SYSTEM + json_instruction, max_turns, tools, provider=provider
+    )
     backend = get_backend(provider)
     options = SDKOptions(
-        system_prompt=with_turn_budget(STOP_REVISION_SYSTEM + json_instruction, max_turns, tools),
-        allowed_tools=tools,
-        max_turns=max_turns,
+        system_prompt=budget.system_prompt,
+        allowed_tools=budget.allowed_tools,
+        max_turns=budget.max_turns,
         model=model,
         extra_args={},
         mcp_servers=mcp_servers,

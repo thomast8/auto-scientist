@@ -19,8 +19,8 @@ from auto_scientist.sdk_backend import CODEX_SANDBOX_ADDENDUM, SDKOptions, get_b
 from auto_scientist.sdk_utils import (
     append_block_to_buffer,
     collect_text_from_query,
+    prepare_turn_budget,
     safe_query,
-    with_turn_budget,
 )
 
 logger = logging.getLogger(__name__)
@@ -64,11 +64,12 @@ async def run_ingestor(
     system_prompt = INGESTOR_SYSTEM
     if provider == "openai":
         system_prompt += CODEX_SANDBOX_ADDENDUM
+    budget = prepare_turn_budget(system_prompt, max_turns, tools, provider=provider)
     backend = get_backend(provider)
     options = SDKOptions(
-        system_prompt=with_turn_budget(system_prompt, max_turns, tools),
-        allowed_tools=tools,
-        max_turns=max_turns,
+        system_prompt=budget.system_prompt,
+        allowed_tools=budget.allowed_tools,
+        max_turns=budget.max_turns,
         permission_mode="acceptEdits",
         cwd=output_dir,
         model=model,
@@ -179,12 +180,13 @@ async def run_ingestor(
                         f"domain_config.json, resuming session to fix"
                     )
                     clarification_max_turns = 10
+                    retry_budget = prepare_turn_budget(
+                        INGESTOR_SYSTEM, clarification_max_turns, tools, provider=provider
+                    )
                     options = SDKOptions(
-                        system_prompt=with_turn_budget(
-                            INGESTOR_SYSTEM, clarification_max_turns, tools
-                        ),
-                        allowed_tools=tools,
-                        max_turns=clarification_max_turns,
+                        system_prompt=retry_budget.system_prompt,
+                        allowed_tools=retry_budget.allowed_tools,
+                        max_turns=retry_budget.max_turns,
                         permission_mode="acceptEdits",
                         cwd=output_dir,
                         model=model,

@@ -121,8 +121,8 @@ class TestRunScientist:
 
     @pytest.mark.asyncio
     @patch("auto_scientist.sdk_backend.claude_query")
-    async def test_has_web_search_only_without_predictions(self, mock_query, tmp_path):
-        """Scientist without prediction history should only have WebSearch."""
+    async def test_has_web_search_and_toolsearch_without_predictions(self, mock_query, tmp_path):
+        """Scientist without prediction history should have WebSearch + ToolSearch."""
         from claude_code_sdk import ResultMessage
 
         result_msg = MagicMock(spec=ResultMessage)
@@ -139,7 +139,9 @@ class TestRunScientist:
         notebook_path = tmp_path / "notebook.md"
         await run_scientist(analysis={}, notebook_path=notebook_path, version="v01")
 
-        assert captured_options["options"].allowed_tools == ["WebSearch"]
+        tools = captured_options["options"].allowed_tools
+        assert "WebSearch" in tools
+        assert "ToolSearch" in tools
 
     @pytest.mark.asyncio
     @patch("auto_scientist.sdk_backend.claude_query")
