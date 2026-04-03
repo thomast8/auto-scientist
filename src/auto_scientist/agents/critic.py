@@ -32,8 +32,11 @@ from auto_scientist.agents.debate_models import (
     CriticOutput,
     DebateResult,
 )
-from auto_scientist.agents.prediction_tool import PREDICTION_SPEC, build_prediction_mcp_server
-from auto_scientist.agents.scientist import PREDICTION_TOOL_HINT
+from auto_scientist.agents.prediction_tool import (
+    PREDICTION_SPEC,
+    build_prediction_mcp_server,
+    format_compact_tree,
+)
 from auto_scientist.model_config import AgentModelConfig, reasoning_to_cc_extra_args
 from auto_scientist.models.google_client import query_google
 from auto_scientist.models.openai_client import query_openai
@@ -310,9 +313,11 @@ async def run_single_critic_debate(
         prediction_history_records, output_dir=output_dir
     )
 
-    # SDK mode with MCP: use tool hint instead of text dump
-    # API mode without MCP: keep the full-detail text as the only source
-    effective_prediction_history = PREDICTION_TOOL_HINT if mcp_servers else prediction_history
+    effective_prediction_history = (
+        format_compact_tree(prediction_history_records)
+        if prediction_history_records
+        else prediction_history
+    )
 
     critic_system, critic_user = _build_critic_prompt(
         plan,

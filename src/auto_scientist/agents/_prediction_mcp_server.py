@@ -128,8 +128,8 @@ def _build_compact_tree(predictions: list[dict]) -> str:
     return "\n".join(all_lines)
 
 
-def _build_overview(predictions: list[dict]) -> str:
-    """Build counts header + compact prediction tree."""
+def _build_status(predictions: list[dict]) -> str:
+    """Build a counts-only status summary (no tree, since tree is inline in prompt)."""
     by_status: dict[str, int] = {}
     for rec in predictions:
         outcome = rec.get("outcome", "pending")
@@ -140,8 +140,6 @@ def _build_overview(predictions: list[dict]) -> str:
         count = by_status.get(status, 0)
         if count:
             lines.append(f"  {status}: {count}")
-    lines.append("")
-    lines.append(_build_compact_tree(predictions))
     return "\n".join(lines)
 
 
@@ -154,8 +152,8 @@ def _query(predictions: list[dict[str, Any]], args: dict[str, Any]) -> str:
     if not predictions:
         return "No predictions in history yet."
 
-    if args.get("overview"):
-        return _build_overview(predictions)
+    if args.get("status"):
+        return _build_status(predictions)
 
     by_id = {r["pred_id"]: r for r in predictions if r.get("pred_id")}
     available = ", ".join(sorted(by_id.keys()))
@@ -167,7 +165,7 @@ def _query(predictions: list[dict[str, Any]], args: dict[str, Any]) -> str:
 
     if not pred_ids and not chain_id and not status_filter and iteration is None:
         return (
-            "Please specify a query: overview, pred_ids, chain, filter, "
+            "Please specify a query: status, pred_ids, chain, filter, "
             f"or iteration. Available IDs: {available}"
         )
 
@@ -228,24 +226,24 @@ if __name__ == "__main__":
         server_name="predictions",
         tool_name="read_predictions",
         description=(
-            "Query the prediction history. Start with "
-            "overview=true to see counts and the full "
-            "prediction tree (status, summary, parent-child "
-            "chains). Then use targeted queries (chain, "
-            "pred_ids, filter) to inspect specifics. Each "
-            "call loads results into your context, so prefer "
-            "fewer targeted queries over exhaustive audits."
+            "Drill into prediction history details. The "
+            "compact prediction tree is already in your "
+            "prompt; use this tool for full records. "
+            "Use status=true for counts, chain/pred_ids/"
+            "filter/iteration for specific predictions "
+            "with full detail (evidence, diagnostics, "
+            "implications)."
         ),
         input_schema={
             "type": "object",
             "properties": {
-                "overview": {
+                "status": {
                     "type": "boolean",
                     "description": (
-                        "Returns a count header plus the full "
-                        "compact prediction tree showing status, "
-                        "summary, and parent-child chains. Call "
-                        "this first to orient."
+                        "Returns a count header: total "
+                        "predictions and breakdown by outcome "
+                        "(confirmed, refuted, inconclusive, "
+                        "pending). Use for a quick tally."
                     ),
                 },
                 "chain": {
@@ -291,8 +289,8 @@ if __name__ == "__main__":
         },
         deferred_description=(
             "mcp__predictions__read_predictions("
-            "overview?, chain?, pred_ids?, filter?, iteration?) "
-            "- Query prediction history. Call with overview=true first."
+            "status?, chain?, pred_ids?, filter?, iteration?) "
+            "- Drill into prediction details. Tree is already in your prompt."
         ),
     )
 

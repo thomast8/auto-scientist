@@ -23,23 +23,22 @@ logger = logging.getLogger(__name__)
 # ---------------------------------------------------------------------------
 
 _READ_PREDICTIONS_DESCRIPTION = (
-    "Query the prediction history. Start with overview=true to see counts "
-    "and the full prediction tree (status, summary, parent-child chains). "
-    "Then use targeted queries (chain, pred_ids, filter) to inspect "
-    "specifics. Each call loads results into your context, so prefer "
-    "fewer targeted queries over exhaustive audits."
+    "Drill into prediction history details. The compact prediction tree "
+    "is already in your prompt; use this tool for full records. "
+    "Use status=true for counts, chain/pred_ids/filter/iteration for "
+    "specific predictions with full detail (evidence, diagnostics, "
+    "implications). Prefer fewer targeted queries over exhaustive audits."
 )
 
 _READ_PREDICTIONS_SCHEMA: dict[str, Any] = {
     "type": "object",
     "properties": {
-        "overview": {
+        "status": {
             "type": "boolean",
             "description": (
-                "Returns a count header (total, by-status) plus the full "
-                "compact prediction tree showing status, summary, and "
-                "parent-child chains for every prediction. Call this "
-                "first to orient, then drill into specifics."
+                "Returns a count header: total predictions and "
+                "breakdown by outcome (confirmed, refuted, "
+                "inconclusive, pending). Use for a quick tally."
             ),
         },
         "chain": {
@@ -89,8 +88,8 @@ PREDICTION_SPEC = MCPToolSpec(
     input_schema=_READ_PREDICTIONS_SCHEMA,
     deferred_description=(
         "mcp__predictions__read_predictions("
-        "overview?, chain?, pred_ids?, filter?, iteration?) "
-        "- Query prediction history. Call with overview=true first."
+        "status?, chain?, pred_ids?, filter?, iteration?) "
+        "- Drill into prediction details. Tree is already in your prompt."
     ),
 )
 
@@ -98,7 +97,7 @@ register_mcp_tool(PREDICTION_SPEC)
 
 
 # ---------------------------------------------------------------------------
-# Compact tree (canonical implementation, used by overview and scientist)
+# Compact tree (canonical implementation, inlined in all agent prompts)
 # ---------------------------------------------------------------------------
 
 
@@ -173,7 +172,7 @@ def format_compact_tree(
             lines.extend(_render_compact(child, indent + 1))
         return lines
 
-    header = "== PREDICTION TREE (use read_predictions tool for full detail) =="
+    header = "== PREDICTION TREE =="
     all_lines = [header]
     for root in children[None]:
         all_lines.extend(_render_compact(root, 0))
@@ -245,10 +244,10 @@ def _get_full_chain_ids(
     return chain
 
 
-def _build_overview_response(
+def _build_status_response(
     prediction_history: list[PredictionRecord],
 ) -> dict[str, Any]:
-    """Build counts header + compact prediction tree."""
+    """Build a counts-only status summary (no tree, since tree is inline in prompt)."""
     by_status: dict[str, int] = {}
     for rec in prediction_history:
         by_status[rec.outcome] = by_status.get(rec.outcome, 0) + 1
@@ -258,8 +257,6 @@ def _build_overview_response(
         count = by_status.get(status, 0)
         if count:
             lines.append(f"  {status}: {count}")
-    lines.append("")
-    lines.append(format_compact_tree(prediction_history))
 
     return {"content": [{"type": "text", "text": "\n".join(lines)}]}
 
@@ -280,9 +277,9 @@ async def _handle_read_predictions(
     by_id = {r.pred_id: r for r in prediction_history if r.pred_id}
     available = ", ".join(sorted(by_id.keys()))
 
-    # Overview mode: counts + compact tree
-    if args.get("overview"):
-        return _build_overview_response(prediction_history)
+    # Status mode: counts only (tree is already in the prompt)
+    if args.get("status"):
+        return _build_status_response(prediction_history)
 
     pred_ids = args.get("pred_ids")
     chain_id = args.get("chain")
@@ -296,7 +293,7 @@ async def _handle_read_predictions(
                 {
                     "type": "text",
                     "text": (
-                        "Please specify a query: overview, pred_ids, chain, "
+                        "Please specify a query: status, pred_ids, chain, "
                         f"filter, or iteration. Available IDs: {available}"
                     ),
                 }

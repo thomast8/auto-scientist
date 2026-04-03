@@ -16,8 +16,12 @@ from auto_scientist.agents.debate_models import (
     CriticOutput,
     DebateResult,
 )
-from auto_scientist.agents.prediction_tool import PREDICTION_SPEC, build_prediction_mcp_server
-from auto_scientist.agents.scientist import PREDICTION_TOOL_HINT, SCIENTIST_PLAN_SCHEMA
+from auto_scientist.agents.prediction_tool import (
+    PREDICTION_SPEC,
+    build_prediction_mcp_server,
+    format_compact_tree,
+)
+from auto_scientist.agents.scientist import SCIENTIST_PLAN_SCHEMA
 from auto_scientist.model_config import AgentModelConfig
 from auto_scientist.prompts.stop_gate import (
     ASSESSMENT_SCHEMA,
@@ -75,8 +79,8 @@ async def run_completeness_assessment(
     """
     notebook_content = Path(notebook_path).read_text() if Path(notebook_path).exists() else ""
 
-    # Build MCP for prediction tree access (no WebSearch for assessment)
-    tools: list[str] = []
+    # Build tools: WebSearch + optional MCP for prediction drill-down
+    tools: list[str] = ["WebSearch"]
     mcp_servers: dict[str, Any] = {}
     if prediction_history:
         mcp_servers["predictions"] = build_prediction_mcp_server(
@@ -88,9 +92,7 @@ async def run_completeness_assessment(
         goal=goal,
         stop_reason=stop_reason,
         domain_knowledge=domain_knowledge or "(no domain knowledge provided)",
-        prediction_history=(
-            PREDICTION_TOOL_HINT if prediction_history else "(no prediction history yet)"
-        ),
+        prediction_history=format_compact_tree(prediction_history),
         notebook_content=notebook_content or "(empty notebook)",
     )
 
@@ -242,8 +244,11 @@ async def run_single_stop_debate(
         persona_instructions=persona_instructions or "",
         critic_output_schema=json.dumps(CRITIC_OUTPUT_SCHEMA, indent=2),
     )
-    # SDK mode with MCP: use tool hint; API mode: keep full text
-    effective_prediction_history = PREDICTION_TOOL_HINT if mcp_servers else prediction_history
+    effective_prediction_history = (
+        format_compact_tree(prediction_history_records)
+        if prediction_history_records
+        else prediction_history
+    )
 
     critic_user = STOP_CRITIC_USER.format(
         goal=goal,
@@ -323,9 +328,7 @@ async def run_scientist_stop_revision(
         concern_ledger=(
             json.dumps(concern_ledger, indent=2) if concern_ledger else "(no concerns raised)"
         ),
-        prediction_history=(
-            PREDICTION_TOOL_HINT if prediction_history else "(no prediction history yet)"
-        ),
+        prediction_history=format_compact_tree(prediction_history),
         version=version,
         plan_schema=json.dumps(SCIENTIST_PLAN_SCHEMA, indent=2),
     )

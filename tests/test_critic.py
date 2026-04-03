@@ -798,8 +798,8 @@ class TestCriticMcpIntegration:
         assert "mcp_servers" not in mock_openai.call_args.kwargs
 
     @pytest.mark.asyncio
-    async def test_sdk_with_records_uses_tool_hint_in_prompt(self, plan):
-        """SDK mode with records replaces prediction text with tool hint."""
+    async def test_sdk_with_records_uses_compact_tree_in_prompt(self, plan):
+        """SDK mode with records uses compact tree from records, not raw text."""
         critic = AgentModelConfig(provider="anthropic", model="claude-sonnet-4-6")
         records = [
             PredictionRecord(
@@ -817,14 +817,15 @@ class TestCriticMcpIntegration:
                 config=critic,
                 plan=plan,
                 notebook_content="",
-                prediction_history="FULL DETAIL TEXT THAT SHOULD NOT APPEAR",
+                prediction_history="RAW TEXT FALLBACK",
                 prediction_history_records=records,
             )
 
-        # The prompt sent to SDK should contain the tool hint, not the text
+        # The prompt should contain compact tree from records, not the raw text
         prompt = mock_sdk.call_args[0][0]
-        assert "read_predictions" in prompt
-        assert "FULL DETAIL TEXT THAT SHOULD NOT APPEAR" not in prompt
+        assert "PREDICTION TREE" in prompt
+        assert "noise is additive" in prompt
+        assert "RAW TEXT FALLBACK" not in prompt
 
     @pytest.mark.asyncio
     async def test_api_mode_keeps_text_in_prompt(self, plan):

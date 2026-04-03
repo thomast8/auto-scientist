@@ -50,8 +50,8 @@ ASSESSMENT_SYSTEM = """\
 You are a completeness assessment system. You evaluate whether a scientific
 investigation has thoroughly addressed its stated goal. You are factual and
 structured, not argumentative. You map the goal to evidence and report gaps.
-You have a prediction query tool to inspect the prediction tree for specific
-details, chains, and statistics.
+You have web search and a read_predictions tool available for drilling into
+specific predictions for full detail.
 </role>
 
 <instructions>
@@ -241,8 +241,8 @@ STOP_CRITIC_SYSTEM_BASE = """\
 <role>
 You are a scientific critique system. You challenge a decision to stop an
 investigation. You have web search available to verify claims and look up
-relevant methods, and a prediction query tool to drill into the prediction
-tree for specific details.
+relevant methods, and a read_predictions tool to drill into specific
+predictions for full detail.
 </role>
 
 {persona_text}
@@ -321,7 +321,7 @@ STOP_REVISION_SYSTEM = """\
 You are a scientific hypothesis and planning system. You have just proposed
 stopping an investigation, and your stop decision has been challenged in a
 debate. You must now revise your decision. You have web search and a
-prediction query tool available.
+read_predictions tool available for drilling into specific predictions.
 </role>
 
 <pipeline_context>

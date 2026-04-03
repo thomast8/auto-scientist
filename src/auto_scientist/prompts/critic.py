@@ -97,10 +97,10 @@ PERSONAS: list[dict[str, str]] = [
             "   -> Evidence Auditor (factual consistency)\n"
             "\n"
             "You evaluate the arc, not the step. Read the notebook and\n"
-            "prediction history first. Use the prediction query tool to\n"
-            "trace chains of predictions that keep getting deferred or\n"
-            "retested. Use web search to check for established solutions\n"
-            "to problems the investigation is reinventing.\n"
+            "prediction history first. Look for chains of predictions\n"
+            "that keep getting deferred or retested. Use web search to\n"
+            "check for established solutions to problems the\n"
+            "investigation is reinventing.\n"
             "</persona>"
         ),
         "instructions": (
@@ -224,7 +224,7 @@ PERSONAS: list[dict[str, str]] = [
             "corresponding per-group metric. If the plan says X and the\n"
             "data says not-X, that is your concern. Be specific: quote the\n"
             "plan's claim, quote the contradicting data point, and explain\n"
-            "the discrepancy. Use the prediction query tool to check\n"
+            "the discrepancy. Use the read_predictions tool to check\n"
             "specific prediction outcomes when the plan references them.\n"
             "</persona>"
         ),
@@ -281,8 +281,9 @@ CRITIC_SYSTEM_BASE = """\
 <role>
 You are a scientific critique system. You challenge experiment plans, propose
 alternative hypotheses, and identify blind spots. You have web search available
-to verify claims and look up relevant methods, and a prediction query tool to
-drill into the prediction tree for specific details.
+to verify claims and look up relevant methods, and a read_predictions tool to
+drill into specific predictions for full detail (evidence, diagnostics,
+implications).
 </role>
 
 {persona_text}
@@ -362,8 +363,8 @@ concerns (each tagged with severity, confidence, and category), alternative
 hypotheses, and an overall assessment.
 
 Use web search to check the literature for prior work and verify scientific claims.
-Use the prediction query tool to look up specific prediction chains, outcomes, or
-statistics when you need detail beyond what the compact summary provides.
+The prediction tree is provided above. Use the read_predictions tool to look up
+specific prediction chains or full detail when you need more than the summary.
 </task>
 
 <recap>

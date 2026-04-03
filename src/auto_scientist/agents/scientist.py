@@ -37,10 +37,6 @@ logger = logging.getLogger(__name__)
 
 MAX_ATTEMPTS = 3
 
-PREDICTION_TOOL_HINT = (
-    "(Use the read_predictions tool with overview=true to see the full prediction tree.)"
-)
-
 SCIENTIST_BASE_TOOLS = ["WebSearch"]
 
 
@@ -219,9 +215,7 @@ async def run_scientist(
             json.dumps(analysis, indent=2) if analysis else "(no analysis yet - first iteration)"
         ),
         notebook_content=notebook_content or "(empty notebook - first iteration)",
-        prediction_history=(
-            PREDICTION_TOOL_HINT if prediction_history else "(no prediction history yet)"
-        ),
+        prediction_history=format_compact_tree(prediction_history),
         version=version,
     )
 
@@ -330,9 +324,7 @@ async def run_scientist_revision(
         notebook_content=notebook_content or "(empty notebook)",
         original_plan=json.dumps(original_plan, indent=2),
         concern_ledger=ledger_text,
-        prediction_history=(
-            PREDICTION_TOOL_HINT if prediction_history else "(no prediction history yet)"
-        ),
+        prediction_history=format_compact_tree(prediction_history),
         version=version,
     )
 

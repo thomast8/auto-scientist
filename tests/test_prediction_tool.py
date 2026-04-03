@@ -207,20 +207,17 @@ class TestHandleReadPredictions:
         assert "[2.1]" in text  # self
 
     @pytest.mark.asyncio
-    async def test_overview_returns_counts_and_tree(self, sample_history):
-        """overview=true returns counts header plus compact prediction tree."""
-        result = await _handle_read_predictions(sample_history, {"overview": True})
+    async def test_status_returns_counts_only(self, sample_history):
+        """status=true returns counts header without the compact tree."""
+        result = await _handle_read_predictions(sample_history, {"status": True})
         text = result["content"][0]["text"]
         # Counts header
         assert "Total: 6 predictions" in text
         assert "confirmed:" in text
         assert "refuted:" in text
         assert "inconclusive:" in text
-        # Compact tree with status and summary
-        assert "PREDICTION TREE" in text
-        assert "CONFIRMED:" in text
-        assert "PENDING:" in text
-        # Should NOT contain full detail fields
+        # Should NOT contain tree or full detail
+        assert "PREDICTION TREE" not in text
         assert "Diagnostic:" not in text
 
     @pytest.mark.asyncio

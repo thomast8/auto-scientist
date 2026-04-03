@@ -801,7 +801,7 @@ class TestFormatCompactTree:
         child_indent = len(child_line) - len(child_line.lstrip())
         assert child_indent > parent_indent
 
-    def test_header_includes_tool_hint(self):
+    def test_header_is_clean(self):
         history = [
             PredictionRecord(
                 pred_id="1.1",
@@ -813,7 +813,8 @@ class TestFormatCompactTree:
             ),
         ]
         result = _format_compact_tree(history)
-        assert "read_predictions" in result
+        assert "== PREDICTION TREE ==" in result
+        assert "read_predictions" not in result
 
     def test_one_line_per_prediction(self):
         """Each prediction should be a single line (not multi-line like the full formatter)."""
