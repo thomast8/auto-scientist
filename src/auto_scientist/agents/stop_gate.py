@@ -103,7 +103,7 @@ async def run_completeness_assessment(
         effective_prompt = user_prompt + correction_hint
 
         try:
-            raw, _usage = await collect_text_from_query(
+            raw, _usage, _session_id = await collect_text_from_query(
                 effective_prompt,
                 options,
                 backend,
@@ -301,7 +301,7 @@ async def run_scientist_stop_revision(
         effective_prompt = user_prompt + correction_hint
 
         try:
-            raw, _usage = await collect_text_from_query(
+            raw, _usage, _session_id = await collect_text_from_query(
                 effective_prompt,
                 options,
                 backend,

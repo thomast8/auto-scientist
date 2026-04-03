@@ -310,11 +310,12 @@ async def collect_text_from_query(
     backend: SDKBackend,
     message_buffer: list[str] | None = None,
     agent_name: str = "Agent",
-) -> tuple[str, dict[str, Any]]:
+) -> tuple[str, dict[str, Any], str | None]:
     """Run an SDK query and collect the text response.
 
     Returns:
-        (text, usage) tuple. Usage dict contains token counts and cost info.
+        (text, usage, session_id) tuple. Usage dict contains token counts and
+        cost info. session_id is the backend session identifier (for resume).
         Also sets ``last_usage`` on the function object so the orchestrator
         can read it after sequential agent phases (coder, ingestor).
     """
@@ -322,6 +323,7 @@ async def collect_text_from_query(
     result_text = ""
     assistant_texts: list[str] = []
     usage: dict[str, Any] = {}
+    session_id: str | None = None
     has_streaming = False
 
     async for message in backend.query(prompt=prompt, options=options):
@@ -329,6 +331,7 @@ async def collect_text_from_query(
             if message.result:
                 result_text = message.result
             usage = message.usage
+            session_id = message.session_id
         elif message.type == "stream":
             # Partial content deltas (Claude backend with include_partial_messages).
             # Populate only the message_buffer so the summarizer sees real-time
@@ -364,7 +367,7 @@ async def collect_text_from_query(
     # (orchestrator's _apply_sdk_usage reads this after sequential agent phases)
     collect_text_from_query.last_usage = usage  # type: ignore[attr-defined]
 
-    return raw, usage
+    return raw, usage, session_id
 
 
 # Initialize the usage attribute

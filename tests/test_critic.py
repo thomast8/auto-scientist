@@ -77,11 +77,11 @@ def _sdk_mock(
 ) -> AsyncMock:
     """Create an AsyncMock for collect_text_from_query (SDK path).
 
-    Returns (text, usage) tuple matching the real function signature.
+    Returns (text, usage, session_id) tuple matching the real function signature.
     Also sets last_usage attribute for backward compat with orchestrator.
     """
     usage = {"input_tokens": input_tokens, "output_tokens": output_tokens}
-    mock = AsyncMock(return_value=(text, usage))
+    mock = AsyncMock(return_value=(text, usage, None))
     mock.last_usage = usage
     return mock
 
@@ -642,7 +642,7 @@ class TestAnthropicSDKPath:
             "cache_read_input_tokens": 50,
             "output_tokens": 45,
         }
-        mock_sdk = AsyncMock(return_value=(_pad(valid_json), sdk_usage))
+        mock_sdk = AsyncMock(return_value=(_pad(valid_json), sdk_usage, None))
         mock_sdk.last_usage = sdk_usage
 
         with patch(SDK_PATH, mock_sdk):

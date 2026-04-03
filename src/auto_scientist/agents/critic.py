@@ -92,7 +92,9 @@ async def _query_critic(
             max_turns=max_turns,
             extra_args=extra_args,
         )
-        text, usage = await collect_text_from_query(prompt, options, backend, message_buffer)
+        text, usage, _session_id = await collect_text_from_query(
+            prompt, options, backend, message_buffer
+        )
         in_tok = (
             usage.get("input_tokens", 0)
             + usage.get("cache_creation_input_tokens", 0)
@@ -139,7 +141,9 @@ async def _query_critic(
             max_turns=max_turns,
             extra_args=extra_args_api,
         )
-        text, usage = await collect_text_from_query(prompt, options, backend, message_buffer)
+        text, usage, _session_id = await collect_text_from_query(
+            prompt, options, backend, message_buffer
+        )
         in_tok = (
             usage.get("input_tokens", 0)
             + usage.get("cache_creation_input_tokens", 0)
