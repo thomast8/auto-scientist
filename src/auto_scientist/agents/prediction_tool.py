@@ -19,24 +19,43 @@ from auto_scientist.state import PredictionRecord
 
 logger = logging.getLogger(__name__)
 
+# Tool description - self-documenting, no prompt-level instructions needed.
+_READ_PREDICTIONS_DESCRIPTION = (
+    "Query the prediction history for detail not shown in the compact tree. "
+    "Start with stats=true to see counts by status/iteration, then use "
+    "targeted queries (chain, pred_ids, filter) to inspect specifics. "
+    "Each call loads results into your context, so prefer fewer targeted "
+    "queries over exhaustive audits."
+)
+
 # JSON Schema for the tool input.
 _READ_PREDICTIONS_SCHEMA: dict[str, Any] = {
     "type": "object",
     "properties": {
-        "pred_ids": {
-            "type": "array",
-            "items": {"type": "string"},
+        "stats": {
+            "type": "boolean",
             "description": (
-                "Specific prediction IDs to retrieve, e.g. ['2.1', '3.4']. "
-                "Use the bracketed IDs from the prediction tree."
+                "Returns counts by status and iteration, plus a one-line "
+                "summary per prediction. Use this first to orient, then "
+                "drill into specifics with other parameters."
             ),
         },
         "chain": {
             "type": "string",
             "description": (
-                "A prediction ID. Returns the full chain from root ancestor "
-                "to all descendants for that prediction. E.g. chain='2.1' "
-                "returns the root, 2.1, and any children of 2.1."
+                "A prediction ID. Returns the full reasoning chain: root "
+                "ancestor through this prediction to all descendants. "
+                "Best for understanding why a particular investigation "
+                "thread exists. E.g. chain='2.1'."
+            ),
+        },
+        "pred_ids": {
+            "type": "array",
+            "items": {"type": "string"},
+            "description": (
+                "Specific prediction IDs to retrieve with full detail "
+                "(evidence, diagnostics, implications). "
+                "E.g. ['2.1', '3.4']."
             ),
         },
         "filter": {
@@ -49,8 +68,9 @@ _READ_PREDICTIONS_SCHEMA: dict[str, Any] = {
                 "active_chains",
             ],
             "description": (
-                "Filter predictions by status. 'active_chains' returns pending "
-                "predictions plus their full ancestor chains."
+                "Return all predictions with this status. "
+                "'active_chains' returns pending predictions plus their "
+                "full ancestor chains."
             ),
         },
         "iteration": {
@@ -120,6 +140,34 @@ def _get_full_chain_ids(
     return chain
 
 
+def _build_stats_response(
+    prediction_history: list[PredictionRecord],
+) -> dict[str, Any]:
+    """Build a compact stats summary of prediction counts."""
+    by_status: dict[str, int] = {}
+    by_iter: dict[int, list[str]] = {}
+    for rec in prediction_history:
+        by_status[rec.outcome] = by_status.get(rec.outcome, 0) + 1
+        it = rec.iteration_prescribed
+        by_iter.setdefault(it, []).append(f"[{rec.pred_id}] {rec.outcome.upper()}")
+
+    lines = [f"Total: {len(prediction_history)} predictions"]
+    lines.append("")
+    lines.append("By status:")
+    for status in ["confirmed", "refuted", "inconclusive", "pending"]:
+        count = by_status.get(status, 0)
+        if count:
+            lines.append(f"  {status}: {count}")
+
+    lines.append("")
+    lines.append("By iteration:")
+    for it in sorted(by_iter):
+        preds = by_iter[it]
+        lines.append(f"  iter {it}: {', '.join(preds)}")
+
+    return {"content": [{"type": "text", "text": "\n".join(lines)}]}
+
+
 async def _handle_read_predictions(
     prediction_history: list[PredictionRecord],
     args: dict[str, Any],
@@ -130,6 +178,10 @@ async def _handle_read_predictions(
 
     by_id = {r.pred_id: r for r in prediction_history if r.pred_id}
     available = ", ".join(sorted(by_id.keys()))
+
+    # Stats mode: return counts overview, no detail
+    if args.get("stats"):
+        return _build_stats_response(prediction_history)
 
     pred_ids = args.get("pred_ids")
     chain_id = args.get("chain")
@@ -143,8 +195,8 @@ async def _handle_read_predictions(
                 {
                     "type": "text",
                     "text": (
-                        "Please specify a query: pred_ids, chain, filter, or iteration. "
-                        f"Available IDs: {available}"
+                        "Please specify a query: stats, pred_ids, chain, "
+                        f"filter, or iteration. Available IDs: {available}"
                     ),
                 }
             ]

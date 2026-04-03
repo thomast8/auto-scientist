@@ -206,6 +206,21 @@ class TestHandleReadPredictions:
         assert "[2.1]" in text  # self
 
     @pytest.mark.asyncio
+    async def test_stats_returns_counts(self, sample_history):
+        """stats=true returns counts by status and iteration, not full detail."""
+        result = await _handle_read_predictions(sample_history, {"stats": True})
+        text = result["content"][0]["text"]
+        assert "Total: 6 predictions" in text
+        assert "confirmed:" in text
+        assert "refuted:" in text
+        assert "inconclusive:" in text
+        assert "iter 0:" in text
+        assert "iter 1:" in text
+        # Should NOT contain full detail fields
+        assert "Diagnostic:" not in text
+        assert "If confirmed:" not in text
+
+    @pytest.mark.asyncio
     async def test_output_includes_full_detail(self, sample_history):
         """Full detail should include prediction, diagnostic, evidence, etc."""
         result = await _handle_read_predictions(sample_history, {"pred_ids": ["0.2"]})

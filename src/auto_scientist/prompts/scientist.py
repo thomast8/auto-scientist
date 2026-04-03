@@ -795,15 +795,9 @@ SCIENTIST_USER = """\
 
 <task>
 1. Understand the current state from the analysis and notebook
-2. Use read_predictions to query specific predictions, not all at once.
-   Target your queries: use chain="2.1" to trace a specific reasoning
-   chain, pred_ids=["1.1","1.2"] for specific predictions, or
-   filter="pending" to check open work. Examine which trajectories are
-   active, what was confirmed or refuted, and whether any refuted
-   predictions deserve re-examination under new conditions. If
-   read_predictions is not available, the compact tree above is your
-   condensed prediction summary (diagnostics, evidence, and implications
-   are omitted).
+2. Review prediction history trajectories: which are active, what was
+   confirmed or refuted, and whether any refuted predictions deserve
+   re-examination under new conditions
 3. Formulate a clear hypothesis about what to change and why
 4. Create a detailed implementation plan with prioritized changes
 5. Define testable predictions that test your reasoning (link to prior
@@ -1086,13 +1080,6 @@ SCIENTIST_REVISION_USER = """\
 Produce a revised plan incorporating valid concerns from the ledger.
 Output a complete plan (all fields), not just changes. Preserve or
 update the testable_predictions from the original plan.
-
-Use read_predictions to query specific predictions referenced in the
-concerns. Use chain="ID" to trace a reasoning chain, or pred_ids for
-individual predictions. Do not request all predictions at once. If
-read_predictions is not available, the compact tree above is your
-condensed prediction summary (diagnostics, evidence, and implications
-are omitted).
 
 The new version is: {version}
 </task>

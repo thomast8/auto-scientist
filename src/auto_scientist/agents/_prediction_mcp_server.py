@@ -78,9 +78,35 @@ def _get_full_chain(pred_id: str, by_id: dict[str, dict], predictions: list[dict
     return chain
 
 
+def _build_stats(predictions: list[dict]) -> str:
+    by_status: dict[str, int] = {}
+    by_iter: dict[int, list[str]] = {}
+    for rec in predictions:
+        outcome = rec.get("outcome", "pending")
+        by_status[outcome] = by_status.get(outcome, 0) + 1
+        it = rec.get("iteration_prescribed", 0)
+        pid = rec.get("pred_id", "?")
+        by_iter.setdefault(it, []).append(f"[{pid}] {outcome.upper()}")
+
+    lines = [f"Total: {len(predictions)} predictions", ""]
+    lines.append("By status:")
+    for status in ["confirmed", "refuted", "inconclusive", "pending"]:
+        count = by_status.get(status, 0)
+        if count:
+            lines.append(f"  {status}: {count}")
+    lines.append("")
+    lines.append("By iteration:")
+    for it in sorted(by_iter):
+        lines.append(f"  iter {it}: {', '.join(by_iter[it])}")
+    return "\n".join(lines)
+
+
 def _query(predictions: list[dict], args: dict[str, Any]) -> str:
     if not predictions:
         return "No predictions in history yet."
+
+    if args.get("stats"):
+        return _build_stats(predictions)
 
     by_id = {r["pred_id"]: r for r in predictions if r.get("pred_id")}
     available = ", ".join(sorted(by_id.keys()))
@@ -92,8 +118,8 @@ def _query(predictions: list[dict], args: dict[str, Any]) -> str:
 
     if not pred_ids and not chain_id and not status_filter and iteration is None:
         return (
-            "Please specify a query: pred_ids, chain, filter, or iteration. "
-            f"Available IDs: {available}"
+            "Please specify a query: stats, pred_ids, chain, filter, "
+            f"or iteration. Available IDs: {available}"
         )
 
     selected: list[dict] = []
@@ -157,24 +183,43 @@ async def main():
             Tool(
                 name="read_predictions",
                 description=(
-                    "Read full detail for specific predictions from the "
-                    "prediction history. Use this to inspect evidence, "
-                    "diagnostics, and implications for any prediction shown "
-                    "in the compact tree summary."
+                    "Query the prediction history for detail not shown "
+                    "in the compact tree. Start with stats=true to see "
+                    "counts by status/iteration, then use targeted "
+                    "queries (chain, pred_ids, filter) to inspect "
+                    "specifics. Each call loads results into your "
+                    "context, so prefer fewer targeted queries over "
+                    "exhaustive audits."
                 ),
                 inputSchema={
                     "type": "object",
                     "properties": {
-                        "pred_ids": {
-                            "type": "array",
-                            "items": {"type": "string"},
-                            "description": "Prediction IDs to retrieve",
+                        "stats": {
+                            "type": "boolean",
+                            "description": (
+                                "Returns counts by status and iteration, "
+                                "plus a one-line summary per prediction. "
+                                "Use this first to orient, then drill "
+                                "into specifics with other parameters."
+                            ),
                         },
                         "chain": {
                             "type": "string",
                             "description": (
-                                "A prediction ID. Returns the full chain "
-                                "from root ancestor to all descendants."
+                                "A prediction ID. Returns the full "
+                                "reasoning chain: root ancestor through "
+                                "this prediction to all descendants. "
+                                "Best for understanding why a particular "
+                                "investigation thread exists."
+                            ),
+                        },
+                        "pred_ids": {
+                            "type": "array",
+                            "items": {"type": "string"},
+                            "description": (
+                                "Specific prediction IDs to retrieve "
+                                "with full detail (evidence, diagnostics, "
+                                "implications)."
                             ),
                         },
                         "filter": {
@@ -186,11 +231,18 @@ async def main():
                                 "inconclusive",
                                 "active_chains",
                             ],
-                            "description": "Filter by status",
+                            "description": (
+                                "Return all predictions with this status. "
+                                "'active_chains' returns pending "
+                                "predictions plus their full ancestor "
+                                "chains."
+                            ),
                         },
                         "iteration": {
                             "type": "integer",
-                            "description": "Predictions from this iteration",
+                            "description": (
+                                "Return predictions prescribed in a specific iteration."
+                            ),
                         },
                     },
                 },
