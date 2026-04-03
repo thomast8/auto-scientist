@@ -19,6 +19,7 @@ from auto_scientist.prompts.coder import (
     CODER_SYSTEM,
     CODER_USER,
 )
+from auto_scientist.retry import QueryResult, ValidationError, agent_retry_loop
 from auto_scientist.sdk_backend import CODEX_SANDBOX_ADDENDUM, SDKOptions, get_backend
 from auto_scientist.sdk_utils import (
     append_block_to_buffer,
@@ -27,8 +28,6 @@ from auto_scientist.sdk_utils import (
 )
 
 logger = logging.getLogger(__name__)
-
-MAX_ATTEMPTS = 2
 
 
 def _validate_syntax(script_path: Path) -> tuple[bool, str]:
@@ -135,56 +134,62 @@ async def run_coder(
         extra_args={"setting-sources": ""},
     )
 
-    correction_hint = ""
-    for attempt in range(MAX_ATTEMPTS):
-        effective_prompt = user_prompt + correction_hint
+    async def _query(prompt: str, resume_session_id: str | None) -> QueryResult:
+        opts = options
+        if resume_session_id is not None:
+            opts = SDKOptions(
+                system_prompt=options.system_prompt,
+                allowed_tools=options.allowed_tools,
+                max_turns=options.max_turns,
+                permission_mode=options.permission_mode,
+                cwd=options.cwd,
+                model=options.model,
+                extra_args=options.extra_args,
+                resume=resume_session_id,
+            )
+        session_id: str | None = None
+        async for message in backend.query(prompt=prompt, options=opts):
+            if message.type == "assistant":
+                if message_buffer is not None:
+                    for block in message.content_blocks:
+                        append_block_to_buffer(block, message_buffer)
+            elif message.type == "result":
+                usage = message.usage
+                session_id = message.session_id
+                collect_text_from_query.last_usage = usage  # type: ignore[attr-defined]
+        return QueryResult(raw_output="", session_id=session_id, usage={})
 
-        try:
-            async for message in backend.query(prompt=effective_prompt, options=options):
-                if message.type == "assistant":
-                    if message_buffer is not None:
-                        for block in message.content_blocks:
-                            append_block_to_buffer(block, message_buffer)
-                elif message.type == "result":
-                    usage = message.usage
-                    collect_text_from_query.last_usage = usage  # type: ignore[attr-defined]
-        except Exception as e:
-            if attempt == MAX_ATTEMPTS - 1:
-                raise
-            logger.warning(f"Coder attempt {attempt + 1}: SDK error ({e}), retrying")
-            continue
-
-        # Validate: script must exist
+    def _validate(result: QueryResult) -> Path:
         if not new_script_path.exists():
-            if attempt == MAX_ATTEMPTS - 1:
-                raise FileNotFoundError(
-                    f"Coder agent did not create the expected script at {new_script_path}"
-                )
-            correction_hint = (
-                "\n\n<validation_error>\n"
+            raise ValidationError(
+                "<validation_error>\n"
                 f"You did not create the script at {new_script_path}. "
                 "Please write the experiment script to that exact path.\n"
                 "</validation_error>"
             )
-            logger.warning(f"Coder attempt {attempt + 1}: script not created, retrying")
-            continue
-
-        # Validate: script must have valid Python syntax
         valid, syntax_error = _validate_syntax(new_script_path)
         if not valid:
-            if attempt == MAX_ATTEMPTS - 1:
-                # Return the script anyway; the runner will catch the syntax error
-                break
-            correction_hint = (
-                "\n\n<validation_error>\n"
+            raise ValidationError(
+                "<validation_error>\n"
                 f"The script at {new_script_path} has a syntax error:\n{syntax_error}\n"
                 "Please fix the syntax error and rewrite the script.\n"
                 "</validation_error>"
             )
-            logger.warning(f"Coder attempt {attempt + 1}: syntax error, retrying")
-            continue
+        return new_script_path
 
-        # All checks passed
-        break
+    def _on_exhausted(result: QueryResult | None, error: Exception) -> Path:
+        # If the script exists but has a syntax error, return it anyway;
+        # the runner will catch the error.
+        if new_script_path.exists():
+            return new_script_path
+        raise FileNotFoundError(
+            f"Coder agent did not create the expected script at {new_script_path}"
+        )
 
-    return new_script_path
+    return await agent_retry_loop(
+        query_fn=_query,
+        validate_fn=_validate,
+        prompt=user_prompt,
+        agent_name="Coder",
+        on_exhausted=_on_exhausted,
+    )
