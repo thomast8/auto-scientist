@@ -1545,6 +1545,7 @@ class Orchestrator:
                     model=cfg.model,
                     message_buffer=buf,
                     provider=cfg.provider,
+                    output_dir=self.output_dir,
                 )
 
             assessment: dict[str, Any] = await self._with_summaries(
@@ -1657,6 +1658,8 @@ class Orchestrator:
                         analysis_json=analysis_json,
                         prediction_history=prediction_history_text,
                         goal=self.state.goal,
+                        prediction_history_records=self.state.prediction_history,
+                        output_dir=self.output_dir,
                     )
 
                 try:
@@ -1765,6 +1768,7 @@ class Orchestrator:
                     message_buffer=buf,
                     goal=self.state.goal,
                     provider=revision_cfg.provider,
+                    output_dir=self.output_dir,
                 )
 
             revised: dict[str, Any] = await self._with_summaries(
@@ -1843,7 +1847,7 @@ class Orchestrator:
         domain_knowledge = self.state.domain_knowledge
         scientist_cfg = self.model_config.resolve("scientist")
 
-        # Pre-format analysis and prediction history as strings for debate
+        # Full-detail text as API-mode fallback; SDK critics override with tool hint
         analysis_json = json.dumps(analysis, indent=2) if analysis else ""
         prediction_history = _format_predictions_for_prompt(
             self.state.prediction_history,
@@ -1873,6 +1877,8 @@ class Orchestrator:
                     analysis_json,
                     prediction_history,
                     self.state.goal,
+                    prediction_history_records=self.state.prediction_history,
+                    output_dir=self.output_dir,
                 )
             else:
                 critiques = await run_debate(
@@ -1885,6 +1891,8 @@ class Orchestrator:
                     analysis_json=analysis_json,
                     prediction_history=prediction_history,
                     goal=self.state.goal,
+                    prediction_history_records=self.state.prediction_history,
+                    output_dir=self.output_dir,
                 )
             self._live.log(f"DEBATE: received {len(critiques)} critique(s)")
             return critiques
@@ -1907,6 +1915,8 @@ class Orchestrator:
         analysis_json: str,
         prediction_history: str,
         goal: str = "",
+        prediction_history_records: list | None = None,
+        output_dir: Path | None = None,
     ) -> list:
         """Run per-persona debates in parallel, each with its own summarizer and panel."""
         import asyncio
@@ -2008,6 +2018,8 @@ class Orchestrator:
                     analysis_json=analysis_json,
                     prediction_history=prediction_history,
                     goal=goal,
+                    prediction_history_records=prediction_history_records,
+                    output_dir=output_dir,
                 )
 
             try:

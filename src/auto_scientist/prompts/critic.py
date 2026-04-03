@@ -1,8 +1,11 @@
 """Prompt templates for the Critic agents.
 
-Critics use plain API calls (no agent tools). They receive the full evidence
-base: plan + analysis JSON + prediction history + notebook + domain knowledge.
-They do not see experiment scripts.
+Critics receive the full evidence base: plan + analysis JSON + prediction
+history + notebook + domain knowledge. They do not see experiment scripts.
+
+In SDK mode, critics have web search and interactive prediction tree access
+(MCP tool) to query specific predictions, chains, and statistics. In direct
+API mode, prediction history is provided as formatted text in the prompt.
 
 Four personas provide orthogonal critical perspectives with explicit lane
 fences and "not in your lane" examples to prevent overlap. Each critique runs
@@ -94,9 +97,10 @@ PERSONAS: list[dict[str, str]] = [
             "   -> Evidence Auditor (factual consistency)\n"
             "\n"
             "You evaluate the arc, not the step. Read the notebook and\n"
-            "prediction history first. Use web search to check for\n"
-            "established solutions to problems the investigation is\n"
-            "reinventing.\n"
+            "prediction history first. Use the prediction query tool to\n"
+            "trace chains of predictions that keep getting deferred or\n"
+            "retested. Use web search to check for established solutions\n"
+            "to problems the investigation is reinventing.\n"
             "</persona>"
         ),
         "instructions": (
@@ -220,7 +224,8 @@ PERSONAS: list[dict[str, str]] = [
             "corresponding per-group metric. If the plan says X and the\n"
             "data says not-X, that is your concern. Be specific: quote the\n"
             "plan's claim, quote the contradicting data point, and explain\n"
-            "the discrepancy.\n"
+            "the discrepancy. Use the prediction query tool to check\n"
+            "specific prediction outcomes when the plan references them.\n"
             "</persona>"
         ),
     },
@@ -276,7 +281,8 @@ CRITIC_SYSTEM_BASE = """\
 <role>
 You are a scientific critique system. You challenge experiment plans, propose
 alternative hypotheses, and identify blind spots. You have web search available
-to verify claims and look up relevant methods.
+to verify claims and look up relevant methods, and a prediction query tool to
+drill into the prediction tree for specific details.
 </role>
 
 {persona_text}
@@ -290,6 +296,11 @@ You receive the full evidence base: the plan, analysis data (metrics,
 observations, prediction outcomes), prediction history (what was tested and
 the results), lab notebook, and domain knowledge. You do not see experiment
 code, which is an implementation detail handled by the Coder.
+
+A compact summary of the prediction history is included in the context below.
+When you need more detail on a specific prediction (full reasoning, chain of
+related predictions, or statistics by status/iteration), use the prediction
+query tool rather than guessing from the summary.
 </pipeline_context>
 
 {persona_instructions}
@@ -351,6 +362,8 @@ concerns (each tagged with severity, confidence, and category), alternative
 hypotheses, and an overall assessment.
 
 Use web search to check the literature for prior work and verify scientific claims.
+Use the prediction query tool to look up specific prediction chains, outcomes, or
+statistics when you need detail beyond what the compact summary provides.
 </task>
 
 <recap>

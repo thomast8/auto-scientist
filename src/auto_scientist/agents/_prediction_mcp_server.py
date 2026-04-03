@@ -69,26 +69,79 @@ def _get_full_chain(pred_id: str, by_id: dict[str, dict], predictions: list[dict
     return chain
 
 
-def _build_stats(predictions: list[dict]) -> str:
+def _get_display_text(rec: dict) -> str:
+    """Return summary text, falling back to truncated evidence."""
+    text = rec.get("summary") or rec.get("evidence") or rec.get("prediction", "")
+    text = " ".join(text.split())
+    if len(text) > 100:
+        return text[:100] + "..."
+    return text
+
+
+def _build_compact_tree(predictions: list[dict]) -> str:
+    """Build compact one-line-per-prediction tree from raw dicts."""
+    by_id: dict[str, dict] = {}
+    children: dict[str | None, list[dict]] = {None: []}
+    for rec in predictions:
+        pid = rec.get("pred_id")
+        if pid:
+            by_id[pid] = rec
+    for rec in predictions:
+        parent = rec.get("follows_from")
+        if parent and parent in by_id:
+            children.setdefault(parent, []).append(rec)
+        else:
+            children[None].append(rec)
+
+    visited: set[str] = set()
+
+    def _render(rec: dict, indent: int) -> list[str]:
+        pid = rec.get("pred_id")
+        if pid and pid in visited:
+            return []
+        if pid:
+            visited.add(pid)
+
+        prefix = "  " * indent
+        tag = pid or f"v{rec.get('iteration_prescribed', 0):02d}"
+        display = _get_display_text(rec)
+        outcome = rec.get("outcome", "pending")
+        lines = []
+
+        if outcome == "pending":
+            lines.append(f"{prefix}[{tag}] PENDING: {rec.get('prediction', '')}")
+        elif outcome == "confirmed":
+            lines.append(f"{prefix}[{tag}] CONFIRMED: {display} -> {rec.get('if_confirmed', '')}")
+        elif outcome == "refuted":
+            lines.append(f"{prefix}[{tag}] REFUTED: {display} -> {rec.get('if_refuted', '')}")
+        elif outcome == "inconclusive":
+            lines.append(f"{prefix}[{tag}] INCONCLUSIVE: {display}")
+
+        for child in children.get(pid, []):
+            lines.extend(_render(child, indent + 1))
+        return lines
+
+    header = "== PREDICTION TREE (use read_predictions tool for full detail) =="
+    all_lines = [header]
+    for root in children[None]:
+        all_lines.extend(_render(root, 0))
+    return "\n".join(all_lines)
+
+
+def _build_overview(predictions: list[dict]) -> str:
+    """Build counts header + compact prediction tree."""
     by_status: dict[str, int] = {}
-    by_iter: dict[int, list[str]] = {}
     for rec in predictions:
         outcome = rec.get("outcome", "pending")
         by_status[outcome] = by_status.get(outcome, 0) + 1
-        it = rec.get("iteration_prescribed", 0)
-        pid = rec.get("pred_id", "?")
-        by_iter.setdefault(it, []).append(f"[{pid}] {outcome.upper()}")
 
-    lines = [f"Total: {len(predictions)} predictions", ""]
-    lines.append("By status:")
+    lines = [f"Total: {len(predictions)} predictions"]
     for status in ["confirmed", "refuted", "inconclusive", "pending"]:
         count = by_status.get(status, 0)
         if count:
             lines.append(f"  {status}: {count}")
     lines.append("")
-    lines.append("By iteration:")
-    for it in sorted(by_iter):
-        lines.append(f"  iter {it}: {', '.join(by_iter[it])}")
+    lines.append(_build_compact_tree(predictions))
     return "\n".join(lines)
 
 
@@ -101,8 +154,8 @@ def _query(predictions: list[dict[str, Any]], args: dict[str, Any]) -> str:
     if not predictions:
         return "No predictions in history yet."
 
-    if args.get("stats"):
-        return _build_stats(predictions)
+    if args.get("overview"):
+        return _build_overview(predictions)
 
     by_id = {r["pred_id"]: r for r in predictions if r.get("pred_id")}
     available = ", ".join(sorted(by_id.keys()))
@@ -114,7 +167,7 @@ def _query(predictions: list[dict[str, Any]], args: dict[str, Any]) -> str:
 
     if not pred_ids and not chain_id and not status_filter and iteration is None:
         return (
-            "Please specify a query: stats, pred_ids, chain, filter, "
+            "Please specify a query: overview, pred_ids, chain, filter, "
             f"or iteration. Available IDs: {available}"
         )
 
@@ -175,24 +228,24 @@ if __name__ == "__main__":
         server_name="predictions",
         tool_name="read_predictions",
         description=(
-            "Query the prediction history for detail not shown "
-            "in the compact tree. Start with stats=true to see "
-            "counts by status/iteration, then use targeted "
-            "queries (chain, pred_ids, filter) to inspect "
-            "specifics. Each call loads results into your "
-            "context, so prefer fewer targeted queries over "
-            "exhaustive audits."
+            "Query the prediction history. Start with "
+            "overview=true to see counts and the full "
+            "prediction tree (status, summary, parent-child "
+            "chains). Then use targeted queries (chain, "
+            "pred_ids, filter) to inspect specifics. Each "
+            "call loads results into your context, so prefer "
+            "fewer targeted queries over exhaustive audits."
         ),
         input_schema={
             "type": "object",
             "properties": {
-                "stats": {
+                "overview": {
                     "type": "boolean",
                     "description": (
-                        "Returns counts by status and iteration, "
-                        "plus a one-line summary per prediction. "
-                        "Use this first to orient, then drill "
-                        "into specifics with other parameters."
+                        "Returns a count header plus the full "
+                        "compact prediction tree showing status, "
+                        "summary, and parent-child chains. Call "
+                        "this first to orient."
                     ),
                 },
                 "chain": {
@@ -238,8 +291,8 @@ if __name__ == "__main__":
         },
         deferred_description=(
             "mcp__predictions__read_predictions("
-            "stats?, chain?, pred_ids?, filter?, iteration?) "
-            "- Query prediction history for detail beyond the compact tree."
+            "overview?, chain?, pred_ids?, filter?, iteration?) "
+            "- Query prediction history. Call with overview=true first."
         ),
     )
 

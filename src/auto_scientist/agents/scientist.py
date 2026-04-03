@@ -10,7 +10,12 @@ import logging
 from pathlib import Path
 from typing import Any
 
-from auto_scientist.agents.prediction_tool import PREDICTION_SPEC, build_prediction_mcp_server
+from auto_scientist.agents.prediction_tool import (
+    PREDICTION_SPEC,
+    _build_prediction_forest,
+    build_prediction_mcp_server,
+    format_compact_tree,
+)
 from auto_scientist.model_config import ReasoningConfig, reasoning_to_cc_extra_args
 from auto_scientist.prompts.scientist import (
     SCIENTIST_REVISION_SYSTEM,
@@ -31,6 +36,10 @@ from auto_scientist.state import PredictionRecord
 logger = logging.getLogger(__name__)
 
 MAX_ATTEMPTS = 3
+
+PREDICTION_TOOL_HINT = (
+    "(Use the read_predictions tool with overview=true to see the full prediction tree.)"
+)
 
 SCIENTIST_BASE_TOOLS = ["WebSearch"]
 
@@ -106,84 +115,8 @@ SCIENTIST_PLAN_SCHEMA = {
 }
 
 
-def _get_display_text(rec: PredictionRecord) -> str:
-    """Return the summary text for a prediction, falling back to truncated evidence.
-
-    Sanitizes output to ensure single-line (collapses newlines, hard-truncates).
-    """
-    text = rec.summary or rec.evidence or rec.prediction
-    # Collapse newlines for one-line-per-prediction guarantee
-    text = " ".join(text.split())
-    if len(text) > 100:
-        return text[:100] + "..."
-    return text
-
-
-def _build_prediction_forest(
-    prediction_history: list[PredictionRecord],
-) -> tuple[dict[str, PredictionRecord], dict[str | None, list[PredictionRecord]]]:
-    """Build parent-to-children index from follows_from links.
-
-    Returns (by_id, children) where children[None] contains root predictions.
-    """
-    by_id: dict[str, PredictionRecord] = {}
-    children: dict[str | None, list[PredictionRecord]] = {None: []}
-    for rec in prediction_history:
-        if rec.pred_id:
-            by_id[rec.pred_id] = rec
-    for rec in prediction_history:
-        parent = rec.follows_from
-        if parent and parent in by_id:
-            children.setdefault(parent, []).append(rec)
-        else:
-            children[None].append(rec)
-    return by_id, children
-
-
-def _format_compact_tree(
-    prediction_history: list[PredictionRecord] | None,
-) -> str:
-    """Format prediction history as a compact one-line-per-prediction tree.
-
-    Each prediction gets a single line with status, summary, and implication.
-    The full detail is available via the read_predictions MCP tool.
-    """
-    if not prediction_history:
-        return "(no prediction history yet)"
-
-    _by_id, children = _build_prediction_forest(prediction_history)
-    visited: set[str] = set()
-
-    def _render_compact(rec: PredictionRecord, indent: int) -> list[str]:
-        if rec.pred_id and rec.pred_id in visited:
-            return []
-        if rec.pred_id:
-            visited.add(rec.pred_id)
-
-        prefix = "  " * indent
-        tag = rec.pred_id or f"v{rec.iteration_prescribed:02d}"
-        display = _get_display_text(rec)
-        lines = []
-
-        if rec.outcome == "pending":
-            lines.append(f"{prefix}[{tag}] PENDING: {rec.prediction}")
-        elif rec.outcome == "confirmed":
-            lines.append(f"{prefix}[{tag}] CONFIRMED: {display} -> {rec.if_confirmed}")
-        elif rec.outcome == "refuted":
-            lines.append(f"{prefix}[{tag}] REFUTED: {display} -> {rec.if_refuted}")
-        elif rec.outcome == "inconclusive":
-            lines.append(f"{prefix}[{tag}] INCONCLUSIVE: {display}")
-
-        for child in children.get(rec.pred_id, []):
-            lines.extend(_render_compact(child, indent + 1))
-        return lines
-
-    header = "== PREDICTION TREE (use read_predictions tool for full detail) =="
-    all_lines = [header]
-    for root in children[None]:
-        all_lines.extend(_render_compact(root, 0))
-
-    return "\n".join(all_lines)
+# Re-export for backward compatibility (scripts, tests, orchestrator)
+_format_compact_tree = format_compact_tree
 
 
 def _format_predictions_for_prompt(
@@ -191,7 +124,8 @@ def _format_predictions_for_prompt(
 ) -> str:
     """Format prediction history as full-detail reasoning trajectories.
 
-    Used by the stop gate, critic debate, and compare_personas script.
+    Used by the stop gate assessment and compare_personas script.
+    Debate critics now use the compact tree + MCP tool instead.
     Builds a forest from follows_from links and renders each tree as a
     trajectory chain showing the reasoning flow across iterations.
     """
@@ -285,7 +219,9 @@ async def run_scientist(
             json.dumps(analysis, indent=2) if analysis else "(no analysis yet - first iteration)"
         ),
         notebook_content=notebook_content or "(empty notebook - first iteration)",
-        prediction_history=_format_compact_tree(prediction_history),
+        prediction_history=(
+            PREDICTION_TOOL_HINT if prediction_history else "(no prediction history yet)"
+        ),
         version=version,
     )
 
@@ -391,7 +327,9 @@ async def run_scientist_revision(
         notebook_content=notebook_content or "(empty notebook)",
         original_plan=json.dumps(original_plan, indent=2),
         concern_ledger=ledger_text,
-        prediction_history=_format_compact_tree(prediction_history),
+        prediction_history=(
+            PREDICTION_TOOL_HINT if prediction_history else "(no prediction history yet)"
+        ),
         version=version,
     )
 

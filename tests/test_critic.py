@@ -8,11 +8,14 @@ import pytest
 from auto_scientist.agent_result import AgentResult
 from auto_scientist.agents.critic import (
     _build_critic_prompt,
+    _build_critic_tools_and_mcp,
     run_debate,
     run_single_critic_debate,
 )
 from auto_scientist.agents.debate_models import CriticOutput, DebateResult
+from auto_scientist.agents.prediction_tool import PREDICTION_SPEC
 from auto_scientist.model_config import AgentModelConfig, ReasoningConfig
+from auto_scientist.state import PredictionRecord
 
 # Mock paths for direct API calls (OpenAI/Google) and SDK (Anthropic)
 OPENAI_PATH = "auto_scientist.agents.critic.query_openai"
@@ -673,3 +676,166 @@ class TestAnthropicSDKPath:
         options = mock_sdk.call_args[0][1]
         assert options.system_prompt
         assert "<output_format>" in options.system_prompt
+
+
+class TestBuildCriticToolsAndMcp:
+    """Verify _build_critic_tools_and_mcp builds correct tools and MCP config."""
+
+    def test_no_records_returns_base_tools_only(self):
+        tools, mcp_servers = _build_critic_tools_and_mcp(None)
+        assert tools == ["WebSearch"]
+        assert mcp_servers == {}
+
+    def test_empty_records_returns_base_tools_only(self):
+        tools, mcp_servers = _build_critic_tools_and_mcp([])
+        assert tools == ["WebSearch"]
+        assert mcp_servers == {}
+
+    def test_with_records_adds_mcp_tool(self):
+        records = [
+            PredictionRecord(
+                prediction="noise is additive",
+                diagnostic="check residuals",
+                if_confirmed="add noise term",
+                if_refuted="look elsewhere",
+                iteration_prescribed=1,
+            ),
+        ]
+        tools, mcp_servers = _build_critic_tools_and_mcp(records)
+        assert PREDICTION_SPEC.mcp_tool_name in tools
+        assert "WebSearch" in tools
+        assert "predictions" in mcp_servers
+        assert mcp_servers["predictions"]["type"] == "stdio"
+
+
+class TestCriticMcpIntegration:
+    """Verify MCP servers are passed to SDK options when prediction records exist."""
+
+    @pytest.mark.asyncio
+    async def test_sdk_receives_mcp_servers_with_records(self, plan):
+        """SDK path receives MCP servers when prediction_history_records is provided."""
+        critic = AgentModelConfig(provider="anthropic", model="claude-sonnet-4-6")
+        records = [
+            PredictionRecord(
+                prediction="noise is additive",
+                diagnostic="check residuals",
+                if_confirmed="add noise term",
+                if_refuted="look elsewhere",
+                iteration_prescribed=1,
+            ),
+        ]
+        mock_sdk = _sdk_critic_mock()
+
+        with patch(SDK_PATH, mock_sdk):
+            await run_single_critic_debate(
+                config=critic,
+                plan=plan,
+                notebook_content="",
+                prediction_history_records=records,
+            )
+
+        options = mock_sdk.call_args[0][1]
+        assert "predictions" in options.mcp_servers
+        assert PREDICTION_SPEC.mcp_tool_name in options.allowed_tools
+
+    @pytest.mark.asyncio
+    async def test_sdk_no_mcp_without_records(self, plan):
+        """SDK path has empty MCP servers when no prediction records."""
+        critic = AgentModelConfig(provider="anthropic", model="claude-sonnet-4-6")
+        mock_sdk = _sdk_critic_mock()
+
+        with patch(SDK_PATH, mock_sdk):
+            await run_single_critic_debate(
+                config=critic,
+                plan=plan,
+                notebook_content="",
+            )
+
+        options = mock_sdk.call_args[0][1]
+        assert options.mcp_servers == {}
+        assert PREDICTION_SPEC.mcp_tool_name not in options.allowed_tools
+
+    @pytest.mark.asyncio
+    async def test_sdk_max_turns_is_10(self, plan):
+        """SDK path uses max_turns=10."""
+        critic = AgentModelConfig(provider="anthropic", model="claude-sonnet-4-6")
+        mock_sdk = _sdk_critic_mock()
+
+        with patch(SDK_PATH, mock_sdk):
+            await run_single_critic_debate(
+                config=critic,
+                plan=plan,
+                notebook_content="",
+            )
+
+        options = mock_sdk.call_args[0][1]
+        assert options.max_turns == 10
+
+    @pytest.mark.asyncio
+    async def test_api_mode_ignores_records(self, plan):
+        """Direct API mode (OpenAI) ignores prediction records (no MCP available)."""
+        critic = AgentModelConfig(provider="openai", model="gpt-4o", mode="api")
+        records = [
+            PredictionRecord(
+                prediction="noise is additive",
+                diagnostic="check residuals",
+                if_confirmed="add noise term",
+                if_refuted="look elsewhere",
+                iteration_prescribed=1,
+            ),
+        ]
+        with patch(OPENAI_PATH, new_callable=AsyncMock, return_value=_CR()) as mock_openai:
+            result = await run_single_critic_debate(
+                config=critic,
+                plan=plan,
+                notebook_content="",
+                prediction_history_records=records,
+            )
+
+        assert isinstance(result, DebateResult)
+        # Direct API gets no mcp_servers kwarg
+        assert "mcp_servers" not in mock_openai.call_args.kwargs
+
+    @pytest.mark.asyncio
+    async def test_sdk_with_records_uses_tool_hint_in_prompt(self, plan):
+        """SDK mode with records replaces prediction text with tool hint."""
+        critic = AgentModelConfig(provider="anthropic", model="claude-sonnet-4-6")
+        records = [
+            PredictionRecord(
+                prediction="noise is additive",
+                diagnostic="check residuals",
+                if_confirmed="add noise term",
+                if_refuted="look elsewhere",
+                iteration_prescribed=1,
+            ),
+        ]
+        mock_sdk = _sdk_critic_mock()
+
+        with patch(SDK_PATH, mock_sdk):
+            await run_single_critic_debate(
+                config=critic,
+                plan=plan,
+                notebook_content="",
+                prediction_history="FULL DETAIL TEXT THAT SHOULD NOT APPEAR",
+                prediction_history_records=records,
+            )
+
+        # The prompt sent to SDK should contain the tool hint, not the text
+        prompt = mock_sdk.call_args[0][0]
+        assert "read_predictions" in prompt
+        assert "FULL DETAIL TEXT THAT SHOULD NOT APPEAR" not in prompt
+
+    @pytest.mark.asyncio
+    async def test_api_mode_keeps_text_in_prompt(self, plan):
+        """API mode without MCP keeps the full prediction text in the prompt."""
+        critic = AgentModelConfig(provider="openai", model="gpt-4o", mode="api")
+        with patch(OPENAI_PATH, new_callable=AsyncMock, return_value=_CR()) as mock_openai:
+            await run_single_critic_debate(
+                config=critic,
+                plan=plan,
+                notebook_content="",
+                prediction_history="[1.0] CONFIRMED: polynomial fits well",
+            )
+
+        prompt = mock_openai.call_args[0][1]
+        assert "polynomial fits well" in prompt
