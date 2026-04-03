@@ -691,7 +691,7 @@ class TestFormatCompactTree:
         assert "spline RMSE=0.31 vs polynomial 0.58" in result
         assert "-> focus on local fit" in result
 
-    def test_refuted_shows_dead_end(self):
+    def test_refuted_shows_implication(self):
         history = [
             PredictionRecord(
                 pred_id="0.2",
@@ -707,8 +707,9 @@ class TestFormatCompactTree:
             ),
         ]
         result = _format_compact_tree(history)
-        assert "[0.2] DEAD END:" in result
+        assert "[0.2] REFUTED:" in result
         assert "Cr r_s near zero; Ni dominates" in result
+        assert "-> look elsewhere" in result
 
     def test_inconclusive_shows_status(self):
         history = [

@@ -170,7 +170,7 @@ def _format_compact_tree(
         elif rec.outcome == "confirmed":
             lines.append(f"{prefix}[{tag}] CONFIRMED: {display} -> {rec.if_confirmed}")
         elif rec.outcome == "refuted":
-            lines.append(f"{prefix}[{tag}] DEAD END: {display}")
+            lines.append(f"{prefix}[{tag}] REFUTED: {display} -> {rec.if_refuted}")
         elif rec.outcome == "inconclusive":
             lines.append(f"{prefix}[{tag}] INCONCLUSIVE: {display}")
 
