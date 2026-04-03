@@ -164,36 +164,33 @@ async def run_scientist_with_tool(
     iteration: int,
     provider: str,
 ) -> None:
-    """Actually invoke the Scientist agent and observe tool usage."""
-    from claude_code_sdk import (
-        AssistantMessage,
-        ClaudeCodeOptions,
-        ResultMessage,
-        ToolUseBlock,
-        query,
-    )
+    """Actually invoke the Scientist agent and observe tool usage.
+
+    Uses the project's SDKBackend abstraction so Claude runs through the
+    Claude Code CLI and Codex runs through the Codex CLI, each with their
+    native MCP support.
+    """
+    from auto_scientist.sdk_backend import SDKOptions, get_backend
+    from auto_scientist.sdk_utils import with_turn_budget
 
     preds = predictions_at_iteration(state.prediction_history, iteration)
     analysis = analyses.get(iteration - 1, {})
 
-    logger.info(f"Running Scientist at iteration {iteration} with {len(preds)} predictions")
+    logger.info(f"Running Scientist at iteration {iteration}, {len(preds)} preds")
     logger.info(f"Provider: {provider}")
 
-    # Build compact tree
     compact_tree = _format_compact_tree(preds)
     logger.info(f"Compact tree: {len(compact_tree)} chars")
 
-    # Build the user prompt
     user_prompt = SCIENTIST_USER.format(
         goal=state.goal or "(no goal specified)",
-        domain_knowledge=state.domain_knowledge or "(no domain knowledge provided)",
-        analysis_json=json.dumps(analysis, indent=2) if analysis else "(no analysis)",
+        domain_knowledge=state.domain_knowledge or "(none)",
+        analysis_json=(json.dumps(analysis, indent=2) if analysis else "(no analysis)"),
         notebook_content=notebook or "(empty notebook)",
         prediction_history=compact_tree,
         version=f"v{iteration:02d}",
     )
 
-    # Build system prompt
     plan_schema = ScientistPlanOutput.model_json_schema()
     json_instruction = (
         "\n\n## Output Format\n"
@@ -202,90 +199,62 @@ async def run_scientist_with_tool(
         f"Schema:\n{json.dumps(plan_schema, indent=2)}"
     )
 
-    # Build tools and MCP servers
     tools, mcp_servers = _build_scientist_tools_and_mcp(preds, provider)
     logger.info(f"Tools: {tools}")
-    logger.info(f"MCP servers: {list(mcp_servers.keys()) if mcp_servers else 'none'}")
+    logger.info(f"MCP servers: {list(mcp_servers.keys()) or 'none'}")
 
-    # Build tool descriptions for system prompt
-    tool_descriptions = [
-        "  - WebSearch(query: str) - Search the web.",
-    ]
-    if "mcp__predictions__read_predictions" in tools:
-        tool_descriptions.append(
-            "  - mcp__predictions__read_predictions(pred_ids?, filter?, iteration?) "
-            "- Query prediction history for full detail."
-        )
-    tool_block = "\n".join(tool_descriptions)
+    system_prompt = with_turn_budget(SCIENTIST_SYSTEM + json_instruction, 15, tools)
 
-    system_prompt = SCIENTIST_SYSTEM + json_instruction
-    system_prompt += (
-        f"\n\n<available_tools>\n"
-        f"Your available tools (call directly, do NOT use ToolSearch):\n"
-        f"{tool_block}\n"
-        f"</available_tools>"
-        f"\n<turn_budget>You have a budget of 15 turns for this task.</turn_budget>"
-    )
-
-    logger.info(f"System prompt: {len(system_prompt):,} chars")
-    logger.info(f"User prompt: {len(user_prompt):,} chars")
-    logger.info(f"Total: {len(system_prompt) + len(user_prompt):,} chars")
+    logger.info(f"System: {len(system_prompt):,} | User: {len(user_prompt):,}")
 
     print(f"\n{'=' * 80}")
-    print(f"SCIENTIST INVOCATION (iteration {iteration}, provider={provider})")
+    print(f"SCIENTIST INVOCATION (iter {iteration}, provider={provider})")
     print(f"{'=' * 80}")
-    print(f"Predictions in context: {len(preds)}")
-    print(f"Compact tree in prompt: {len(compact_tree)} chars")
-    print(f"MCP tool available: {'yes' if mcp_servers else 'no'}")
+    print(f"Predictions: {len(preds)}")
+    print(f"Compact tree: {len(compact_tree)} chars")
+    print(f"MCP tool: {'yes' if mcp_servers else 'no'}")
     print()
 
-    # Run the agent
-    options = ClaudeCodeOptions(
+    backend = get_backend(provider)
+    options = SDKOptions(
         system_prompt=system_prompt,
         allowed_tools=tools,
-        mcp_servers=mcp_servers if mcp_servers else {},
         max_turns=15,
-        permission_mode="acceptEdits",
-        extra_args={"setting-sources": ""},
+        mcp_servers=mcp_servers,
     )
 
-    tool_calls: list[dict] = []
+    tool_calls: list[dict[str, Any]] = []
     web_searches: list[str] = []
     final_result = None
 
     try:
-        async for message in query(prompt=user_prompt, options=options):
-            if isinstance(message, AssistantMessage):
-                for block in message.content:
-                    if isinstance(block, ToolUseBlock):
-                        if block.name.startswith("mcp__predictions"):
-                            call_info = {
-                                "tool": block.name,
-                                "input": block.input if hasattr(block, "input") else {},
-                            }
-                            tool_calls.append(call_info)
-                            print(f"  [MCP CALL] {block.name}")
-                            print(f"    Args: {json.dumps(call_info['input'], indent=2)}")
-                        elif block.name == "WebSearch":
-                            query_text = (
-                                block.input.get("query", "") if hasattr(block, "input") else ""
-                            )
-                            web_searches.append(query_text)
-                            print(f"  [WEB SEARCH] {query_text}")
-                        elif block.name == "ToolSearch":
-                            print(f"  [TOOL SEARCH] {getattr(block, 'input', {})}")
-                    elif hasattr(block, "text") and block.text:
-                        # Show text blocks (trimmed)
-                        txt = block.text[:300]
-                        if len(block.text) > 300:
-                            txt += "..."
+        async for msg in backend.query(user_prompt, options):
+            if msg.type == "assistant":
+                for block in msg.content_blocks:
+                    name = getattr(block, "name", None)
+                    inp = getattr(block, "input", {})
+                    text = getattr(block, "text", None)
+
+                    if name and name.startswith("mcp__predictions"):
+                        call_info = {"tool": name, "input": inp or {}}
+                        tool_calls.append(call_info)
+                        print(f"  [MCP CALL] {name}")
+                        print(f"    Args: {json.dumps(call_info['input'], indent=2)}")
+                    elif name == "WebSearch":
+                        q = inp.get("query", "") if isinstance(inp, dict) else ""
+                        web_searches.append(q)
+                        print(f"  [WEB SEARCH] {q}")
+                    elif name == "ToolSearch":
+                        print(f"  [TOOL SEARCH] {inp}")
+                    elif text:
+                        txt = text[:300] + ("..." if len(text) > 300 else "")
                         print(f"  [TEXT] {txt}")
-            elif isinstance(message, ResultMessage):
-                final_result = message.result
-                if hasattr(message, "usage") and message.usage:
-                    print(f"\n  Usage: {message.usage}")
+            elif msg.type == "result":
+                final_result = msg.result
+                if msg.usage:
+                    print(f"\n  Usage: {msg.usage}")
     except BaseException as exc:
-        logger.warning(f"SDK error (query may have completed): {type(exc).__name__}: {exc}")
+        logger.warning(f"SDK error: {type(exc).__name__}: {exc}")
 
     # Results
     print(f"\n{'─' * 60}")
