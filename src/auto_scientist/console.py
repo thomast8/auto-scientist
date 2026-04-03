@@ -352,7 +352,7 @@ class AgentPanel(Widget):
         # Strip summarizer label prefixes like "[done] " or "[15s] "
         summary = re.sub(r"^\[\w+\]\s+", "", summary)
         # Escape Rich markup in the summary to prevent broken rendering
-        collapsible.title = f"[{self.panel_style}]{rich_escape(summary)}[/]"
+        collapsible.title = rich_escape(summary)
         self.border_subtitle = self._build_footer()
         # Show the CollapsibleTitle now that we have content to toggle
         try:
