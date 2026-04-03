@@ -255,7 +255,7 @@ class TestReportRetry:
             output_dir=tmp_path,
         )
         assert "# Report" in result
-        assert call_count == 2
+        assert call_count == 3  # normalized to 3 attempts
 
     @pytest.mark.asyncio
     @patch("auto_scientist.agents.report.safe_query")
