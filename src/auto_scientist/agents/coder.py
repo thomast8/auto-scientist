@@ -10,6 +10,7 @@ Safety hooks: block writes outside experiments/ dir, block writes to data files.
 
 import json
 import logging
+from dataclasses import replace
 from pathlib import Path
 from typing import Any
 
@@ -135,18 +136,7 @@ async def run_coder(
     )
 
     async def _query(prompt: str, resume_session_id: str | None) -> QueryResult:
-        opts = options
-        if resume_session_id is not None:
-            opts = SDKOptions(
-                system_prompt=options.system_prompt,
-                allowed_tools=options.allowed_tools,
-                max_turns=options.max_turns,
-                permission_mode=options.permission_mode,
-                cwd=options.cwd,
-                model=options.model,
-                extra_args=options.extra_args,
-                resume=resume_session_id,
-            )
+        opts = replace(options, resume=resume_session_id) if resume_session_id else options
         session_id: str | None = None
         async for message in backend.query(prompt=prompt, options=opts):
             if message.type == "assistant":

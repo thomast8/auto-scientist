@@ -6,6 +6,7 @@ investigation goal has been thoroughly addressed before honoring the decision.
 
 import json
 import logging
+from dataclasses import replace
 from pathlib import Path
 from typing import Any
 
@@ -97,16 +98,7 @@ async def run_completeness_assessment(
     )
 
     async def _query(prompt: str, resume_session_id: str | None) -> QueryResult:
-        opts = options
-        if resume_session_id is not None:
-            opts = SDKOptions(
-                system_prompt=options.system_prompt,
-                allowed_tools=options.allowed_tools,
-                max_turns=options.max_turns,
-                model=options.model,
-                extra_args=options.extra_args,
-                resume=resume_session_id,
-            )
+        opts = replace(options, resume=resume_session_id) if resume_session_id else options
         raw, usage, sid = await collect_text_from_query(
             prompt, opts, backend, message_buffer, agent_name="Completeness Assessment"
         )
@@ -290,16 +282,7 @@ async def run_scientist_stop_revision(
     )
 
     async def _query(prompt: str, resume_session_id: str | None) -> QueryResult:
-        opts = options
-        if resume_session_id is not None:
-            opts = SDKOptions(
-                system_prompt=options.system_prompt,
-                allowed_tools=options.allowed_tools,
-                max_turns=options.max_turns,
-                model=options.model,
-                extra_args=options.extra_args,
-                resume=resume_session_id,
-            )
+        opts = replace(options, resume=resume_session_id) if resume_session_id else options
         raw, usage, sid = await collect_text_from_query(
             prompt, opts, backend, message_buffer, agent_name="Stop Revision"
         )

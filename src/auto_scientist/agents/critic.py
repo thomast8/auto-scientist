@@ -173,7 +173,7 @@ async def _query_critic_structured(
     """Query a critic and validate the response as structured CriticOutput.
 
     Returns (validated CriticOutput, raw AgentResult).
-    Retries once on validation failure with a correction hint.
+    Uses agent_retry_loop (3 attempts) with selective retryable errors.
     """
     last_agent_result: list[AgentResult] = [AgentResult(text="")]
 
