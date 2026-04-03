@@ -409,6 +409,8 @@ class TestCodexBackend:
         assert result_msgs[0].session_id == "thr-123"
         assert result_msgs[0].usage["num_turns"] == 1
 
+        await backend.close()
+
     @pytest.mark.asyncio
     async def test_counts_multiple_steps_as_turns(self):
         """CodexBackend.query counts all ConversationSteps as num_turns."""
@@ -437,6 +439,8 @@ class TestCodexBackend:
 
         result_msgs = [m for m in messages if m.type == "result"]
         assert result_msgs[0].usage["num_turns"] == 3
+
+        await backend.close()
 
     @pytest.mark.asyncio
     async def test_strips_openai_api_key(self):
@@ -468,45 +472,141 @@ class TestCodexBackend:
         # CODEX_HOME must always be set for isolation
         assert "CODEX_HOME" in env
 
+        await backend.close()
+
     @pytest.mark.asyncio
-    async def test_session_resumption(self):
-        """When resume is set, CodexBackend passes thread_id to chat()."""
+    async def test_session_resumption_reuses_client(self):
+        """Resume reuses the same client and passes thread_id to chat()."""
         from auto_scientist.sdk_backend import CodexBackend, SDKOptions
 
-        steps = [self._make_mock_step("continued", "thr-existing")]
+        # Track kwargs from each chat() call
+        chat_calls: list[dict] = []
 
-        # Custom mock to capture kwargs
-        chat_kwargs_captured = {}
+        mock_client = AsyncMock()
+        mock_client.start = AsyncMock()
+        mock_client.close = AsyncMock()
+
+        async def mock_chat(*args, **kwargs):
+            chat_calls.append(dict(kwargs))
+            for step in [self._make_mock_step("ok", "thr-abc")]:
+                yield step
+
+        mock_client.chat = mock_chat
+
+        backend = CodexBackend()
+
+        # First call: fresh (no resume)
+        fresh_opts = SDKOptions(system_prompt="sys", allowed_tools=[], max_turns=5)
+        with patch(
+            "auto_scientist.sdk_backend.CodexClient.connect_stdio",
+            return_value=mock_client,
+        ) as mock_connect:
+            async for _ in backend.query("first", fresh_opts):
+                pass
+
+        assert mock_connect.call_count == 1, "First call should create a new client"
+
+        # Second call: resume with session_id from first call
+        resume_opts = SDKOptions(
+            system_prompt="sys",
+            allowed_tools=[],
+            max_turns=5,
+            resume="thr-abc",
+        )
+        with patch(
+            "auto_scientist.sdk_backend.CodexClient.connect_stdio",
+            return_value=mock_client,
+        ) as mock_connect:
+            messages = [msg async for msg in backend.query("continue", resume_opts)]
+
+        assert mock_connect.call_count == 0, "Resume should reuse existing client, not create new"
+        assert len(chat_calls) == 2
+        # First call used thread_config (fresh)
+        assert "thread_config" in chat_calls[0]
+        assert "thread_id" not in chat_calls[0]
+        # Second call used thread_id (resume)
+        assert chat_calls[1].get("thread_id") == "thr-abc"
+        assert "thread_config" not in chat_calls[1]
+
+        result_msgs = [m for m in messages if m.type == "result"]
+        assert len(result_msgs) == 1
+        assert result_msgs[0].result == "ok"
+
+        await backend.close()
+
+    @pytest.mark.asyncio
+    async def test_resume_without_prior_client_falls_back(self):
+        """Resume with no live client logs a warning and starts a fresh thread."""
+        from auto_scientist.sdk_backend import CodexBackend, SDKOptions
+
+        chat_kwargs_captured: dict = {}
         mock_client = AsyncMock()
         mock_client.start = AsyncMock()
         mock_client.close = AsyncMock()
 
         async def mock_chat(*args, **kwargs):
             chat_kwargs_captured.update(kwargs)
-            for step in steps:
+            for step in [self._make_mock_step("fresh", "thr-new")]:
                 yield step
 
         mock_client.chat = mock_chat
 
         backend = CodexBackend()
+        # Resume requested but no prior call was made
         opts = SDKOptions(
-            system_prompt="",
+            system_prompt="sys",
             allowed_tools=[],
             max_turns=5,
-            resume="thr-existing",
+            resume="thr-gone",
         )
 
         with patch(
             "auto_scientist.sdk_backend.CodexClient.connect_stdio",
             return_value=mock_client,
-        ):
-            messages = [msg async for msg in backend.query("continue", opts)]
+        ) as mock_connect:
+            messages = [msg async for msg in backend.query("retry", opts)]
+
+        # Should have created a new client (fallback)
+        assert mock_connect.call_count == 1
+        # Should have used thread_config (fresh), not thread_id
+        assert "thread_config" in chat_kwargs_captured
+        assert "thread_id" not in chat_kwargs_captured
 
         result_msgs = [m for m in messages if m.type == "result"]
-        assert len(result_msgs) == 1
-        assert result_msgs[0].result == "continued"
-        # Verify thread_id was passed for resumption
-        assert chat_kwargs_captured.get("thread_id") == "thr-existing"
+        assert result_msgs[0].session_id == "thr-new"
+
+        await backend.close()
+
+    @pytest.mark.asyncio
+    async def test_close_cleans_up_client_and_home(self):
+        """close() shuts down the client and removes the temp directory."""
+        from auto_scientist.sdk_backend import CodexBackend, SDKOptions
+
+        steps = [self._make_mock_step("ok", "thr-1")]
+        mock_client = self._make_mock_client(steps)
+
+        backend = CodexBackend()
+        opts = SDKOptions(system_prompt="", allowed_tools=[], max_turns=5)
+
+        with patch(
+            "auto_scientist.sdk_backend.CodexClient.connect_stdio",
+            return_value=mock_client,
+        ):
+            async for _ in backend.query("test", opts):
+                pass
+
+        # Client and codex_home should be alive
+        assert backend._client is not None
+        assert backend._codex_home is not None
+        codex_home_path = backend._codex_home
+        assert codex_home_path.exists()
+
+        await backend.close()
+
+        assert backend._client is None
+        assert backend._codex_home is None
+        assert not codex_home_path.exists()
+        mock_client.close.assert_called_once()
 
     def test_writes_codex_mcp_config(self, tmp_path):
         """CodexBackend writes config.toml directly in codex_home."""
@@ -555,6 +655,8 @@ class TestCodexBackend:
             "CODEX_HOME must NOT point to the real ~/.codex"
         )
 
+        await backend.close()
+
     @pytest.mark.asyncio
     async def test_codex_home_copies_auth(self, tmp_path):
         """Auth.json is copied to isolated CODEX_HOME for subscription auth."""
@@ -578,7 +680,6 @@ class TestCodexBackend:
                 return_value=mock_client,
             ) as mock_connect,
             patch("auto_scientist.sdk_backend.Path.home", return_value=fake_home),
-            patch("auto_scientist.sdk_backend.shutil.rmtree"),
         ):
             async for _ in backend.query("test", opts):
                 pass
@@ -587,10 +688,8 @@ class TestCodexBackend:
         auth_copy = codex_home / "auth.json"
         assert auth_copy.exists(), "auth.json must be copied to isolated CODEX_HOME"
         assert auth_copy.read_text() == '{"auth_mode": "test"}'
-        # Manual cleanup since we patched rmtree
-        import shutil
 
-        shutil.rmtree(codex_home, ignore_errors=True)
+        await backend.close()
 
     @pytest.mark.asyncio
     async def test_codex_home_contains_mcp_config(self):
@@ -616,12 +715,9 @@ class TestCodexBackend:
             codex_homes_seen.append(kwargs.get("env", {}).get("CODEX_HOME", ""))
             return mock_client
 
-        with (
-            patch(
-                "auto_scientist.sdk_backend.CodexClient.connect_stdio",
-                side_effect=capture_connect,
-            ),
-            patch("auto_scientist.sdk_backend.shutil.rmtree"),
+        with patch(
+            "auto_scientist.sdk_backend.CodexClient.connect_stdio",
+            side_effect=capture_connect,
         ):
             async for _ in backend.query("test", opts):
                 pass
@@ -632,7 +728,110 @@ class TestCodexBackend:
         assert config_path.exists(), "config.toml must be written in CODEX_HOME"
         content = config_path.read_text()
         assert "[mcp_servers.predictions]" in content
-        # Clean up manually since we patched rmtree
-        import shutil
 
-        shutil.rmtree(codex_home, ignore_errors=True)
+        await backend.close()
+
+    @pytest.mark.asyncio
+    async def test_end_to_end_fresh_then_resume(self):
+        """Simulates the ingestor/report retry flow: fresh call, then resume."""
+        from auto_scientist.sdk_backend import CodexBackend, SDKOptions
+
+        chat_calls: list[dict] = []
+
+        mock_client = AsyncMock()
+        mock_client.start = AsyncMock()
+        mock_client.close = AsyncMock()
+
+        call_count = 0
+
+        async def mock_chat(*args, **kwargs):
+            nonlocal call_count
+            call_count += 1
+            chat_calls.append(dict(kwargs))
+            thread_id = "thr-persist"
+            for step in [self._make_mock_step(f"response-{call_count}", thread_id)]:
+                yield step
+
+        mock_client.chat = mock_chat
+
+        backend = CodexBackend()
+
+        with patch(
+            "auto_scientist.sdk_backend.CodexClient.connect_stdio",
+            return_value=mock_client,
+        ) as mock_connect:
+            # --- First call: fresh ---
+            fresh_opts = SDKOptions(
+                system_prompt="You are an ingestor.",
+                allowed_tools=["Bash", "Read", "Write"],
+                max_turns=30,
+                model="gpt-5.4-mini",
+            )
+            session_id = None
+            async for msg in backend.query("Ingest this data", fresh_opts):
+                if msg.type == "result":
+                    session_id = msg.session_id
+
+            assert session_id == "thr-persist"
+            assert mock_connect.call_count == 1
+
+            # --- Second call: resume (simulates config validation retry) ---
+            resume_opts = SDKOptions(
+                system_prompt="You are an ingestor.",
+                allowed_tools=["Bash", "Read", "Write"],
+                max_turns=10,
+                model="gpt-5.4-mini",
+                resume=session_id,
+            )
+            resume_result = None
+            async for msg in backend.query("Fix the config", resume_opts):
+                if msg.type == "result":
+                    resume_result = msg.result
+
+            # Client was reused, not recreated
+            assert mock_connect.call_count == 1
+            assert resume_result == "response-2"
+
+            # Verify the chat kwargs for each call
+            assert "thread_config" in chat_calls[0]
+            assert chat_calls[1].get("thread_id") == "thr-persist"
+
+        await backend.close()
+
+    @pytest.mark.asyncio
+    async def test_error_mid_turn_cleans_up_client(self):
+        """When chat() raises mid-turn, close() tears down client and temp dir."""
+        from auto_scientist.sdk_backend import CodexBackend, SDKOptions
+
+        mock_client = AsyncMock()
+        mock_client.start = AsyncMock()
+        mock_client.close = AsyncMock()
+
+        async def failing_chat(*args, **kwargs):
+            yield self._make_mock_step("partial", "thr-fail")
+            raise RuntimeError("simulated mid-turn failure")
+
+        mock_client.chat = failing_chat
+
+        backend = CodexBackend()
+        opts = SDKOptions(
+            system_prompt="test",
+            allowed_tools=["Read"],
+            max_turns=5,
+            model="gpt-5.4",
+        )
+
+        with (
+            patch(
+                "auto_scientist.sdk_backend.CodexClient.connect_stdio",
+                return_value=mock_client,
+            ),
+            pytest.raises(RuntimeError, match="simulated mid-turn failure"),
+        ):
+            async for _ in backend.query("hello", opts):
+                pass
+
+        # Client and codex_home should be cleaned up after error
+        assert backend._client is None
+        assert backend._codex_home is None
+        mock_client.close.assert_called_once()

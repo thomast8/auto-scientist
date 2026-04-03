@@ -236,6 +236,8 @@ class SDKBackend(Protocol):
 
     def query(self, prompt: str, options: SDKOptions) -> AsyncIterator[SDKMessage]: ...
 
+    async def close(self) -> None: ...
+
 
 # ---------------------------------------------------------------------------
 # Claude Code SDK Backend
@@ -271,6 +273,9 @@ def _extract_stream_delta(event: dict[str, Any]) -> tuple[str, str] | None:
 
 class ClaudeBackend:
     """Wraps claude_code_sdk.query() behind the SDKBackend interface."""
+
+    async def close(self) -> None:
+        """No-op: Claude Code CLI manages its own session lifecycle."""
 
     def _build_claude_options(self, options: SDKOptions) -> ClaudeCodeOptions:
         """Convert SDKOptions to ClaudeCodeOptions."""
@@ -396,7 +401,35 @@ _CODEX_APPROVAL_POLICY: Any = "never"
 
 
 class CodexBackend:
-    """Wraps codex_app_server_sdk behind the SDKBackend interface."""
+    """Wraps codex_app_server_sdk behind the SDKBackend interface.
+
+    Stateful: keeps the Codex app-server client alive between ``query()``
+    calls so that threads can be resumed via ``options.resume``.  Call
+    ``close()`` when done, or rely on ``__del__`` for temp-dir cleanup.
+    """
+
+    def __init__(self) -> None:
+        self._client: CodexClient | None = None
+        self._codex_home: Path | None = None
+        self._sandbox_mode: str = "<unknown>"
+
+    async def close(self) -> None:
+        """Shut down the live client and remove the temp config directory."""
+        if self._client is not None:
+            try:
+                await self._client.close()
+            except Exception:
+                logger.debug("Error closing Codex client", exc_info=True)
+            self._client = None
+        if self._codex_home is not None:
+            shutil.rmtree(self._codex_home, ignore_errors=True)
+            self._codex_home = None
+
+    def __del__(self) -> None:
+        """Safety net: remove the temp directory if close() was never called."""
+        if self._codex_home is not None:
+            shutil.rmtree(self._codex_home, ignore_errors=True)
+            self._codex_home = None
 
     @staticmethod
     def _resolve_sandbox(
@@ -471,9 +504,116 @@ class CodexBackend:
             return True
         return False
 
-    async def query(self, prompt: str, options: SDKOptions) -> AsyncIterator[SDKMessage]:
-        """Run a Codex SDK query, yielding unified SDKMessages."""
+    async def _ensure_client(
+        self, options: SDKOptions, model: str | None
+    ) -> tuple[CodexClient, dict[str, Any], str]:
+        """Return ``(client, chat_kwargs, sandbox_mode)`` for this call.
+
+        On a fresh call (no ``options.resume``), tears down any existing
+        client and spins up a new app-server subprocess with an isolated
+        ``CODEX_HOME``.
+
+        On a resume call, reuses the existing client so the thread is
+        still accessible.  Falls back to a fresh client if the previous
+        one was torn down (e.g. after an error).
+        """
         effort = self._resolve_effort(options.extra_args)
+        turn_overrides = TurnOverrides()
+        if effort:
+            turn_overrides.effort = effort  # type: ignore[assignment]
+
+        # --- Resume path: reuse existing client ---
+        if options.resume:
+            if self._client is not None:
+                logger.debug(f"Resuming Codex thread {options.resume} on existing client")
+                chat_kwargs: dict[str, Any] = {
+                    "turn_overrides": turn_overrides,
+                    "thread_id": options.resume,
+                }
+                return self._client, chat_kwargs, self._sandbox_mode
+
+            logger.warning(
+                f"Codex resume requested (thread {options.resume}) but no live "
+                f"client exists; falling back to a fresh thread"
+            )
+
+        # --- Fresh path: close any stale client, create new one ---
+        await self.close()
+
+        has_mcp = False
+        codex_home = Path(tempfile.mkdtemp(prefix="codex_home_"))
+        self._codex_home = codex_home
+
+        # Copy auth.json so ChatGPT subscription auth works in isolation.
+        real_auth = Path.home() / ".codex" / "auth.json"
+        if real_auth.exists():
+            shutil.copy2(real_auth, codex_home / "auth.json")
+
+        # Write MCP server config to the isolated home (not cwd).
+        if options.mcp_servers:
+            has_mcp = self._write_codex_mcp_config(options.mcp_servers, codex_home)
+
+        sandbox_mode = self._resolve_sandbox(options.allowed_tools, has_mcp=has_mcp)
+        self._sandbox_mode = sandbox_mode
+
+        # Build environment for the Codex subprocess.
+        # IMPORTANT: create_subprocess_exec replaces the entire env when a
+        # dict is passed, so we must start from os.environ and layer overrides.
+        env: dict[str, str] = {
+            **os.environ,
+            **options.env,
+            "CODEX_HOME": str(codex_home),
+        }
+        if "OPENAI_API_KEY" not in options.env and os.environ.get("OPENAI_API_KEY"):
+            logger.info(
+                "Stripping OPENAI_API_KEY from Codex subprocess env "
+                "(using ChatGPT subscription instead of direct API billing)"
+            )
+            env["OPENAI_API_KEY"] = ""
+
+        # Build thread config
+        thread_config = ThreadConfig(
+            model=model,
+            base_instructions=options.system_prompt,
+            sandbox=sandbox_mode,  # type: ignore[arg-type]
+            approval_policy=_CODEX_APPROVAL_POLICY,
+        )
+        if options.cwd:
+            thread_config.cwd = str(options.cwd)
+
+        logger.debug(
+            f"CodexBackend new client: model={model}, sandbox={sandbox_mode}, effort={effort}"
+        )
+
+        codex_cwd = Path(options.cwd) if options.cwd else Path.cwd()
+        client = CodexClient.connect_stdio(
+            cwd=str(codex_cwd),
+            env=env,
+            inactivity_timeout=600.0,
+        )
+        try:
+            await client.start()
+        except Exception:
+            try:
+                await client.close()
+            except Exception:
+                logger.debug("Error closing half-started Codex client", exc_info=True)
+            raise
+        self._client = client
+
+        chat_kwargs = {
+            "turn_overrides": turn_overrides,
+            "thread_config": thread_config,
+        }
+        return client, chat_kwargs, sandbox_mode
+
+    async def query(self, prompt: str, options: SDKOptions) -> AsyncIterator[SDKMessage]:
+        """Run a Codex SDK query, yielding unified SDKMessages.
+
+        The client is kept alive after a successful call so that a
+        subsequent call with ``options.resume`` can continue the same
+        thread.  On error the client is torn down.
+        """
         model = options.model
 
         # Apply model overrides at query time (not globally) to avoid
@@ -487,75 +627,9 @@ class CodexBackend:
             )
             model = replacement
 
-        # Isolate the Codex subprocess from the host's ~/.codex/ directory.
-        # Without this, the subprocess inherits the host's AGENTS.md,
-        # MCP servers, skills, rules, model defaults, and personality.
-        codex_home = Path(tempfile.mkdtemp(prefix="codex_home_"))
+        sandbox_mode = self._sandbox_mode
         try:
-            # Copy auth.json so ChatGPT subscription auth works in isolation.
-            real_auth = Path.home() / ".codex" / "auth.json"
-            if real_auth.exists():
-                shutil.copy2(real_auth, codex_home / "auth.json")
-
-            # Write MCP server config to the isolated home (not cwd).
-            # Only stdio servers are written; non-stdio are skipped.
-            has_mcp = False
-            if options.mcp_servers:
-                has_mcp = self._write_codex_mcp_config(options.mcp_servers, codex_home)
-
-            sandbox_mode = self._resolve_sandbox(options.allowed_tools, has_mcp=has_mcp)
-
-            # Build environment for the Codex subprocess.
-            # IMPORTANT: create_subprocess_exec replaces the entire env when a
-            # dict is passed, so we must start from os.environ and layer overrides.
-            env: dict[str, str] = {
-                **os.environ,
-                **options.env,
-                "CODEX_HOME": str(codex_home),
-            }
-            if "OPENAI_API_KEY" not in options.env and os.environ.get("OPENAI_API_KEY"):
-                logger.info(
-                    "Stripping OPENAI_API_KEY from Codex subprocess env "
-                    "(using ChatGPT subscription instead of direct API billing)"
-                )
-                env["OPENAI_API_KEY"] = ""
-
-            # Build thread config
-            thread_config = ThreadConfig(
-                model=model,
-                base_instructions=options.system_prompt,
-                sandbox=sandbox_mode,  # type: ignore[arg-type]
-                approval_policy=_CODEX_APPROVAL_POLICY,
-            )
-            if options.cwd:
-                thread_config.cwd = str(options.cwd)
-
-            # Build turn overrides
-            turn_overrides = TurnOverrides()
-            if effort:
-                turn_overrides.effort = effort  # type: ignore[assignment]
-
-            logger.debug(
-                f"CodexBackend query: model={model}, "
-                f"sandbox={sandbox_mode}, effort={effort}, prompt_len={len(prompt)}"
-            )
-
-            # Connect and run using chat() for streaming (enables progress
-            # summaries) instead of chat_once() which blocks until turn completes.
-            codex_cwd = Path(options.cwd) if options.cwd else Path.cwd()
-            client: CodexClient | None = None
-            client = CodexClient.connect_stdio(
-                cwd=str(codex_cwd),
-                env=env,
-                inactivity_timeout=600.0,
-            )
-            await client.start()
-
-            chat_kwargs: dict[str, Any] = {"turn_overrides": turn_overrides}
-            if options.resume:
-                chat_kwargs["thread_id"] = options.resume
-            else:
-                chat_kwargs["thread_config"] = thread_config
+            client, chat_kwargs, sandbox_mode = await self._ensure_client(options, model)
 
             final_text_parts: list[str] = []
             thread_id: str | None = None
@@ -587,22 +661,17 @@ class CodexBackend:
                 usage={"num_turns": step_count},
             )
         except CodexProtocolError as e:
+            await self.close()
             raise RuntimeError(
                 f"Codex query failed (model={model}, sandbox={sandbox_mode}): {e}\n"
                 f"If using ChatGPT subscription, note that gpt-5.4-nano is not supported "
                 f"by Codex. Use gpt-5.4-mini or higher."
             ) from e
         except Exception as e:
+            await self.close()
             raise RuntimeError(
                 f"Codex query failed (model={model}, sandbox={sandbox_mode}): {e}"
             ) from e
-        finally:
-            if client is not None:
-                try:
-                    await client.close()
-                except Exception:
-                    logger.debug("Error closing Codex client", exc_info=True)
-            shutil.rmtree(codex_home, ignore_errors=True)
 
 
 # ---------------------------------------------------------------------------
