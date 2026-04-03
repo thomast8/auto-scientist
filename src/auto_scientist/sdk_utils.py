@@ -14,6 +14,7 @@ from typing import Any
 
 from pydantic import BaseModel, ValidationError
 
+from auto_scientist.retry import ValidationError as RetryValidationError
 from auto_scientist.sdk_backend import SDKBackend
 
 logger = logging.getLogger(__name__)
@@ -88,8 +89,12 @@ async def safe_query(
 # ---------------------------------------------------------------------------
 
 
-class OutputValidationError(Exception):
-    """Raised when an agent's output fails JSON parsing or schema validation."""
+class OutputValidationError(RetryValidationError):
+    """Raised when an agent's output fails JSON parsing or schema validation.
+
+    Subclasses :class:`~auto_scientist.retry.ValidationError` so that the
+    shared ``agent_retry_loop`` catches it automatically.
+    """
 
     def __init__(
         self,
@@ -100,10 +105,13 @@ class OutputValidationError(Exception):
         self.raw_output = raw_output
         self.validation_error = validation_error
         self.agent_name = agent_name
-        super().__init__(f"{agent_name} output validation failed: {validation_error}")
+        # Build the correction hint first, then pass to ValidationError
+        hint = self._build_correction_hint()
+        super().__init__(correction_hint=hint)
+        # Override the default Exception message for nicer repr
+        self.args = (f"{agent_name} output validation failed: {validation_error}",)
 
-    def correction_prompt(self) -> str:
-        """Format a correction hint for the LLM to fix its output."""
+    def _build_correction_hint(self) -> str:
         truncated = self.raw_output[:500]
         if len(self.raw_output) > 500:
             truncated += "..."
@@ -114,6 +122,10 @@ class OutputValidationError(Exception):
             "Please output ONLY valid JSON matching the schema. No markdown fencing.\n"
             "</validation_error>"
         )
+
+    def correction_prompt(self) -> str:
+        """Format a correction hint for the LLM to fix its output."""
+        return self.correction_hint
 
 
 def _strip_markdown_fencing(raw: str) -> str:
