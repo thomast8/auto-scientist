@@ -159,6 +159,38 @@ def _resolve_source(source: str) -> tuple[Path, ExperimentState]:
     return source_path, ExperimentState.load(state_path)
 
 
+def _detect_retry_agent(version_dir: Path) -> str | None:
+    """Detect which agent to resume from within a failed iteration.
+
+    Walks the agent execution order and returns the last agent whose
+    artifacts are present on disk, so that earlier agents are skipped
+    on retry.  Returns None when no artifacts exist (full restart).
+    """
+    from auto_scientist.resume import _AGENT_ARTIFACTS, AGENT_ORDER
+
+    last_completed = None
+    for agent in AGENT_ORDER:
+        artifacts = _AGENT_ARTIFACTS[agent]
+        if not artifacts:
+            # Coder has no tracked artifacts; check for experiment.py instead
+            if agent == "coder" and (version_dir / "experiment.py").exists():
+                last_completed = agent
+            continue
+        if all((version_dir / a).exists() for a in artifacts):
+            last_completed = agent
+
+    # Resume from the agent that failed (= last_completed itself if it
+    # produced partial output, or the one after if it fully completed).
+    # The coder is the final agent: if its script exists, re-run the coder.
+    if last_completed == "coder":
+        return "coder"
+    if last_completed is not None:
+        idx = AGENT_ORDER.index(last_completed)
+        if idx + 1 < len(AGENT_ORDER):
+            return AGENT_ORDER[idx + 1]
+    return None
+
+
 def _next_output_dir(base: Path) -> Path:
     """If *base* already contains a state.json, return base_001, base_002, etc."""
     if not (base / "state.json").exists():
@@ -638,10 +670,24 @@ def resume(
         restored_panels = None
 
         if state.phase in ("stopped", "report"):
-            raise click.UsageError(
-                "This run has already completed. Use --fork to continue "
-                "from a copy (the original run is preserved)."
-            )
+            # Allow in-place retry when the latest version failed
+            latest = state.versions[-1] if state.versions else None
+            if latest and latest.status == "failed":
+                target = state.iteration - 1
+                retry_agent = _detect_retry_agent(run_dir / f"v{target:02d}")
+                result = rewind_run(run_dir, target, from_agent=retry_agent)
+                state = result.state
+                from_agent = result.from_agent
+                restored_panels = result.restored_panels
+                agent_info = f" from agent '{from_agent}'" if from_agent else ""
+                console.print(
+                    f"[yellow]Retrying failed iteration {target}{agent_info} in-place[/yellow]"
+                )
+            else:
+                raise click.UsageError(
+                    "This run has already completed. Use --fork to continue "
+                    "from a copy (the original run is preserved)."
+                )
 
     # Persist resolved max_iterations so future resumes have it
     state.max_iterations = max_iterations
@@ -668,7 +714,7 @@ def resume(
         max_iterations=max_iterations,
         model_config=model_config,
         verbose=verbose,
-        skip_to_agent=from_agent if fork else None,
+        skip_to_agent=from_agent,
         restored_panels=restored_panels,
     )
 
