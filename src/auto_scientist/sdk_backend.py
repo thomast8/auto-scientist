@@ -638,6 +638,23 @@ class CodexBackend:
         if options.cwd:
             thread_config.cwd = str(options.cwd)
 
+        # Codex + GPT models ignore MCP tool calls in long/complex prompts
+        # (confirmed empirically: MCP=0 at 33K+ chars, stochastic at shorter).
+        # developer_instructions carry higher priority than base_instructions
+        # for behavioral directives.  Placing the MCP mandate here raises
+        # MCP usage from ~0% to ~67% with production-length prompts.
+        if has_mcp:
+            mcp_tool_names = [t for t in (options.allowed_tools or []) if t.startswith("mcp__")]
+            if mcp_tool_names:
+                names_str = ", ".join(mcp_tool_names)
+                thread_config.developer_instructions = (
+                    "MANDATORY TOOL REQUIREMENT: Before producing your final output, "
+                    f"you MUST call at least one of these MCP tools: {names_str}. "
+                    "Call with summary=true first, then drill into specifics. "
+                    "If your output does not include at least one MCP tool call, "
+                    "it will be rejected."
+                )
+
         logger.debug(
             f"CodexBackend new client: model={model}, sandbox={sandbox_mode}, effort={effort}"
         )
