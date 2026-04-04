@@ -367,7 +367,7 @@ class TestCollectTextFromQuery:
                 )
 
         opts = SDKOptions(system_prompt="", allowed_tools=[], max_turns=5)
-        raw, usage = await collect_text_from_query("prompt", opts, FakeBackend())
+        raw, usage, session_id = await collect_text_from_query("prompt", opts, FakeBackend())
         assert raw == '{"answer": 42}'
 
     @pytest.mark.asyncio
@@ -384,7 +384,7 @@ class TestCollectTextFromQuery:
                 yield SDKMessage(type="result", result="", usage={})
 
         opts = SDKOptions(system_prompt="", allowed_tools=[], max_turns=5)
-        raw, usage = await collect_text_from_query("prompt", opts, FakeBackend())
+        raw, usage, session_id = await collect_text_from_query("prompt", opts, FakeBackend())
         assert raw == '{"answer": 42}'
 
     @pytest.mark.asyncio
@@ -427,7 +427,7 @@ class TestCollectTextFromQuery:
                 )
 
         opts = SDKOptions(system_prompt="", allowed_tools=[], max_turns=5)
-        _text, usage = await collect_text_from_query("prompt", opts, FakeBackend())
+        _text, usage, _session_id = await collect_text_from_query("prompt", opts, FakeBackend())
         assert usage["input_tokens"] == 100
         assert usage["output_tokens"] == 50
         assert usage["num_turns"] == 3

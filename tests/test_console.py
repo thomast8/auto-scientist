@@ -7,17 +7,19 @@ import pytest
 from textual.app import App, ComposeResult
 from textual.widgets import Collapsible, RichLog
 
-from auto_scientist.console import (
+from auto_scientist.app import (
+    AgentDetailScreen,
+    PipelineApp,
+    QuitConfirmScreen,
+)
+from auto_scientist.pipeline_live import PipelineLive
+from auto_scientist.widgets import (
     AGENT_STYLES,
     PHASE_STYLES,
-    AgentDetailScreen,
     AgentPanel,
     IterationContainer,
     IterationToggle,
     MetricsBar,
-    PipelineApp,
-    PipelineLive,
-    QuitConfirmScreen,
     _format_elapsed,
 )
 

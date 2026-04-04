@@ -11,6 +11,7 @@ unknown message types are silently skipped instead of crashing the stream.
 import asyncio
 import logging
 import os
+import re
 import shutil
 import tempfile
 from collections.abc import AsyncIterator
@@ -194,6 +195,52 @@ else:
 
 
 # ---------------------------------------------------------------------------
+# Session cleanup: track Claude Code sessions for post-run deletion
+# ---------------------------------------------------------------------------
+
+# Registry of (session_id, encoded_cwd) pairs created during this process.
+_claude_session_registry: list[tuple[str, str]] = []
+
+
+def _encode_cwd(cwd: Path) -> str:
+    """Encode a path the way Claude Code does for project directories."""
+    return re.sub(r"[^a-zA-Z0-9]", "-", str(cwd))
+
+
+def _register_session(session_id: str, cwd: Path) -> None:
+    """Track a Claude Code session for cleanup on exit."""
+    encoded = _encode_cwd(cwd)
+    _claude_session_registry.append((session_id, encoded))
+    logger.debug(f"Registered session {session_id} (cwd={encoded})")
+
+
+def cleanup_sessions() -> int:
+    """Delete all tracked Claude Code session files from ~/.claude/projects/.
+
+    Returns the number of sessions cleaned up.
+    """
+    projects_dir = Path.home() / ".claude" / "projects"
+    cleaned = 0
+    for session_id, encoded_cwd in _claude_session_registry:
+        session_dir = projects_dir / encoded_cwd
+        for suffix in (f"{session_id}.jsonl", session_id):
+            path = session_dir / suffix
+            if path.is_file():
+                path.unlink()
+                cleaned += 1
+                logger.debug(f"Cleaned up session file: {path}")
+            elif path.is_dir():
+                shutil.rmtree(path)
+                cleaned += 1
+                logger.debug(f"Cleaned up session dir: {path}")
+    count = len(_claude_session_registry)
+    _claude_session_registry.clear()
+    if count:
+        logger.info(f"Cleaned up {cleaned} session artifacts from {count} agent sessions")
+    return cleaned
+
+
+# ---------------------------------------------------------------------------
 # Unified types
 # ---------------------------------------------------------------------------
 
@@ -365,11 +412,15 @@ class ClaudeBackend:
                 usage = getattr(msg, "usage", None) or {}
                 usage["num_turns"] = getattr(msg, "num_turns", 0)
                 usage["total_cost_usd"] = getattr(msg, "total_cost_usd", None)
+                sid = getattr(msg, "session_id", None)
+                if sid:
+                    effective_cwd = Path(options.cwd) if options.cwd else Path.cwd()
+                    _register_session(sid, effective_cwd)
                 yield SDKMessage(
                     type="result",
                     result=msg.result if msg.result else None,
                     usage=usage,
-                    session_id=getattr(msg, "session_id", None),
+                    session_id=sid,
                 )
             elif hasattr(msg, "event"):
                 # StreamEvent - extract text/thinking deltas and accumulate

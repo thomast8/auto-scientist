@@ -147,7 +147,7 @@ class TestRunCompletenessAssessment:
         assessment = _valid_assessment_dict()
         raw_json = json.dumps(assessment)
 
-        with patch(COLLECT_TEXT_PATH, new_callable=AsyncMock, return_value=(raw_json, {})):
+        with patch(COLLECT_TEXT_PATH, new_callable=AsyncMock, return_value=(raw_json, {}, None)):
             result = await run_completeness_assessment(
                 goal="find factors driving water clarity",
                 stop_reason="All sub-questions answered",
@@ -167,7 +167,7 @@ class TestRunCompletenessAssessment:
         assessment["sub_questions"][0]["coverage"] = "thorough"
         raw_json = json.dumps(assessment)
 
-        with patch(COLLECT_TEXT_PATH, new_callable=AsyncMock, return_value=(raw_json, {})):
+        with patch(COLLECT_TEXT_PATH, new_callable=AsyncMock, return_value=(raw_json, {}, None)):
             result = await run_completeness_assessment(
                 goal="discover mineral composition patterns",
                 stop_reason="Full coverage achieved",
@@ -183,8 +183,8 @@ class TestRunCompletenessAssessment:
         from auto_scientist.agents.stop_gate import run_completeness_assessment
 
         valid_json = json.dumps(_valid_assessment_dict())
-        invalid_response = ("not json at all {{", {})
-        valid_response = (valid_json, {})
+        invalid_response = ("not json at all {{", {}, None)
+        valid_response = (valid_json, {}, None)
 
         with patch(
             COLLECT_TEXT_PATH,
@@ -205,7 +205,7 @@ class TestRunCompletenessAssessment:
         from auto_scientist.agents.stop_gate import run_completeness_assessment
 
         valid_json = json.dumps(_valid_assessment_dict())
-        valid_response = (valid_json, {})
+        valid_response = (valid_json, {}, None)
 
         with patch(
             COLLECT_TEXT_PATH,
@@ -248,7 +248,7 @@ class TestRunCompletenessAssessment:
             patch(
                 COLLECT_TEXT_PATH,
                 new_callable=AsyncMock,
-                return_value=("not json", {}),
+                return_value=("not json", {}, None),
             ),
             pytest.raises(OutputValidationError),
         ):
@@ -268,7 +268,7 @@ class TestRunCompletenessAssessment:
         with patch(
             COLLECT_TEXT_PATH,
             new_callable=AsyncMock,
-            return_value=(valid_json, {}),
+            return_value=(valid_json, {}, None),
         ) as mock_collect:
             await run_completeness_assessment(
                 goal="test goal",
@@ -291,7 +291,7 @@ class TestRunCompletenessAssessment:
         with patch(
             COLLECT_TEXT_PATH,
             new_callable=AsyncMock,
-            return_value=(valid_json, {}),
+            return_value=(valid_json, {}, None),
         ) as mock_collect:
             await run_completeness_assessment(
                 goal="discover alloy fatigue mechanism",
@@ -313,7 +313,7 @@ class TestRunCompletenessAssessment:
         with patch(
             COLLECT_TEXT_PATH,
             new_callable=AsyncMock,
-            return_value=(valid_json, {}),
+            return_value=(valid_json, {}, None),
         ) as mock_collect:
             await run_completeness_assessment(
                 goal="test",
@@ -674,7 +674,7 @@ class TestRunScientistStopRevision:
         plan = _valid_scientist_plan_dict(should_stop=False)
         raw_json = json.dumps(plan)
 
-        with patch(COLLECT_TEXT_PATH, new_callable=AsyncMock, return_value=(raw_json, {})):
+        with patch(COLLECT_TEXT_PATH, new_callable=AsyncMock, return_value=(raw_json, {}, None)):
             result = await run_scientist_stop_revision(
                 stop_reason="seemed complete",
                 completeness_assessment=valid_assessment,
@@ -696,7 +696,7 @@ class TestRunScientistStopRevision:
         plan = _valid_scientist_plan_dict(should_stop=True)
         raw_json = json.dumps(plan)
 
-        with patch(COLLECT_TEXT_PATH, new_callable=AsyncMock, return_value=(raw_json, {})):
+        with patch(COLLECT_TEXT_PATH, new_callable=AsyncMock, return_value=(raw_json, {}, None)):
             result = await run_scientist_stop_revision(
                 stop_reason="investigation complete",
                 completeness_assessment={
@@ -726,8 +726,8 @@ class TestRunScientistStopRevision:
         from auto_scientist.agents.stop_gate import run_scientist_stop_revision
 
         valid_json = json.dumps(_valid_scientist_plan_dict())
-        invalid_response = ("malformed {{", {})
-        valid_response = (valid_json, {})
+        invalid_response = ("malformed {{", {}, None)
+        valid_response = (valid_json, {}, None)
 
         with patch(
             COLLECT_TEXT_PATH,
@@ -751,7 +751,7 @@ class TestRunScientistStopRevision:
         from auto_scientist.agents.stop_gate import run_scientist_stop_revision
 
         valid_json = json.dumps(_valid_scientist_plan_dict())
-        valid_response = (valid_json, {})
+        valid_response = (valid_json, {}, None)
 
         with patch(
             COLLECT_TEXT_PATH,
@@ -800,7 +800,7 @@ class TestRunScientistStopRevision:
             patch(
                 COLLECT_TEXT_PATH,
                 new_callable=AsyncMock,
-                return_value=("not json", {}),
+                return_value=("not json", {}, None),
             ),
             pytest.raises(OutputValidationError),
         ):
@@ -823,7 +823,7 @@ class TestRunScientistStopRevision:
         with patch(
             COLLECT_TEXT_PATH,
             new_callable=AsyncMock,
-            return_value=(valid_json, {}),
+            return_value=(valid_json, {}, None),
         ) as mock_collect:
             await run_scientist_stop_revision(
                 stop_reason="done",
@@ -858,7 +858,7 @@ class TestRunScientistStopRevision:
         with patch(
             COLLECT_TEXT_PATH,
             new_callable=AsyncMock,
-            return_value=(valid_json, {}),
+            return_value=(valid_json, {}, None),
         ) as mock_collect:
             await run_scientist_stop_revision(
                 stop_reason="done",
@@ -882,7 +882,7 @@ class TestRunScientistStopRevision:
         with patch(
             COLLECT_TEXT_PATH,
             new_callable=AsyncMock,
-            return_value=(valid_json, {}),
+            return_value=(valid_json, {}, None),
         ) as mock_collect:
             await run_scientist_stop_revision(
                 stop_reason="done",

@@ -10,6 +10,7 @@ Safety hooks: block writes outside experiments/ dir, block writes to data files.
 
 import json
 import logging
+from dataclasses import replace
 from pathlib import Path
 from typing import Any
 
@@ -19,6 +20,7 @@ from auto_scientist.prompts.coder import (
     CODER_SYSTEM,
     CODER_USER,
 )
+from auto_scientist.retry import QueryResult, ValidationError, agent_retry_loop
 from auto_scientist.sdk_backend import CODEX_SANDBOX_ADDENDUM, SDKOptions, get_backend
 from auto_scientist.sdk_utils import (
     append_block_to_buffer,
@@ -27,8 +29,6 @@ from auto_scientist.sdk_utils import (
 )
 
 logger = logging.getLogger(__name__)
-
-MAX_ATTEMPTS = 3
 
 _STDERR_TRUNCATE = 3000
 
@@ -50,7 +50,6 @@ def _check_runtime_success(version_dir: Path) -> tuple[bool, str]:
         try:
             data = json.loads(run_result_path.read_text())
         except (json.JSONDecodeError, ValueError):
-            # Malformed JSON - fall through to exitcode check
             pass
         else:
             if data.get("timed_out"):
@@ -68,14 +67,11 @@ def _check_runtime_success(version_dir: Path) -> tuple[bool, str]:
             code = -1
 
         if code == 0:
-            # Script succeeded but coder didn't write run_result.json.
-            # Write a minimal one so the orchestrator can read it.
             run_result_path.write_text(
                 json.dumps({"success": True, "return_code": 0, "timed_out": False, "error": None})
             )
             return True, ""
 
-        # Non-zero exit code: read stderr for the traceback
         stderr = ""
         if stderr_path.exists():
             stderr = stderr_path.read_text()
@@ -83,7 +79,6 @@ def _check_runtime_success(version_dir: Path) -> tuple[bool, str]:
                 stderr = f"...truncated...\n{stderr[-_STDERR_TRUNCATE:]}"
         return False, stderr or f"script exited with code {code} (no stderr captured)"
 
-    # No artifacts at all: script was never run
     return False, "No runtime artifacts found; the script was not run by the coder agent"
 
 
@@ -200,79 +195,67 @@ async def run_coder(
         network_access=provider == "openai",
     )
 
-    correction_hint = ""
-    for attempt in range(MAX_ATTEMPTS):
-        effective_prompt = user_prompt + correction_hint
+    async def _query(prompt: str, resume_session_id: str | None) -> QueryResult:
+        opts = replace(options, resume=resume_session_id) if resume_session_id else options
+        session_id: str | None = None
+        async for message in backend.query(prompt=prompt, options=opts):
+            if message.type == "assistant":
+                if message_buffer is not None:
+                    for block in message.content_blocks:
+                        append_block_to_buffer(block, message_buffer)
+            elif message.type == "result":
+                usage = message.usage
+                session_id = message.session_id
+                collect_text_from_query.last_usage = usage  # type: ignore[attr-defined]
+        return QueryResult(raw_output="", session_id=session_id, usage={})
 
-        try:
-            async for message in backend.query(prompt=effective_prompt, options=options):
-                if message.type == "assistant":
-                    if message_buffer is not None:
-                        for block in message.content_blocks:
-                            append_block_to_buffer(block, message_buffer)
-                elif message.type == "result":
-                    usage = message.usage
-                    collect_text_from_query.last_usage = usage  # type: ignore[attr-defined]
-        except Exception as e:
-            if attempt == MAX_ATTEMPTS - 1:
-                raise
-            logger.warning(f"Coder attempt {attempt + 1}: SDK error ({e}), retrying")
-            continue
-
-        # Validate: script must exist
+    def _validate(result: QueryResult) -> Path:
         if not new_script_path.exists():
-            if attempt == MAX_ATTEMPTS - 1:
-                raise FileNotFoundError(
-                    f"Coder agent did not create the expected script at {new_script_path}"
-                )
-            correction_hint = (
-                "\n\n<validation_error>\n"
+            raise ValidationError(
+                "<validation_error>\n"
                 f"You did not create the script at {new_script_path}. "
                 "Please write the experiment script to that exact path.\n"
                 "</validation_error>"
             )
-            logger.warning(f"Coder attempt {attempt + 1}: script not created, retrying")
-            continue
-
-        # Validate: script must have valid Python syntax
         valid, syntax_error = _validate_syntax(new_script_path)
         if not valid:
-            if attempt == MAX_ATTEMPTS - 1:
-                # Return the script anyway; the runner will catch the syntax error
-                break
-            correction_hint = (
-                "\n\n<validation_error>\n"
+            raise ValidationError(
+                "<validation_error>\n"
                 f"The script at {new_script_path} has a syntax error:\n{syntax_error}\n"
                 "Please fix the syntax error and rewrite the script.\n"
                 "</validation_error>"
             )
-            logger.warning(f"Coder attempt {attempt + 1}: syntax error, retrying")
-            continue
 
         # Validate: third-party imports must be declared in PEP 723 deps
         deps_ok, deps_error = _validate_deps(new_script_path)
         if not deps_ok:
-            if attempt == MAX_ATTEMPTS - 1:
-                break
-            correction_hint = f"\n\n<validation_error>\n{deps_error}\n</validation_error>"
-            logger.warning(f"Coder attempt {attempt + 1}: undeclared dependencies, retrying")
-            continue
+            raise ValidationError(f"<validation_error>\n{deps_error}\n</validation_error>")
 
         # Validate: script ran successfully at runtime
         runtime_ok, runtime_error = _check_runtime_success(new_script_path.parent)
         if not runtime_ok:
-            if attempt == MAX_ATTEMPTS - 1:
-                break
-            correction_hint = (
-                "\n\n<runtime_error>\n"
+            raise ValidationError(
+                "<runtime_error>\n"
                 f"The script at {new_script_path} failed at runtime:\n{runtime_error}\n"
                 "The script already exists on disk. Read it, fix the bug, and re-run it.\n"
                 "</runtime_error>"
             )
-            logger.warning(f"Coder attempt {attempt + 1}: runtime error, retrying")
-            continue
 
-        # All checks passed
-        break
+        return new_script_path
 
-    return new_script_path
+    def _on_exhausted(result: QueryResult | None, error: Exception) -> Path:
+        if result is None:
+            raise error
+        if new_script_path.exists():
+            return new_script_path
+        raise FileNotFoundError(
+            f"Coder agent did not create the expected script at {new_script_path}"
+        )
+
+    return await agent_retry_loop(
+        query_fn=_query,
+        validate_fn=_validate,
+        prompt=user_prompt,
+        agent_name="Coder",
+        on_exhausted=_on_exhausted,
+    )
