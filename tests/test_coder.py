@@ -1,12 +1,22 @@
 """Tests for the Coder agent."""
 
 import json
+from pathlib import Path
 from unittest.mock import MagicMock, patch
 
 import pytest
 
 from auto_scientist.agents.coder import _check_runtime_success, run_coder
 from auto_scientist.sdk_backend import SDKMessage
+
+_SUCCESS_RUN_RESULT = json.dumps(
+    {"success": True, "return_code": 0, "timed_out": False, "error": None}
+)
+
+
+def _write_success_result(version_dir: Path) -> None:
+    """Write a minimal successful run_result.json to a version directory."""
+    (version_dir / "run_result.json").write_text(_SUCCESS_RUN_RESULT)
 
 
 def _text_block(text: str) -> MagicMock:
@@ -38,9 +48,10 @@ class TestRunCoder:
     @patch("auto_scientist.sdk_backend.claude_query")
     async def test_creates_script_at_expected_path(self, mock_query, tmp_path):
         async def fake_query(**kwargs):
-            script_path = tmp_path / "v01" / "experiment.py"
-            script_path.parent.mkdir(parents=True, exist_ok=True)
-            script_path.write_text("print('hello')")
+            version_dir = tmp_path / "v01"
+            version_dir.mkdir(parents=True, exist_ok=True)
+            (version_dir / "experiment.py").write_text("print('hello')")
+            _write_success_result(version_dir)
             yield MagicMock(
                 spec_set=["result", "usage", "num_turns", "total_cost_usd", "session_id"]
             )
@@ -80,9 +91,10 @@ class TestRunCoder:
 
         async def fake_query(**kwargs):
             captured_prompt["prompt"] = kwargs.get("prompt", "")
-            script_path = tmp_path / "v01" / "experiment.py"
-            script_path.parent.mkdir(parents=True, exist_ok=True)
-            script_path.write_text("print('v01')")
+            version_dir = tmp_path / "v01"
+            version_dir.mkdir(parents=True, exist_ok=True)
+            (version_dir / "experiment.py").write_text("print('v01')")
+            _write_success_result(version_dir)
             yield MagicMock(
                 spec_set=["result", "usage", "num_turns", "total_cost_usd", "session_id"]
             )
@@ -109,9 +121,10 @@ class TestRunCoder:
 
         async def fake_query(**kwargs):
             captured_prompt["prompt"] = kwargs.get("prompt", "")
-            script_path = tmp_path / "v01" / "experiment.py"
-            script_path.parent.mkdir(parents=True, exist_ok=True)
-            script_path.write_text("print('v01')")
+            version_dir = tmp_path / "v01"
+            version_dir.mkdir(parents=True, exist_ok=True)
+            (version_dir / "experiment.py").write_text("print('v01')")
+            _write_success_result(version_dir)
             yield MagicMock(
                 spec_set=["result", "usage", "num_turns", "total_cost_usd", "session_id"]
             )
@@ -135,9 +148,10 @@ class TestRunCoder:
     @patch("auto_scientist.sdk_backend.claude_query")
     async def test_write_subdirectory_allowed(self, mock_query, tmp_path):
         async def fake_query(**kwargs):
-            script_path = tmp_path / "v01" / "experiment.py"
-            script_path.parent.mkdir(parents=True, exist_ok=True)
-            script_path.write_text("print('nested')")
+            version_dir = tmp_path / "v01"
+            version_dir.mkdir(parents=True, exist_ok=True)
+            (version_dir / "experiment.py").write_text("print('nested')")
+            _write_success_result(version_dir)
             yield MagicMock(
                 spec_set=["result", "usage", "num_turns", "total_cost_usd", "session_id"]
             )
@@ -159,9 +173,10 @@ class TestRunCoder:
 
         async def fake_query(**kwargs):
             captured_opts.update(kwargs)
-            script_path = tmp_path / "v01" / "experiment.py"
-            script_path.parent.mkdir(parents=True, exist_ok=True)
-            script_path.write_text("print('test')")
+            version_dir = tmp_path / "v01"
+            version_dir.mkdir(parents=True, exist_ok=True)
+            (version_dir / "experiment.py").write_text("print('test')")
+            _write_success_result(version_dir)
             yield MagicMock(
                 spec_set=["result", "usage", "num_turns", "total_cost_usd", "session_id"]
             )
@@ -187,9 +202,10 @@ class TestRunCoder:
 
         async def fake_query(**kwargs):
             captured_opts.update(kwargs)
-            script_path = tmp_path / "v01" / "experiment.py"
-            script_path.parent.mkdir(parents=True, exist_ok=True)
-            script_path.write_text("print('test')")
+            version_dir = tmp_path / "v01"
+            version_dir.mkdir(parents=True, exist_ok=True)
+            (version_dir / "experiment.py").write_text("print('test')")
+            _write_success_result(version_dir)
             yield MagicMock(
                 spec_set=["result", "usage", "num_turns", "total_cost_usd", "session_id"]
             )
@@ -214,9 +230,10 @@ class TestRunCoder:
 
         async def fake_query(**kwargs):
             captured_opts.update(kwargs)
-            script_path = tmp_path / "v01" / "experiment.py"
-            script_path.parent.mkdir(parents=True, exist_ok=True)
-            script_path.write_text("print('test')")
+            version_dir = tmp_path / "v01"
+            version_dir.mkdir(parents=True, exist_ok=True)
+            (version_dir / "experiment.py").write_text("print('test')")
+            _write_success_result(version_dir)
             yield MagicMock(
                 spec_set=["result", "usage", "num_turns", "total_cost_usd", "session_id"]
             )
@@ -250,9 +267,10 @@ class TestRunCoder:
         async def fake_query(prompt, options):
             captured["prompt"] = prompt
             captured["system"] = options.system_prompt
-            script_path = tmp_path / "v01" / "experiment.py"
-            script_path.parent.mkdir(parents=True, exist_ok=True)
-            script_path.write_text("print('ok')")
+            version_dir = tmp_path / "v01"
+            version_dir.mkdir(parents=True, exist_ok=True)
+            (version_dir / "experiment.py").write_text("print('ok')")
+            _write_success_result(version_dir)
             yield _result_msg()
 
         mock_backend = MagicMock()
@@ -281,9 +299,10 @@ class TestRunCoder:
 
         async def fake_query(**kwargs):
             captured_opts.update(kwargs)
-            script_path = tmp_path / "v01" / "experiment.py"
-            script_path.parent.mkdir(parents=True, exist_ok=True)
-            script_path.write_text("print('ok')")
+            version_dir = tmp_path / "v01"
+            version_dir.mkdir(parents=True, exist_ok=True)
+            (version_dir / "experiment.py").write_text("print('ok')")
+            _write_success_result(version_dir)
             yield MagicMock(
                 spec_set=["result", "usage", "num_turns", "total_cost_usd", "session_id"]
             )
@@ -312,9 +331,10 @@ class TestRunCoder:
 
         async def fake_query(prompt, options):
             captured["prompt"] = prompt
-            script_path = tmp_path / "v01" / "experiment.py"
-            script_path.parent.mkdir(parents=True, exist_ok=True)
-            script_path.write_text("print('ok')")
+            version_dir = tmp_path / "v01"
+            version_dir.mkdir(parents=True, exist_ok=True)
+            (version_dir / "experiment.py").write_text("print('ok')")
+            _write_success_result(version_dir)
             yield _result_msg()
 
         mock_backend = MagicMock()
@@ -342,9 +362,10 @@ class TestRunCoder:
         async def fake_query(prompt, options):
             captured["prompt"] = prompt
             captured["system"] = options.system_prompt
-            script_path = tmp_path / "v01" / "experiment.py"
-            script_path.parent.mkdir(parents=True, exist_ok=True)
-            script_path.write_text("print('ok')")
+            version_dir = tmp_path / "v01"
+            version_dir.mkdir(parents=True, exist_ok=True)
+            (version_dir / "experiment.py").write_text("print('ok')")
+            _write_success_result(version_dir)
             yield _result_msg()
 
         mock_backend = MagicMock()
@@ -378,9 +399,10 @@ class TestCoderMessageBuffer:
         result_msg.result = ""
 
         async def fake_query(**kwargs):
-            script_path = tmp_path / "v01" / "experiment.py"
-            script_path.parent.mkdir(parents=True, exist_ok=True)
-            script_path.write_text("print('hi')")
+            version_dir = tmp_path / "v01"
+            version_dir.mkdir(parents=True, exist_ok=True)
+            (version_dir / "experiment.py").write_text("print('hi')")
+            _write_success_result(version_dir)
             yield assistant_msg
             yield result_msg
 
@@ -411,9 +433,10 @@ class TestCoderMessageBuffer:
         result_msg.result = ""
 
         async def fake_query(**kwargs):
-            script_path = tmp_path / "v01" / "experiment.py"
-            script_path.parent.mkdir(parents=True, exist_ok=True)
-            script_path.write_text("print('hi')")
+            version_dir = tmp_path / "v01"
+            version_dir.mkdir(parents=True, exist_ok=True)
+            (version_dir / "experiment.py").write_text("print('hi')")
+            _write_success_result(version_dir)
             yield assistant_msg
             yield result_msg
 
@@ -454,11 +477,7 @@ class TestCoderRetry:
                     '# /// script\n# dependencies = ["numpy", "pandas"]\n# ///\n'
                     "import numpy\nimport pandas\nprint('hi')\n"
                 )
-                (version_dir / "run_result.json").write_text(
-                    json.dumps(
-                        {"success": True, "return_code": 0, "timed_out": False, "error": None}
-                    )
-                )
+                _write_success_result(version_dir)
             yield MagicMock(
                 spec_set=["result", "usage", "num_turns", "total_cost_usd", "session_id"]
             )
@@ -490,11 +509,7 @@ class TestCoderRetry:
                 script_path.write_text("def broken(\n")
             else:
                 script_path.write_text("print('hello')")
-                (version_dir / "run_result.json").write_text(
-                    json.dumps(
-                        {"success": True, "return_code": 0, "timed_out": False, "error": None}
-                    )
-                )
+                _write_success_result(version_dir)
             yield MagicMock(
                 spec_set=["result", "usage", "num_turns", "total_cost_usd", "session_id"]
             )
@@ -523,11 +538,7 @@ class TestCoderRetry:
                 version_dir = tmp_path / "v01"
                 version_dir.mkdir(parents=True, exist_ok=True)
                 (version_dir / "experiment.py").write_text("print('hello')")
-                (version_dir / "run_result.json").write_text(
-                    json.dumps(
-                        {"success": True, "return_code": 0, "timed_out": False, "error": None}
-                    )
-                )
+                _write_success_result(version_dir)
             yield MagicMock(
                 spec_set=["result", "usage", "num_turns", "total_cost_usd", "session_id"]
             )
@@ -579,9 +590,7 @@ class TestCoderRuntimeRetry:
             version_dir = tmp_path / "v01"
             version_dir.mkdir(parents=True, exist_ok=True)
             (version_dir / "experiment.py").write_text("print('ok')")
-            (version_dir / "run_result.json").write_text(
-                json.dumps({"success": True, "return_code": 0, "timed_out": False, "error": None})
-            )
+            _write_success_result(version_dir)
             yield MagicMock(
                 spec_set=["result", "usage", "num_turns", "total_cost_usd", "session_id"]
             )
