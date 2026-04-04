@@ -224,8 +224,9 @@ PERSONAS: list[dict[str, str]] = [
             "corresponding per-group metric. If the plan says X and the\n"
             "data says not-X, that is your concern. Be specific: quote the\n"
             "plan's claim, quote the contradicting data point, and explain\n"
-            "the discrepancy. Use the read_predictions tool to check\n"
-            "specific prediction outcomes when the plan references them.\n"
+            "the discrepancy. Use the mcp__predictions__read_predictions\n"
+            "tool to check specific prediction outcomes when the plan\n"
+            "references them.\n"
             "</persona>"
         ),
     },
@@ -236,7 +237,7 @@ ITERATION_0_PERSONAS: frozenset[str] = frozenset({"Methodologist", "Falsificatio
 Evidence Auditor require prior iteration history to function."""
 
 PREDICTION_PERSONAS: frozenset[str] = frozenset({"Trajectory Critic", "Evidence Auditor"})
-"""Personas that receive prediction history and the read_predictions MCP tool.
+"""Personas that receive prediction history and the mcp__predictions__read_predictions tool.
 Trajectory Critic needs prediction chains to detect circling and stagnation.
 Evidence Auditor needs prediction outcomes to fact-check plan claims.
 Methodologist and Falsification Expert evaluate the current plan's design

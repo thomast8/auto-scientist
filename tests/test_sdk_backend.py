@@ -346,6 +346,30 @@ class TestCodexBackend:
             CodexBackend._resolve_sandbox(["Read", "Write"], has_mcp=True) == "danger-full-access"
         )
 
+    def test_resolve_disabled_features_critic(self):
+        """Critics (WebSearch only) get shell and agent tools disabled."""
+        from auto_scientist.sdk_backend import CodexBackend
+
+        disabled = CodexBackend._resolve_disabled_features(
+            ["WebSearch", "mcp__predictions__read_predictions"]
+        )
+        assert "shell_tool" in disabled
+        assert "unified_exec" in disabled
+        assert "multi_agent" in disabled
+        assert "tool_suggest" in disabled
+
+    def test_resolve_disabled_features_coder(self):
+        """Coders (shell tools) keep shell enabled but still disable agents."""
+        from auto_scientist.sdk_backend import CodexBackend
+
+        disabled = CodexBackend._resolve_disabled_features(
+            ["Read", "Write", "Edit", "Bash", "Glob", "Grep"]
+        )
+        assert "shell_tool" not in disabled
+        assert "unified_exec" not in disabled
+        assert "multi_agent" in disabled
+        assert "tool_suggest" in disabled
+
     def test_maps_reasoning_effort(self):
         """ReasoningConfig effort levels map to Codex effort strings."""
         from auto_scientist.sdk_backend import CodexBackend
@@ -608,11 +632,10 @@ class TestCodexBackend:
         assert not codex_home_path.exists()
         mock_client.close.assert_called_once()
 
-    def test_writes_codex_mcp_config(self, tmp_path):
-        """CodexBackend writes config.toml directly in codex_home."""
+    def test_writes_codex_home_config(self, tmp_path):
+        """CodexBackend writes config.toml with MCP and feature flags."""
         from auto_scientist.sdk_backend import CodexBackend
 
-        backend = CodexBackend()
         mcp_servers = {
             "predictions": {
                 "type": "stdio",
@@ -620,7 +643,11 @@ class TestCodexBackend:
                 "args": ["/path/to/server.py", "/path/to/data.json"],
             }
         }
-        backend._write_codex_mcp_config(mcp_servers, tmp_path)
+        CodexBackend._write_codex_home_config(
+            tmp_path,
+            mcp_servers=mcp_servers,
+            disabled_features=["multi_agent", "tool_suggest"],
+        )
 
         config_path = tmp_path / "config.toml"
         assert config_path.exists(), "config.toml should be written directly in codex_home"
@@ -629,6 +656,9 @@ class TestCodexBackend:
         assert "[mcp_servers.predictions]" in content
         assert 'command = "python3"' in content
         assert "/path/to/server.py" in content
+        assert "[features]" in content
+        assert "multi_agent = false" in content
+        assert "tool_suggest = false" in content
 
     @pytest.mark.asyncio
     async def test_codex_home_always_isolates(self):

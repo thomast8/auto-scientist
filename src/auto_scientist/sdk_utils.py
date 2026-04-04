@@ -337,6 +337,7 @@ def prepare_turn_budget(
                 f"\n<available_tools>\n"
                 f"Your available tools (call directly, do NOT use ToolSearch):\n"
                 f"{tool_block}\n"
+                f"Use ONLY the tools listed above. Do not call any tools not listed here.\n"
                 f"</available_tools>"
             )
 

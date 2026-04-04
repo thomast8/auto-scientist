@@ -326,6 +326,10 @@ async def run_single_critic_debate(
         mcp_servers = {}
         effective_prediction_history = ""
 
+    # MCP tool references only make sense in SDK mode where the tool is wired.
+    # API-mode critics get prediction history inline but no tool to call.
+    has_mcp_tool = has_predictions and config.mode == "sdk"
+
     critic_system, critic_user = _build_critic_prompt(
         plan,
         notebook_content,
@@ -336,6 +340,7 @@ async def run_single_critic_debate(
         prediction_history=effective_prediction_history,
         goal=goal,
         has_predictions=has_predictions,
+        has_mcp_tool=has_mcp_tool,
     )
     critic_output, critic_result = await _query_critic_structured(
         config,
@@ -526,6 +531,7 @@ def _build_critic_prompt(
     prediction_history: str = "",
     goal: str = "",
     has_predictions: bool = True,
+    has_mcp_tool: bool = True,
 ) -> tuple[str, str]:
     """Build the (system, user) prompt pair sent to critic models.
 
@@ -535,33 +541,52 @@ def _build_critic_prompt(
     When has_predictions is False, prediction-related text (tool references,
     history section, pipeline context) is omitted from both prompts.
 
+    When has_mcp_tool is False (API mode), prediction history is included
+    inline but tool references and "MUST call" instructions are omitted
+    since no MCP tool is available.
+
     Returns:
         (system_prompt, user_prompt) tuple.
     """
     effective_instructions = persona_instructions or DEFAULT_CRITIC_INSTRUCTIONS
 
     if has_predictions:
-        prediction_role_text = (
-            ", and a read_predictions tool to\n"
-            "drill into specific predictions for full detail (evidence, diagnostics,\n"
-            "implications)"
-        )
+        tool_name = PREDICTION_SPEC.mcp_tool_name
         prediction_evidence_text = "prediction history (what was tested and\nthe results), "
-        prediction_pipeline_text = (
-            "\nA compact summary of the prediction history is included in the context "
-            "below.\nWhen you need more detail on a specific prediction (full reasoning, "
-            "chain of\nrelated predictions, or statistics by outcome/iteration), use the "
-            "prediction\nquery tool rather than guessing from the summary."
-        )
         prediction_history_section = (
             f"\n<prediction_history>{prediction_history or '(no prediction history yet)'}"
             "</prediction_history>"
         )
-        prediction_task_text = (
-            "\nThe prediction tree is provided above. Use the read_predictions tool to "
-            "look up\nspecific prediction chains or full detail when you need more than "
-            "the summary."
-        )
+
+        if has_mcp_tool:
+            prediction_role_text = (
+                f", and a {tool_name} tool to\n"
+                "drill into specific predictions for full detail (evidence, diagnostics,\n"
+                "implications)"
+            )
+            prediction_pipeline_text = (
+                "\nA compact summary of the prediction history is included in the context "
+                f"below.\nWhen you need more detail on a specific prediction, call the "
+                f"{tool_name}\ntool rather than guessing from the summary. You MUST call "
+                f"this tool at least\nonce before writing your critique to verify prediction "
+                "details firsthand."
+            )
+            prediction_task_text = (
+                f"\nThe prediction tree is provided above. Call {tool_name} to "
+                "look up\nspecific prediction chains or full detail when you need more than "
+                "the summary.\nYou MUST call this tool at least once before writing your "
+                "response."
+            )
+        else:
+            # API mode: prediction data is inline, no tool available
+            prediction_role_text = ""
+            prediction_pipeline_text = (
+                "\nA compact summary of the prediction history is included in the context below."
+            )
+            prediction_task_text = (
+                "\nThe prediction tree is provided above. Use it to verify "
+                "prediction outcomes referenced in the plan."
+            )
     else:
         prediction_role_text = ""
         prediction_evidence_text = ""

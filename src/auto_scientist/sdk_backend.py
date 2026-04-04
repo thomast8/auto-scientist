@@ -473,8 +473,33 @@ class CodexBackend:
         return _CODEX_EFFORT_MAP.get(effort, effort)
 
     @staticmethod
-    def _write_codex_mcp_config(mcp_servers: dict[str, Any], codex_home: Path) -> bool:
-        """Write MCP server config to ``$CODEX_HOME/config.toml``.
+    def _resolve_disabled_features(
+        allowed_tools: list[str] | tuple[str, ...],
+    ) -> list[str]:
+        """Determine which Codex features to disable based on allowed tools.
+
+        Codex exposes 16+ built-in tools by default.  For agents that only
+        need web search and MCP tools, the extra tools (shell, agents,
+        tool_suggest) dilute the model's attention and reduce MCP usage.
+        """
+        disabled: list[str] = []
+        allowed = set(allowed_tools)
+        shell_tools = {"Write", "Edit", "Bash", "Read", "Glob", "Grep"}
+        if not (shell_tools & allowed):
+            disabled.append("shell_tool")
+            disabled.append("unified_exec")
+        # Always disable: no auto-scientist agent needs sub-agents or tool discovery.
+        disabled.append("multi_agent")
+        disabled.append("tool_suggest")
+        return disabled
+
+    @staticmethod
+    def _write_codex_home_config(
+        codex_home: Path,
+        mcp_servers: dict[str, Any] | None = None,
+        disabled_features: list[str] | None = None,
+    ) -> bool:
+        """Write ``$CODEX_HOME/config.toml`` with MCP servers and feature flags.
 
         Codex reads config from ``$CODEX_HOME/config.toml`` (defaults to
         ``~/.codex/config.toml``).  We write to an isolated temp directory
@@ -483,30 +508,44 @@ class CodexBackend:
 
         Only stdio servers with ``command`` + ``args`` are supported.
 
-        Returns True if any servers were written, False if all were skipped.
+        Returns True if any MCP servers were written, False otherwise.
         """
         config_path = codex_home / "config.toml"
 
         lines: list[str] = []
-        for name, cfg in mcp_servers.items():
-            srv_type = cfg.get("type", "")
-            if srv_type != "stdio":
-                logger.warning(f"Codex MCP: skipping non-stdio server '{name}' (type={srv_type})")
-                continue
-            command = cfg.get("command", "")
-            args = cfg.get("args", [])
-            lines.append(f"[mcp_servers.{name}]")
-            lines.append(f'command = "{command}"')
-            # Format args as TOML array of strings
-            args_str = ", ".join(f'"{a}"' for a in args)
-            lines.append(f"args = [{args_str}]")
+        has_mcp = False
+
+        # Feature flags
+        if disabled_features:
+            lines.append("[features]")
+            for feat in disabled_features:
+                lines.append(f"{feat} = false")
             lines.append("")
+
+        # MCP servers
+        if mcp_servers:
+            for name, cfg in mcp_servers.items():
+                srv_type = cfg.get("type", "")
+                if srv_type != "stdio":
+                    logger.warning(
+                        f"Codex MCP: skipping non-stdio server '{name}' (type={srv_type})"
+                    )
+                    continue
+                command = cfg.get("command", "")
+                args = cfg.get("args", [])
+                lines.append(f"[mcp_servers.{name}]")
+                lines.append(f'command = "{command}"')
+                # Format args as TOML array of strings
+                args_str = ", ".join(f'"{a}"' for a in args)
+                lines.append(f"args = [{args_str}]")
+                lines.append("")
+                has_mcp = True
 
         if lines:
             config_path.write_text("\n".join(lines))
-            logger.debug(f"Wrote Codex MCP config to {config_path}")
-            return True
-        return False
+            logger.debug(f"Wrote Codex config to {config_path}")
+
+        return has_mcp
 
     async def _ensure_client(
         self, options: SDKOptions, model: str | None
@@ -553,9 +592,13 @@ class CodexBackend:
         if real_auth.exists():
             shutil.copy2(real_auth, codex_home / "auth.json")
 
-        # Write MCP server config to the isolated home (not cwd).
-        if options.mcp_servers:
-            has_mcp = self._write_codex_mcp_config(options.mcp_servers, codex_home)
+        # Write config.toml with MCP servers and feature flags.
+        disabled_features = self._resolve_disabled_features(options.allowed_tools)
+        has_mcp = self._write_codex_home_config(
+            codex_home,
+            mcp_servers=options.mcp_servers or None,
+            disabled_features=disabled_features,
+        )
 
         sandbox_mode = self._resolve_sandbox(options.allowed_tools, has_mcp=has_mcp)
         self._sandbox_mode = sandbox_mode

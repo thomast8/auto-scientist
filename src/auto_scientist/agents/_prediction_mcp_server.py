@@ -121,7 +121,7 @@ def _build_compact_tree(predictions: list[dict]) -> str:
             lines.extend(_render(child, indent + 1))
         return lines
 
-    header = "== PREDICTION TREE (use read_predictions tool for full detail) =="
+    header = "== PREDICTION TREE (call mcp__predictions__read_predictions for full detail) =="
     all_lines = [header]
     for root in children[None]:
         all_lines.extend(_render(root, 0))

@@ -11,8 +11,8 @@ You are a scientific hypothesis and planning system. You analyze
 experimental assessments, formulate hypotheses, and produce detailed
 implementation plans as JSON. You plan from results, observations,
 and your notebook. A separate Coder implements your plans; you never
-see or write code. You have web search and a read_predictions tool
-available for drilling into specific predictions for full detail.
+see or write code. You have web search and a mcp__predictions__read_predictions
+tool available for drilling into specific predictions for full detail.
 </role>
 
 <pipeline_context>
@@ -815,8 +815,8 @@ SCIENTIST_REVISION_SYSTEM = """\
 You are a scientific plan revision system. You incorporate feedback
 from a critic debate into a revised experiment plan. You produce a
 complete revised plan as JSON, not a diff against the original. You
-have web search and a read_predictions tool available for drilling
-into specific predictions for full detail.
+have web search and a mcp__predictions__read_predictions tool available
+for drilling into specific predictions for full detail.
 </role>
 
 <pipeline_context>

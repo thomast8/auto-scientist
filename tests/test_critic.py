@@ -955,3 +955,116 @@ class TestPersonaPredictionAccess:
 
         options = mock_sdk.call_args[0][1]
         assert "read_predictions" not in options.system_prompt
+
+
+class TestMcpToolNameInPrompts:
+    """Verify both Claude and Codex get the full mcp__predictions__read_predictions name."""
+
+    @pytest.mark.asyncio
+    async def test_claude_prompt_uses_full_mcp_name(self, plan):
+        """Claude (anthropic) prompt references the full MCP tool name."""
+        critic = AgentModelConfig(provider="anthropic", model="claude-sonnet-4-6")
+        persona = {"name": "Evidence Auditor", "system_text": ""}
+        records = [
+            PredictionRecord(
+                prediction="test pred",
+                diagnostic="check",
+                if_confirmed="ok",
+                if_refuted="bad",
+                iteration_prescribed=1,
+            ),
+        ]
+        mock_sdk = _sdk_critic_mock()
+
+        with patch(SDK_PATH, mock_sdk):
+            await run_single_critic_debate(
+                config=critic,
+                plan=plan,
+                notebook_content="",
+                persona=persona,
+                prediction_history_records=records,
+            )
+
+        options = mock_sdk.call_args[0][1]
+        user_prompt = mock_sdk.call_args[0][0]
+        full_name = PREDICTION_SPEC.mcp_tool_name
+
+        # System prompt and user prompt both reference the full tool name
+        assert full_name in options.system_prompt
+        assert full_name in user_prompt
+        # The short name without prefix should NOT appear standalone
+        assert "a read_predictions tool" not in options.system_prompt
+
+    @pytest.mark.asyncio
+    async def test_codex_prompt_uses_full_mcp_name(self, plan):
+        """Codex (openai) prompt references the full MCP tool name."""
+        critic = AgentModelConfig(provider="openai", model="gpt-4.1")
+        persona = {"name": "Trajectory Critic", "system_text": ""}
+        records = [
+            PredictionRecord(
+                prediction="test pred",
+                diagnostic="check",
+                if_confirmed="ok",
+                if_refuted="bad",
+                iteration_prescribed=1,
+            ),
+        ]
+        mock_sdk = _sdk_critic_mock()
+
+        with patch(SDK_PATH, mock_sdk):
+            await run_single_critic_debate(
+                config=critic,
+                plan=plan,
+                notebook_content="",
+                persona=persona,
+                prediction_history_records=records,
+            )
+
+        options = mock_sdk.call_args[0][1]
+        user_prompt = mock_sdk.call_args[0][0]
+        full_name = PREDICTION_SPEC.mcp_tool_name
+
+        # Both providers get the same full name
+        assert full_name in options.system_prompt
+        assert full_name in user_prompt
+        # MCP servers and allowed_tools are identical
+        assert "predictions" in options.mcp_servers
+        assert full_name in options.allowed_tools
+
+    @pytest.mark.asyncio
+    async def test_both_providers_get_same_allowed_tools(self, plan):
+        """Claude and Codex get the same allowed_tools for prediction personas."""
+        records = [
+            PredictionRecord(
+                prediction="test",
+                diagnostic="check",
+                if_confirmed="ok",
+                if_refuted="bad",
+                iteration_prescribed=1,
+            ),
+        ]
+        persona = {"name": "Evidence Auditor", "system_text": ""}
+
+        # Collect allowed_tools for each provider
+        tools_by_provider = {}
+        for provider, model in [
+            ("anthropic", "claude-sonnet-4-6"),
+            ("openai", "gpt-4.1"),
+        ]:
+            critic = AgentModelConfig(provider=provider, model=model)
+            mock_sdk = _sdk_critic_mock()
+            with patch(SDK_PATH, mock_sdk):
+                await run_single_critic_debate(
+                    config=critic,
+                    plan=plan,
+                    notebook_content="",
+                    persona=persona,
+                    prediction_history_records=records,
+                )
+            options = mock_sdk.call_args[0][1]
+            # Strip ToolSearch (added only for anthropic deferred tools)
+            tools = [t for t in options.allowed_tools if t != "ToolSearch"]
+            tools_by_provider[provider] = sorted(tools)
+
+        # Both should have the same base tools
+        assert tools_by_provider["anthropic"] == tools_by_provider["openai"]

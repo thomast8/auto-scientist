@@ -50,8 +50,8 @@ ASSESSMENT_SYSTEM = """\
 You are a completeness assessment system. You evaluate whether a scientific
 investigation has thoroughly addressed its stated goal. You are factual and
 structured, not argumentative. You map the goal to evidence and report gaps.
-You have web search and a read_predictions tool available for drilling into
-specific predictions for full detail.
+You have web search and a mcp__predictions__read_predictions tool available
+for drilling into specific predictions for full detail.
 </role>
 
 <instructions>
@@ -241,8 +241,8 @@ STOP_CRITIC_SYSTEM_BASE = """\
 <role>
 You are a scientific critique system. You challenge a decision to stop an
 investigation. You have web search available to verify claims and look up
-relevant methods, and a read_predictions tool to drill into specific
-predictions for full detail.
+relevant methods, and a mcp__predictions__read_predictions tool to drill
+into specific predictions for full detail.
 </role>
 
 {persona_text}
@@ -263,8 +263,8 @@ history, lab notebook, and domain knowledge.
 
 A compact summary of the prediction history is included in the context below.
 When you need more detail on a specific prediction (full reasoning, chain of
-related predictions, or statistics by outcome/iteration), use the prediction
-query tool rather than guessing from the summary.
+related predictions, or statistics by outcome/iteration), call the
+mcp__predictions__read_predictions tool rather than guessing from the summary.
 </pipeline_context>
 
 {persona_instructions}
@@ -300,9 +300,9 @@ severity, confidence, and category), alternative hypotheses (investigations
 that should still be pursued), and an overall assessment.
 
 Use web search to check the literature for standard approaches and verify
-whether the investigation's coverage is genuinely complete. Use the prediction
-query tool to check specific prediction outcomes and chains when evaluating
-whether an avenue was properly explored.
+whether the investigation's coverage is genuinely complete. Call
+mcp__predictions__read_predictions to check specific prediction outcomes and
+chains when evaluating whether an avenue was properly explored.
 </task>
 
 <recap>
@@ -321,7 +321,8 @@ STOP_REVISION_SYSTEM = """\
 You are a scientific hypothesis and planning system. You have just proposed
 stopping an investigation, and your stop decision has been challenged in a
 debate. You must now revise your decision. You have web search and a
-read_predictions tool available for drilling into specific predictions.
+mcp__predictions__read_predictions tool available for drilling into
+specific predictions.
 </role>
 
 <pipeline_context>

@@ -55,7 +55,7 @@ def run_structural_checks() -> tuple[int, int]:
                 "args": ["/fake/server.py", "/fake/data.json"],
             }
         }
-        CodexBackend._write_codex_mcp_config(mcp_servers, tmp)
+        CodexBackend._write_codex_home_config(tmp, mcp_servers=mcp_servers)
 
         old_path = tmp / ".codex" / "config.toml"
         new_path = tmp / "config.toml"
@@ -83,14 +83,14 @@ def run_structural_checks() -> tuple[int, int]:
 
     import inspect
 
-    sig = inspect.signature(CodexBackend._write_codex_mcp_config)
+    sig = inspect.signature(CodexBackend._write_codex_home_config)
     params = list(sig.parameters.keys())
 
     # 3. Parameter renamed from cwd to codex_home
     has_codex_home_param = "codex_home" in params
     tally(
         check(
-            "_write_codex_mcp_config param is 'codex_home' (not 'cwd')",
+            "_write_codex_home_config param is 'codex_home' (not 'cwd')",
             has_codex_home_param,
             f"params={params}",
         )
@@ -99,7 +99,7 @@ def run_structural_checks() -> tuple[int, int]:
     # 4. Writes config.toml directly (not in .codex/ subdir)
     tmp2 = Path(tempfile.mkdtemp(prefix="codex_mcp_fix_"))
     try:
-        CodexBackend._write_codex_mcp_config(mcp_servers, tmp2)
+        CodexBackend._write_codex_home_config(tmp2, mcp_servers=mcp_servers)
         writes_direct = (tmp2 / "config.toml").exists()
         writes_subdir = (tmp2 / ".codex" / "config.toml").exists()
 
