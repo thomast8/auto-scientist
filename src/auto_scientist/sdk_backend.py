@@ -57,6 +57,10 @@ Before running any script, install its dependencies:
 2. Install them: `pip install <dep1> <dep2> ...`
 3. Then run the script using the command from the task instructions
 
+IMPORTANT: Every time you edit the script to add a new import, you MUST also:
+- Add the package to the PEP 723 dependencies block
+- Run `pip install <new_package>` before re-running the script
+
 The script must still declare dependencies in the PEP 723 block for
 reproducibility outside this environment.
 </sandbox_environment>

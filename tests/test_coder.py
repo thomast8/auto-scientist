@@ -433,6 +433,42 @@ class TestCoderMessageBuffer:
 class TestCoderRetry:
     @pytest.mark.asyncio
     @patch("auto_scientist.sdk_backend.claude_query")
+    async def test_retry_on_undeclared_deps(self, mock_query, tmp_path):
+        """First attempt has undeclared dep, second fixes it."""
+        call_count = 0
+
+        async def fake_query(**kwargs):
+            nonlocal call_count
+            call_count += 1
+            script_path = tmp_path / "v01" / "experiment.py"
+            script_path.parent.mkdir(parents=True, exist_ok=True)
+            if call_count == 1:
+                script_path.write_text(
+                    '# /// script\n# dependencies = ["numpy"]\n# ///\n'
+                    "import numpy\nimport pandas\nprint('hi')\n"
+                )
+            else:
+                script_path.write_text(
+                    '# /// script\n# dependencies = ["numpy", "pandas"]\n# ///\n'
+                    "import numpy\nimport pandas\nprint('hi')\n"
+                )
+            yield MagicMock(
+                spec_set=["result", "usage", "num_turns", "total_cost_usd", "session_id"]
+            )
+
+        mock_query.side_effect = fake_query
+
+        result = await run_coder(
+            plan={"hypothesis": "test", "changes": []},
+            previous_script=tmp_path / "nonexistent" / "experiment.py",
+            output_dir=tmp_path,
+            version="v01",
+        )
+        assert result == tmp_path / "v01" / "experiment.py"
+        assert call_count == 2
+
+    @pytest.mark.asyncio
+    @patch("auto_scientist.sdk_backend.claude_query")
     async def test_retry_on_syntax_error(self, mock_query, tmp_path):
         """First attempt produces script with syntax error, second succeeds."""
         call_count = 0

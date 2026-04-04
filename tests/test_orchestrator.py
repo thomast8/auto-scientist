@@ -1834,8 +1834,10 @@ class TestRunCoderOrchestrator:
             await orchestrator._run_coder({"hypothesis": "test"})
 
         assert captured_kwargs["run_timeout_minutes"] == 60
-        # Orchestrator resolves the executable to an absolute path
-        assert captured_kwargs["run_command"] == "/usr/bin/python {script_path}"
+        # Orchestrator resolves exe to absolute path and prepends ensure_deps
+        run_cmd = captured_kwargs["run_command"]
+        assert run_cmd.endswith("/usr/bin/python {script_path}")
+        assert "auto_scientist.ensure_deps {script_path} &&" in run_cmd
 
     @pytest.mark.asyncio
     async def test_run_config_defaults_without_config(self, orchestrator, tmp_path):
@@ -1859,8 +1861,10 @@ class TestRunCoderOrchestrator:
             await orchestrator._run_coder({"hypothesis": "test"})
 
         assert captured_kwargs["run_timeout_minutes"] == 120
-        # Orchestrator resolves the executable to an absolute path
-        assert captured_kwargs["run_command"] == "/usr/local/bin/uv run {script_path}"
+        # Orchestrator resolves exe to absolute path and prepends ensure_deps
+        run_cmd = captured_kwargs["run_command"]
+        assert run_cmd.endswith("/usr/local/bin/uv run {script_path}")
+        assert "auto_scientist.ensure_deps {script_path} &&" in run_cmd
 
     @pytest.mark.asyncio
     async def test_run_command_warns_when_exe_not_found(self, orchestrator, tmp_path):
@@ -1883,8 +1887,10 @@ class TestRunCoderOrchestrator:
         ):
             await orchestrator._run_coder({"hypothesis": "test"})
 
-        # Falls through with original command when which returns None
-        assert captured_kwargs["run_command"] == "uv run {script_path}"
+        # Falls through with original command (unresolved) but still has ensure_deps
+        run_cmd = captured_kwargs["run_command"]
+        assert run_cmd.endswith("uv run {script_path}")
+        assert "auto_scientist.ensure_deps {script_path} &&" in run_cmd
 
 
 class TestReadRunResult:

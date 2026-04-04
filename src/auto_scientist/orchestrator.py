@@ -4,6 +4,7 @@ import json
 import logging
 import os
 import shutil
+import sys
 from collections.abc import Callable
 from pathlib import Path
 from typing import Any, Literal
@@ -2237,6 +2238,23 @@ class Orchestrator:
                         f"Executable '{exe}' not found on PATH; "
                         f"coder may fail to run the experiment script"
                     )
+
+        # Prepend ensure_deps to auto-patch PEP 723 deps before each run.
+        # For CC: invoke as a module (auto_scientist is importable).
+        # For Codex: copy the script into the output dir (sandbox can't
+        # import auto_scientist, but ensure_deps is pure stdlib).
+        if "{script_path}" in run_cmd:
+            if cfg.provider == "openai":
+                import auto_scientist.ensure_deps as _ed_mod
+
+                ed_src = Path(_ed_mod.__file__)
+                ed_dst = self.output_dir / "_ensure_deps.py"
+                shutil.copy2(ed_src, ed_dst)
+                run_cmd = f"python3 _ensure_deps.py {{script_path}} && {run_cmd}"
+            else:
+                run_cmd = (
+                    f"{sys.executable} -m auto_scientist.ensure_deps {{script_path}} && {run_cmd}"
+                )
 
         # Pre-compute data directory listing so coder doesn't waste turns
         data_dir = Path(data_path) if data_path else None

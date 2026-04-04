@@ -66,8 +66,14 @@ plan as given.
    - All code in one file: data loading, computation, output, plotting
    - Load data directly from the dataset path provided
    - Use any packages you need; just declare them in the metadata block
-   The script is executed via `uv run script.py`, which reads the metadata
-   block and installs dependencies automatically (cached between runs).
+   - Whenever you add or change an import, immediately update the
+     dependencies list to match. For packages where the import name differs
+     from the PyPI name, use the PyPI name (e.g., `scikit-learn` not `sklearn`,
+     `pillow` not `PIL`).
+   The framework validates that every third-party import has a matching
+   dependency entry, and auto-patches the metadata block before execution.
+   The script is then executed via `uv run script.py`, which reads the
+   metadata block and installs dependencies automatically.
 
 6. Print structured results to stdout:
    a. Header with the version name and a one-line description of changes

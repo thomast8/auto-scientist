@@ -44,6 +44,13 @@ def _validate_syntax(script_path: Path) -> tuple[bool, str]:
     return result.returncode == 0, result.stderr
 
 
+def _validate_deps(script_path: Path) -> tuple[bool, str]:
+    """Check that every third-party import is covered by PEP 723 deps."""
+    from auto_scientist.ensure_deps import validate_deps
+
+    return validate_deps(script_path)
+
+
 async def run_coder(
     plan: dict[str, Any],
     previous_script: Path,
@@ -86,8 +93,8 @@ async def run_coder(
         previous_script_section = CODER_NO_PREVIOUS
 
     # Codex seatbelt sandbox: uv panics (SCDynamicStore access denied).
-    # Replace uv run with python3 BEFORE formatting prompts so both system
-    # and user prompts get the corrected command.
+    # Replace uv run with python3; keep ensure_deps prefix (it's copied
+    # as a local script by the orchestrator).
     if provider == "openai" and "uv run" in run_command:
         run_command = run_command.replace("uv run", "python3", 1)
 
@@ -183,6 +190,15 @@ async def run_coder(
                 "</validation_error>"
             )
             logger.warning(f"Coder attempt {attempt + 1}: syntax error, retrying")
+            continue
+
+        # Validate: third-party imports must be declared in PEP 723 deps
+        deps_ok, deps_error = _validate_deps(new_script_path)
+        if not deps_ok:
+            if attempt == MAX_ATTEMPTS - 1:
+                break
+            correction_hint = f"\n\n<validation_error>\n{deps_error}\n</validation_error>"
+            logger.warning(f"Coder attempt {attempt + 1}: undeclared dependencies, retrying")
             continue
 
         # All checks passed
