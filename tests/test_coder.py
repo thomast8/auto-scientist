@@ -441,8 +441,9 @@ class TestCoderRetry:
         async def fake_query(**kwargs):
             nonlocal call_count
             call_count += 1
-            script_path = tmp_path / "v01" / "experiment.py"
-            script_path.parent.mkdir(parents=True, exist_ok=True)
+            version_dir = tmp_path / "v01"
+            version_dir.mkdir(parents=True, exist_ok=True)
+            script_path = version_dir / "experiment.py"
             if call_count == 1:
                 script_path.write_text(
                     '# /// script\n# dependencies = ["numpy"]\n# ///\n'
@@ -452,6 +453,11 @@ class TestCoderRetry:
                 script_path.write_text(
                     '# /// script\n# dependencies = ["numpy", "pandas"]\n# ///\n'
                     "import numpy\nimport pandas\nprint('hi')\n"
+                )
+                (version_dir / "run_result.json").write_text(
+                    json.dumps(
+                        {"success": True, "return_code": 0, "timed_out": False, "error": None}
+                    )
                 )
             yield MagicMock(
                 spec_set=["result", "usage", "num_turns", "total_cost_usd", "session_id"]
@@ -477,12 +483,18 @@ class TestCoderRetry:
         async def fake_query(**kwargs):
             nonlocal call_count
             call_count += 1
-            script_path = tmp_path / "v01" / "experiment.py"
-            script_path.parent.mkdir(parents=True, exist_ok=True)
+            version_dir = tmp_path / "v01"
+            version_dir.mkdir(parents=True, exist_ok=True)
+            script_path = version_dir / "experiment.py"
             if call_count == 1:
                 script_path.write_text("def broken(\n")
             else:
                 script_path.write_text("print('hello')")
+                (version_dir / "run_result.json").write_text(
+                    json.dumps(
+                        {"success": True, "return_code": 0, "timed_out": False, "error": None}
+                    )
+                )
             yield MagicMock(
                 spec_set=["result", "usage", "num_turns", "total_cost_usd", "session_id"]
             )
@@ -508,9 +520,14 @@ class TestCoderRetry:
             nonlocal call_count
             call_count += 1
             if call_count == 2:
-                script_path = tmp_path / "v01" / "experiment.py"
-                script_path.parent.mkdir(parents=True, exist_ok=True)
-                script_path.write_text("print('hello')")
+                version_dir = tmp_path / "v01"
+                version_dir.mkdir(parents=True, exist_ok=True)
+                (version_dir / "experiment.py").write_text("print('hello')")
+                (version_dir / "run_result.json").write_text(
+                    json.dumps(
+                        {"success": True, "return_code": 0, "timed_out": False, "error": None}
+                    )
+                )
             yield MagicMock(
                 spec_set=["result", "usage", "num_turns", "total_cost_usd", "session_id"]
             )
@@ -545,6 +562,156 @@ class TestCoderRetry:
                 output_dir=tmp_path,
                 version="v01",
             )
+
+
+class TestCoderRuntimeRetry:
+    """Tests for runtime error recovery in the coder retry loop."""
+
+    @pytest.mark.asyncio
+    @patch("auto_scientist.sdk_backend.claude_query")
+    async def test_successful_run_no_retry(self, mock_query, tmp_path):
+        """Script runs successfully on first attempt, no retry needed."""
+        call_count = 0
+
+        async def fake_query(**kwargs):
+            nonlocal call_count
+            call_count += 1
+            version_dir = tmp_path / "v01"
+            version_dir.mkdir(parents=True, exist_ok=True)
+            (version_dir / "experiment.py").write_text("print('ok')")
+            (version_dir / "run_result.json").write_text(
+                json.dumps({"success": True, "return_code": 0, "timed_out": False, "error": None})
+            )
+            yield MagicMock(
+                spec_set=["result", "usage", "num_turns", "total_cost_usd", "session_id"]
+            )
+
+        mock_query.side_effect = fake_query
+
+        await run_coder(
+            plan={"hypothesis": "test", "changes": []},
+            previous_script=tmp_path / "nonexistent" / "experiment.py",
+            output_dir=tmp_path,
+            version="v01",
+        )
+        assert call_count == 1
+
+    @pytest.mark.asyncio
+    @patch("auto_scientist.sdk_backend.claude_query")
+    async def test_runtime_crash_triggers_retry(self, mock_query, tmp_path):
+        """First attempt crashes at runtime, second succeeds."""
+        call_count = 0
+        captured_prompts = []
+
+        async def fake_query(**kwargs):
+            nonlocal call_count
+            call_count += 1
+            captured_prompts.append(kwargs.get("prompt", ""))
+            version_dir = tmp_path / "v01"
+            version_dir.mkdir(parents=True, exist_ok=True)
+            (version_dir / "experiment.py").write_text("print('ok')")
+            if call_count == 1:
+                # First attempt: script crashes
+                (version_dir / "exitcode.txt").write_text("1\n")
+                (version_dir / "stderr.txt").write_text("KeyError: 'Fenrite'\n")
+            else:
+                # Second attempt: script succeeds
+                (version_dir / "run_result.json").write_text(
+                    json.dumps(
+                        {
+                            "success": True,
+                            "return_code": 0,
+                            "timed_out": False,
+                            "error": None,
+                        }
+                    )
+                )
+                # Clean up failure artifacts from attempt 1
+                for f in ["exitcode.txt", "stderr.txt"]:
+                    p = version_dir / f
+                    if p.exists():
+                        p.unlink()
+            yield MagicMock(
+                spec_set=["result", "usage", "num_turns", "total_cost_usd", "session_id"]
+            )
+
+        mock_query.side_effect = fake_query
+
+        await run_coder(
+            plan={"hypothesis": "test", "changes": []},
+            previous_script=tmp_path / "nonexistent" / "experiment.py",
+            output_dir=tmp_path,
+            version="v01",
+        )
+        assert call_count == 2
+        assert "<runtime_error>" in captured_prompts[1]
+        assert "Fenrite" in captured_prompts[1]
+
+    @pytest.mark.asyncio
+    @patch("auto_scientist.sdk_backend.claude_query")
+    async def test_runtime_failure_all_attempts_returns_script(self, mock_query, tmp_path):
+        """Runtime failure on all attempts still returns script path."""
+        call_count = 0
+
+        async def fake_query(**kwargs):
+            nonlocal call_count
+            call_count += 1
+            version_dir = tmp_path / "v01"
+            version_dir.mkdir(parents=True, exist_ok=True)
+            (version_dir / "experiment.py").write_text("print('broken')")
+            (version_dir / "exitcode.txt").write_text("1\n")
+            (version_dir / "stderr.txt").write_text("KeyError: 'Fenrite'\n")
+            yield MagicMock(
+                spec_set=["result", "usage", "num_turns", "total_cost_usd", "session_id"]
+            )
+
+        mock_query.side_effect = fake_query
+
+        result = await run_coder(
+            plan={"hypothesis": "test", "changes": []},
+            previous_script=tmp_path / "nonexistent" / "experiment.py",
+            output_dir=tmp_path,
+            version="v01",
+        )
+        # Returns script path even on failure (orchestrator handles downstream)
+        assert result == tmp_path / "v01" / "experiment.py"
+        assert call_count == 3  # MAX_ATTEMPTS = 3
+
+    @pytest.mark.asyncio
+    @patch("auto_scientist.sdk_backend.claude_query")
+    async def test_timeout_does_not_trigger_retry(self, mock_query, tmp_path):
+        """Timed-out run should NOT trigger a retry."""
+        call_count = 0
+
+        async def fake_query(**kwargs):
+            nonlocal call_count
+            call_count += 1
+            version_dir = tmp_path / "v01"
+            version_dir.mkdir(parents=True, exist_ok=True)
+            (version_dir / "experiment.py").write_text("print('slow')")
+            (version_dir / "run_result.json").write_text(
+                json.dumps(
+                    {
+                        "success": False,
+                        "return_code": -1,
+                        "timed_out": True,
+                        "error": "timeout",
+                    }
+                )
+            )
+            yield MagicMock(
+                spec_set=["result", "usage", "num_turns", "total_cost_usd", "session_id"]
+            )
+
+        mock_query.side_effect = fake_query
+
+        await run_coder(
+            plan={"hypothesis": "test", "changes": []},
+            previous_script=tmp_path / "nonexistent" / "experiment.py",
+            output_dir=tmp_path,
+            version="v01",
+        )
+        assert call_count == 1
 
 
 class TestCheckRuntimeSuccess:

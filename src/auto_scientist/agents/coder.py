@@ -28,7 +28,7 @@ from auto_scientist.sdk_utils import (
 
 logger = logging.getLogger(__name__)
 
-MAX_ATTEMPTS = 2
+MAX_ATTEMPTS = 3
 
 _STDERR_TRUNCATE = 3000
 
@@ -255,6 +255,20 @@ async def run_coder(
                 break
             correction_hint = f"\n\n<validation_error>\n{deps_error}\n</validation_error>"
             logger.warning(f"Coder attempt {attempt + 1}: undeclared dependencies, retrying")
+            continue
+
+        # Validate: script ran successfully at runtime
+        runtime_ok, runtime_error = _check_runtime_success(new_script_path.parent)
+        if not runtime_ok:
+            if attempt == MAX_ATTEMPTS - 1:
+                break
+            correction_hint = (
+                "\n\n<runtime_error>\n"
+                f"The script at {new_script_path} failed at runtime:\n{runtime_error}\n"
+                "The script already exists on disk. Read it, fix the bug, and re-run it.\n"
+                "</runtime_error>"
+            )
+            logger.warning(f"Coder attempt {attempt + 1}: runtime error, retrying")
             continue
 
         # All checks passed
