@@ -5,7 +5,7 @@ from unittest.mock import MagicMock, patch
 import yaml
 from click.testing import CliRunner
 
-from auto_scientist.cli import _next_output_dir, _resolve_source, cli
+from auto_scientist.cli import _detect_retry_agent, _next_output_dir, _resolve_source, cli
 from auto_scientist.experiment_config import ExperimentConfig
 from auto_scientist.model_config import ModelConfig
 from auto_scientist.state import ExperimentState
@@ -604,8 +604,8 @@ class TestResumeCommand:
 
     @patch("auto_scientist.cli.PipelineApp")
     @patch("auto_scientist.cli.Orchestrator")
-    def test_resume_completed_fork_extends_to_default(self, mock_orch, mock_app_cls, tmp_path):
-        """Forking a completed run should extend max_iterations to default, not restore."""
+    def test_resume_completed_fork_respects_saved_max(self, mock_orch, mock_app_cls, tmp_path):
+        """Forking a completed run should respect the saved max_iterations."""
         state = ExperimentState(
             domain="auto", goal="g", phase="stopped", iteration=3, max_iterations=3
         )
@@ -617,8 +617,8 @@ class TestResumeCommand:
         result = runner.invoke(cli, ["resume", "--state", str(tmp_path), "--fork"])
 
         assert result.exit_code == 0
-        assert mock_orch.call_args.kwargs["max_iterations"] == 20
-        assert "Extending to 20" in result.output
+        assert mock_orch.call_args.kwargs["max_iterations"] == 3
+        assert "restored from original run" in result.output
 
     def test_resume_old_state_past_default_requires_explicit(self, tmp_path):
         """Old state at iteration >= 20 must require explicit --max-iterations."""
@@ -644,6 +644,160 @@ class TestResumeCommand:
         assert result.exit_code == 0
         reloaded = ExperimentState.load(tmp_path / "state.json")
         assert reloaded.max_iterations == 3
+
+    @patch("auto_scientist.cli.PipelineApp")
+    @patch("auto_scientist.cli.Orchestrator")
+    def test_resume_retries_failed_iteration_in_place(self, mock_orch, mock_app_cls, tmp_path):
+        """Naked resume of a stopped run with a failed last version should retry from coder."""
+        from auto_scientist.state import VersionEntry
+
+        state = ExperimentState(
+            domain="auto",
+            goal="g",
+            phase="stopped",
+            iteration=1,
+            max_iterations=5,
+            consecutive_failures=1,
+        )
+        state.versions = [
+            VersionEntry(
+                version="v00",
+                iteration=0,
+                script_path=str(tmp_path / "v00" / "experiment.py"),
+                results_path=None,
+                status="failed",
+            ),
+        ]
+        state.save(tmp_path / "state.json")
+        # Create version directory with artifacts from earlier agents
+        v00 = tmp_path / "v00"
+        v00.mkdir()
+        (v00 / "analysis.json").write_text('{"data_summary": "test"}')
+        (v00 / "plan.json").write_text('{"hypothesis": "test"}')
+        (v00 / "debate.json").write_text('{"original_plan": {}, "debate_results": []}')
+        (v00 / "revision_plan.json").write_text('{"strategy": "test"}')
+        (v00 / "experiment.py").write_text("# failed script")
+
+        runner = CliRunner()
+        result = runner.invoke(cli, ["resume", "--state", str(tmp_path)])
+
+        assert result.exit_code == 0, result.output
+        assert "Retrying" in result.output
+        assert "coder" in result.output
+        # State should be rewound to iteration 0 with coder as resume point
+        reloaded = ExperimentState.load(tmp_path / "state.json")
+        assert reloaded.phase == "iteration"
+        assert reloaded.iteration == 0
+        assert reloaded.consecutive_failures == 0
+        # Orchestrator should receive skip_to_agent="coder"
+        assert mock_orch.call_args.kwargs["skip_to_agent"] == "coder"
+        # Earlier agents' artifacts should be preserved
+        assert (v00 / "analysis.json").exists()
+        assert (v00 / "plan.json").exists()
+        # Coder artifacts should be cleaned up
+        assert not (v00 / "experiment.py").exists()
+
+    @patch("auto_scientist.cli.PipelineApp")
+    @patch("auto_scientist.cli.Orchestrator")
+    def test_resume_retries_from_earliest_missing_agent(self, mock_orch, mock_app_cls, tmp_path):
+        """When only analyst completed, retry should resume from scientist."""
+        from auto_scientist.state import VersionEntry
+
+        state = ExperimentState(
+            domain="auto",
+            goal="g",
+            phase="stopped",
+            iteration=1,
+            max_iterations=5,
+            consecutive_failures=1,
+        )
+        state.versions = [
+            VersionEntry(
+                version="v00",
+                iteration=0,
+                script_path=str(tmp_path / "v00" / "experiment.py"),
+                results_path=None,
+                status="failed",
+            ),
+        ]
+        state.save(tmp_path / "state.json")
+        v00 = tmp_path / "v00"
+        v00.mkdir()
+        # Only analyst artifact exists
+        (v00 / "analysis.json").write_text('{"data_summary": "test"}')
+
+        runner = CliRunner()
+        result = runner.invoke(cli, ["resume", "--state", str(tmp_path)])
+
+        assert result.exit_code == 0, result.output
+        assert "scientist" in result.output
+        assert mock_orch.call_args.kwargs["skip_to_agent"] == "scientist"
+
+    def test_resume_completed_run_still_blocked(self, tmp_path):
+        """Naked resume of a run that completed normally should still require --fork."""
+        from auto_scientist.state import VersionEntry
+
+        state = ExperimentState(
+            domain="auto",
+            goal="g",
+            phase="stopped",
+            iteration=3,
+            max_iterations=5,
+            consecutive_failures=0,
+        )
+        state.versions = [
+            VersionEntry(
+                version="v00",
+                iteration=0,
+                script_path="s",
+                results_path="r",
+                status="completed",
+            ),
+            VersionEntry(
+                version="v01",
+                iteration=1,
+                script_path="s",
+                results_path="r",
+                status="completed",
+            ),
+            VersionEntry(
+                version="v02",
+                iteration=2,
+                script_path="s",
+                results_path="r",
+                status="completed",
+            ),
+        ]
+        state.save(tmp_path / "state.json")
+
+        runner = CliRunner()
+        result = runner.invoke(cli, ["resume", "--state", str(tmp_path)])
+
+        assert result.exit_code != 0
+        assert "--fork" in result.output
+
+
+class TestDetectRetryAgent:
+    def test_all_agents_completed_returns_coder(self, tmp_path):
+        (tmp_path / "analysis.json").touch()
+        (tmp_path / "plan.json").touch()
+        (tmp_path / "debate.json").touch()
+        (tmp_path / "revision_plan.json").touch()
+        (tmp_path / "experiment.py").touch()
+        assert _detect_retry_agent(tmp_path) == "coder"
+
+    def test_only_analyst_returns_scientist(self, tmp_path):
+        (tmp_path / "analysis.json").touch()
+        assert _detect_retry_agent(tmp_path) == "scientist"
+
+    def test_through_debate_returns_revision(self, tmp_path):
+        (tmp_path / "analysis.json").touch()
+        (tmp_path / "plan.json").touch()
+        (tmp_path / "debate.json").touch()
+        assert _detect_retry_agent(tmp_path) == "revision"
+
+    def test_empty_dir_returns_none(self, tmp_path):
+        assert _detect_retry_agent(tmp_path) is None
 
 
 class TestResolveSource:

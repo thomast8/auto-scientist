@@ -7,6 +7,7 @@ import pytest
 from claude_code_sdk import AssistantMessage, ResultMessage, TextBlock
 
 from auto_scientist.agents.scientist import (
+    _format_compact_tree,
     _format_predictions_for_prompt,
     run_scientist,
     run_scientist_revision,
@@ -120,8 +121,8 @@ class TestRunScientist:
 
     @pytest.mark.asyncio
     @patch("auto_scientist.sdk_backend.claude_query")
-    async def test_has_web_search_only(self, mock_query, tmp_path):
-        """Scientist should have WebSearch only (file access is the Analyst's job)."""
+    async def test_has_web_search_and_toolsearch_without_predictions(self, mock_query, tmp_path):
+        """Scientist without prediction history should have WebSearch + ToolSearch."""
         from claude_code_sdk import ResultMessage
 
         result_msg = MagicMock(spec=ResultMessage)
@@ -138,7 +139,50 @@ class TestRunScientist:
         notebook_path = tmp_path / "notebook.md"
         await run_scientist(analysis={}, notebook_path=notebook_path, version="v01")
 
-        assert captured_options["options"].allowed_tools == ["WebSearch"]
+        tools = captured_options["options"].allowed_tools
+        assert "WebSearch" in tools
+        assert "ToolSearch" in tools
+
+    @pytest.mark.asyncio
+    @patch("auto_scientist.sdk_backend.claude_query")
+    async def test_has_mcp_tool_with_predictions(self, mock_query, tmp_path):
+        """Scientist with prediction history should include the MCP tool."""
+        from claude_code_sdk import ResultMessage
+
+        from auto_scientist.state import PredictionRecord
+
+        result_msg = MagicMock(spec=ResultMessage)
+        result_msg.result = json.dumps(SAMPLE_PLAN)
+
+        captured_options = {}
+
+        async def fake_query(**kwargs):
+            captured_options.update(kwargs)
+            yield result_msg
+
+        mock_query.side_effect = fake_query
+
+        history = [
+            PredictionRecord(
+                pred_id="0.1",
+                iteration_prescribed=0,
+                prediction="test",
+                diagnostic="d",
+                if_confirmed="c",
+                if_refuted="r",
+            ),
+        ]
+
+        notebook_path = tmp_path / "notebook.md"
+        await run_scientist(
+            analysis={},
+            notebook_path=notebook_path,
+            version="v01",
+            prediction_history=history,
+        )
+
+        assert "mcp__predictions__read_predictions" in captured_options["options"].allowed_tools
+        assert "predictions" in captured_options["options"].mcp_servers
 
 
 class TestRunScientistMessageBuffer:
@@ -618,6 +662,188 @@ class TestFormatPredictionsForPrompt:
         ]
         result = _format_predictions_for_prompt(history)
         assert "[v02]" in result
+
+
+class TestFormatCompactTree:
+    def test_none_returns_placeholder(self):
+        result = _format_compact_tree(None)
+        assert "no prediction history" in result
+
+    def test_empty_list_returns_placeholder(self):
+        result = _format_compact_tree([])
+        assert "no prediction history" in result
+
+    def test_confirmed_shows_summary_and_implication(self):
+        history = [
+            PredictionRecord(
+                pred_id="1.1",
+                iteration_prescribed=1,
+                iteration_evaluated=1,
+                prediction="spline fits better locally",
+                diagnostic="compare regional RMSE",
+                if_confirmed="focus on local fit",
+                if_refuted="problem is elsewhere",
+                outcome="confirmed",
+                evidence="spline RMSE=0.31, polynomial RMSE=0.58",
+                summary="spline RMSE=0.31 vs polynomial 0.58",
+            ),
+        ]
+        result = _format_compact_tree(history)
+        assert "[1.1] CONFIRMED:" in result
+        assert "spline RMSE=0.31 vs polynomial 0.58" in result
+        assert "-> focus on local fit" in result
+
+    def test_refuted_shows_implication(self):
+        history = [
+            PredictionRecord(
+                pred_id="0.2",
+                iteration_prescribed=0,
+                iteration_evaluated=1,
+                prediction="Cr correlation is strongest",
+                diagnostic="compute CLR correlations",
+                if_confirmed="use Cr model",
+                if_refuted="look elsewhere",
+                outcome="refuted",
+                evidence="Ni dominates at r_s=0.613",
+                summary="Cr r_s near zero; Ni dominates",
+            ),
+        ]
+        result = _format_compact_tree(history)
+        assert "[0.2] REFUTED:" in result
+        assert "Cr r_s near zero; Ni dominates" in result
+        assert "-> look elsewhere" in result
+
+    def test_inconclusive_shows_status(self):
+        history = [
+            PredictionRecord(
+                pred_id="2.3",
+                iteration_prescribed=2,
+                iteration_evaluated=3,
+                prediction="Mo and Fe top-2 importances",
+                diagnostic="check RF importances",
+                if_confirmed="use Mo/Fe",
+                if_refuted="other features matter",
+                outcome="inconclusive",
+                evidence="Mo+Cr actually top-2",
+                summary="Mo+Cr top-2 by mean, not Mo+Fe",
+            ),
+        ]
+        result = _format_compact_tree(history)
+        assert "[2.3] INCONCLUSIVE:" in result
+        assert "Mo+Cr top-2 by mean, not Mo+Fe" in result
+
+    def test_pending_shows_prediction_text(self):
+        history = [
+            PredictionRecord(
+                pred_id="5.1",
+                iteration_prescribed=5,
+                prediction="boundary constraints reduce edge error",
+                diagnostic="measure error at boundaries",
+                if_confirmed="boundary solved",
+                if_refuted="need different approach",
+            ),
+        ]
+        result = _format_compact_tree(history)
+        assert "[5.1] PENDING:" in result
+        assert "boundary constraints reduce edge error" in result
+
+    def test_empty_summary_falls_back_to_truncated_evidence(self):
+        long_evidence = "A" * 150
+        history = [
+            PredictionRecord(
+                pred_id="1.1",
+                iteration_prescribed=1,
+                iteration_evaluated=1,
+                prediction="test",
+                diagnostic="d",
+                if_confirmed="c",
+                if_refuted="r",
+                outcome="confirmed",
+                evidence=long_evidence,
+            ),
+        ]
+        result = _format_compact_tree(history)
+        assert "A" * 100 in result
+        assert "..." in result
+        assert "A" * 150 not in result
+
+    def test_tree_indentation_via_follows_from(self):
+        history = [
+            PredictionRecord(
+                pred_id="1.1",
+                iteration_prescribed=1,
+                iteration_evaluated=1,
+                prediction="parent",
+                diagnostic="d",
+                if_confirmed="c",
+                if_refuted="r",
+                outcome="confirmed",
+                evidence="ev",
+                summary="parent summary",
+            ),
+            PredictionRecord(
+                pred_id="2.1",
+                iteration_prescribed=2,
+                prediction="child",
+                diagnostic="d",
+                if_confirmed="c",
+                if_refuted="r",
+                follows_from="1.1",
+            ),
+        ]
+        result = _format_compact_tree(history)
+        lines = result.strip().split("\n")
+        # Find the parent and child lines
+        parent_line = [line for line in lines if "1.1" in line][0]
+        child_line = [line for line in lines if "2.1" in line][0]
+        # Child should be more indented than parent
+        parent_indent = len(parent_line) - len(parent_line.lstrip())
+        child_indent = len(child_line) - len(child_line.lstrip())
+        assert child_indent > parent_indent
+
+    def test_header_is_clean(self):
+        history = [
+            PredictionRecord(
+                pred_id="1.1",
+                iteration_prescribed=1,
+                prediction="test",
+                diagnostic="d",
+                if_confirmed="c",
+                if_refuted="r",
+            ),
+        ]
+        result = _format_compact_tree(history)
+        assert "== PREDICTION TREE ==" in result
+        assert "read_predictions" not in result
+
+    def test_one_line_per_prediction(self):
+        """Each prediction should be a single line (not multi-line like the full formatter)."""
+        history = [
+            PredictionRecord(
+                pred_id="1.1",
+                iteration_prescribed=1,
+                iteration_evaluated=1,
+                prediction="test pred",
+                diagnostic="run test",
+                if_confirmed="continue",
+                if_refuted="stop",
+                outcome="confirmed",
+                evidence="it worked",
+                summary="it worked",
+            ),
+            PredictionRecord(
+                pred_id="1.2",
+                iteration_prescribed=1,
+                prediction="another pred",
+                diagnostic="run another",
+                if_confirmed="go",
+                if_refuted="no go",
+            ),
+        ]
+        result = _format_compact_tree(history)
+        # Filter to prediction lines (not header)
+        pred_lines = [line for line in result.split("\n") if line.strip().startswith("[")]
+        assert len(pred_lines) == 2
 
 
 class TestGoalInPrompts:

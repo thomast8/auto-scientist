@@ -13,6 +13,7 @@ import logging
 import os
 import re
 import shutil
+import tempfile
 from collections.abc import AsyncIterator
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -52,15 +53,64 @@ CODEX_SANDBOX_ADDENDUM = """\
 You are running inside a sandboxed environment where `uv` is not available.
 The run command in the task instructions already uses `python3` instead.
 
-Before running any script, install its dependencies:
-1. Read the PEP 723 metadata block at the top of the script to find dependencies
-2. Install them: `pip install <dep1> <dep2> ...`
-3. Then run the script using the command from the task instructions
+Dependencies are installed automatically by the run command. You do NOT need
+to run `pip install` manually. Just declare all third-party packages in the
+PEP 723 metadata block and use the exact run command from the task
+instructions. The framework will install everything before executing the
+script.
 
-The script must still declare dependencies in the PEP 723 block for
-reproducibility outside this environment.
+IMPORTANT: Every time you edit the script to add a new import, you MUST also
+add the package to the PEP 723 dependencies block. Do NOT remove imports to
+work around installation failures; the framework handles installation.
 </sandbox_environment>
 """
+
+# Tools that should never be available to SDK subprocesses.
+# Agent/Skill could recurse into host plugins; we block them explicitly.
+_DISALLOWED_SUBPROCESS_TOOLS = "Agent,Skill"
+
+
+@dataclass(frozen=True)
+class _IsolationConfig:
+    """CLI extra_args and env vars for subprocess isolation."""
+
+    extra_args: dict[str, str | None]
+    env: dict[str, str]
+
+
+def _isolation_config() -> _IsolationConfig:
+    """Build isolation settings for SDK subprocesses.
+
+    Instead of --bare (which strips all tools except Bash/Edit/Read),
+    we use targeted flags and env vars to isolate from host config
+    while keeping the full tool set (WebSearch, Glob, Grep, Write):
+
+    CLI flags (extra_args):
+    - ``--setting-sources ''`` skips host user/project/local settings,
+      hooks, and CLAUDE.md auto-discovery.
+    - ``--disallowed-tools Agent,Skill`` prevents recursion into host
+      plugins and skill invocations.
+
+    Env vars:
+    - ``CLAUDE_CODE_DISABLE_AUTO_MEMORY=1`` prevents host memory files
+      (MEMORY.md) from leaking into subprocess context.
+    - ``CLAUDE_CODE_DISABLE_CLAUDE_MDS=1`` prevents CLAUDE.md discovery
+      (belt-and-suspenders with --setting-sources '').
+
+    Auth works natively (keychain on macOS, ANTHROPIC_API_KEY env
+    on other platforms) since we no longer block keychain reads.
+    """
+    return _IsolationConfig(
+        extra_args={
+            "setting-sources": "",
+            "disallowed-tools": _DISALLOWED_SUBPROCESS_TOOLS,
+        },
+        env={
+            "CLAUDE_CODE_DISABLE_AUTO_MEMORY": "1",
+            "CLAUDE_CODE_DISABLE_CLAUDE_MDS": "1",
+        },
+    )
+
 
 # Codex effort mapping: our levels -> Codex ReasoningEffort strings
 _CODEX_EFFORT_MAP: dict[str, str] = {
@@ -208,6 +258,8 @@ class SDKOptions:
     extra_args: dict[str, str | None] = field(default_factory=dict)
     resume: str | None = None
     env: dict[str, str] = field(default_factory=dict)
+    mcp_servers: dict[str, Any] = field(default_factory=dict)
+    network_access: bool = False
 
 
 @dataclass
@@ -233,6 +285,8 @@ class SDKBackend(Protocol):
     """Protocol that both Claude and Codex backends implement."""
 
     def query(self, prompt: str, options: SDKOptions) -> AsyncIterator[SDKMessage]: ...
+
+    async def close(self) -> None: ...
 
 
 # ---------------------------------------------------------------------------
@@ -270,32 +324,35 @@ def _extract_stream_delta(event: dict[str, Any]) -> tuple[str, str] | None:
 class ClaudeBackend:
     """Wraps claude_code_sdk.query() behind the SDKBackend interface."""
 
+    async def close(self) -> None:
+        """No-op: Claude Code CLI manages its own session lifecycle."""
+
     def _build_claude_options(self, options: SDKOptions) -> ClaudeCodeOptions:
         """Convert SDKOptions to ClaudeCodeOptions."""
         env = dict(options.env)
-
-        # Strip ANTHROPIC_API_KEY so the CLI uses subscription auth
-        if "ANTHROPIC_API_KEY" not in env and os.environ.get("ANTHROPIC_API_KEY"):
-            logger.info(
-                "Stripping ANTHROPIC_API_KEY from SDK subprocess env "
-                "(using Claude Code subscription instead of direct API billing)"
-            )
-            env["ANTHROPIC_API_KEY"] = ""
+        extra_args = dict(options.extra_args)
 
         # When reasoning is "off" (no effort key in extra_args), disable
         # extended thinking via env var.  The Claude Code CLI has no
         # --effort off/none flag; omitting --effort lets the model use
         # adaptive thinking by default.  MAX_THINKING_TOKENS=0 is the
         # only way to fully suppress it.
-        if "effort" not in options.extra_args:
+        if "effort" not in extra_args:
             env["MAX_THINKING_TOKENS"] = "0"
+
+        # Isolate SDK subprocesses from the user's personal Claude Code
+        # environment (hooks, plugins, CLAUDE.md, memory, settings) while
+        # keeping the full tool set (WebSearch, Glob, Grep, Write, etc.).
+        isolation = _isolation_config()
+        extra_args.update(isolation.extra_args)
+        env.update(isolation.env)
 
         kwargs: dict[str, Any] = {
             "system_prompt": options.system_prompt,
             "allowed_tools": options.allowed_tools,
             "max_turns": options.max_turns,
             "permission_mode": options.permission_mode,
-            "extra_args": dict(options.extra_args),
+            "extra_args": extra_args,
             "include_partial_messages": True,
         }
         if options.model:
@@ -306,6 +363,8 @@ class ClaudeBackend:
             kwargs["resume"] = options.resume
         if env:
             kwargs["env"] = env
+        if options.mcp_servers:
+            kwargs["mcp_servers"] = options.mcp_servers
 
         return ClaudeCodeOptions(**kwargs)
 
@@ -396,10 +455,60 @@ _CODEX_APPROVAL_POLICY: Any = "never"
 
 
 class CodexBackend:
-    """Wraps codex_app_server_sdk behind the SDKBackend interface."""
+    """Wraps codex_app_server_sdk behind the SDKBackend interface.
 
-    def _resolve_sandbox(self, allowed_tools: list[str] | tuple[str, ...]) -> str:
-        """Map allowed tools to Codex sandbox mode."""
+    Stateful: keeps the Codex app-server client alive between ``query()``
+    calls so that threads can be resumed via ``options.resume``.  Call
+    ``close()`` when done, or rely on ``__del__`` for temp-dir cleanup.
+    """
+
+    def __init__(self) -> None:
+        self._client: CodexClient | None = None
+        self._codex_home: Path | None = None
+        self._sandbox_mode: str = "<unknown>"
+
+    async def close(self) -> None:
+        """Shut down the live client and remove the temp config directory."""
+        if self._client is not None:
+            try:
+                await self._client.close()
+            except Exception:
+                logger.debug("Error closing Codex client", exc_info=True)
+            self._client = None
+        if self._codex_home is not None:
+            shutil.rmtree(self._codex_home, ignore_errors=True)
+            self._codex_home = None
+
+    def __del__(self) -> None:
+        """Safety net: remove the temp directory if close() was never called."""
+        if self._codex_home is not None:
+            shutil.rmtree(self._codex_home, ignore_errors=True)
+            self._codex_home = None
+
+    @staticmethod
+    def _resolve_sandbox(
+        allowed_tools: list[str] | tuple[str, ...],
+        has_mcp: bool = False,
+        network_access: bool = False,
+    ) -> str:
+        """Map allowed tools to Codex sandbox mode.
+
+        MCP servers run as child subprocesses of the Codex app-server.
+        The read-only and workspace-write sandboxes block subprocess
+        creation, which prevents MCP servers from starting.  When MCP
+        servers are configured we must use danger-full-access; the
+        security boundary is maintained by the allowed_tools list, not
+        the sandbox.
+
+        ``network_access=True`` escalates to danger-full-access so that
+        pip can download packages (e.g. for the Coder agent).
+        """
+        if has_mcp:
+            logger.debug("Sandbox escalated to danger-full-access for MCP subprocess spawning")
+            return "danger-full-access"
+        if network_access:
+            logger.debug("Sandbox escalated to danger-full-access for network access (pip install)")
+            return "danger-full-access"
         write_tools = {"Write", "Edit", "Bash"}
         if write_tools & set(allowed_tools):
             return "workspace-write"
@@ -420,10 +529,216 @@ class CodexBackend:
             return "none"
         return _CODEX_EFFORT_MAP.get(effort, effort)
 
-    async def query(self, prompt: str, options: SDKOptions) -> AsyncIterator[SDKMessage]:
-        """Run a Codex SDK query, yielding unified SDKMessages."""
-        sandbox_mode = self._resolve_sandbox(options.allowed_tools)
+    @staticmethod
+    def _resolve_disabled_features(
+        allowed_tools: list[str] | tuple[str, ...],
+    ) -> list[str]:
+        """Determine which Codex features to disable based on allowed tools.
+
+        Codex exposes 16+ built-in tools by default.  For agents that only
+        need web search and MCP tools, the extra tools (shell, agents,
+        tool_suggest) dilute the model's attention and reduce MCP usage.
+        """
+        disabled: list[str] = []
+        allowed = set(allowed_tools)
+        shell_tools = {"Write", "Edit", "Bash", "Read", "Glob", "Grep"}
+        if not (shell_tools & allowed):
+            disabled.append("shell_tool")
+            disabled.append("unified_exec")
+        # Always disable: no auto-scientist agent needs sub-agents or tool discovery.
+        disabled.append("multi_agent")
+        disabled.append("tool_suggest")
+        return disabled
+
+    @staticmethod
+    def _write_codex_home_config(
+        codex_home: Path,
+        mcp_servers: dict[str, Any] | None = None,
+        disabled_features: list[str] | None = None,
+    ) -> bool:
+        """Write ``$CODEX_HOME/config.toml`` with MCP servers and feature flags.
+
+        Codex reads config from ``$CODEX_HOME/config.toml`` (defaults to
+        ``~/.codex/config.toml``).  We write to an isolated temp directory
+        so the subprocess sees only the servers we configure, not the
+        host machine's global MCP servers, AGENTS.md, skills, or rules.
+
+        Only stdio servers with ``command`` + ``args`` are supported.
+
+        Returns True if any MCP servers were written, False otherwise.
+        """
+        config_path = codex_home / "config.toml"
+
+        lines: list[str] = []
+        has_mcp = False
+
+        # Feature flags
+        if disabled_features:
+            lines.append("[features]")
+            for feat in disabled_features:
+                lines.append(f"{feat} = false")
+            lines.append("")
+
+        # MCP servers
+        if mcp_servers:
+            for name, cfg in mcp_servers.items():
+                srv_type = cfg.get("type", "")
+                if srv_type != "stdio":
+                    logger.warning(
+                        f"Codex MCP: skipping non-stdio server '{name}' (type={srv_type})"
+                    )
+                    continue
+                command = cfg.get("command", "")
+                args = cfg.get("args", [])
+                lines.append(f"[mcp_servers.{name}]")
+                lines.append(f'command = "{command}"')
+                # Format args as TOML array of strings
+                args_str = ", ".join(f'"{a}"' for a in args)
+                lines.append(f"args = [{args_str}]")
+                lines.append("")
+                has_mcp = True
+
+        if lines:
+            config_path.write_text("\n".join(lines))
+            logger.debug(f"Wrote Codex config to {config_path}")
+
+        return has_mcp
+
+    async def _ensure_client(
+        self, options: SDKOptions, model: str | None
+    ) -> tuple[CodexClient, dict[str, Any], str]:
+        """Return ``(client, chat_kwargs, sandbox_mode)`` for this call.
+
+        On a fresh call (no ``options.resume``), tears down any existing
+        client and spins up a new app-server subprocess with an isolated
+        ``CODEX_HOME``.
+
+        On a resume call, reuses the existing client so the thread is
+        still accessible.  Falls back to a fresh client if the previous
+        one was torn down (e.g. after an error).
+        """
         effort = self._resolve_effort(options.extra_args)
+        turn_overrides = TurnOverrides()
+        if effort:
+            turn_overrides.effort = effort  # type: ignore[assignment]
+
+        # --- Resume path: reuse existing client ---
+        if options.resume:
+            if self._client is not None:
+                logger.debug(f"Resuming Codex thread {options.resume} on existing client")
+                chat_kwargs: dict[str, Any] = {
+                    "turn_overrides": turn_overrides,
+                    "thread_id": options.resume,
+                }
+                return self._client, chat_kwargs, self._sandbox_mode
+
+            logger.warning(
+                f"Codex resume requested (thread {options.resume}) but no live "
+                f"client exists; falling back to a fresh thread"
+            )
+
+        # --- Fresh path: close any stale client, create new one ---
+        await self.close()
+
+        has_mcp = False
+        codex_home = Path(tempfile.mkdtemp(prefix="codex_home_"))
+        self._codex_home = codex_home
+
+        # Copy auth.json so ChatGPT subscription auth works in isolation.
+        real_auth = Path.home() / ".codex" / "auth.json"
+        if real_auth.exists():
+            shutil.copy2(real_auth, codex_home / "auth.json")
+
+        # Write config.toml with MCP servers and feature flags.
+        disabled_features = self._resolve_disabled_features(options.allowed_tools)
+        has_mcp = self._write_codex_home_config(
+            codex_home,
+            mcp_servers=options.mcp_servers or None,
+            disabled_features=disabled_features,
+        )
+
+        sandbox_mode = self._resolve_sandbox(
+            options.allowed_tools,
+            has_mcp=has_mcp,
+            network_access=options.network_access,
+        )
+        self._sandbox_mode = sandbox_mode
+
+        # Build environment for the Codex subprocess.
+        # IMPORTANT: create_subprocess_exec replaces the entire env when a
+        # dict is passed, so we must start from os.environ and layer overrides.
+        env: dict[str, str] = {
+            **os.environ,
+            **options.env,
+            "CODEX_HOME": str(codex_home),
+        }
+        if "OPENAI_API_KEY" not in options.env and os.environ.get("OPENAI_API_KEY"):
+            logger.info(
+                "Stripping OPENAI_API_KEY from Codex subprocess env "
+                "(using ChatGPT subscription instead of direct API billing)"
+            )
+            env["OPENAI_API_KEY"] = ""
+
+        # Build thread config
+        thread_config = ThreadConfig(
+            model=model,
+            base_instructions=options.system_prompt,
+            sandbox=sandbox_mode,  # type: ignore[arg-type]
+            approval_policy=_CODEX_APPROVAL_POLICY,
+        )
+        if options.cwd:
+            thread_config.cwd = str(options.cwd)
+
+        # Codex + GPT models ignore MCP tool calls in long/complex prompts
+        # (confirmed empirically: MCP=0 at 33K+ chars, stochastic at shorter).
+        # developer_instructions carry higher priority than base_instructions
+        # for behavioral directives.  Placing the MCP mandate here raises
+        # MCP usage from ~0% to ~67% with production-length prompts.
+        if has_mcp:
+            mcp_tool_names = [t for t in (options.allowed_tools or []) if t.startswith("mcp__")]
+            if mcp_tool_names:
+                names_str = ", ".join(mcp_tool_names)
+                thread_config.developer_instructions = (
+                    "MANDATORY TOOL REQUIREMENT: Before producing your final output, "
+                    f"you MUST call at least one of these MCP tools: {names_str}. "
+                    "Call with summary=true first, then drill into specifics. "
+                    "If your output does not include at least one MCP tool call, "
+                    "it will be rejected."
+                )
+
+        logger.debug(
+            f"CodexBackend new client: model={model}, sandbox={sandbox_mode}, effort={effort}"
+        )
+
+        codex_cwd = Path(options.cwd) if options.cwd else Path.cwd()
+        client = CodexClient.connect_stdio(
+            cwd=str(codex_cwd),
+            env=env,
+            inactivity_timeout=600.0,
+        )
+        try:
+            await client.start()
+        except Exception:
+            try:
+                await client.close()
+            except Exception:
+                logger.debug("Error closing half-started Codex client", exc_info=True)
+            raise
+        self._client = client
+
+        chat_kwargs = {
+            "turn_overrides": turn_overrides,
+            "thread_config": thread_config,
+        }
+        return client, chat_kwargs, sandbox_mode
+
+    async def query(self, prompt: str, options: SDKOptions) -> AsyncIterator[SDKMessage]:
+        """Run a Codex SDK query, yielding unified SDKMessages.
+
+        The client is kept alive after a successful call so that a
+        subsequent call with ``options.resume`` can continue the same
+        thread.  On error the client is torn down.
+        """
         model = options.model
 
         # Apply model overrides at query time (not globally) to avoid
@@ -437,55 +752,9 @@ class CodexBackend:
             )
             model = replacement
 
-        # Build environment for the Codex subprocess.
-        # IMPORTANT: create_subprocess_exec replaces the entire env when a
-        # dict is passed, so we must start from os.environ and layer overrides.
-        env: dict[str, str] | None = None
-        needs_env = bool(options.env) or os.environ.get("OPENAI_API_KEY")
-        if needs_env:
-            env = {**os.environ, **options.env}
-            if "OPENAI_API_KEY" not in options.env and os.environ.get("OPENAI_API_KEY"):
-                logger.info(
-                    "Stripping OPENAI_API_KEY from Codex subprocess env "
-                    "(using ChatGPT subscription instead of direct API billing)"
-                )
-                env["OPENAI_API_KEY"] = ""
-
-        # Build thread config
-        thread_config = ThreadConfig(
-            model=model,
-            base_instructions=options.system_prompt,
-            sandbox=sandbox_mode,  # type: ignore[arg-type]
-            approval_policy=_CODEX_APPROVAL_POLICY,
-        )
-        if options.cwd:
-            thread_config.cwd = str(options.cwd)
-
-        # Build turn overrides
-        turn_overrides = TurnOverrides()
-        if effort:
-            turn_overrides.effort = effort  # type: ignore[assignment]
-
-        logger.debug(
-            f"CodexBackend query: model={model}, "
-            f"sandbox={sandbox_mode}, effort={effort}, prompt_len={len(prompt)}"
-        )
-
-        # Connect and run using chat() for streaming (enables progress
-        # summaries) instead of chat_once() which blocks until turn completes.
-        client = CodexClient.connect_stdio(
-            cwd=str(options.cwd) if options.cwd else None,
-            env=env,
-            inactivity_timeout=600.0,
-        )
+        sandbox_mode = self._sandbox_mode
         try:
-            await client.start()
-
-            chat_kwargs: dict[str, Any] = {"turn_overrides": turn_overrides}
-            if options.resume:
-                chat_kwargs["thread_id"] = options.resume
-            else:
-                chat_kwargs["thread_config"] = thread_config
+            client, chat_kwargs, sandbox_mode = await self._ensure_client(options, model)
 
             final_text_parts: list[str] = []
             thread_id: str | None = None
@@ -517,20 +786,17 @@ class CodexBackend:
                 usage={"num_turns": step_count},
             )
         except CodexProtocolError as e:
+            await self.close()
             raise RuntimeError(
                 f"Codex query failed (model={model}, sandbox={sandbox_mode}): {e}\n"
                 f"If using ChatGPT subscription, note that gpt-5.4-nano is not supported "
                 f"by Codex. Use gpt-5.4-mini or higher."
             ) from e
         except Exception as e:
+            await self.close()
             raise RuntimeError(
                 f"Codex query failed (model={model}, sandbox={sandbox_mode}): {e}"
             ) from e
-        finally:
-            try:
-                await client.close()
-            except Exception:
-                logger.debug("Error closing Codex client", exc_info=True)
 
 
 # ---------------------------------------------------------------------------

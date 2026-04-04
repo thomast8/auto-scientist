@@ -16,6 +16,7 @@ class VersionEntry(BaseModel):
     results_path: str | None = None
     hypothesis: str = ""
     status: Literal["pending", "running", "completed", "failed", "crashed"] = "pending"
+    failure_reason: Literal["timed_out", "crash", "no_script", "no_result"] | None = None
 
 
 class PredictionRecord(BaseModel):
@@ -31,6 +32,7 @@ class PredictionRecord(BaseModel):
     follows_from: str | None = None
     outcome: Literal["pending", "confirmed", "refuted", "inconclusive"] = "pending"
     evidence: str = ""
+    summary: str = ""  # One-line compact summary for tree display
 
 
 class ExperimentState(BaseModel):

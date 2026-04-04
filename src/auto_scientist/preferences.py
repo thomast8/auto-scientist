@@ -4,6 +4,8 @@ from __future__ import annotations
 
 import json
 import logging
+import subprocess
+import sys
 import tempfile
 from pathlib import Path
 
@@ -54,3 +56,67 @@ def save_theme(theme_name: str) -> None:
     prefs = load_preferences()
     prefs["theme"] = theme_name
     save_preferences(prefs)
+
+
+def system_is_dark() -> bool | None:
+    """Detect whether macOS is in dark mode.
+
+    Returns True (dark), False (light), or None (unable to detect, e.g. Linux/Windows).
+    """
+    if sys.platform != "darwin":
+        return None
+    try:
+        result = subprocess.run(
+            ["defaults", "read", "-g", "AppleInterfaceStyle"],
+            capture_output=True,
+            text=True,
+            timeout=2,
+        )
+        return result.stdout.strip().lower() == "dark"
+    except Exception:
+        return None
+
+
+# Bidirectional mapping of dark <-> light theme pairs.
+# Themes without a counterpart (e.g. dracula) are left as-is.
+_THEME_PAIRS: dict[str, str] = {}
+for _dark, _light in [
+    ("textual-dark", "textual-light"),
+    ("solarized-dark", "solarized-light"),
+    ("atom-one-dark", "atom-one-light"),
+    ("catppuccin-mocha", "catppuccin-latte"),
+    ("rose-pine", "rose-pine-dawn"),
+    ("rose-pine-moon", "rose-pine-dawn"),
+]:
+    _THEME_PAIRS[_dark] = _light
+    _THEME_PAIRS[_light] = _dark
+
+
+def default_theme() -> str:
+    """Return a Textual theme matching the OS appearance.
+
+    If we can detect the system appearance (macOS only) and the saved theme
+    has a dark/light counterpart, returns the variant that matches. On
+    platforms where detection isn't available, the saved theme is returned
+    unchanged. Falls back to textual-dark when nothing is saved.
+    """
+    dark = system_is_dark()
+    saved = load_theme()
+    if saved is not None:
+        if dark is None:
+            return saved  # can't detect system appearance, respect saved choice
+        # Import here to avoid circular / heavy imports at module level
+        from textual.theme import BUILTIN_THEMES
+
+        theme_obj = BUILTIN_THEMES.get(saved)
+        if theme_obj is not None and theme_obj.dark == dark:
+            return saved  # already matches system
+        # Try to flip to the counterpart
+        counterpart = _THEME_PAIRS.get(saved)
+        if counterpart is not None:
+            return counterpart
+        # No counterpart, keep the saved theme as-is
+        return saved
+    if dark is False:
+        return "textual-light"
+    return "textual-dark"

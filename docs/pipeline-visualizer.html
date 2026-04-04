@@ -688,7 +688,7 @@ Does NOT read or write Python code.">
 
         <!-- Debate (4 personas) -->
         <g class="agent-group" data-agent="debate"
-           data-tooltip="Debate (4 personas)|Parallel critic-scientist debates via direct API calls (OpenAI/Google/Anthropic). Both sides have web search.
+           data-tooltip="Debate (4 personas)|Parallel critiques via SDK (Anthropic/OpenAI) or direct API (OpenAI/Google). Critics have web search and prediction query tool (MCP, SDK mode only).
 
 4 personas: Methodologist, Trajectory Critic, Falsification Expert, Evidence Auditor.
 Iteration 0: only Methodologist + Falsification Expert (others need history).
@@ -697,6 +697,9 @@ Model assignment rotates across iterations so no model is always the same role.
 Both sides get identical context (symmetric):
   plan JSON, analysis JSON, prediction history, lab notebook, domain knowledge, goal.
 Neither side sees Python code.
+
+SDK mode critics can interactively query the prediction tree (stats, chains, specific predictions).
+Direct API mode falls back to prediction history as text in the prompt.
 
 Single-pass: each persona produces structured concerns independently.
 Produces: concern ledger (structured claims with severity, confidence, category).">
@@ -1720,7 +1723,7 @@ Never modifies original data. Logs assumptions to the lab notebook.">
           <td><span class="badge yes">yes</span></td>
           <td><span class="badge input">input</span></td>
           <td><span class="badge yes">yes</span></td>
-          <td>web only (direct API)</td>
+          <td>WebSearch, read_predictions (SDK)</td>
         </tr>
         <tr>
           <td class="agent-col">Scientist (debate)</td>

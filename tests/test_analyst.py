@@ -535,3 +535,122 @@ class TestAnalystRetry:
         )
         assert len(captured_prompts) == 2
         assert "<validation_error>" in captured_prompts[1]
+
+
+class TestTimeoutContext:
+    """Tests for timeout_context parameter in run_analyst."""
+
+    @pytest.mark.asyncio
+    @patch("auto_scientist.sdk_backend.claude_query")
+    async def test_timeout_context_prepends_to_prompt(self, mock_query, tmp_path):
+        """When timeout_context is provided, the prompt should contain timeout info."""
+        analysis = {
+            "key_metrics": {"timeout_minutes": 120},
+            "improvements": [],
+            "regressions": [],
+            "observations": ["script timed out after 120 minutes"],
+        }
+
+        from claude_code_sdk import ResultMessage
+
+        result_msg = MagicMock(spec=ResultMessage)
+        result_msg.result = json.dumps(analysis)
+
+        captured_prompt = {}
+
+        async def fake_query(**kwargs):
+            captured_prompt["prompt"] = kwargs.get("prompt", "")
+            yield result_msg
+
+        mock_query.side_effect = fake_query
+
+        notebook_path = tmp_path / "notebook.md"
+        notebook_path.write_text("# Notebook")
+
+        await run_analyst(
+            results_path=None,
+            plot_paths=[],
+            notebook_path=notebook_path,
+            timeout_context={
+                "timeout_minutes": 120,
+                "hypothesis": "Test heavy computation",
+            },
+        )
+        assert "<timeout_info>" in captured_prompt["prompt"]
+        assert "TIMED OUT after 120 minutes" in captured_prompt["prompt"]
+        assert "Test heavy computation" in captured_prompt["prompt"]
+
+    @pytest.mark.asyncio
+    @patch("auto_scientist.sdk_backend.claude_query")
+    async def test_timeout_context_with_partial_results(self, mock_query, tmp_path):
+        """When timeout_context is provided with existing results file, indicate partial."""
+        analysis = {
+            "key_metrics": {"timeout_minutes": 60},
+            "improvements": [],
+            "regressions": [],
+            "observations": ["partial results"],
+        }
+
+        from claude_code_sdk import ResultMessage
+
+        result_msg = MagicMock(spec=ResultMessage)
+        result_msg.result = json.dumps(analysis)
+
+        captured_prompt = {}
+
+        async def fake_query(**kwargs):
+            captured_prompt["prompt"] = kwargs.get("prompt", "")
+            yield result_msg
+
+        mock_query.side_effect = fake_query
+
+        results_path = tmp_path / "results.txt"
+        results_path.write_text("partial output here")
+        notebook_path = tmp_path / "notebook.md"
+        notebook_path.write_text("# Notebook")
+
+        await run_analyst(
+            results_path=results_path,
+            plot_paths=[],
+            notebook_path=notebook_path,
+            timeout_context={
+                "timeout_minutes": 60,
+                "hypothesis": "Test hypothesis",
+            },
+        )
+        assert "Partial results available: yes" in captured_prompt["prompt"]
+
+    @pytest.mark.asyncio
+    @patch("auto_scientist.sdk_backend.claude_query")
+    async def test_no_timeout_context_omits_block(self, mock_query, tmp_path):
+        """Without timeout_context, prompt should not contain timeout info."""
+        analysis = {
+            "key_metrics": {},
+            "improvements": [],
+            "regressions": [],
+            "observations": [],
+        }
+
+        from claude_code_sdk import ResultMessage
+
+        result_msg = MagicMock(spec=ResultMessage)
+        result_msg.result = json.dumps(analysis)
+
+        captured_prompt = {}
+
+        async def fake_query(**kwargs):
+            captured_prompt["prompt"] = kwargs.get("prompt", "")
+            yield result_msg
+
+        mock_query.side_effect = fake_query
+
+        results_path = tmp_path / "results.txt"
+        results_path.write_text("data")
+        notebook_path = tmp_path / "notebook.md"
+
+        await run_analyst(
+            results_path=results_path,
+            plot_paths=[],
+            notebook_path=notebook_path,
+        )
+        assert "<timeout_info>" not in captured_prompt["prompt"]

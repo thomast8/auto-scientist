@@ -21,8 +21,8 @@ from auto_scientist.sdk_backend import CODEX_SANDBOX_ADDENDUM, SDKOptions, get_b
 from auto_scientist.sdk_utils import (
     append_block_to_buffer,
     collect_text_from_query,
+    prepare_turn_budget,
     safe_query,
-    with_turn_budget,
 )
 
 logger = logging.getLogger(__name__)
@@ -64,15 +64,16 @@ async def run_ingestor(
     system_prompt = INGESTOR_SYSTEM
     if provider == "openai":
         system_prompt += CODEX_SANDBOX_ADDENDUM
+    budget = prepare_turn_budget(system_prompt, max_turns, tools, provider=provider)
     backend = get_backend(provider)
     options = SDKOptions(
-        system_prompt=with_turn_budget(system_prompt, max_turns, tools),
-        allowed_tools=tools,
-        max_turns=max_turns,
+        system_prompt=budget.system_prompt,
+        allowed_tools=budget.allowed_tools,
+        max_turns=budget.max_turns,
         permission_mode="acceptEdits",
         cwd=output_dir,
         model=model,
-        extra_args={"setting-sources": ""},
+        extra_args={},
     )
 
     config_path_str = str(config_path) if config_path else "(not requested)"
@@ -92,10 +93,13 @@ async def run_ingestor(
     async def _query(prompt_text: str, resume_session_id: str | None) -> QueryResult:
         if resume_session_id is not None:
             clarification_max_turns = 10
+            retry_budget = prepare_turn_budget(
+                INGESTOR_SYSTEM, clarification_max_turns, tools, provider=provider
+            )
             current_options[0] = SDKOptions(
-                system_prompt=with_turn_budget(INGESTOR_SYSTEM, clarification_max_turns, tools),
-                allowed_tools=tools,
-                max_turns=clarification_max_turns,
+                system_prompt=retry_budget.system_prompt,
+                allowed_tools=retry_budget.allowed_tools,
+                max_turns=retry_budget.max_turns,
                 permission_mode="acceptEdits",
                 cwd=output_dir,
                 model=model,
@@ -103,7 +107,6 @@ async def run_ingestor(
                 extra_args={"setting-sources": ""},
             )
         else:
-            # Fresh start: reset to original options (clears any stale resume).
             current_options[0] = options
         sid: str | None = None
         async for msg in safe_query(
@@ -122,7 +125,6 @@ async def run_ingestor(
         return QueryResult(raw_output="", session_id=sid, usage={})
 
     def _validate(result: QueryResult) -> Path:
-        # Check data files exist
         data_files = list(data_dir.iterdir())
         output_files = [f for f in data_files if f.name != "ingest.py"]
         if not output_files:
@@ -133,7 +135,6 @@ async def run_ingestor(
                 "</validation_error>"
             )
 
-        # Validate domain_config.json if requested
         if config_path is not None:
             config_error: str | None = None
             if not config_path.exists():
@@ -172,7 +173,6 @@ async def run_ingestor(
         return data_dir
 
     def _on_exhausted(result: QueryResult | None, error: Exception) -> Path:
-        # Preserve original error types for callers that catch them.
         if isinstance(error, RetryValidationError) and "No data files" in str(error):
             raise FileNotFoundError(f"Ingestor agent did not produce any data files in {data_dir}")
         if isinstance(error, RetryValidationError) and "domain_config.json" in str(error):

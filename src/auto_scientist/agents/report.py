@@ -16,9 +16,9 @@ from auto_scientist.sdk_backend import SDKOptions, get_backend
 from auto_scientist.sdk_utils import (
     append_block_to_buffer,
     collect_text_from_query,
+    prepare_turn_budget,
     safe_query,
     validate_report_structure,
-    with_turn_budget,
 )
 from auto_scientist.state import ExperimentState
 
@@ -60,15 +60,16 @@ async def run_report(
 
     max_turns = 10
     allowed_tools = ["Read", "Glob"]
+    budget = prepare_turn_budget(REPORT_SYSTEM, max_turns, allowed_tools, provider=provider)
     backend = get_backend(provider)
     options = SDKOptions(
-        system_prompt=with_turn_budget(REPORT_SYSTEM, max_turns, allowed_tools),
-        allowed_tools=allowed_tools,
-        max_turns=max_turns,
+        system_prompt=budget.system_prompt,
+        allowed_tools=budget.allowed_tools,
+        max_turns=budget.max_turns,
         permission_mode="acceptEdits",
         cwd=output_dir,
         model=model,
-        extra_args={"setting-sources": ""},
+        extra_args={},
     )
 
     # Shared state between query and validate closures.
@@ -79,10 +80,11 @@ async def run_report(
         if resume_session_id is not None:
             retry_max_turns = 10
             retry_allowed_tools = ["Read", "Glob"]
+            retry_budget = prepare_turn_budget(REPORT_SYSTEM, retry_max_turns, retry_allowed_tools)
             opts = SDKOptions(
-                system_prompt=with_turn_budget(REPORT_SYSTEM, retry_max_turns, retry_allowed_tools),
-                allowed_tools=retry_allowed_tools,
-                max_turns=retry_max_turns,
+                system_prompt=retry_budget.system_prompt,
+                allowed_tools=retry_budget.allowed_tools,
+                max_turns=retry_budget.max_turns,
                 permission_mode="acceptEdits",
                 cwd=output_dir,
                 model=model,
@@ -105,7 +107,6 @@ async def run_report(
                 collect_text_from_query.last_usage = usage  # type: ignore[attr-defined]
 
         raw = "\n".join(report_parts)
-        # Strip conversational preamble before the first markdown heading.
         heading_idx = raw.find("\n# ")
         if heading_idx != -1:
             raw = raw[heading_idx + 1 :]
@@ -136,7 +137,6 @@ async def run_report(
         return text
 
     def _on_exhausted(result: QueryResult | None, error: Exception) -> str:
-        # SDK/transport errors should propagate, not return stale content.
         if result is None:
             raise error
         full_text = last_full_text[0]

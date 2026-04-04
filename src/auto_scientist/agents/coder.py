@@ -25,10 +25,61 @@ from auto_scientist.sdk_backend import CODEX_SANDBOX_ADDENDUM, SDKOptions, get_b
 from auto_scientist.sdk_utils import (
     append_block_to_buffer,
     collect_text_from_query,
-    with_turn_budget,
+    prepare_turn_budget,
 )
 
 logger = logging.getLogger(__name__)
+
+_STDERR_TRUNCATE = 3000
+
+
+def _check_runtime_success(version_dir: Path) -> tuple[bool, str]:
+    """Check whether the coder's experiment script ran successfully.
+
+    Reads run_result.json first, falls back to exitcode.txt/stderr.txt.
+    Returns (True, "") on success or (False, error_description) on failure.
+    Timeouts are treated as success for retry purposes (they need Scientist
+    rethinking, not a coder retry).
+    """
+    run_result_path = version_dir / "run_result.json"
+    exitcode_path = version_dir / "exitcode.txt"
+    stderr_path = version_dir / "stderr.txt"
+
+    # Try run_result.json first
+    if run_result_path.exists():
+        try:
+            data = json.loads(run_result_path.read_text())
+        except (json.JSONDecodeError, ValueError):
+            pass
+        else:
+            if data.get("timed_out"):
+                return True, ""
+            if data.get("success"):
+                return True, ""
+            error = data.get("error") or "script failed (no error message in run_result.json)"
+            return False, error
+
+    # Fall back to exitcode.txt
+    if exitcode_path.exists():
+        try:
+            code = int(exitcode_path.read_text().strip())
+        except ValueError:
+            code = -1
+
+        if code == 0:
+            run_result_path.write_text(
+                json.dumps({"success": True, "return_code": 0, "timed_out": False, "error": None})
+            )
+            return True, ""
+
+        stderr = ""
+        if stderr_path.exists():
+            stderr = stderr_path.read_text()
+            if len(stderr) > _STDERR_TRUNCATE:
+                stderr = f"...truncated...\n{stderr[-_STDERR_TRUNCATE:]}"
+        return False, stderr or f"script exited with code {code} (no stderr captured)"
+
+    return False, "No runtime artifacts found; the script was not run by the coder agent"
 
 
 def _validate_syntax(script_path: Path) -> tuple[bool, str]:
@@ -42,6 +93,13 @@ def _validate_syntax(script_path: Path) -> tuple[bool, str]:
         text=True,
     )
     return result.returncode == 0, result.stderr
+
+
+def _validate_deps(script_path: Path) -> tuple[bool, str]:
+    """Check that every third-party import is covered by PEP 723 deps."""
+    from auto_scientist.ensure_deps import validate_deps
+
+    return validate_deps(script_path)
 
 
 async def run_coder(
@@ -86,8 +144,8 @@ async def run_coder(
         previous_script_section = CODER_NO_PREVIOUS
 
     # Codex seatbelt sandbox: uv panics (SCDynamicStore access denied).
-    # Replace uv run with python3 BEFORE formatting prompts so both system
-    # and user prompts get the corrected command.
+    # Replace uv run with python3; keep ensure_deps prefix (it's copied
+    # as a local script by the orchestrator).
     if provider == "openai" and "uv run" in run_command:
         run_command = run_command.replace("uv run", "python3", 1)
 
@@ -124,15 +182,17 @@ async def run_coder(
 
     max_turns = 50
     allowed_tools = ["Read", "Write", "Edit", "Bash", "Glob", "Grep"]
+    budget = prepare_turn_budget(system_prompt, max_turns, allowed_tools, provider=provider)
     backend = get_backend(provider)
     options = SDKOptions(
-        system_prompt=with_turn_budget(system_prompt, max_turns, allowed_tools),
-        allowed_tools=allowed_tools,
-        max_turns=max_turns,
+        system_prompt=budget.system_prompt,
+        allowed_tools=budget.allowed_tools,
+        max_turns=budget.max_turns,
         permission_mode="acceptEdits",
         cwd=output_dir,
         model=model,
-        extra_args={"setting-sources": ""},
+        extra_args={},
+        network_access=provider == "openai",
     )
 
     async def _query(prompt: str, resume_session_id: str | None) -> QueryResult:
@@ -165,14 +225,27 @@ async def run_coder(
                 "Please fix the syntax error and rewrite the script.\n"
                 "</validation_error>"
             )
+
+        # Validate: third-party imports must be declared in PEP 723 deps
+        deps_ok, deps_error = _validate_deps(new_script_path)
+        if not deps_ok:
+            raise ValidationError(f"<validation_error>\n{deps_error}\n</validation_error>")
+
+        # Validate: script ran successfully at runtime
+        runtime_ok, runtime_error = _check_runtime_success(new_script_path.parent)
+        if not runtime_ok:
+            raise ValidationError(
+                "<runtime_error>\n"
+                f"The script at {new_script_path} failed at runtime:\n{runtime_error}\n"
+                "The script already exists on disk. Read it, fix the bug, and re-run it.\n"
+                "</runtime_error>"
+            )
+
         return new_script_path
 
     def _on_exhausted(result: QueryResult | None, error: Exception) -> Path:
-        # SDK/transport errors should propagate, not return stale artifacts.
         if result is None:
             raise error
-        # If the script exists but has a syntax error, return it anyway;
-        # the runner will catch the error.
         if new_script_path.exists():
             return new_script_path
         raise FileNotFoundError(

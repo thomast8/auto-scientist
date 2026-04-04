@@ -17,6 +17,11 @@ from auto_scientist.agents.debate_models import (
     CriticOutput,
     DebateResult,
 )
+from auto_scientist.agents.prediction_tool import (
+    PREDICTION_SPEC,
+    build_prediction_mcp_server,
+    format_compact_tree,
+)
 from auto_scientist.agents.scientist import SCIENTIST_PLAN_SCHEMA
 from auto_scientist.model_config import AgentModelConfig
 from auto_scientist.prompts.stop_gate import (
@@ -33,8 +38,8 @@ from auto_scientist.schemas import CompletenessAssessmentOutput, ScientistPlanOu
 from auto_scientist.sdk_backend import SDKOptions, get_backend
 from auto_scientist.sdk_utils import (
     collect_text_from_query,
+    prepare_turn_budget,
     validate_json_output,
-    with_turn_budget,
 )
 from auto_scientist.state import PredictionRecord
 
@@ -64,6 +69,7 @@ async def run_completeness_assessment(
     model: str | None = None,
     message_buffer: list[str] | None = None,
     provider: str = "anthropic",
+    output_dir: Path | None = None,
 ) -> dict[str, Any]:
     """Assess whether the investigation goal has been thoroughly addressed.
 
@@ -72,11 +78,20 @@ async def run_completeness_assessment(
     """
     notebook_content = Path(notebook_path).read_text() if Path(notebook_path).exists() else ""
 
+    # Build tools: WebSearch + optional MCP for prediction drill-down
+    tools: list[str] = ["WebSearch"]
+    mcp_servers: dict[str, Any] = {}
+    if prediction_history:
+        mcp_servers["predictions"] = build_prediction_mcp_server(
+            prediction_history, output_dir=output_dir
+        )
+        tools.append(PREDICTION_SPEC.mcp_tool_name)
+
     user_prompt = ASSESSMENT_USER.format(
         goal=goal,
         stop_reason=stop_reason,
         domain_knowledge=domain_knowledge or "(no domain knowledge provided)",
-        prediction_history=_format_predictions_for_assessment(prediction_history),
+        prediction_history=format_compact_tree(prediction_history),
         notebook_content=notebook_content or "(empty notebook)",
     )
 
@@ -87,14 +102,18 @@ async def run_completeness_assessment(
         f"Schema:\n{json.dumps(ASSESSMENT_SCHEMA, indent=2)}"
     )
 
-    max_turns = 5
+    max_turns = 10
+    budget = prepare_turn_budget(
+        ASSESSMENT_SYSTEM + json_instruction, max_turns, tools, provider=provider
+    )
     backend = get_backend(provider)
     options = SDKOptions(
-        system_prompt=with_turn_budget(ASSESSMENT_SYSTEM + json_instruction, max_turns, []),
-        allowed_tools=[],
-        max_turns=max_turns,
+        system_prompt=budget.system_prompt,
+        allowed_tools=budget.allowed_tools,
+        max_turns=budget.max_turns,
         model=model,
-        extra_args={"setting-sources": ""},
+        extra_args={},
+        mcp_servers=mcp_servers,
     )
 
     async def _query(prompt: str, resume_session_id: str | None) -> QueryResult:
@@ -129,6 +148,8 @@ async def _query_stop_agent(
     output_model: type[BaseModel],
     label: str,
     message_buffer: list[str] | None = None,
+    allowed_tools: list[str] | None = None,
+    mcp_servers: dict[str, Any] | None = None,
 ) -> tuple[Any, Any]:
     """Query a stop gate agent (critic or scientist) via provider-aware dispatch.
 
@@ -146,6 +167,8 @@ async def _query_stop_agent(
             system_prompt=system_prompt,
             response_schema=output_model,
             message_buffer=message_buffer,
+            allowed_tools=allowed_tools,
+            mcp_servers=mcp_servers,
         )
         last_agent_result.clear()
         last_agent_result.append(result)
@@ -174,12 +197,21 @@ async def run_single_stop_debate(
     analysis_json: str = "",
     prediction_history: str = "",
     goal: str = "",
+    prediction_history_records: list[PredictionRecord] | None = None,
+    output_dir: Path | None = None,
 ) -> DebateResult:
     """Run a single critic persona's challenge of the stop decision.
 
     The scientist responds once via run_scientist_stop_revision after
     all critics have challenged.
+
+    Args:
+        prediction_history: Pre-formatted text for prompt injection.
+        prediction_history_records: Raw records for MCP server (SDK mode only).
+        output_dir: Directory for MCP data files.
     """
+    from auto_scientist.agents.critic import _build_critic_tools_and_mcp
+
     persona = persona or {"name": "Generic", "system_text": ""}
     persona_name = persona["name"]
     persona_text = persona["system_text"]
@@ -188,17 +220,27 @@ async def run_single_stop_debate(
     label = f"{config.provider}:{config.model}"
     assessment_json = json.dumps(completeness_assessment, indent=2)
 
+    tools, mcp_servers = _build_critic_tools_and_mcp(
+        prediction_history_records, output_dir=output_dir
+    )
+
     critic_system = STOP_CRITIC_SYSTEM_BASE.format(
         persona_text=persona_text,
         persona_instructions=persona_instructions or "",
         critic_output_schema=json.dumps(CRITIC_OUTPUT_SCHEMA, indent=2),
     )
+    effective_prediction_history = (
+        format_compact_tree(prediction_history_records)
+        if prediction_history_records
+        else prediction_history
+    )
+
     critic_user = STOP_CRITIC_USER.format(
         goal=goal,
         domain_knowledge=domain_knowledge,
         notebook_content=notebook_content,
         analysis_json=analysis_json,
-        prediction_history=prediction_history,
+        prediction_history=effective_prediction_history,
         stop_reason=stop_reason,
         completeness_assessment=assessment_json,
     )
@@ -210,6 +252,8 @@ async def run_single_stop_debate(
         output_model=CriticOutput,
         label=f"Stop Critic ({persona_name}, {label})",
         message_buffer=message_buffer,
+        allowed_tools=tools,
+        mcp_servers=mcp_servers,
     )
 
     return DebateResult(
@@ -241,6 +285,7 @@ async def run_scientist_stop_revision(
     message_buffer: list[str] | None = None,
     goal: str = "",
     provider: str = "anthropic",
+    output_dir: Path | None = None,
 ) -> dict[str, Any]:
     """Revise the stop decision after the stop debate.
 
@@ -248,6 +293,15 @@ async def run_scientist_stop_revision(
     true, the stop is upheld. If false, the plan contains a real experiment.
     """
     notebook_content = Path(notebook_path).read_text() if Path(notebook_path).exists() else ""
+
+    # Build tools: WebSearch + MCP prediction tree
+    tools = ["WebSearch"]
+    mcp_servers: dict[str, Any] = {}
+    if prediction_history:
+        mcp_servers["predictions"] = build_prediction_mcp_server(
+            prediction_history, output_dir=output_dir
+        )
+        tools.append(PREDICTION_SPEC.mcp_tool_name)
 
     user_prompt = STOP_REVISION_USER.format(
         goal=goal or "(no goal specified)",
@@ -259,7 +313,7 @@ async def run_scientist_stop_revision(
         concern_ledger=(
             json.dumps(concern_ledger, indent=2) if concern_ledger else "(no concerns raised)"
         ),
-        prediction_history=_format_predictions_for_assessment(prediction_history),
+        prediction_history=format_compact_tree(prediction_history),
         version=version,
         plan_schema=json.dumps(SCIENTIST_PLAN_SCHEMA, indent=2),
     )
@@ -271,14 +325,18 @@ async def run_scientist_stop_revision(
         f"Schema:\n{json.dumps(SCIENTIST_PLAN_SCHEMA, indent=2)}"
     )
 
-    max_turns = 5
+    max_turns = 15
+    budget = prepare_turn_budget(
+        STOP_REVISION_SYSTEM + json_instruction, max_turns, tools, provider=provider
+    )
     backend = get_backend(provider)
     options = SDKOptions(
-        system_prompt=with_turn_budget(STOP_REVISION_SYSTEM + json_instruction, max_turns, []),
-        allowed_tools=[],
-        max_turns=max_turns,
+        system_prompt=budget.system_prompt,
+        allowed_tools=budget.allowed_tools,
+        max_turns=budget.max_turns,
         model=model,
-        extra_args={"setting-sources": ""},
+        extra_args={},
+        mcp_servers=mcp_servers,
     )
 
     async def _query(prompt: str, resume_session_id: str | None) -> QueryResult:

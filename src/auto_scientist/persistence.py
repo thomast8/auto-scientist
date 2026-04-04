@@ -215,7 +215,8 @@ def load_final_plan_from_disk(version_dir: Path, state: ExperimentState) -> dict
     """Load the final (post-debate) plan from disk and replay prediction updates.
 
     Used when resuming from coder: the plan on disk is the post-debate
-    revision, so we also replay apply_prediction_updates.
+    revision.  Prediction updates are applied only if they are not
+    already present in state (rewind_run preserves them on coder resume).
     """
     plan_path = version_dir / "plan.json"
     if not plan_path.exists():
@@ -227,7 +228,16 @@ def load_final_plan_from_disk(version_dir: Path, state: ExperimentState) -> dict
         logger.error(f"Cannot load final plan: {e}")
         return None
 
-    apply_prediction_updates(plan, state)
+    existing = {
+        p.pred_id for p in state.prediction_history if p.iteration_prescribed == state.iteration
+    }
+    if not existing:
+        apply_prediction_updates(plan, state)
+    else:
+        logger.info(
+            f"Predictions for iteration {state.iteration} already in state, "
+            f"skipping re-application ({len(existing)} found)"
+        )
 
     logger.info(f"Loaded final plan from {plan_path}")
     return plan
@@ -310,16 +320,19 @@ def evaluate(
     """Evaluate results and update the version entry."""
     if run_result is None:
         version_entry.status = "failed"
+        version_entry.failure_reason = "no_result"
         state.record_failure()
         return
 
     if run_result.timed_out:
         version_entry.status = "failed"
+        version_entry.failure_reason = "timed_out"
         state.record_failure()
         return
 
     if not run_result.success:
         version_entry.status = "failed"
+        version_entry.failure_reason = "crash"
         state.record_failure()
         return
 
@@ -333,14 +346,32 @@ def evaluate(
         version_entry.results_path = str(results_path)
 
 
+def normalize_follows_from(raw: str | None, known_pred_ids: set[str]) -> str | None:
+    """Validate a follows_from value against known prediction IDs.
+
+    Returns the value unchanged if it matches a known pred_id,
+    otherwise returns None with a warning log.
+    """
+    if not raw or not isinstance(raw, str) or not raw.strip():
+        return None
+    raw = raw.strip()
+    if raw in known_pred_ids:
+        return raw
+    logger.warning(f"follows_from '{raw}' is not a known pred_id; setting to null")
+    return None
+
+
 def apply_prediction_updates(plan: dict[str, Any], state: ExperimentState) -> None:
     """Extract testable predictions from the Scientist plan and store as pending records.
 
     Assigns ordinal pred_ids like "1.1", "1.2" and injects them back into the
     plan dict so the Coder can include them in HYPOTHESIS TESTS output.
-    Skips malformed or empty prediction entries.
+    Skips malformed or empty prediction entries and carried-forward predictions
+    (which already have PredictionRecords).
     """
     from auto_scientist.state import PredictionRecord
+
+    known_pred_ids = {r.pred_id for r in state.prediction_history if r.pred_id}
 
     predictions = plan.get("testable_predictions", [])
     stored = []
@@ -348,11 +379,14 @@ def apply_prediction_updates(plan: dict[str, Any], state: ExperimentState) -> No
         if not isinstance(pred, dict):
             logger.warning(f"Prediction {i}: expected dict, got {type(pred).__name__}; skipping")
             continue
+        if pred.get("_carried_forward"):
+            continue
         text = pred.get("prediction", "")
         if not text or not isinstance(text, str) or not text.strip():
             logger.warning(f"Prediction {i}: empty or invalid prediction text; skipping")
             continue
         pred_id = f"{state.iteration}.{i}"
+        follows_from = normalize_follows_from(pred.get("follows_from"), known_pred_ids)
         record = PredictionRecord(
             pred_id=pred_id,
             iteration_prescribed=state.iteration,
@@ -360,13 +394,48 @@ def apply_prediction_updates(plan: dict[str, Any], state: ExperimentState) -> No
             diagnostic=pred.get("diagnostic", ""),
             if_confirmed=pred.get("if_confirmed", ""),
             if_refuted=pred.get("if_refuted", ""),
-            follows_from=pred.get("follows_from"),
+            follows_from=follows_from,
         )
         state.prediction_history.append(record)
+        known_pred_ids.add(pred_id)
         pred["pred_id"] = pred_id
+        pred["follows_from"] = follows_from
         stored.append(pred_id)
     if stored:
         logger.info(f"Stored {len(stored)} predictions: {', '.join(stored)}")
+
+
+def get_pending_carryforward_predictions(state: ExperimentState) -> list[dict[str, Any]]:
+    """Collect pending predictions from prior iterations for carry-forward.
+
+    Returns prediction dicts (matching testable_predictions schema) with a
+    ``_carried_forward`` marker so ``apply_prediction_updates`` skips them.
+    """
+    current_iter = state.iteration
+    carried: list[dict[str, Any]] = []
+    for rec in state.prediction_history:
+        if rec.outcome != "pending":
+            continue
+        if rec.iteration_prescribed >= current_iter:
+            continue
+        carried.append(
+            {
+                "pred_id": rec.pred_id,
+                "prediction": rec.prediction,
+                "diagnostic": rec.diagnostic,
+                "if_confirmed": rec.if_confirmed,
+                "if_refuted": rec.if_refuted,
+                "follows_from": rec.follows_from,
+                "_carried_forward": True,
+            }
+        )
+    if carried:
+        ids = [p["pred_id"] for p in carried]
+        logger.info(
+            f"Carrying forward {len(carried)} pending predictions "
+            f"from prior iterations: {', '.join(ids)}"
+        )
+    return carried
 
 
 def resolve_prediction_outcomes(analysis: dict[str, Any] | None, state: ExperimentState) -> None:
@@ -397,6 +466,7 @@ def resolve_prediction_outcomes(analysis: dict[str, Any] | None, state: Experime
             return False
         record.outcome = normalized
         record.evidence = outcome.get("evidence", "")
+        record.summary = outcome.get("summary", "")
         record.iteration_evaluated = state.iteration
         return True
 

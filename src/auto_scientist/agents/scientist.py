@@ -11,6 +11,12 @@ from dataclasses import replace
 from pathlib import Path
 from typing import Any
 
+from auto_scientist.agents.prediction_tool import (
+    PREDICTION_SPEC,
+    _build_prediction_forest,
+    build_prediction_mcp_server,
+    format_compact_tree,
+)
 from auto_scientist.model_config import ReasoningConfig, reasoning_to_cc_extra_args
 from auto_scientist.prompts.scientist import (
     SCIENTIST_REVISION_SYSTEM,
@@ -23,14 +29,36 @@ from auto_scientist.schemas import ScientistPlanOutput
 from auto_scientist.sdk_backend import SDKOptions, get_backend
 from auto_scientist.sdk_utils import (
     collect_text_from_query,
+    prepare_turn_budget,
     validate_json_output,
-    with_turn_budget,
 )
 from auto_scientist.state import PredictionRecord
 
 logger = logging.getLogger(__name__)
 
-SCIENTIST_TOOLS = ["WebSearch"]
+SCIENTIST_BASE_TOOLS = ["WebSearch"]
+
+
+def _build_scientist_tools_and_mcp(
+    prediction_history: list[PredictionRecord] | None,
+    provider: str,
+    output_dir: Path | None = None,
+) -> tuple[list[str], dict[str, Any]]:
+    """Build the tools list and MCP servers dict for a Scientist invocation.
+
+    Both Claude and Codex backends get the same stdio MCP server config.
+    Claude passes it via mcp_servers; the CodexBackend writes it to
+    an isolated ``$CODEX_HOME/config.toml`` automatically.
+    """
+    tools = list(SCIENTIST_BASE_TOOLS)
+    mcp_servers: dict[str, Any] = {}
+    if prediction_history:
+        mcp_servers["predictions"] = build_prediction_mcp_server(
+            prediction_history, output_dir=output_dir
+        )
+        tools.append(PREDICTION_SPEC.mcp_tool_name)
+    return tools, mcp_servers
+
 
 # JSON schema for structured output (injected into the prompt for LLM guidance)
 SCIENTIST_PLAN_SCHEMA = {
@@ -64,7 +92,14 @@ SCIENTIST_PLAN_SCHEMA = {
                     "diagnostic": {"type": "string"},
                     "if_confirmed": {"type": "string"},
                     "if_refuted": {"type": "string"},
-                    "follows_from": {"type": ["string", "null"]},
+                    "follows_from": {
+                        "type": ["string", "null"],
+                        "description": (
+                            "pred_id of a prior prediction (e.g. '0.3', '1.2'). "
+                            "Must be an exact bracketed ID from the prediction "
+                            "history, or null for new trajectories."
+                        ),
+                    },
                 },
                 "required": ["prediction", "diagnostic", "if_confirmed", "if_refuted"],
             },
@@ -82,32 +117,24 @@ SCIENTIST_PLAN_SCHEMA = {
 }
 
 
+# Re-export for backward compatibility (scripts, tests, orchestrator)
+_format_compact_tree = format_compact_tree
+
+
 def _format_predictions_for_prompt(
     prediction_history: list[PredictionRecord] | None,
 ) -> str:
-    """Format prediction history as reasoning trajectories for the Scientist prompt.
+    """Format prediction history as full-detail reasoning trajectories.
 
+    Used by the stop gate assessment and compare_personas script.
+    Debate critics now use the compact tree + MCP tool instead.
     Builds a forest from follows_from links and renders each tree as a
     trajectory chain showing the reasoning flow across iterations.
     """
     if not prediction_history:
         return "(no prediction history yet)"
 
-    # Build parent→children index using pred_id
-    by_id: dict[str, PredictionRecord] = {}
-    children: dict[str | None, list[PredictionRecord]] = {None: []}
-    for rec in prediction_history:
-        if rec.pred_id:
-            by_id[rec.pred_id] = rec
-
-    # Classify each record as root or child
-    for rec in prediction_history:
-        parent = rec.follows_from
-        if parent and parent in by_id:
-            children.setdefault(parent, []).append(rec)
-        else:
-            children[None].append(rec)
-
+    _by_id, children = _build_prediction_forest(prediction_history)
     visited: set[str] = set()
 
     def _render_record(rec: PredictionRecord, indent: int) -> list[str]:
@@ -161,6 +188,7 @@ async def run_scientist(
     goal: str = "",
     provider: str = "anthropic",
     reasoning: ReasoningConfig | None = None,
+    output_dir: Path | None = None,
 ) -> dict[str, Any]:
     """Formulate hypothesis and plan based on analysis.
 
@@ -193,7 +221,7 @@ async def run_scientist(
             json.dumps(analysis, indent=2) if analysis else "(no analysis yet - first iteration)"
         ),
         notebook_content=notebook_content or "(empty notebook - first iteration)",
-        prediction_history=_format_predictions_for_prompt(prediction_history),
+        prediction_history=format_compact_tree(prediction_history),
         version=version,
     )
 
@@ -206,20 +234,26 @@ async def run_scientist(
         f"Schema:\n{json.dumps(SCIENTIST_PLAN_SCHEMA, indent=2)}"
     )
 
-    extra_args: dict[str, str | None] = {"setting-sources": ""}
+    extra_args: dict[str, str | None] = {}
     if reasoning and reasoning.level != "off":
         extra_args.update(reasoning_to_cc_extra_args(reasoning))
 
-    max_turns = 10
+    tools, mcp_servers = _build_scientist_tools_and_mcp(
+        prediction_history, provider, output_dir=output_dir
+    )
+
+    max_turns = 15
+    budget = prepare_turn_budget(
+        system_prompt + json_instruction, max_turns, tools, provider=provider
+    )
     backend = get_backend(provider)
     options = SDKOptions(
-        system_prompt=with_turn_budget(
-            system_prompt + json_instruction, max_turns, SCIENTIST_TOOLS
-        ),
-        allowed_tools=SCIENTIST_TOOLS,
-        max_turns=max_turns,
+        system_prompt=budget.system_prompt,
+        allowed_tools=budget.allowed_tools,
+        max_turns=budget.max_turns,
         model=model,
         extra_args=extra_args,
+        mcp_servers=mcp_servers,
     )
 
     async def _query(prompt: str, resume_session_id: str | None) -> QueryResult:
@@ -253,6 +287,7 @@ async def run_scientist_revision(
     goal: str = "",
     provider: str = "anthropic",
     reasoning: ReasoningConfig | None = None,
+    output_dir: Path | None = None,
 ) -> dict[str, Any]:
     """Revise the plan after a critic debate.
 
@@ -284,7 +319,7 @@ async def run_scientist_revision(
         notebook_content=notebook_content or "(empty notebook)",
         original_plan=json.dumps(original_plan, indent=2),
         concern_ledger=ledger_text,
-        prediction_history=_format_predictions_for_prompt(prediction_history),
+        prediction_history=format_compact_tree(prediction_history),
         version=version,
     )
 
@@ -295,20 +330,26 @@ async def run_scientist_revision(
         f"Schema:\n{json.dumps(SCIENTIST_PLAN_SCHEMA, indent=2)}"
     )
 
-    extra_args: dict[str, str | None] = {"setting-sources": ""}
+    extra_args: dict[str, str | None] = {}
     if reasoning and reasoning.level != "off":
         extra_args.update(reasoning_to_cc_extra_args(reasoning))
 
-    max_turns = 10
+    tools, mcp_servers = _build_scientist_tools_and_mcp(
+        prediction_history, provider, output_dir=output_dir
+    )
+
+    max_turns = 15
+    budget = prepare_turn_budget(
+        SCIENTIST_REVISION_SYSTEM + json_instruction, max_turns, tools, provider=provider
+    )
     backend = get_backend(provider)
     options = SDKOptions(
-        system_prompt=with_turn_budget(
-            SCIENTIST_REVISION_SYSTEM + json_instruction, max_turns, SCIENTIST_TOOLS
-        ),
-        allowed_tools=SCIENTIST_TOOLS,
-        max_turns=max_turns,
+        system_prompt=budget.system_prompt,
+        allowed_tools=budget.allowed_tools,
+        max_turns=budget.max_turns,
         model=model,
         extra_args=extra_args,
+        mcp_servers=mcp_servers,
     )
 
     async def _query(prompt: str, resume_session_id: str | None) -> QueryResult:

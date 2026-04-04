@@ -10,8 +10,10 @@ from auto_scientist.schemas import AnalystOutput, ScientistPlanOutput
 from auto_scientist.sdk_backend import SDKMessage, SDKOptions, _tolerant_parse_message
 from auto_scientist.sdk_utils import (
     OutputValidationError,
+    TurnBudgetConfig,
     append_block_to_buffer,
     collect_text_from_query,
+    prepare_turn_budget,
     safe_query,
     validate_json_output,
     validate_report_structure,
@@ -512,3 +514,98 @@ class TestValidateReportStructure:
         report = _VALID_REPORT.replace("## Key Scientific Insights", "## Insights")
         issues = validate_report_structure(report)
         assert issues == []
+
+
+# ---------------------------------------------------------------------------
+# prepare_turn_budget
+# ---------------------------------------------------------------------------
+
+
+class TestPrepareTurnBudget:
+    def test_no_tools_returns_unchanged(self):
+        budget = prepare_turn_budget("sys prompt", 10)
+        assert isinstance(budget, TurnBudgetConfig)
+        assert budget.allowed_tools == []
+        assert budget.max_turns == 10
+        assert budget.system_prompt.startswith("sys prompt")
+        assert "<turn_budget>" in budget.system_prompt
+        assert "<available_tools>" not in budget.system_prompt
+
+    def test_standard_tools_only_no_toolsearch(self):
+        budget = prepare_turn_budget("sys", 30, ["Read", "Glob"], provider="anthropic")
+        assert "ToolSearch" not in budget.allowed_tools
+        assert budget.max_turns == 30
+        assert "do NOT use ToolSearch" in budget.system_prompt
+        assert "[DEFERRED]" not in budget.system_prompt
+
+    def test_deferred_anthropic_adds_toolsearch(self):
+        budget = prepare_turn_budget("sys", 10, ["WebSearch", "Read"], provider="anthropic")
+        assert "ToolSearch" in budget.allowed_tools
+        assert "WebSearch" in budget.allowed_tools
+        assert "Read" in budget.allowed_tools
+        assert budget.max_turns == 11
+        assert "[DEFERRED]" in budget.system_prompt
+        assert "select:" in budget.system_prompt
+        assert "do NOT use ToolSearch" not in budget.system_prompt
+
+    def test_deferred_openai_no_toolsearch(self):
+        budget = prepare_turn_budget("sys", 10, ["WebSearch", "Read"], provider="openai")
+        assert "ToolSearch" not in budget.allowed_tools
+        assert budget.max_turns == 10
+        assert "[DEFERRED]" not in budget.system_prompt
+
+    def test_multiple_deferred_single_select(self):
+        budget = prepare_turn_budget(
+            "sys", 10, ["WebSearch", "AskUserQuestion"], provider="anthropic"
+        )
+        # Single ToolSearch entry, not two
+        assert budget.allowed_tools.count("ToolSearch") == 1
+        # Only +1 turn, not +2
+        assert budget.max_turns == 11
+        # select: query should list both tools (sorted)
+        assert "select:AskUserQuestion,WebSearch" in budget.system_prompt
+
+    def test_mcp_tools_not_deferred(self):
+        budget = prepare_turn_budget(
+            "sys", 10, ["mcp__predictions__read_predictions"], provider="anthropic"
+        )
+        assert "ToolSearch" not in budget.allowed_tools
+        assert budget.max_turns == 10
+        assert "[DEFERRED]" not in budget.system_prompt
+
+    def test_mixed_deferred_mcp_standard(self):
+        budget = prepare_turn_budget(
+            "sys",
+            15,
+            ["WebSearch", "mcp__predictions__read_predictions", "Read"],
+            provider="anthropic",
+        )
+        assert "ToolSearch" in budget.allowed_tools
+        assert budget.max_turns == 16
+        # Only WebSearch gets [DEFERRED], not the MCP tool
+        assert "[DEFERRED]" in budget.system_prompt
+        assert "[DEFERRED] mcp__" not in budget.system_prompt
+
+    def test_prompt_preserves_original(self):
+        original = "You are a scientist agent. Do science."
+        budget = prepare_turn_budget(original, 10, ["Read"])
+        assert budget.system_prompt.startswith(original)
+
+    def test_turn_budget_tag_correct_count(self):
+        # Standard: no bump
+        budget = prepare_turn_budget("sys", 10, ["Read"])
+        assert "budget of 10 turns" in budget.system_prompt
+
+        # Deferred + anthropic: bumped
+        budget2 = prepare_turn_budget("sys", 10, ["WebSearch"], provider="anthropic")
+        assert "budget of 11 turns" in budget2.system_prompt
+
+    def test_return_is_frozen_dataclass(self):
+        budget = prepare_turn_budget("sys", 10, ["Read"])
+        with pytest.raises(AttributeError):
+            budget.max_turns = 99  # type: ignore[misc]
+
+    def test_old_function_removed(self):
+        import auto_scientist.sdk_utils as mod
+
+        assert not hasattr(mod, "with_turn_budget")

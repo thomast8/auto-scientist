@@ -10,6 +10,7 @@ The monkey-patch for unknown message types now lives in sdk_backend.py
 import json
 import logging
 from collections.abc import AsyncIterator
+from dataclasses import dataclass
 from typing import Any
 
 from pydantic import BaseModel, ValidationError
@@ -260,7 +261,8 @@ def validate_json_output(
 # Descriptions for deferred tools (not loaded by default in Claude Code).
 # Including these in the system prompt lets the model call them directly
 # without wasting a turn on ToolSearch.
-_DEFERRED_TOOL_DESCRIPTIONS: dict[str, str] = {
+# MCP tool descriptions are auto-populated from the registry (see _mcp_base.py).
+_STATIC_TOOL_DESCRIPTIONS: dict[str, str] = {
     "WebSearch": (
         "WebSearch(query: str) - Search the web. "
         "Required param: query (string, min 2 chars). "
@@ -270,38 +272,99 @@ _DEFERRED_TOOL_DESCRIPTIONS: dict[str, str] = {
 }
 
 
-def with_turn_budget(system_prompt: str, max_turns: int, tools: list[str] | None = None) -> str:
-    """Append turn budget and available tool descriptions to a system prompt.
+def _get_deferred_tool_descriptions() -> dict[str, str]:
+    """Merge static tool descriptions with auto-registered MCP tool descriptions."""
+    from auto_scientist.agents._mcp_base import get_deferred_descriptions
 
-    Tells the model how many turns it has so it can plan tool usage
-    accordingly instead of spiraling into unbounded research loops.
-    Lists available tools so the model can call them directly without
-    wasting a turn on ToolSearch.
+    merged = dict(_STATIC_TOOL_DESCRIPTIONS)
+    merged.update(get_deferred_descriptions())
+    return merged
+
+
+@dataclass(frozen=True)
+class TurnBudgetConfig:
+    """Result of prepare_turn_budget: prompt, tools, and max_turns.
+
+    Encapsulates the three values that must stay in sync when deferred
+    tools require ToolSearch resolution.
     """
+
+    system_prompt: str
+    allowed_tools: list[str]
+    max_turns: int
+
+
+def prepare_turn_budget(
+    system_prompt: str,
+    max_turns: int,
+    tools: list[str] | None = None,
+    *,
+    provider: str = "anthropic",
+) -> TurnBudgetConfig:
+    """Build system prompt, allowed tools, and turn budget for SDK mode.
+
+    Detects deferred tools (WebSearch, AskUserQuestion) that require
+    ToolSearch to resolve their schema in Claude Code SDK subprocesses.
+    When deferred tools are present and provider is anthropic, adds
+    ToolSearch to allowed_tools and bumps max_turns by 1.
+
+    MCP tools (``mcp__*``) are auto-discovered via the MCP protocol
+    and do not need ToolSearch.
+    """
+    effective_tools = list(tools) if tools else []
+    effective_max_turns = max_turns
     parts = [system_prompt]
 
-    if tools:
+    if effective_tools:
+        descriptions = _get_deferred_tool_descriptions()
+        deferred_names = sorted(t for t in effective_tools if t in _STATIC_TOOL_DESCRIPTIONS)
+        has_deferred = bool(deferred_names) and provider == "anthropic"
+
         tool_lines = []
-        for tool in tools:
-            if tool in _DEFERRED_TOOL_DESCRIPTIONS:
-                tool_lines.append(f"  - {_DEFERRED_TOOL_DESCRIPTIONS[tool]}")
+        for tool in effective_tools:
+            desc = descriptions.get(tool, tool)
+            if has_deferred and tool in _STATIC_TOOL_DESCRIPTIONS:
+                tool_lines.append(f"  - [DEFERRED] {desc}")
             else:
-                tool_lines.append(f"  - {tool}")
+                tool_lines.append(f"  - {desc}")
         tool_block = "\n".join(tool_lines)
-        parts.append(
-            f"\n<available_tools>\n"
-            f"Your available tools (call directly, do NOT use ToolSearch):\n"
-            f"{tool_block}\n"
-            f"</available_tools>"
-        )
+
+        if has_deferred:
+            select_query = ",".join(deferred_names)
+            effective_tools = effective_tools + ["ToolSearch"]
+            effective_max_turns += 1
+            parts.append(
+                f"\n<available_tools>\n"
+                f"IMPORTANT: Before using any tool marked [DEFERRED] below, "
+                f"you MUST first call:\n"
+                f'  ToolSearch(query="select:{select_query}")\n'
+                f"This resolves their schemas so you can call them. "
+                f"It costs 1 turn from your budget.\n\n"
+                f"Available tools:\n"
+                f"{tool_block}\n"
+                f"</available_tools>"
+            )
+        else:
+            parts.append(
+                f"\n<available_tools>\n"
+                f"Your available tools (call directly, do NOT use ToolSearch):\n"
+                f"{tool_block}\n"
+                f"Use ONLY the tools listed above. Do not call any tools not listed here.\n"
+                f"</available_tools>"
+            )
 
     parts.append(
-        f"\n<turn_budget>You have a budget of {max_turns} turns for this task. "
-        f"Each tool use consumes one turn. Plan your tool usage carefully "
-        f"and produce your final output within this budget.</turn_budget>"
+        f"\n<turn_budget>You have a budget of {effective_max_turns} turns "
+        f"for this task. Each tool use consumes one turn. Plan your tool "
+        f"usage carefully and produce your final output within this "
+        f"budget.</turn_budget>"
     )
 
-    return "".join(parts)
+    return TurnBudgetConfig(
+        system_prompt="".join(parts),
+        allowed_tools=effective_tools,
+        max_turns=effective_max_turns,
+    )
 
 
 async def collect_text_from_query(

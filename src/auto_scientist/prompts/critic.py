@@ -1,8 +1,11 @@
 """Prompt templates for the Critic agents.
 
-Critics use plain API calls (no agent tools). They receive the full evidence
-base: plan + analysis JSON + prediction history + notebook + domain knowledge.
-They do not see experiment scripts.
+Critics receive the full evidence base: plan + analysis JSON + prediction
+history + notebook + domain knowledge. They do not see experiment scripts.
+
+In SDK mode, critics have web search and interactive prediction tree access
+(MCP tool) to query specific predictions, chains, and statistics. In direct
+API mode, prediction history is provided as formatted text in the prompt.
 
 Four personas provide orthogonal critical perspectives with explicit lane
 fences and "not in your lane" examples to prevent overlap. Each critique runs
@@ -94,9 +97,10 @@ PERSONAS: list[dict[str, str]] = [
             "   -> Evidence Auditor (factual consistency)\n"
             "\n"
             "You evaluate the arc, not the step. Read the notebook and\n"
-            "prediction history first. Use web search to check for\n"
-            "established solutions to problems the investigation is\n"
-            "reinventing.\n"
+            "prediction history first. Look for chains of predictions\n"
+            "that keep getting deferred or retested. Use web search to\n"
+            "check for established solutions to problems the\n"
+            "investigation is reinventing.\n"
             "</persona>"
         ),
         "instructions": (
@@ -220,7 +224,9 @@ PERSONAS: list[dict[str, str]] = [
             "corresponding per-group metric. If the plan says X and the\n"
             "data says not-X, that is your concern. Be specific: quote the\n"
             "plan's claim, quote the contradicting data point, and explain\n"
-            "the discrepancy.\n"
+            "the discrepancy. Use the mcp__predictions__read_predictions\n"
+            "tool to check specific prediction outcomes when the plan\n"
+            "references them.\n"
             "</persona>"
         ),
     },
@@ -229,6 +235,13 @@ PERSONAS: list[dict[str, str]] = [
 ITERATION_0_PERSONAS: frozenset[str] = frozenset({"Methodologist", "Falsification Expert"})
 """Personas that run on iteration 0 (exploration). Trajectory Critic and
 Evidence Auditor require prior iteration history to function."""
+
+PREDICTION_PERSONAS: frozenset[str] = frozenset({"Trajectory Critic", "Evidence Auditor"})
+"""Personas that receive prediction history and the mcp__predictions__read_predictions tool.
+Trajectory Critic needs prediction chains to detect circling and stagnation.
+Evidence Auditor needs prediction outcomes to fact-check plan claims.
+Methodologist and Falsification Expert evaluate the current plan's design
+and logical structure; prediction history is noise for them."""
 
 
 def get_model_index_for_debate(
@@ -276,7 +289,7 @@ CRITIC_SYSTEM_BASE = """\
 <role>
 You are a scientific critique system. You challenge experiment plans, propose
 alternative hypotheses, and identify blind spots. You have web search available
-to verify claims and look up relevant methods.
+to verify claims and look up relevant methods{prediction_role_text}.
 </role>
 
 {persona_text}
@@ -287,9 +300,9 @@ Your critique is used by the Scientist to revise the plan before
 implementation.
 
 You receive the full evidence base: the plan, analysis data (metrics,
-observations, prediction outcomes), prediction history (what was tested and
-the results), lab notebook, and domain knowledge. You do not see experiment
-code, which is an implementation detail handled by the Coder.
+observations, prediction outcomes), {prediction_evidence_text}lab notebook,
+and domain knowledge. You do not see experiment code, which is an
+implementation detail handled by the Coder.{prediction_pipeline_text}
 </pipeline_context>
 
 {persona_instructions}
@@ -337,8 +350,7 @@ CRITIC_USER = """\
 <goal>{goal}</goal>
 <domain_knowledge>{domain_knowledge}</domain_knowledge>
 <notebook>{notebook_content}</notebook>
-<analysis>{analysis_json}</analysis>
-<prediction_history>{prediction_history}</prediction_history>
+<analysis>{analysis_json}</analysis>{prediction_history_section}
 </context>
 
 <data>
@@ -350,7 +362,8 @@ Critique the scientist's plan. Output your critique as structured JSON with
 concerns (each tagged with severity, confidence, and category), alternative
 hypotheses, and an overall assessment.
 
-Use web search to check the literature for prior work and verify scientific claims.
+Use web search to check the literature for prior work and verify scientific \
+claims.{prediction_task_text}
 </task>
 
 <recap>

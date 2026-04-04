@@ -1,11 +1,22 @@
 """Tests for the Coder agent."""
 
+import json
+from pathlib import Path
 from unittest.mock import MagicMock, patch
 
 import pytest
 
-from auto_scientist.agents.coder import run_coder
+from auto_scientist.agents.coder import _check_runtime_success, run_coder
 from auto_scientist.sdk_backend import SDKMessage
+
+_SUCCESS_RUN_RESULT = json.dumps(
+    {"success": True, "return_code": 0, "timed_out": False, "error": None}
+)
+
+
+def _write_success_result(version_dir: Path) -> None:
+    """Write a minimal successful run_result.json to a version directory."""
+    (version_dir / "run_result.json").write_text(_SUCCESS_RUN_RESULT)
 
 
 def _text_block(text: str) -> MagicMock:
@@ -37,9 +48,10 @@ class TestRunCoder:
     @patch("auto_scientist.sdk_backend.claude_query")
     async def test_creates_script_at_expected_path(self, mock_query, tmp_path):
         async def fake_query(**kwargs):
-            script_path = tmp_path / "v01" / "experiment.py"
-            script_path.parent.mkdir(parents=True, exist_ok=True)
-            script_path.write_text("print('hello')")
+            version_dir = tmp_path / "v01"
+            version_dir.mkdir(parents=True, exist_ok=True)
+            (version_dir / "experiment.py").write_text("print('hello')")
+            _write_success_result(version_dir)
             yield MagicMock(
                 spec_set=["result", "usage", "num_turns", "total_cost_usd", "session_id"]
             )
@@ -79,9 +91,10 @@ class TestRunCoder:
 
         async def fake_query(**kwargs):
             captured_prompt["prompt"] = kwargs.get("prompt", "")
-            script_path = tmp_path / "v01" / "experiment.py"
-            script_path.parent.mkdir(parents=True, exist_ok=True)
-            script_path.write_text("print('v01')")
+            version_dir = tmp_path / "v01"
+            version_dir.mkdir(parents=True, exist_ok=True)
+            (version_dir / "experiment.py").write_text("print('v01')")
+            _write_success_result(version_dir)
             yield MagicMock(
                 spec_set=["result", "usage", "num_turns", "total_cost_usd", "session_id"]
             )
@@ -108,9 +121,10 @@ class TestRunCoder:
 
         async def fake_query(**kwargs):
             captured_prompt["prompt"] = kwargs.get("prompt", "")
-            script_path = tmp_path / "v01" / "experiment.py"
-            script_path.parent.mkdir(parents=True, exist_ok=True)
-            script_path.write_text("print('v01')")
+            version_dir = tmp_path / "v01"
+            version_dir.mkdir(parents=True, exist_ok=True)
+            (version_dir / "experiment.py").write_text("print('v01')")
+            _write_success_result(version_dir)
             yield MagicMock(
                 spec_set=["result", "usage", "num_turns", "total_cost_usd", "session_id"]
             )
@@ -134,9 +148,10 @@ class TestRunCoder:
     @patch("auto_scientist.sdk_backend.claude_query")
     async def test_write_subdirectory_allowed(self, mock_query, tmp_path):
         async def fake_query(**kwargs):
-            script_path = tmp_path / "v01" / "experiment.py"
-            script_path.parent.mkdir(parents=True, exist_ok=True)
-            script_path.write_text("print('nested')")
+            version_dir = tmp_path / "v01"
+            version_dir.mkdir(parents=True, exist_ok=True)
+            (version_dir / "experiment.py").write_text("print('nested')")
+            _write_success_result(version_dir)
             yield MagicMock(
                 spec_set=["result", "usage", "num_turns", "total_cost_usd", "session_id"]
             )
@@ -158,9 +173,10 @@ class TestRunCoder:
 
         async def fake_query(**kwargs):
             captured_opts.update(kwargs)
-            script_path = tmp_path / "v01" / "experiment.py"
-            script_path.parent.mkdir(parents=True, exist_ok=True)
-            script_path.write_text("print('test')")
+            version_dir = tmp_path / "v01"
+            version_dir.mkdir(parents=True, exist_ok=True)
+            (version_dir / "experiment.py").write_text("print('test')")
+            _write_success_result(version_dir)
             yield MagicMock(
                 spec_set=["result", "usage", "num_turns", "total_cost_usd", "session_id"]
             )
@@ -186,9 +202,10 @@ class TestRunCoder:
 
         async def fake_query(**kwargs):
             captured_opts.update(kwargs)
-            script_path = tmp_path / "v01" / "experiment.py"
-            script_path.parent.mkdir(parents=True, exist_ok=True)
-            script_path.write_text("print('test')")
+            version_dir = tmp_path / "v01"
+            version_dir.mkdir(parents=True, exist_ok=True)
+            (version_dir / "experiment.py").write_text("print('test')")
+            _write_success_result(version_dir)
             yield MagicMock(
                 spec_set=["result", "usage", "num_turns", "total_cost_usd", "session_id"]
             )
@@ -213,9 +230,10 @@ class TestRunCoder:
 
         async def fake_query(**kwargs):
             captured_opts.update(kwargs)
-            script_path = tmp_path / "v01" / "experiment.py"
-            script_path.parent.mkdir(parents=True, exist_ok=True)
-            script_path.write_text("print('test')")
+            version_dir = tmp_path / "v01"
+            version_dir.mkdir(parents=True, exist_ok=True)
+            (version_dir / "experiment.py").write_text("print('test')")
+            _write_success_result(version_dir)
             yield MagicMock(
                 spec_set=["result", "usage", "num_turns", "total_cost_usd", "session_id"]
             )
@@ -249,9 +267,10 @@ class TestRunCoder:
         async def fake_query(prompt, options):
             captured["prompt"] = prompt
             captured["system"] = options.system_prompt
-            script_path = tmp_path / "v01" / "experiment.py"
-            script_path.parent.mkdir(parents=True, exist_ok=True)
-            script_path.write_text("print('ok')")
+            version_dir = tmp_path / "v01"
+            version_dir.mkdir(parents=True, exist_ok=True)
+            (version_dir / "experiment.py").write_text("print('ok')")
+            _write_success_result(version_dir)
             yield _result_msg()
 
         mock_backend = MagicMock()
@@ -280,9 +299,10 @@ class TestRunCoder:
 
         async def fake_query(**kwargs):
             captured_opts.update(kwargs)
-            script_path = tmp_path / "v01" / "experiment.py"
-            script_path.parent.mkdir(parents=True, exist_ok=True)
-            script_path.write_text("print('ok')")
+            version_dir = tmp_path / "v01"
+            version_dir.mkdir(parents=True, exist_ok=True)
+            (version_dir / "experiment.py").write_text("print('ok')")
+            _write_success_result(version_dir)
             yield MagicMock(
                 spec_set=["result", "usage", "num_turns", "total_cost_usd", "session_id"]
             )
@@ -311,9 +331,10 @@ class TestRunCoder:
 
         async def fake_query(prompt, options):
             captured["prompt"] = prompt
-            script_path = tmp_path / "v01" / "experiment.py"
-            script_path.parent.mkdir(parents=True, exist_ok=True)
-            script_path.write_text("print('ok')")
+            version_dir = tmp_path / "v01"
+            version_dir.mkdir(parents=True, exist_ok=True)
+            (version_dir / "experiment.py").write_text("print('ok')")
+            _write_success_result(version_dir)
             yield _result_msg()
 
         mock_backend = MagicMock()
@@ -341,9 +362,10 @@ class TestRunCoder:
         async def fake_query(prompt, options):
             captured["prompt"] = prompt
             captured["system"] = options.system_prompt
-            script_path = tmp_path / "v01" / "experiment.py"
-            script_path.parent.mkdir(parents=True, exist_ok=True)
-            script_path.write_text("print('ok')")
+            version_dir = tmp_path / "v01"
+            version_dir.mkdir(parents=True, exist_ok=True)
+            (version_dir / "experiment.py").write_text("print('ok')")
+            _write_success_result(version_dir)
             yield _result_msg()
 
         mock_backend = MagicMock()
@@ -377,9 +399,10 @@ class TestCoderMessageBuffer:
         result_msg.result = ""
 
         async def fake_query(**kwargs):
-            script_path = tmp_path / "v01" / "experiment.py"
-            script_path.parent.mkdir(parents=True, exist_ok=True)
-            script_path.write_text("print('hi')")
+            version_dir = tmp_path / "v01"
+            version_dir.mkdir(parents=True, exist_ok=True)
+            (version_dir / "experiment.py").write_text("print('hi')")
+            _write_success_result(version_dir)
             yield assistant_msg
             yield result_msg
 
@@ -410,9 +433,10 @@ class TestCoderMessageBuffer:
         result_msg.result = ""
 
         async def fake_query(**kwargs):
-            script_path = tmp_path / "v01" / "experiment.py"
-            script_path.parent.mkdir(parents=True, exist_ok=True)
-            script_path.write_text("print('hi')")
+            version_dir = tmp_path / "v01"
+            version_dir.mkdir(parents=True, exist_ok=True)
+            (version_dir / "experiment.py").write_text("print('hi')")
+            _write_success_result(version_dir)
             yield assistant_msg
             yield result_msg
 
@@ -433,6 +457,44 @@ class TestCoderMessageBuffer:
 class TestCoderRetry:
     @pytest.mark.asyncio
     @patch("auto_scientist.sdk_backend.claude_query")
+    async def test_retry_on_undeclared_deps(self, mock_query, tmp_path):
+        """First attempt has undeclared dep, second fixes it."""
+        call_count = 0
+
+        async def fake_query(**kwargs):
+            nonlocal call_count
+            call_count += 1
+            version_dir = tmp_path / "v01"
+            version_dir.mkdir(parents=True, exist_ok=True)
+            script_path = version_dir / "experiment.py"
+            if call_count == 1:
+                script_path.write_text(
+                    '# /// script\n# dependencies = ["numpy"]\n# ///\n'
+                    "import numpy\nimport pandas\nprint('hi')\n"
+                )
+            else:
+                script_path.write_text(
+                    '# /// script\n# dependencies = ["numpy", "pandas"]\n# ///\n'
+                    "import numpy\nimport pandas\nprint('hi')\n"
+                )
+                _write_success_result(version_dir)
+            yield MagicMock(
+                spec_set=["result", "usage", "num_turns", "total_cost_usd", "session_id"]
+            )
+
+        mock_query.side_effect = fake_query
+
+        result = await run_coder(
+            plan={"hypothesis": "test", "changes": []},
+            previous_script=tmp_path / "nonexistent" / "experiment.py",
+            output_dir=tmp_path,
+            version="v01",
+        )
+        assert result == tmp_path / "v01" / "experiment.py"
+        assert call_count == 2
+
+    @pytest.mark.asyncio
+    @patch("auto_scientist.sdk_backend.claude_query")
     async def test_retry_on_syntax_error(self, mock_query, tmp_path):
         """First attempt produces script with syntax error, second succeeds."""
         call_count = 0
@@ -440,12 +502,14 @@ class TestCoderRetry:
         async def fake_query(**kwargs):
             nonlocal call_count
             call_count += 1
-            script_path = tmp_path / "v01" / "experiment.py"
-            script_path.parent.mkdir(parents=True, exist_ok=True)
+            version_dir = tmp_path / "v01"
+            version_dir.mkdir(parents=True, exist_ok=True)
+            script_path = version_dir / "experiment.py"
             if call_count == 1:
                 script_path.write_text("def broken(\n")
             else:
                 script_path.write_text("print('hello')")
+                _write_success_result(version_dir)
             yield MagicMock(
                 spec_set=["result", "usage", "num_turns", "total_cost_usd", "session_id"]
             )
@@ -471,9 +535,10 @@ class TestCoderRetry:
             nonlocal call_count
             call_count += 1
             if call_count == 2:
-                script_path = tmp_path / "v01" / "experiment.py"
-                script_path.parent.mkdir(parents=True, exist_ok=True)
-                script_path.write_text("print('hello')")
+                version_dir = tmp_path / "v01"
+                version_dir.mkdir(parents=True, exist_ok=True)
+                (version_dir / "experiment.py").write_text("print('hello')")
+                _write_success_result(version_dir)
             yield MagicMock(
                 spec_set=["result", "usage", "num_turns", "total_cost_usd", "session_id"]
             )
@@ -508,3 +573,235 @@ class TestCoderRetry:
                 output_dir=tmp_path,
                 version="v01",
             )
+
+
+class TestCoderRuntimeRetry:
+    """Tests for runtime error recovery in the coder retry loop."""
+
+    @pytest.mark.asyncio
+    @patch("auto_scientist.sdk_backend.claude_query")
+    async def test_successful_run_no_retry(self, mock_query, tmp_path):
+        """Script runs successfully on first attempt, no retry needed."""
+        call_count = 0
+
+        async def fake_query(**kwargs):
+            nonlocal call_count
+            call_count += 1
+            version_dir = tmp_path / "v01"
+            version_dir.mkdir(parents=True, exist_ok=True)
+            (version_dir / "experiment.py").write_text("print('ok')")
+            _write_success_result(version_dir)
+            yield MagicMock(
+                spec_set=["result", "usage", "num_turns", "total_cost_usd", "session_id"]
+            )
+
+        mock_query.side_effect = fake_query
+
+        await run_coder(
+            plan={"hypothesis": "test", "changes": []},
+            previous_script=tmp_path / "nonexistent" / "experiment.py",
+            output_dir=tmp_path,
+            version="v01",
+        )
+        assert call_count == 1
+
+    @pytest.mark.asyncio
+    @patch("auto_scientist.sdk_backend.claude_query")
+    async def test_runtime_crash_triggers_retry(self, mock_query, tmp_path):
+        """First attempt crashes at runtime, second succeeds."""
+        call_count = 0
+        captured_prompts = []
+
+        async def fake_query(**kwargs):
+            nonlocal call_count
+            call_count += 1
+            captured_prompts.append(kwargs.get("prompt", ""))
+            version_dir = tmp_path / "v01"
+            version_dir.mkdir(parents=True, exist_ok=True)
+            (version_dir / "experiment.py").write_text("print('ok')")
+            if call_count == 1:
+                # First attempt: script crashes
+                (version_dir / "exitcode.txt").write_text("1\n")
+                (version_dir / "stderr.txt").write_text("KeyError: 'Fenrite'\n")
+            else:
+                # Second attempt: script succeeds
+                (version_dir / "run_result.json").write_text(
+                    json.dumps(
+                        {
+                            "success": True,
+                            "return_code": 0,
+                            "timed_out": False,
+                            "error": None,
+                        }
+                    )
+                )
+                # Clean up failure artifacts from attempt 1
+                for f in ["exitcode.txt", "stderr.txt"]:
+                    p = version_dir / f
+                    if p.exists():
+                        p.unlink()
+            yield MagicMock(
+                spec_set=["result", "usage", "num_turns", "total_cost_usd", "session_id"]
+            )
+
+        mock_query.side_effect = fake_query
+
+        await run_coder(
+            plan={"hypothesis": "test", "changes": []},
+            previous_script=tmp_path / "nonexistent" / "experiment.py",
+            output_dir=tmp_path,
+            version="v01",
+        )
+        assert call_count == 2
+        assert "<runtime_error>" in captured_prompts[1]
+        assert "Fenrite" in captured_prompts[1]
+
+    @pytest.mark.asyncio
+    @patch("auto_scientist.sdk_backend.claude_query")
+    async def test_runtime_failure_all_attempts_returns_script(self, mock_query, tmp_path):
+        """Runtime failure on all attempts still returns script path."""
+        call_count = 0
+
+        async def fake_query(**kwargs):
+            nonlocal call_count
+            call_count += 1
+            version_dir = tmp_path / "v01"
+            version_dir.mkdir(parents=True, exist_ok=True)
+            (version_dir / "experiment.py").write_text("print('broken')")
+            (version_dir / "exitcode.txt").write_text("1\n")
+            (version_dir / "stderr.txt").write_text("KeyError: 'Fenrite'\n")
+            yield MagicMock(
+                spec_set=["result", "usage", "num_turns", "total_cost_usd", "session_id"]
+            )
+
+        mock_query.side_effect = fake_query
+
+        result = await run_coder(
+            plan={"hypothesis": "test", "changes": []},
+            previous_script=tmp_path / "nonexistent" / "experiment.py",
+            output_dir=tmp_path,
+            version="v01",
+        )
+        # Returns script path even on failure (orchestrator handles downstream)
+        assert result == tmp_path / "v01" / "experiment.py"
+        assert call_count == 3  # MAX_ATTEMPTS = 3
+
+    @pytest.mark.asyncio
+    @patch("auto_scientist.sdk_backend.claude_query")
+    async def test_timeout_does_not_trigger_retry(self, mock_query, tmp_path):
+        """Timed-out run should NOT trigger a retry."""
+        call_count = 0
+
+        async def fake_query(**kwargs):
+            nonlocal call_count
+            call_count += 1
+            version_dir = tmp_path / "v01"
+            version_dir.mkdir(parents=True, exist_ok=True)
+            (version_dir / "experiment.py").write_text("print('slow')")
+            (version_dir / "run_result.json").write_text(
+                json.dumps(
+                    {
+                        "success": False,
+                        "return_code": -1,
+                        "timed_out": True,
+                        "error": "timeout",
+                    }
+                )
+            )
+            yield MagicMock(
+                spec_set=["result", "usage", "num_turns", "total_cost_usd", "session_id"]
+            )
+
+        mock_query.side_effect = fake_query
+
+        await run_coder(
+            plan={"hypothesis": "test", "changes": []},
+            previous_script=tmp_path / "nonexistent" / "experiment.py",
+            output_dir=tmp_path,
+            version="v01",
+        )
+        assert call_count == 1
+
+
+class TestCheckRuntimeSuccess:
+    def test_success_via_run_result(self, tmp_path):
+        """run_result.json with success=true returns (True, "")."""
+        (tmp_path / "run_result.json").write_text(
+            json.dumps({"success": True, "return_code": 0, "timed_out": False, "error": None})
+        )
+        ok, err = _check_runtime_success(tmp_path)
+        assert ok is True
+        assert err == ""
+
+    def test_timed_out_treated_as_pass(self, tmp_path):
+        """Timeouts should not trigger retry; treated as pass for retry purposes."""
+        (tmp_path / "run_result.json").write_text(
+            json.dumps({"success": False, "return_code": -1, "timed_out": True, "error": "timeout"})
+        )
+        ok, err = _check_runtime_success(tmp_path)
+        assert ok is True
+        assert err == ""
+
+    def test_run_result_failure_returns_error(self, tmp_path):
+        """run_result.json with success=false returns the error."""
+        (tmp_path / "run_result.json").write_text(
+            json.dumps(
+                {
+                    "success": False,
+                    "return_code": 1,
+                    "timed_out": False,
+                    "error": "KeyError: 'Fenrite'",
+                }
+            )
+        )
+        ok, err = _check_runtime_success(tmp_path)
+        assert ok is False
+        assert "KeyError" in err
+        assert "Fenrite" in err
+
+    def test_no_run_result_exitcode_zero_is_success(self, tmp_path):
+        """exitcode=0 but no run_result.json: coder forgot, treat as success."""
+        (tmp_path / "exitcode.txt").write_text("0\n")
+        (tmp_path / "results.txt").write_text("some output")
+        ok, err = _check_runtime_success(tmp_path)
+        assert ok is True
+        # Should write a minimal run_result.json
+        assert (tmp_path / "run_result.json").exists()
+        data = json.loads((tmp_path / "run_result.json").read_text())
+        assert data["success"] is True
+
+    def test_no_run_result_exitcode_nonzero_returns_stderr(self, tmp_path):
+        """exitcode=1 and no run_result.json: return stderr as error."""
+        (tmp_path / "exitcode.txt").write_text("1\n")
+        (tmp_path / "stderr.txt").write_text(
+            "Traceback (most recent call last):\n"
+            "  File 'experiment.py', line 42\n"
+            "KeyError: 'Fenrite'\n"
+        )
+        ok, err = _check_runtime_success(tmp_path)
+        assert ok is False
+        assert "KeyError" in err
+        assert "Fenrite" in err
+
+    def test_no_artifacts_returns_generic_failure(self, tmp_path):
+        """No run_result.json, no exitcode.txt: script was never run."""
+        ok, err = _check_runtime_success(tmp_path)
+        assert ok is False
+        assert "never ran" in err.lower() or "not run" in err.lower() or "no runtime" in err.lower()
+
+    def test_stderr_truncated(self, tmp_path):
+        """Long stderr should be truncated to ~3000 chars."""
+        (tmp_path / "exitcode.txt").write_text("1\n")
+        long_stderr = "x" * 10000
+        (tmp_path / "stderr.txt").write_text(long_stderr)
+        ok, err = _check_runtime_success(tmp_path)
+        assert ok is False
+        assert len(err) < 4000  # some overhead for the message wrapper
+
+    def test_malformed_run_result_treated_as_failure(self, tmp_path):
+        """Invalid JSON in run_result.json should be treated as failure."""
+        (tmp_path / "run_result.json").write_text("{broken json")
+        (tmp_path / "exitcode.txt").write_text("1\n")
+        (tmp_path / "stderr.txt").write_text("some error\n")
+        ok, err = _check_runtime_success(tmp_path)
+        assert ok is False

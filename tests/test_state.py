@@ -145,6 +145,43 @@ class TestVersionEntry:
             )
             assert entry.status == status
 
+    def test_failure_reason_defaults_to_none(self):
+        entry = VersionEntry(version="v01", iteration=1, script_path="/tmp/s.py")
+        assert entry.failure_reason is None
+
+    def test_failure_reason_values(self):
+        for reason in ["timed_out", "crash", "no_script", "no_result"]:
+            entry = VersionEntry(
+                version="v01",
+                iteration=1,
+                script_path="/tmp/s.py",
+                failure_reason=reason,
+            )
+            assert entry.failure_reason == reason
+
+    def test_failure_reason_roundtrip(self):
+        entry = VersionEntry(
+            version="v01",
+            iteration=1,
+            script_path="/tmp/s.py",
+            status="failed",
+            failure_reason="timed_out",
+        )
+        json_str = entry.model_dump_json()
+        loaded = VersionEntry.model_validate_json(json_str)
+        assert loaded.failure_reason == "timed_out"
+
+    def test_failure_reason_backward_compat(self):
+        """Loading JSON without failure_reason should default to None."""
+        data = {
+            "version": "v01",
+            "iteration": 1,
+            "script_path": "/tmp/s.py",
+            "status": "failed",
+        }
+        entry = VersionEntry.model_validate(data)
+        assert entry.failure_reason is None
+
 
 class TestExperimentStateExtended:
     def test_record_version_appends_all(self):
@@ -224,6 +261,41 @@ class TestPredictionRecord:
         )
         assert r.outcome == "refuted"
         assert r.follows_from == "initial hypothesis"
+
+    def test_summary_defaults_to_empty(self):
+        r = PredictionRecord(
+            iteration_prescribed=1,
+            prediction="test",
+            diagnostic="d",
+            if_confirmed="c",
+            if_refuted="r",
+        )
+        assert r.summary == ""
+
+    def test_summary_roundtrip(self):
+        r = PredictionRecord(
+            iteration_prescribed=1,
+            prediction="test",
+            diagnostic="d",
+            if_confirmed="c",
+            if_refuted="r",
+            summary="Cr-corrosion r_s near zero; Ni dominates at 0.613",
+        )
+        json_str = r.model_dump_json()
+        loaded = PredictionRecord.model_validate_json(json_str)
+        assert loaded.summary == "Cr-corrosion r_s near zero; Ni dominates at 0.613"
+
+    def test_summary_backward_compat(self):
+        """Loading JSON without summary field should default to empty string."""
+        data = {
+            "iteration_prescribed": 1,
+            "prediction": "test",
+            "diagnostic": "d",
+            "if_confirmed": "c",
+            "if_refuted": "r",
+        }
+        r = PredictionRecord.model_validate(data)
+        assert r.summary == ""
 
 
 # ---------------------------------------------------------------------------

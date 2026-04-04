@@ -157,7 +157,10 @@ class TestLaunchAppTheme:
         prefs_path = tmp_path / "preferences.json"
         prefs_path.write_text(json.dumps({"theme": "atom-one-light"}))
 
-        with patch("auto_scientist.preferences.PREFS_PATH", prefs_path):
+        with (
+            patch("auto_scientist.preferences.PREFS_PATH", prefs_path),
+            patch("auto_scientist.preferences.system_is_dark", return_value=False),
+        ):
             app = LaunchApp()
             async with app.run_test() as pilot:
                 await pilot.pause()

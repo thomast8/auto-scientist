@@ -1,10 +1,13 @@
 """Critic: multi-model critique dispatcher.
 
-Plain API call (OpenAI/Google/Anthropic SDK), no agent tools needed.
 Input: scientist's plan + analysis JSON + prediction history + lab notebook
 + domain knowledge.
 Output: structured critique with tagged concerns and alternative hypotheses,
 plus raw transcript for debugging.
+
+In SDK mode, critics have web search and interactive prediction tree access
+(MCP tool) to query specific predictions, chains, and statistics. In direct
+API mode (OpenAI/Google), prediction history is provided as text in the prompt.
 
 Critics receive the full evidence base but do not see Python code
 (implementation is the Coder's domain).
@@ -17,6 +20,7 @@ import asyncio
 import json
 import logging
 import random
+from pathlib import Path
 from typing import Any
 
 from pydantic import BaseModel
@@ -28,6 +32,11 @@ from auto_scientist.agents.debate_models import (
     CriticOutput,
     DebateResult,
 )
+from auto_scientist.agents.prediction_tool import (
+    PREDICTION_SPEC,
+    build_prediction_mcp_server,
+    format_compact_tree,
+)
 from auto_scientist.model_config import AgentModelConfig, reasoning_to_cc_extra_args
 from auto_scientist.models.google_client import query_google
 from auto_scientist.models.openai_client import query_openai
@@ -37,15 +46,17 @@ from auto_scientist.prompts.critic import (
     DEFAULT_CRITIC_INSTRUCTIONS,
     ITERATION_0_PERSONAS,
     PERSONAS,
+    PREDICTION_PERSONAS,
     get_model_index_for_debate,
 )
 from auto_scientist.retry import QueryResult, agent_retry_loop
 from auto_scientist.sdk_backend import SDKOptions, get_backend
 from auto_scientist.sdk_utils import (
     collect_text_from_query,
+    prepare_turn_budget,
     validate_json_output,
-    with_turn_budget,
 )
+from auto_scientist.state import PredictionRecord
 
 logger = logging.getLogger(__name__)
 
@@ -54,6 +65,27 @@ logger = logging.getLogger(__name__)
 # propagate immediately so the user gets a clear failure instead of a
 # misleading retry-then-fail cycle.
 _RETRYABLE_ERRORS = (ConnectionError, TimeoutError, OSError, RuntimeError)
+
+CRITIC_BASE_TOOLS = ["WebSearch"]
+
+
+def _build_critic_tools_and_mcp(
+    prediction_history_records: list[PredictionRecord] | None,
+    output_dir: Path | None = None,
+) -> tuple[list[str], dict[str, Any]]:
+    """Build the tools list and MCP servers dict for a critic invocation.
+
+    Mirrors the scientist's pattern: base tools + optional prediction MCP.
+    MCP is only usable in SDK mode; direct API callers ignore mcp_servers.
+    """
+    tools = list(CRITIC_BASE_TOOLS)
+    mcp_servers: dict[str, Any] = {}
+    if prediction_history_records:
+        mcp_servers["predictions"] = build_prediction_mcp_server(
+            prediction_history_records, output_dir=output_dir
+        )
+        tools.append(PREDICTION_SPEC.mcp_tool_name)
+    return tools, mcp_servers
 
 
 # ---------------------------------------------------------------------------
@@ -68,27 +100,37 @@ async def _query_critic(
     system_prompt: str = "",
     response_schema: type[BaseModel] | None = None,
     message_buffer: list[str] | None = None,
+    allowed_tools: list[str] | None = None,
+    mcp_servers: dict[str, Any] | None = None,
 ) -> AgentResult:
     """Dispatch a prompt to the appropriate provider and mode.
 
     Routes based on config.mode first:
     - mode='sdk': use the backend abstraction (Claude Code or Codex)
     - mode='api': use direct API calls (OpenAI, Google, Anthropic)
+
+    SDK mode receives optional MCP servers for agentic prediction tree access.
+    Direct API mode ignores mcp_servers (prompt text is the fallback).
     """
+    effective_tools = allowed_tools or list(CRITIC_BASE_TOOLS)
+
     if config.mode == "sdk" and config.provider in ("anthropic", "openai"):
         # SDK mode: use the backend abstraction
-        extra_args: dict[str, str | None] = {"setting-sources": ""}
+        extra_args: dict[str, str | None] = {}
         if config.reasoning and config.reasoning.level != "off":
             extra_args.update(reasoning_to_cc_extra_args(config.reasoning))
-        max_turns = 5
-        allowed_tools = ["WebSearch"]
+        max_turns = 10
+        budget = prepare_turn_budget(
+            system_prompt, max_turns, effective_tools, provider=config.provider
+        )
         backend = get_backend(config.provider)
         options = SDKOptions(
             model=config.model,
-            system_prompt=with_turn_budget(system_prompt, max_turns, allowed_tools),
-            allowed_tools=allowed_tools,
-            max_turns=max_turns,
+            system_prompt=budget.system_prompt,
+            allowed_tools=budget.allowed_tools,
+            max_turns=budget.max_turns,
             extra_args=extra_args,
+            mcp_servers=mcp_servers or {},
         )
         text, usage, _session_id = await collect_text_from_query(
             prompt, options, backend, message_buffer
@@ -105,7 +147,7 @@ async def _query_critic(
             thinking_tokens=usage.get("thinking_tokens", 0),
         )
 
-    # API mode: direct provider API calls
+    # API mode: direct provider API calls (MCP not available)
     effective_prompt = f"{system_prompt}\n\n{prompt}" if system_prompt else prompt
 
     if config.provider == "openai":
@@ -126,18 +168,21 @@ async def _query_critic(
         )
     elif config.provider == "anthropic":
         # Anthropic in API mode falls back to SDK (no direct API web search yet)
-        extra_args_api: dict[str, str | None] = {"setting-sources": ""}
+        extra_args_api: dict[str, str | None] = {}
         if config.reasoning and config.reasoning.level != "off":
             extra_args_api.update(reasoning_to_cc_extra_args(config.reasoning))
-        max_turns = 5
-        allowed_tools = ["WebSearch"]
+        max_turns = 10
+        budget = prepare_turn_budget(
+            system_prompt, max_turns, effective_tools, provider="anthropic"
+        )
         backend = get_backend("anthropic")
         options = SDKOptions(
             model=config.model,
-            system_prompt=with_turn_budget(system_prompt, max_turns, allowed_tools),
-            allowed_tools=allowed_tools,
-            max_turns=max_turns,
+            system_prompt=budget.system_prompt,
+            allowed_tools=budget.allowed_tools,
+            max_turns=budget.max_turns,
             extra_args=extra_args_api,
+            mcp_servers=mcp_servers or {},
         )
         text, usage, _session_id = await collect_text_from_query(
             prompt, options, backend, message_buffer
@@ -169,6 +214,8 @@ async def _query_critic_structured(
     system_prompt: str = "",
     label: str = "",
     message_buffer: list[str] | None = None,
+    allowed_tools: list[str] | None = None,
+    mcp_servers: dict[str, Any] | None = None,
 ) -> tuple[CriticOutput, AgentResult]:
     """Query a critic and validate the response as structured CriticOutput.
 
@@ -184,6 +231,8 @@ async def _query_critic_structured(
             system_prompt=system_prompt,
             response_schema=CriticOutput,
             message_buffer=message_buffer,
+            allowed_tools=allowed_tools,
+            mcp_servers=mcp_servers,
         )
         last_agent_result[0] = result
         return QueryResult(raw_output=result.text, session_id=None, usage={})
@@ -195,7 +244,6 @@ async def _query_critic_structured(
     def _on_exhausted(
         result: QueryResult | None, error: Exception
     ) -> tuple[CriticOutput, AgentResult]:
-        # SDK/transport errors should propagate, not produce synthetic fallbacks.
         if result is None:
             raise error
         agent_result = last_agent_result[0]
@@ -247,10 +295,17 @@ async def run_single_critic_debate(
     analysis_json: str = "",
     prediction_history: str = "",
     goal: str = "",
+    prediction_history_records: list[PredictionRecord] | None = None,
+    output_dir: Path | None = None,
 ) -> DebateResult:
     """Run a single critique for one persona.
 
     Returns a DebateResult with structured output plus raw transcript.
+
+    Args:
+        prediction_history: Pre-formatted text for prompt injection.
+        prediction_history_records: Raw records for MCP server (SDK mode only).
+        output_dir: Directory for MCP data files.
     """
     persona = persona or {"name": "Generic", "system_text": ""}
     persona_name = persona["name"]
@@ -259,6 +314,26 @@ async def run_single_critic_debate(
 
     label = f"{config.provider}:{config.model}"
 
+    has_predictions = persona_name in PREDICTION_PERSONAS
+
+    if has_predictions:
+        tools, mcp_servers = _build_critic_tools_and_mcp(
+            prediction_history_records, output_dir=output_dir
+        )
+        effective_prediction_history = (
+            format_compact_tree(prediction_history_records)
+            if prediction_history_records
+            else prediction_history
+        )
+    else:
+        tools = list(CRITIC_BASE_TOOLS)
+        mcp_servers = {}
+        effective_prediction_history = ""
+
+    # MCP tool references only make sense in SDK mode where the tool is wired.
+    # API-mode critics get prediction history inline but no tool to call.
+    has_mcp_tool = has_predictions and config.mode == "sdk"
+
     critic_system, critic_user = _build_critic_prompt(
         plan,
         notebook_content,
@@ -266,8 +341,10 @@ async def run_single_critic_debate(
         persona_text=persona_text,
         persona_instructions=persona_instructions,
         analysis_json=analysis_json,
-        prediction_history=prediction_history,
+        prediction_history=effective_prediction_history,
         goal=goal,
+        has_predictions=has_predictions,
+        has_mcp_tool=has_mcp_tool,
     )
     critic_output, critic_result = await _query_critic_structured(
         config,
@@ -275,6 +352,8 @@ async def run_single_critic_debate(
         system_prompt=critic_system,
         label=f"Critic ({persona_name}, {label})",
         message_buffer=message_buffer,
+        allowed_tools=tools,
+        mcp_servers=mcp_servers,
     )
     if message_buffer is not None:
         message_buffer.append(f"[Critic/{persona_name}] {critic_result.text}")
@@ -310,6 +389,8 @@ async def _staggered_debate(
     analysis_json: str = "",
     prediction_history: str = "",
     goal: str = "",
+    prediction_history_records: list[PredictionRecord] | None = None,
+    output_dir: Path | None = None,
 ) -> DebateResult:
     """Wrapper that adds a startup delay before running a critique."""
     if delay > 0:
@@ -324,6 +405,8 @@ async def _staggered_debate(
         analysis_json=analysis_json,
         prediction_history=prediction_history,
         goal=goal,
+        prediction_history_records=prediction_history_records,
+        output_dir=output_dir,
     )
 
 
@@ -338,6 +421,8 @@ async def run_debate(
     analysis_json: str = "",
     prediction_history: str = "",
     goal: str = "",
+    prediction_history_records: list[PredictionRecord] | None = None,
+    output_dir: Path | None = None,
 ) -> list[DebateResult]:
     """Run parallel critiques, one per persona, with rotating model assignment.
 
@@ -357,6 +442,8 @@ async def run_debate(
         analysis_json: Serialized analysis JSON from the Analyst.
         prediction_history: Formatted prediction history string.
         goal: Investigation goal string passed through to prompt builders.
+        prediction_history_records: Raw PredictionRecord list for MCP server.
+        output_dir: Directory for MCP data files.
 
     Returns:
         List of DebateResult, one per active persona.
@@ -409,6 +496,8 @@ async def run_debate(
                 analysis_json=analysis_json,
                 prediction_history=prediction_history,
                 goal=goal,
+                prediction_history_records=prediction_history_records,
+                output_dir=output_dir,
             )
         )
 
@@ -445,21 +534,77 @@ def _build_critic_prompt(
     analysis_json: str = "",
     prediction_history: str = "",
     goal: str = "",
+    has_predictions: bool = True,
+    has_mcp_tool: bool = True,
 ) -> tuple[str, str]:
     """Build the (system, user) prompt pair sent to critic models.
 
     persona_instructions overrides the default instructions block when provided
     (used by the Trajectory Critic which needs arc-focused instructions).
 
+    When has_predictions is False, prediction-related text (tool references,
+    history section, pipeline context) is omitted from both prompts.
+
+    When has_mcp_tool is False (API mode), prediction history is included
+    inline but tool references and "MUST call" instructions are omitted
+    since no MCP tool is available.
+
     Returns:
         (system_prompt, user_prompt) tuple.
     """
     effective_instructions = persona_instructions or DEFAULT_CRITIC_INSTRUCTIONS
 
+    if has_predictions:
+        tool_name = PREDICTION_SPEC.mcp_tool_name
+        prediction_evidence_text = "prediction history (what was tested and\nthe results), "
+        prediction_history_section = (
+            f"\n<prediction_history>{prediction_history or '(no prediction history yet)'}"
+            "</prediction_history>"
+        )
+
+        if has_mcp_tool:
+            prediction_role_text = (
+                f", and a {tool_name} tool to\n"
+                "drill into specific predictions for full detail (evidence, diagnostics,\n"
+                "implications)"
+            )
+            prediction_pipeline_text = (
+                "\nA compact summary of the prediction history is included in the context "
+                f"below.\nWhen you need more detail on a specific prediction, call the "
+                f"{tool_name}\ntool rather than guessing from the summary. You MUST call "
+                f"this tool at least\nonce before writing your critique to verify prediction "
+                "details firsthand."
+            )
+            prediction_task_text = (
+                f"\nThe prediction tree is provided above. Call {tool_name} to "
+                "look up\nspecific prediction chains or full detail when you need more than "
+                "the summary.\nYou MUST call this tool at least once before writing your "
+                "response."
+            )
+        else:
+            # API mode: prediction data is inline, no tool available
+            prediction_role_text = ""
+            prediction_pipeline_text = (
+                "\nA compact summary of the prediction history is included in the context below."
+            )
+            prediction_task_text = (
+                "\nThe prediction tree is provided above. Use it to verify "
+                "prediction outcomes referenced in the plan."
+            )
+    else:
+        prediction_role_text = ""
+        prediction_evidence_text = ""
+        prediction_pipeline_text = ""
+        prediction_history_section = ""
+        prediction_task_text = ""
+
     system = CRITIC_SYSTEM_BASE.format(
         persona_text=persona_text,
         persona_instructions=effective_instructions,
         critic_output_schema=json.dumps(CRITIC_OUTPUT_SCHEMA, indent=2),
+        prediction_role_text=prediction_role_text,
+        prediction_evidence_text=prediction_evidence_text,
+        prediction_pipeline_text=prediction_pipeline_text,
     )
 
     user = CRITIC_USER.format(
@@ -467,7 +612,8 @@ def _build_critic_prompt(
         domain_knowledge=domain_knowledge or "(none provided)",
         notebook_content=notebook_content or "(empty)",
         analysis_json=analysis_json or "(no analysis yet)",
-        prediction_history=prediction_history or "(no prediction history yet)",
+        prediction_history_section=prediction_history_section,
         plan_json=json.dumps(plan, indent=2),
+        prediction_task_text=prediction_task_text,
     )
     return system, user

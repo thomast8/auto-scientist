@@ -122,9 +122,14 @@ class PipelineLive:
                 f"[{panel.panel_name}] {panel.done_summary} ({panel._build_footer()})"
             )
 
-    def start_iteration(self, title: int | str) -> None:
+    def start_iteration(self, title: int | str, *, max_iterations: int | None = None) -> None:
         """Begin an iteration container."""
-        iter_title = f"Iteration {title}" if isinstance(title, int) else title
+        if isinstance(title, int) and max_iterations is not None:
+            iter_title = f"Iteration {title}/{max_iterations}"
+        elif isinstance(title, int):
+            iter_title = f"Iteration {title}"
+        else:
+            iter_title = title
         container = IterationContainer(iter_title=iter_title)
         self._current_iteration = container
         if self._app is not None:

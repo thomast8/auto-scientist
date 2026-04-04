@@ -3,8 +3,9 @@
 import json
 import logging
 import shutil
+import sys
 from pathlib import Path
-from typing import Any
+from typing import Any, Literal
 
 from rich.panel import Panel
 from rich.rule import Rule
@@ -12,12 +13,13 @@ from rich.table import Table
 from rich.text import Text
 
 from auto_scientist.config import DomainConfig
-from auto_scientist.model_config import ModelConfig
+from auto_scientist.model_config import AgentModelConfig, ModelConfig
 from auto_scientist.notebook import NOTEBOOK_FILENAME, append_entry, read_notebook
 from auto_scientist.persistence import (
     apply_prediction_updates,
     build_concern_ledger,
     evaluate,
+    get_pending_carryforward_predictions,
     load_analyst_from_disk,
     load_final_plan_from_disk,
     load_scientist_plan_from_disk,
@@ -36,6 +38,7 @@ from auto_scientist.pipeline_live import (
     with_summaries,
 )
 from auto_scientist.scheduler import wait_for_window
+from auto_scientist.sdk_backend import CODEX_MODEL_OVERRIDES
 from auto_scientist.state import ExperimentState, VersionEntry
 from auto_scientist.summarizer import run_with_summaries, summarize_results
 from auto_scientist.validation import validate_prerequisites
@@ -119,6 +122,9 @@ class Orchestrator:
             # Open log file now that the output dir exists
             self._live.start(log_path=self.output_dir / "console.log")
             self._live.mount_banner(self._build_startup_banner())
+
+        # Expose max_iterations to the metrics bar from the start
+        self._live.update_status(max_iterations=self.max_iterations)
 
         # Restore previous iterations from manifest (for fork / resume)
         restore_iterations_from_manifest(self._live, self.output_dir)
@@ -287,7 +293,9 @@ class Orchestrator:
 
         cfg = self.model_config.resolve("ingestor")
         panel = AgentPanel(
-            name="Ingestor", model=cfg.model, style=AGENT_STYLES.get("Ingestor", "bright_red")
+            name="Ingestor",
+            model=self._display_model(cfg),
+            style=AGENT_STYLES.get("Ingestor", "bright_red"),
         )
         self._live.add_panel(panel)
         self._live.update_status(phase="INGESTION")
@@ -333,7 +341,11 @@ class Orchestrator:
 
         return canonical_data_dir
 
-    async def _fail_iteration(self, label: str) -> None:
+    async def _fail_iteration(
+        self,
+        label: str,
+        failure_reason: Literal["timed_out", "crash", "no_script", "no_result"] | None = None,
+    ) -> None:
         """Record a failed iteration and finalize the TUI with a red border."""
         version = f"v{self.state.iteration:02d}"
         version_entry = VersionEntry(
@@ -342,6 +354,7 @@ class Orchestrator:
             script_path="",
             hypothesis="",
             status="failed",
+            failure_reason=failure_reason,
         )
         self.state.record_failure()
         self.state.record_version(version_entry)
@@ -365,8 +378,8 @@ class Orchestrator:
         from auto_scientist.resume import AGENT_ORDER
 
         logger.info(f"=== Iteration {self.state.iteration} start ===")
-        self._live.start_iteration(self.state.iteration)
-        self._live.update_status(iteration=self.state.iteration)
+        self._live.start_iteration(self.state.iteration, max_iterations=self.max_iterations)
+        self._live.update_status(iteration=self.state.iteration, max_iterations=self.max_iterations)
 
         version = f"v{self.state.iteration:02d}"
         version_dir = self.output_dir / version
@@ -506,18 +519,29 @@ class Orchestrator:
             if final_plan:
                 apply_prediction_updates(final_plan, self.state)
 
-            # Persist the final plan (post-debate revision if applicable)
+            # Persist the final plan (post-debate revision if applicable).
+            # NOTE: this must happen BEFORE carry-forward injection below,
+            # so plan.json reflects only the Scientist's own predictions.
+            # Carry-forward entries are ephemeral (re-derived on resume).
             if final_plan:
                 persist_artifact(version_dir, "plan.json", final_plan)
 
         if "debate" not in agents_to_skip or "revision" not in agents_to_skip:
             save_partial_panels(self._live, version_dir)
 
+        # Carry forward pending predictions from prior iterations so the
+        # Coder includes them in HYPOTHESIS TESTS and the Analyst can evaluate them.
+        if final_plan:
+            carryforward = get_pending_carryforward_predictions(self.state)
+            if carryforward:
+                existing = final_plan.get("testable_predictions", [])
+                final_plan["testable_predictions"] = existing + carryforward
+
         # Step 5: Coder implements and runs the plan
         new_script = await self._run_coder(final_plan)
 
         if new_script is None:
-            await self._fail_iteration("failed (no script)")
+            await self._fail_iteration("failed (no script)", failure_reason="no_script")
             return
 
         # Step 6: Read run result from Coder's output files
@@ -575,6 +599,19 @@ class Orchestrator:
         logger.info(f"Iteration {self.state.iteration} complete: status={version_entry.status}")
         self.state.iteration += 1
 
+    @staticmethod
+    def _display_model(cfg: AgentModelConfig) -> str:
+        """Return the model name that will actually be used at runtime.
+
+        SDK-mode agents go through the Codex backend, which silently swaps
+        unsupported models (see CODEX_MODEL_OVERRIDES).  Show the effective
+        model so the banner isn't misleading.
+        """
+        model = cfg.model
+        if cfg.mode == "sdk":
+            model = CODEX_MODEL_OVERRIDES.get(model, model)
+        return model
+
     def _build_startup_banner(self) -> Panel:
         """Build the Rich startup banner with run config and model info."""
         mc = self.model_config
@@ -600,7 +637,7 @@ class Orchestrator:
             style = AGENT_STYLES.get(display_name, "")
             table.add_row(
                 Text(display_name, style=style),
-                Text(f"{cfg.model}  [{cfg.reasoning.level}]", style=style),
+                Text(f"{self._display_model(cfg)}  [{cfg.reasoning.level}]", style=style),
             )
 
         for i, critic in enumerate(mc.critics):
@@ -608,7 +645,7 @@ class Orchestrator:
             table.add_row(
                 Text(label, style="yellow"),
                 Text(
-                    f"{critic.provider}:{critic.model}  [{critic.reasoning.level}]",
+                    f"{critic.provider}:{self._display_model(critic)}  [{critic.reasoning.level}]",
                     style="yellow",
                 ),
             )
@@ -619,14 +656,14 @@ class Orchestrator:
             style = AGENT_STYLES.get(display_name, "")
             table.add_row(
                 Text(display_name, style=style),
-                Text(f"{cfg.model}  [{cfg.reasoning.level}]", style=style),
+                Text(f"{self._display_model(cfg)}  [{cfg.reasoning.level}]", style=style),
             )
 
         if mc.summarizer:
             s = mc.summarizer
             table.add_row(
                 Text("Summarizer", style="dim"),
-                Text(f"{s.provider}:{s.model}  [{s.reasoning.level}]", style="dim"),
+                Text(f"{s.provider}:{self._display_model(s)}  [{s.reasoning.level}]", style="dim"),
             )
 
         return Panel(table, title="Auto-Scientist", title_align="left", border_style="bold")
@@ -644,7 +681,9 @@ class Orchestrator:
         cfg = self.model_config.resolve("analyst")
 
         panel = AgentPanel(
-            name="Analyst", model=cfg.model, style=AGENT_STYLES.get("Analyst", "green")
+            name="Analyst",
+            model=self._display_model(cfg),
+            style=AGENT_STYLES.get("Analyst", "green"),
         )
         self._live.add_panel(panel)
         self._live.update_status(phase="ANALYZE")
@@ -697,18 +736,39 @@ class Orchestrator:
 
         # Find results file (resolve to absolute for agent cwd consistency)
         results_path = Path(latest.results_path).resolve() if latest.results_path else None
+
+        # Build timeout context if previous version timed out
+        timeout_context: dict[str, Any] | None = None
+        if latest.failure_reason == "timed_out":
+            run_timeout = self.config.run_timeout_minutes if self.config else 120
+            timeout_context = {
+                "timeout_minutes": run_timeout,
+                "hypothesis": latest.hypothesis,
+            }
+
         if not results_path or not results_path.exists():
-            self._live.log("ANALYZE: skipped (no results file)")
-            return None
+            if timeout_context is None:
+                self._live.log("ANALYZE: skipped (no results file)")
+                return None
+            # Timeout: check for partial results/plots in the version directory
+            version_dir = Path(latest.script_path).parent if latest.script_path else None
+            if version_dir:
+                partial_results = version_dir / "results.txt"
+                results_path = partial_results.resolve() if partial_results.exists() else None
 
         # Find plot PNGs in the version directory
-        version_dir = Path(latest.script_path).parent
+        if latest.script_path:
+            version_dir = Path(latest.script_path).parent
+        else:
+            version_dir = notebook_path.parent
         plot_paths = sorted(version_dir.glob("*.png"))
 
         cfg = self.model_config.resolve("analyst")
 
         panel = AgentPanel(
-            name="Analyst", model=cfg.model, style=AGENT_STYLES.get("Analyst", "green")
+            name="Analyst",
+            model=self._display_model(cfg),
+            style=AGENT_STYLES.get("Analyst", "green"),
         )
         self._live.add_panel(panel)
         self._live.update_status(phase="ANALYZE")
@@ -725,6 +785,7 @@ class Orchestrator:
                     model=cfg.model,
                     message_buffer=buf,
                     provider=cfg.provider,
+                    timeout_context=timeout_context,
                 )
 
             analysis: dict[str, Any] = await with_summaries(
@@ -759,7 +820,9 @@ class Orchestrator:
         cfg = self.model_config.resolve("scientist")
 
         panel = AgentPanel(
-            name="Scientist", model=cfg.model, style=AGENT_STYLES.get("Scientist", "cyan")
+            name="Scientist",
+            model=self._display_model(cfg),
+            style=AGENT_STYLES.get("Scientist", "cyan"),
         )
         self._live.add_panel(panel)
         self._live.update_status(phase="PLAN")
@@ -779,6 +842,7 @@ class Orchestrator:
                     goal=self.state.goal,
                     provider=cfg.provider,
                     reasoning=cfg.reasoning,
+                    output_dir=self.output_dir,
                 )
 
             plan: dict[str, Any] = await with_summaries(
@@ -841,7 +905,9 @@ class Orchestrator:
         # --- Step 3a: Completeness Assessment ---
         cfg = self.model_config.resolve("assessor")
         panel = AgentPanel(
-            name="Assessor", model=cfg.model, style=AGENT_STYLES.get("Assessor", "blue")
+            name="Assessor",
+            model=self._display_model(cfg),
+            style=AGENT_STYLES.get("Assessor", "blue"),
         )
         self._live.add_panel(panel)
         self._live.update_status(phase="ASSESS")
@@ -859,6 +925,7 @@ class Orchestrator:
                     model=cfg.model,
                     message_buffer=buf,
                     provider=cfg.provider,
+                    output_dir=self.output_dir,
                 )
 
             assessment: dict[str, Any] = await with_summaries(
@@ -915,7 +982,7 @@ class Orchestrator:
                 collectors[name] = []
                 config_idx = i % len(self.model_config.critics)
                 critic_cfg = self.model_config.critics[config_idx]
-                critic_label = f"{critic_cfg.provider}:{critic_cfg.model}"
+                critic_label = f"{critic_cfg.provider}:{self._display_model(critic_cfg)}"
                 stop_panel = AgentPanel(
                     name=f"Critic/{name}",
                     model=critic_label,
@@ -980,6 +1047,8 @@ class Orchestrator:
                         analysis_json=analysis_json,
                         prediction_history=prediction_history_text,
                         goal=self.state.goal,
+                        prediction_history_records=self.state.prediction_history,
+                        output_dir=self.output_dir,
                     )
 
                 try:
@@ -1066,7 +1135,7 @@ class Orchestrator:
         revision_cfg = self.model_config.resolve("scientist")
         revision_panel = AgentPanel(
             name="Stop Revision",
-            model=revision_cfg.model,
+            model=self._display_model(revision_cfg),
             style=AGENT_STYLES.get("Scientist", "cyan"),
         )
         self._live.add_panel(revision_panel)
@@ -1088,6 +1157,7 @@ class Orchestrator:
                     message_buffer=buf,
                     goal=self.state.goal,
                     provider=revision_cfg.provider,
+                    output_dir=self.output_dir,
                 )
 
             revised: dict[str, Any] = await with_summaries(
@@ -1170,7 +1240,7 @@ class Orchestrator:
         domain_knowledge = self.state.domain_knowledge
         scientist_cfg = self.model_config.resolve("scientist")
 
-        # Pre-format analysis and prediction history as strings for debate
+        # Full-detail text as API-mode fallback; SDK critics override with tool hint
         analysis_json = json.dumps(analysis, indent=2) if analysis else ""
         prediction_history = _format_predictions_for_prompt(
             self.state.prediction_history,
@@ -1200,6 +1270,8 @@ class Orchestrator:
                     analysis_json,
                     prediction_history,
                     self.state.goal,
+                    prediction_history_records=self.state.prediction_history,
+                    output_dir=self.output_dir,
                 )
             else:
                 critiques = await run_debate(
@@ -1212,6 +1284,8 @@ class Orchestrator:
                     analysis_json=analysis_json,
                     prediction_history=prediction_history,
                     goal=self.state.goal,
+                    prediction_history_records=self.state.prediction_history,
+                    output_dir=self.output_dir,
                 )
             self._live.log(f"DEBATE: received {len(critiques)} critique(s)")
             return critiques
@@ -1234,6 +1308,8 @@ class Orchestrator:
         analysis_json: str,
         prediction_history: str,
         goal: str = "",
+        prediction_history_records: list | None = None,
+        output_dir: Path | None = None,
     ) -> list:
         """Run per-persona debates in parallel, each with its own summarizer and panel."""
         import asyncio
@@ -1265,7 +1341,7 @@ class Orchestrator:
                 len(self.model_config.critics),
             )
             config = self.model_config.critics[model_idx]
-            label = f"{config.provider}:{config.model}"
+            label = f"{config.provider}:{self._display_model(config)}"
             panel = AgentPanel(
                 name=f"Critic/{name}", model=label, style=AGENT_STYLES.get("Critic", "yellow")
             )
@@ -1335,6 +1411,8 @@ class Orchestrator:
                     analysis_json=analysis_json,
                     prediction_history=prediction_history,
                     goal=goal,
+                    prediction_history_records=prediction_history_records,
+                    output_dir=output_dir,
                 )
 
             try:
@@ -1412,7 +1490,9 @@ class Orchestrator:
         cfg = self.model_config.resolve("scientist")
 
         panel = AgentPanel(
-            name="Revision", model=cfg.model, style=AGENT_STYLES.get("Scientist", "cyan")
+            name="Revision",
+            model=self._display_model(cfg),
+            style=AGENT_STYLES.get("Scientist", "cyan"),
         )
         self._live.add_panel(panel)
         self._live.update_status(phase="REVISE")
@@ -1434,6 +1514,7 @@ class Orchestrator:
                     goal=self.state.goal,
                     provider=cfg.provider,
                     reasoning=cfg.reasoning,
+                    output_dir=self.output_dir,
                 )
 
             revised: dict[str, Any] = await with_summaries(
@@ -1603,6 +1684,38 @@ class Orchestrator:
                         f"coder may fail to run the experiment script"
                     )
 
+        # Prepend ensure_deps to auto-patch PEP 723 deps before each run.
+        # For CC: invoke as a module (auto_scientist is importable).
+        # For Codex: copy the script into the output dir (sandbox can't
+        # import auto_scientist, but ensure_deps is pure stdlib).
+        if "{script_path}" in run_cmd:
+            if cfg.provider == "openai":
+                import auto_scientist.ensure_deps as _ed_mod
+
+                # Bootstrap pip and pre-install common scientific packages
+                # from the HOST as a performance optimization (avoids
+                # download time inside the sandbox).  The coder sandbox
+                # has network access (danger-full-access) so it can also
+                # pip-install at runtime via ensure_deps --install.
+                try:
+                    _ed_mod._ensure_pip()
+                    _ed_mod._preinstall_scientific_packages()
+                except Exception:
+                    logger.warning(
+                        "Failed to pre-install scientific packages from host; "
+                        "coder will fall back to in-sandbox pip install"
+                    )
+
+                ed_src = Path(_ed_mod.__file__)
+                ed_dst = self.output_dir / "_ensure_deps.py"
+                shutil.copy2(ed_src, ed_dst)
+                # Use absolute path so it works even if the coder cd's into a subdirectory
+                run_cmd = f"python3 {ed_dst} --install {{script_path}} && {run_cmd}"
+            else:
+                run_cmd = (
+                    f"{sys.executable} -m auto_scientist.ensure_deps {{script_path}} && {run_cmd}"
+                )
+
         # Pre-compute data directory listing so coder doesn't waste turns
         data_dir = Path(data_path) if data_path else None
         if data_dir and data_dir.is_dir():
@@ -1615,7 +1728,9 @@ class Orchestrator:
             data_files_listing = ""
 
         panel = AgentPanel(
-            name="Coder", model=cfg.model, style=AGENT_STYLES.get("Coder", "magenta1")
+            name="Coder",
+            model=self._display_model(cfg),
+            style=AGENT_STYLES.get("Coder", "magenta1"),
         )
         self._live.add_panel(panel)
         self._live.update_status(phase="IMPLEMENT")
@@ -1666,6 +1781,13 @@ class Orchestrator:
             if self.state.versions:
                 version_dir = self.output_dir / self.state.versions[-1].version
                 persist_artifact(version_dir, "final_analysis.json", analysis)
+        still_pending = [r for r in self.state.prediction_history if r.outcome == "pending"]
+        if still_pending:
+            ids = [r.pred_id or "?" for r in still_pending]
+            logger.warning(
+                f"{len(still_pending)} predictions still pending after "
+                f"final resolution: {', '.join(ids)}"
+            )
 
     async def _run_report(self) -> bool:
         """Phase 2: Generate final summary report."""
@@ -1674,7 +1796,9 @@ class Orchestrator:
         notebook_path = self.output_dir / NOTEBOOK_FILENAME
 
         cfg = self.model_config.resolve("report")
-        panel = AgentPanel(name="Report", model=cfg.model, style=AGENT_STYLES.get("Report", "blue"))
+        panel = AgentPanel(
+            name="Report", model=self._display_model(cfg), style=AGENT_STYLES.get("Report", "blue")
+        )
         self._live.add_panel(panel)
         self._live.update_status(phase="REPORT")
 

@@ -12,6 +12,8 @@ from auto_scientist.persistence import (
     apply_prediction_updates,
     build_concern_ledger,
     evaluate,
+    get_pending_carryforward_predictions,
+    normalize_follows_from,
     read_run_result,
     resolve_prediction_outcomes,
 )
@@ -473,6 +475,7 @@ class TestEvaluate:
         entry = VersionEntry(version="v01", iteration=1, script_path="/tmp/s.py")
         evaluate(None, entry, orchestrator.state)
         assert entry.status == "failed"
+        assert entry.failure_reason == "no_result"
         assert orchestrator.state.consecutive_failures == 1
 
     def test_timed_out_records_failure(self, orchestrator):
@@ -480,6 +483,7 @@ class TestEvaluate:
         entry = VersionEntry(version="v01", iteration=1, script_path="/tmp/s.py")
         evaluate(result, entry, orchestrator.state)
         assert entry.status == "failed"
+        assert entry.failure_reason == "timed_out"
         assert orchestrator.state.consecutive_failures == 1
 
     def test_nonzero_exit_records_failure(self, orchestrator):
@@ -487,6 +491,7 @@ class TestEvaluate:
         entry = VersionEntry(version="v01", iteration=1, script_path="/tmp/s.py")
         evaluate(result, entry, orchestrator.state)
         assert entry.status == "failed"
+        assert entry.failure_reason == "crash"
         assert orchestrator.state.consecutive_failures == 1
 
     def test_success_records_completion(self, orchestrator, tmp_path):
@@ -1456,6 +1461,69 @@ class TestRunAnalystNormal:
         assert result is None
 
 
+class TestRunAnalystTimeout:
+    @pytest.mark.asyncio
+    async def test_timeout_routes_to_analyst(self, orchestrator, tmp_path):
+        """When latest version timed out, _run_analyst invokes analyst with timeout_context."""
+        orchestrator.output_dir.mkdir(parents=True, exist_ok=True)
+
+        version_dir = tmp_path / "v01"
+        version_dir.mkdir()
+        script_path = version_dir / "experiment.py"
+        script_path.write_text("print('hello')")
+
+        latest = VersionEntry(
+            version="v01",
+            iteration=1,
+            script_path=str(script_path),
+            results_path=None,
+            status="failed",
+            failure_reason="timed_out",
+            hypothesis="Heavy computation hypothesis",
+        )
+        orchestrator.state.versions = [latest]
+
+        captured_kwargs = {}
+
+        async def fake_analyst(**kwargs):
+            captured_kwargs.update(kwargs)
+            return {
+                "key_metrics": {"timeout_minutes": 120},
+                "improvements": [],
+                "regressions": [],
+                "observations": ["script timed out"],
+            }
+
+        with patch("auto_scientist.agents.analyst.run_analyst", side_effect=fake_analyst):
+            result = await orchestrator._run_analyst()
+
+        assert result is not None
+        assert result["observations"] == ["script timed out"]
+        assert captured_kwargs.get("timeout_context") is not None
+        ctx = captured_kwargs["timeout_context"]
+        assert ctx["hypothesis"] == "Heavy computation hypothesis"
+        assert ctx["timeout_minutes"] == 120
+
+    @pytest.mark.asyncio
+    async def test_non_timeout_failure_still_skips(self, orchestrator, tmp_path):
+        """When latest version failed (not timeout) with no results, analyst is skipped."""
+        orchestrator.output_dir.mkdir(parents=True, exist_ok=True)
+
+        orchestrator.state.versions = [
+            VersionEntry(
+                version="v01",
+                iteration=1,
+                script_path="/tmp/s.py",
+                results_path=None,
+                status="failed",
+                failure_reason="crash",
+            ),
+        ]
+
+        result = await orchestrator._run_analyst()
+        assert result is None
+
+
 class TestRunScientistPlan:
     @pytest.mark.asyncio
     async def test_returns_plan(self, orchestrator, tmp_path):
@@ -1843,8 +1911,10 @@ class TestRunCoderOrchestrator:
             await orchestrator._run_coder({"hypothesis": "test"})
 
         assert captured_kwargs["run_timeout_minutes"] == 60
-        # Orchestrator resolves the executable to an absolute path
-        assert captured_kwargs["run_command"] == "/usr/bin/python {script_path}"
+        # Orchestrator resolves exe to absolute path and prepends ensure_deps
+        run_cmd = captured_kwargs["run_command"]
+        assert run_cmd.endswith("/usr/bin/python {script_path}")
+        assert "auto_scientist.ensure_deps {script_path} &&" in run_cmd
 
     @pytest.mark.asyncio
     async def test_run_config_defaults_without_config(self, orchestrator, tmp_path):
@@ -1868,8 +1938,10 @@ class TestRunCoderOrchestrator:
             await orchestrator._run_coder({"hypothesis": "test"})
 
         assert captured_kwargs["run_timeout_minutes"] == 120
-        # Orchestrator resolves the executable to an absolute path
-        assert captured_kwargs["run_command"] == "/usr/local/bin/uv run {script_path}"
+        # Orchestrator resolves exe to absolute path and prepends ensure_deps
+        run_cmd = captured_kwargs["run_command"]
+        assert run_cmd.endswith("/usr/local/bin/uv run {script_path}")
+        assert "auto_scientist.ensure_deps {script_path} &&" in run_cmd
 
     @pytest.mark.asyncio
     async def test_run_command_warns_when_exe_not_found(self, orchestrator, tmp_path):
@@ -1892,8 +1964,10 @@ class TestRunCoderOrchestrator:
         ):
             await orchestrator._run_coder({"hypothesis": "test"})
 
-        # Falls through with original command when which returns None
-        assert captured_kwargs["run_command"] == "uv run {script_path}"
+        # Falls through with original command (unresolved) but still has ensure_deps
+        run_cmd = captured_kwargs["run_command"]
+        assert run_cmd.endswith("uv run {script_path}")
+        assert "auto_scientist.ensure_deps {script_path} &&" in run_cmd
 
 
 class TestReadRunResult:
@@ -2430,7 +2504,8 @@ class TestApplyPredictionUpdates:
         assert orchestrator.state.prediction_history[0].pred_id == "1.1"
         assert orchestrator.state.prediction_history[1].pred_id == "1.2"
         assert orchestrator.state.prediction_history[0].outcome == "pending"
-        assert orchestrator.state.prediction_history[1].follows_from == "spline fits better locally"
+        # "spline fits better locally" is not a valid pred_id, normalized to None
+        assert orchestrator.state.prediction_history[1].follows_from is None
         # pred_id injected back into plan dict
         assert plan["testable_predictions"][0]["pred_id"] == "1.1"
         assert plan["testable_predictions"][1]["pred_id"] == "1.2"
@@ -2442,6 +2517,90 @@ class TestApplyPredictionUpdates:
     def test_missing_key_is_noop(self, orchestrator):
         apply_prediction_updates({"hypothesis": "test"}, orchestrator.state)
         assert orchestrator.state.prediction_history == []
+
+
+class TestLoadFinalPlanDedup:
+    """Regression: resuming from coder must not duplicate predictions already in state."""
+
+    def test_no_duplicate_predictions_on_resume(self, orchestrator, tmp_path):
+        from auto_scientist.state import PredictionRecord
+
+        orchestrator.state.iteration = 1
+        # Simulate state restored by rewind_run: predictions already present
+        orchestrator.state.prediction_history = [
+            PredictionRecord(
+                pred_id="1.1",
+                iteration_prescribed=1,
+                prediction="spline fits better locally",
+                diagnostic="compare regional RMSE",
+                if_confirmed="focus on local fit",
+                if_refuted="problem is elsewhere",
+            ),
+            PredictionRecord(
+                pred_id="1.2",
+                iteration_prescribed=1,
+                prediction="smoothing parameter identifiable",
+                diagnostic="profile s on grid",
+                if_confirmed="fine-tune s",
+                if_refuted="fix s",
+            ),
+        ]
+
+        # Write a plan.json to disk (as would exist from the original run)
+        import json
+
+        version_dir = tmp_path / "v01"
+        version_dir.mkdir()
+        plan = {
+            "testable_predictions": [
+                {
+                    "prediction": "spline fits better locally",
+                    "diagnostic": "compare regional RMSE",
+                    "pred_id": "1.1",
+                },
+                {
+                    "prediction": "smoothing parameter identifiable",
+                    "diagnostic": "profile s on grid",
+                    "pred_id": "1.2",
+                },
+            ],
+        }
+        (version_dir / "plan.json").write_text(json.dumps(plan))
+
+        from auto_scientist.persistence import load_final_plan_from_disk
+
+        loaded = load_final_plan_from_disk(version_dir, orchestrator.state)
+
+        assert loaded is not None
+        # Must still have exactly 2 predictions, not 4
+        assert len(orchestrator.state.prediction_history) == 2
+        assert {p.pred_id for p in orchestrator.state.prediction_history} == {"1.1", "1.2"}
+
+    def test_applies_predictions_when_none_exist(self, orchestrator, tmp_path):
+        import json
+
+        from auto_scientist.persistence import load_final_plan_from_disk
+
+        orchestrator.state.iteration = 1
+        orchestrator.state.prediction_history = []
+
+        version_dir = tmp_path / "v01"
+        version_dir.mkdir()
+        plan = {
+            "testable_predictions": [
+                {
+                    "prediction": "spline fits better locally",
+                    "diagnostic": "compare regional RMSE",
+                },
+            ],
+        }
+        (version_dir / "plan.json").write_text(json.dumps(plan))
+
+        loaded = load_final_plan_from_disk(version_dir, orchestrator.state)
+
+        assert loaded is not None
+        assert len(orchestrator.state.prediction_history) == 1
+        assert orchestrator.state.prediction_history[0].pred_id == "1.1"
 
 
 class TestResolvePredictionOutcomes:
@@ -2535,3 +2694,257 @@ class TestResolvePredictionOutcomes:
         resolve_prediction_outcomes(analysis, orchestrator.state)
         assert orchestrator.state.prediction_history[0].outcome == "confirmed"
         assert orchestrator.state.prediction_history[1].outcome == "pending"
+
+    def test_copies_summary_when_present(self, orchestrator):
+        orchestrator.state.iteration = 1
+        self._add_pending(orchestrator, "Cr correlation strongest", pred_id="0.1")
+        analysis = {
+            "prediction_outcomes": [
+                {
+                    "pred_id": "0.1",
+                    "prediction": "Cr correlation strongest",
+                    "outcome": "refuted",
+                    "evidence": "Ni dominates at r_s=0.613; Cr near zero",
+                    "summary": "Cr r_s near zero; Ni dominates at 0.613",
+                },
+            ],
+        }
+        resolve_prediction_outcomes(analysis, orchestrator.state)
+        expected = "Cr r_s near zero; Ni dominates at 0.613"
+        assert orchestrator.state.prediction_history[0].summary == expected
+
+    def test_summary_defaults_empty_when_absent(self, orchestrator):
+        orchestrator.state.iteration = 1
+        self._add_pending(orchestrator, "spline fits better", pred_id="0.1")
+        analysis = {
+            "prediction_outcomes": [
+                {
+                    "pred_id": "0.1",
+                    "prediction": "spline fits better",
+                    "outcome": "confirmed",
+                    "evidence": "RMSE 0.31 vs 0.58",
+                },
+            ],
+        }
+        resolve_prediction_outcomes(analysis, orchestrator.state)
+        assert orchestrator.state.prediction_history[0].summary == ""
+
+
+class TestNormalizeFollowsFrom:
+    """Tests for normalize_follows_from()."""
+
+    def test_valid_pred_id_unchanged(self):
+        known = {"0.1", "0.2", "1.1"}
+
+        assert normalize_follows_from("0.2", known) == "0.2"
+
+    def test_descriptive_string_becomes_none(self):
+        known = {"0.1", "0.2"}
+        assert normalize_follows_from("label-audit change", known) is None
+
+    def test_bare_integer_becomes_none(self):
+        known = {"0.1", "1.1", "1.2"}
+        assert normalize_follows_from("1", known) is None
+
+    def test_comma_separated_becomes_none(self):
+        known = {"0.1", "0.2", "0.3"}
+        assert normalize_follows_from("2,3", known) is None
+
+    def test_none_stays_none(self):
+        assert normalize_follows_from(None, {"0.1"}) is None
+
+    def test_empty_string_becomes_none(self):
+        assert normalize_follows_from("", {"0.1"}) is None
+
+
+class TestApplyPredictionUpdatesFollowsFrom:
+    """Tests for follows_from normalization inside _apply_prediction_updates()."""
+
+    def test_normalizes_invalid_follows_from(self, orchestrator):
+        from auto_scientist.state import PredictionRecord
+
+        orchestrator.state.iteration = 1
+        orchestrator.state.prediction_history = [
+            PredictionRecord(
+                pred_id="0.1",
+                iteration_prescribed=0,
+                prediction="baseline hypothesis",
+                diagnostic="d",
+                if_confirmed="c",
+                if_refuted="r",
+            ),
+        ]
+        plan = {
+            "testable_predictions": [
+                {
+                    "prediction": "new hypothesis",
+                    "diagnostic": "d",
+                    "if_confirmed": "c",
+                    "if_refuted": "r",
+                    "follows_from": "label-audit change",
+                },
+            ],
+        }
+        apply_prediction_updates(plan, orchestrator.state)
+        assert orchestrator.state.prediction_history[1].follows_from is None
+
+    def test_preserves_valid_follows_from(self, orchestrator):
+        from auto_scientist.state import PredictionRecord
+
+        orchestrator.state.iteration = 1
+        orchestrator.state.prediction_history = [
+            PredictionRecord(
+                pred_id="0.1",
+                iteration_prescribed=0,
+                prediction="baseline hypothesis",
+                diagnostic="d",
+                if_confirmed="c",
+                if_refuted="r",
+            ),
+        ]
+        plan = {
+            "testable_predictions": [
+                {
+                    "prediction": "follows from baseline",
+                    "diagnostic": "d",
+                    "if_confirmed": "c",
+                    "if_refuted": "r",
+                    "follows_from": "0.1",
+                },
+            ],
+        }
+        apply_prediction_updates(plan, orchestrator.state)
+        assert orchestrator.state.prediction_history[1].follows_from == "0.1"
+
+    def test_skips_carried_forward(self, orchestrator):
+        orchestrator.state.iteration = 1
+        plan = {
+            "testable_predictions": [
+                {
+                    "prediction": "new prediction",
+                    "diagnostic": "d",
+                    "if_confirmed": "c",
+                    "if_refuted": "r",
+                },
+                {
+                    "pred_id": "0.1",
+                    "prediction": "old prediction",
+                    "diagnostic": "d",
+                    "if_confirmed": "c",
+                    "if_refuted": "r",
+                    "_carried_forward": True,
+                },
+            ],
+        }
+        apply_prediction_updates(plan, orchestrator.state)
+        # Only the non-carried-forward prediction is stored
+        assert len(orchestrator.state.prediction_history) == 1
+        assert orchestrator.state.prediction_history[0].pred_id == "1.1"
+
+
+class TestCarryForwardPredictions:
+    """Tests for _get_pending_carryforward_predictions()."""
+
+    def test_collects_pending_from_prior_iterations(self, orchestrator):
+        from auto_scientist.state import PredictionRecord
+
+        orchestrator.state.iteration = 2
+        orchestrator.state.prediction_history = [
+            PredictionRecord(
+                pred_id="0.1",
+                iteration_prescribed=0,
+                prediction="still pending",
+                diagnostic="d",
+                if_confirmed="c",
+                if_refuted="r",
+                outcome="pending",
+            ),
+            PredictionRecord(
+                pred_id="1.1",
+                iteration_prescribed=1,
+                prediction="already confirmed",
+                diagnostic="d",
+                if_confirmed="c",
+                if_refuted="r",
+                outcome="confirmed",
+                evidence="evidence",
+            ),
+        ]
+        carried = get_pending_carryforward_predictions(orchestrator.state)
+        assert len(carried) == 1
+        assert carried[0]["pred_id"] == "0.1"
+        assert carried[0]["_carried_forward"] is True
+
+    def test_excludes_current_iteration(self, orchestrator):
+        from auto_scientist.state import PredictionRecord
+
+        orchestrator.state.iteration = 2
+        orchestrator.state.prediction_history = [
+            PredictionRecord(
+                pred_id="2.1",
+                iteration_prescribed=2,
+                prediction="current iter pending",
+                diagnostic="d",
+                if_confirmed="c",
+                if_refuted="r",
+                outcome="pending",
+            ),
+        ]
+        carried = get_pending_carryforward_predictions(orchestrator.state)
+        assert carried == []
+
+    def test_empty_history(self, orchestrator):
+        orchestrator.state.iteration = 1
+        carried = get_pending_carryforward_predictions(orchestrator.state)
+        assert carried == []
+
+    def test_integration_inject_into_plan(self, orchestrator):
+        from auto_scientist.state import PredictionRecord
+
+        orchestrator.state.iteration = 1
+        orchestrator.state.prediction_history = [
+            PredictionRecord(
+                pred_id="0.1",
+                iteration_prescribed=0,
+                prediction="iter 0 pending",
+                diagnostic="d",
+                if_confirmed="c",
+                if_refuted="r",
+                outcome="pending",
+            ),
+            PredictionRecord(
+                pred_id="0.2",
+                iteration_prescribed=0,
+                prediction="iter 0 confirmed",
+                diagnostic="d",
+                if_confirmed="c",
+                if_refuted="r",
+                outcome="confirmed",
+                evidence="done",
+            ),
+        ]
+        plan = {
+            "testable_predictions": [
+                {
+                    "prediction": "iter 1 prediction",
+                    "diagnostic": "d",
+                    "if_confirmed": "c",
+                    "if_refuted": "r",
+                },
+            ],
+        }
+        # Apply predictions first (as orchestrator does)
+        apply_prediction_updates(plan, orchestrator.state)
+        # Then inject carry-forward
+        carryforward = get_pending_carryforward_predictions(orchestrator.state)
+        existing = plan.get("testable_predictions", [])
+        plan["testable_predictions"] = existing + carryforward
+
+        preds = plan["testable_predictions"]
+        assert len(preds) == 2
+        # First is the new prediction (with injected pred_id)
+        assert preds[0]["pred_id"] == "1.1"
+        assert "_carried_forward" not in preds[0]
+        # Second is the carried-forward pending prediction
+        assert preds[1]["pred_id"] == "0.1"
+        assert preds[1]["_carried_forward"] is True

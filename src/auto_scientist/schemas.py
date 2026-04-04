@@ -23,6 +23,7 @@ class PredictionOutcome(BaseModel):
     prediction: str
     outcome: Literal["confirmed", "refuted", "inconclusive"]
     evidence: str
+    summary: str = ""
 
 
 class AnalystOutput(BaseModel):
