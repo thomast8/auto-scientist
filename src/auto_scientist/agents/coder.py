@@ -30,6 +30,62 @@ logger = logging.getLogger(__name__)
 
 MAX_ATTEMPTS = 2
 
+_STDERR_TRUNCATE = 3000
+
+
+def _check_runtime_success(version_dir: Path) -> tuple[bool, str]:
+    """Check whether the coder's experiment script ran successfully.
+
+    Reads run_result.json first, falls back to exitcode.txt/stderr.txt.
+    Returns (True, "") on success or (False, error_description) on failure.
+    Timeouts are treated as success for retry purposes (they need Scientist
+    rethinking, not a coder retry).
+    """
+    run_result_path = version_dir / "run_result.json"
+    exitcode_path = version_dir / "exitcode.txt"
+    stderr_path = version_dir / "stderr.txt"
+
+    # Try run_result.json first
+    if run_result_path.exists():
+        try:
+            data = json.loads(run_result_path.read_text())
+        except (json.JSONDecodeError, ValueError):
+            # Malformed JSON - fall through to exitcode check
+            pass
+        else:
+            if data.get("timed_out"):
+                return True, ""
+            if data.get("success"):
+                return True, ""
+            error = data.get("error") or "script failed (no error message in run_result.json)"
+            return False, error
+
+    # Fall back to exitcode.txt
+    if exitcode_path.exists():
+        try:
+            code = int(exitcode_path.read_text().strip())
+        except ValueError:
+            code = -1
+
+        if code == 0:
+            # Script succeeded but coder didn't write run_result.json.
+            # Write a minimal one so the orchestrator can read it.
+            run_result_path.write_text(
+                json.dumps({"success": True, "return_code": 0, "timed_out": False, "error": None})
+            )
+            return True, ""
+
+        # Non-zero exit code: read stderr for the traceback
+        stderr = ""
+        if stderr_path.exists():
+            stderr = stderr_path.read_text()
+            if len(stderr) > _STDERR_TRUNCATE:
+                stderr = f"...truncated...\n{stderr[-_STDERR_TRUNCATE:]}"
+        return False, stderr or f"script exited with code {code} (no stderr captured)"
+
+    # No artifacts at all: script was never run
+    return False, "No runtime artifacts found; the script was not run by the coder agent"
+
 
 def _validate_syntax(script_path: Path) -> tuple[bool, str]:
     """Run py_compile on a script to check for syntax errors."""

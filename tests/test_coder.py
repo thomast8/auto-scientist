@@ -1,10 +1,11 @@
 """Tests for the Coder agent."""
 
+import json
 from unittest.mock import MagicMock, patch
 
 import pytest
 
-from auto_scientist.agents.coder import run_coder
+from auto_scientist.agents.coder import _check_runtime_success, run_coder
 from auto_scientist.sdk_backend import SDKMessage
 
 
@@ -544,3 +545,87 @@ class TestCoderRetry:
                 output_dir=tmp_path,
                 version="v01",
             )
+
+
+class TestCheckRuntimeSuccess:
+    def test_success_via_run_result(self, tmp_path):
+        """run_result.json with success=true returns (True, "")."""
+        (tmp_path / "run_result.json").write_text(
+            json.dumps({"success": True, "return_code": 0, "timed_out": False, "error": None})
+        )
+        ok, err = _check_runtime_success(tmp_path)
+        assert ok is True
+        assert err == ""
+
+    def test_timed_out_treated_as_pass(self, tmp_path):
+        """Timeouts should not trigger retry; treated as pass for retry purposes."""
+        (tmp_path / "run_result.json").write_text(
+            json.dumps({"success": False, "return_code": -1, "timed_out": True, "error": "timeout"})
+        )
+        ok, err = _check_runtime_success(tmp_path)
+        assert ok is True
+        assert err == ""
+
+    def test_run_result_failure_returns_error(self, tmp_path):
+        """run_result.json with success=false returns the error."""
+        (tmp_path / "run_result.json").write_text(
+            json.dumps(
+                {
+                    "success": False,
+                    "return_code": 1,
+                    "timed_out": False,
+                    "error": "KeyError: 'Fenrite'",
+                }
+            )
+        )
+        ok, err = _check_runtime_success(tmp_path)
+        assert ok is False
+        assert "KeyError" in err
+        assert "Fenrite" in err
+
+    def test_no_run_result_exitcode_zero_is_success(self, tmp_path):
+        """exitcode=0 but no run_result.json: coder forgot, treat as success."""
+        (tmp_path / "exitcode.txt").write_text("0\n")
+        (tmp_path / "results.txt").write_text("some output")
+        ok, err = _check_runtime_success(tmp_path)
+        assert ok is True
+        # Should write a minimal run_result.json
+        assert (tmp_path / "run_result.json").exists()
+        data = json.loads((tmp_path / "run_result.json").read_text())
+        assert data["success"] is True
+
+    def test_no_run_result_exitcode_nonzero_returns_stderr(self, tmp_path):
+        """exitcode=1 and no run_result.json: return stderr as error."""
+        (tmp_path / "exitcode.txt").write_text("1\n")
+        (tmp_path / "stderr.txt").write_text(
+            "Traceback (most recent call last):\n"
+            "  File 'experiment.py', line 42\n"
+            "KeyError: 'Fenrite'\n"
+        )
+        ok, err = _check_runtime_success(tmp_path)
+        assert ok is False
+        assert "KeyError" in err
+        assert "Fenrite" in err
+
+    def test_no_artifacts_returns_generic_failure(self, tmp_path):
+        """No run_result.json, no exitcode.txt: script was never run."""
+        ok, err = _check_runtime_success(tmp_path)
+        assert ok is False
+        assert "never ran" in err.lower() or "not run" in err.lower() or "no runtime" in err.lower()
+
+    def test_stderr_truncated(self, tmp_path):
+        """Long stderr should be truncated to ~3000 chars."""
+        (tmp_path / "exitcode.txt").write_text("1\n")
+        long_stderr = "x" * 10000
+        (tmp_path / "stderr.txt").write_text(long_stderr)
+        ok, err = _check_runtime_success(tmp_path)
+        assert ok is False
+        assert len(err) < 4000  # some overhead for the message wrapper
+
+    def test_malformed_run_result_treated_as_failure(self, tmp_path):
+        """Invalid JSON in run_result.json should be treated as failure."""
+        (tmp_path / "run_result.json").write_text("{broken json")
+        (tmp_path / "exitcode.txt").write_text("1\n")
+        (tmp_path / "stderr.txt").write_text("some error\n")
+        ok, err = _check_runtime_success(tmp_path)
+        assert ok is False
