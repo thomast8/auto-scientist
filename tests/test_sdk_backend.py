@@ -345,6 +345,18 @@ class TestCodexBackend:
         assert (
             CodexBackend._resolve_sandbox(["Read", "Write"], has_mcp=True) == "danger-full-access"
         )
+        # network_access escalates to danger-full-access for pip downloads
+        assert (
+            CodexBackend._resolve_sandbox(["Read", "Glob"], network_access=True)
+            == "danger-full-access"
+        )
+        assert (
+            CodexBackend._resolve_sandbox(
+                ["Read", "Write", "Bash"],
+                network_access=True,
+            )
+            == "danger-full-access"
+        )
 
     def test_resolve_disabled_features_critic(self):
         """Critics (WebSearch only) get shell and agent tools disabled."""

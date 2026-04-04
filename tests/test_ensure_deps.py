@@ -1,12 +1,18 @@
 """Tests for the PEP 723 dependency auto-sync module."""
 
+import subprocess
+from unittest.mock import patch
+
 from auto_scientist.ensure_deps import (
     ensure_deps,
     extract_imports,
+    extract_pep723_dep_strings,
     find_missing_deps,
+    install_deps,
     parse_pep723_deps,
     patch_pep723_block,
     validate_deps,
+    verify_imports,
 )
 
 # ---------------------------------------------------------------------------
@@ -234,4 +240,111 @@ class TestValidateDeps:
         script = tmp_path / "experiment.py"
         script.write_text("import os\nimport json\n")
         ok, msg = validate_deps(script)
+        assert ok is True
+
+
+# ---------------------------------------------------------------------------
+# extract_pep723_dep_strings
+# ---------------------------------------------------------------------------
+
+
+class TestExtractPep723DepStrings:
+    def test_returns_raw_strings_with_versions(self):
+        source = (
+            "# /// script\n"
+            '# dependencies = ["numpy>=1.20", "matplotlib", "scikit-learn~=1.3"]\n'
+            "# ///\n"
+        )
+        assert extract_pep723_dep_strings(source) == [
+            "numpy>=1.20",
+            "matplotlib",
+            "scikit-learn~=1.3",
+        ]
+
+    def test_no_block_returns_empty(self):
+        assert extract_pep723_dep_strings("import numpy\n") == []
+
+    def test_malformed_toml_returns_empty(self):
+        source = "# /// script\n# this is not valid toml [[[\n# ///\n"
+        assert extract_pep723_dep_strings(source) == []
+
+    def test_empty_deps_returns_empty(self):
+        source = "# /// script\n# dependencies = []\n# ///\n"
+        assert extract_pep723_dep_strings(source) == []
+
+
+# ---------------------------------------------------------------------------
+# install_deps
+# ---------------------------------------------------------------------------
+
+
+class TestInstallDeps:
+    def test_calls_pip_with_all_deps(self, tmp_path):
+        script = tmp_path / "experiment.py"
+        script.write_text(
+            '# /// script\n# dependencies = ["numpy>=1.20", "pandas"]\n# ///\n'
+            "import numpy\nimport pandas\n"
+        )
+        with patch("auto_scientist.ensure_deps.subprocess.run") as mock_run:
+            mock_run.return_value = subprocess.CompletedProcess(args=[], returncode=0)
+            result = install_deps(script)
+
+        assert result == ["numpy>=1.20", "pandas"]
+        # _ensure_pip check + pip install = 2 calls
+        assert mock_run.call_count == 2
+        pip_call = mock_run.call_args_list[1]
+        assert pip_call.args[0][-2:] == ["numpy>=1.20", "pandas"]
+        assert pip_call.kwargs.get("check") is True
+
+    def test_no_deps_skips_pip(self, tmp_path):
+        script = tmp_path / "experiment.py"
+        script.write_text("import os\n")
+        with patch("auto_scientist.ensure_deps.subprocess.run") as mock_run:
+            result = install_deps(script)
+
+        assert result == []
+        mock_run.assert_not_called()
+
+    def test_pip_failure_raises(self, tmp_path):
+        import pytest
+
+        script = tmp_path / "experiment.py"
+        script.write_text(
+            '# /// script\n# dependencies = ["nonexistent-pkg"]\n# ///\nimport nonexistent_pkg\n'
+        )
+        with patch("auto_scientist.ensure_deps.subprocess.run") as mock_run:
+            # First call (_ensure_pip): pip --version succeeds
+            # Second call (pip install): fails
+            mock_run.side_effect = [
+                subprocess.CompletedProcess(args=[], returncode=0),
+                subprocess.CalledProcessError(1, "pip"),
+            ]
+            with pytest.raises(subprocess.CalledProcessError):
+                install_deps(script)
+
+
+# ---------------------------------------------------------------------------
+# verify_imports
+# ---------------------------------------------------------------------------
+
+
+class TestVerifyImports:
+    def test_all_imports_ok(self, tmp_path):
+        script = tmp_path / "experiment.py"
+        script.write_text("import os\nimport json\n")
+        ok, msg = verify_imports(script)
+        assert ok is True
+        assert msg == ""
+
+    def test_failing_import_reported(self, tmp_path):
+        script = tmp_path / "experiment.py"
+        script.write_text("import nonexistent_xyz_pkg\n")
+        ok, msg = verify_imports(script)
+        assert ok is False
+        assert "nonexistent_xyz_pkg" in msg
+
+    def test_no_imports_passes(self, tmp_path):
+        script = tmp_path / "experiment.py"
+        script.write_text("x = 1\n")
+        ok, msg = verify_imports(script)
         assert ok is True

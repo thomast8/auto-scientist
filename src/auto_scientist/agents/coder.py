@@ -197,6 +197,7 @@ async def run_coder(
         cwd=output_dir,
         model=model,
         extra_args={},
+        network_access=provider == "openai",
     )
 
     correction_hint = ""

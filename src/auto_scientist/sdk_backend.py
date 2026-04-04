@@ -52,17 +52,15 @@ CODEX_SANDBOX_ADDENDUM = """\
 You are running inside a sandboxed environment where `uv` is not available.
 The run command in the task instructions already uses `python3` instead.
 
-Before running any script, install its dependencies:
-1. Read the PEP 723 metadata block at the top of the script to find dependencies
-2. Install them: `pip install <dep1> <dep2> ...`
-3. Then run the script using the command from the task instructions
+Dependencies are installed automatically by the run command. You do NOT need
+to run `pip install` manually. Just declare all third-party packages in the
+PEP 723 metadata block and use the exact run command from the task
+instructions. The framework will install everything before executing the
+script.
 
-IMPORTANT: Every time you edit the script to add a new import, you MUST also:
-- Add the package to the PEP 723 dependencies block
-- Run `pip install <new_package>` before re-running the script
-
-The script must still declare dependencies in the PEP 723 block for
-reproducibility outside this environment.
+IMPORTANT: Every time you edit the script to add a new import, you MUST also
+add the package to the PEP 723 dependencies block. Do NOT remove imports to
+work around installation failures; the framework handles installation.
 </sandbox_environment>
 """
 
@@ -214,6 +212,7 @@ class SDKOptions:
     resume: str | None = None
     env: dict[str, str] = field(default_factory=dict)
     mcp_servers: dict[str, Any] = field(default_factory=dict)
+    network_access: bool = False
 
 
 @dataclass
@@ -439,6 +438,7 @@ class CodexBackend:
     def _resolve_sandbox(
         allowed_tools: list[str] | tuple[str, ...],
         has_mcp: bool = False,
+        network_access: bool = False,
     ) -> str:
         """Map allowed tools to Codex sandbox mode.
 
@@ -448,9 +448,15 @@ class CodexBackend:
         servers are configured we must use danger-full-access; the
         security boundary is maintained by the allowed_tools list, not
         the sandbox.
+
+        ``network_access=True`` escalates to danger-full-access so that
+        pip can download packages (e.g. for the Coder agent).
         """
         if has_mcp:
             logger.debug("Sandbox escalated to danger-full-access for MCP subprocess spawning")
+            return "danger-full-access"
+        if network_access:
+            logger.debug("Sandbox escalated to danger-full-access for network access (pip install)")
             return "danger-full-access"
         write_tools = {"Write", "Edit", "Bash"}
         if write_tools & set(allowed_tools):
@@ -600,7 +606,11 @@ class CodexBackend:
             disabled_features=disabled_features,
         )
 
-        sandbox_mode = self._resolve_sandbox(options.allowed_tools, has_mcp=has_mcp)
+        sandbox_mode = self._resolve_sandbox(
+            options.allowed_tools,
+            has_mcp=has_mcp,
+            network_access=options.network_access,
+        )
         self._sandbox_mode = sandbox_mode
 
         # Build environment for the Codex subprocess.

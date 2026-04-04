@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import ast
 import re
+import subprocess
 import sys
 import tomllib
 from pathlib import Path
@@ -85,6 +86,22 @@ def parse_pep723_deps(source: str) -> set[str]:
             # Most packages: PyPI name == import name (with hyphens -> underscores).
             import_names.add(normalized.replace("-", "_"))
     return import_names
+
+
+def extract_pep723_dep_strings(source: str) -> list[str]:
+    """Return the raw PEP 723 dependency strings (e.g. ``["numpy>=1.20", "pandas"]``)."""
+    m = _PEP723_RE.search(source)
+    if not m:
+        return []
+
+    raw_lines = m.group(1).splitlines()
+    content = "\n".join(line.lstrip("#").strip() for line in raw_lines)
+    try:
+        metadata = tomllib.loads(content)
+    except Exception:
+        return []
+
+    return list(metadata.get("dependencies", []))
 
 
 def find_missing_deps(source: str) -> list[str]:
@@ -165,6 +182,100 @@ def ensure_deps(script_path: Path) -> list[str]:
     return missing
 
 
+def _ensure_pip() -> None:
+    """Make sure pip is available for the current interpreter.
+
+    uv-managed venvs don't include pip. Running ``ensurepip`` bootstraps
+    it so that ``python -m pip install`` works in the Codex sandbox.
+    """
+    result = subprocess.run(
+        [sys.executable, "-m", "pip", "--version"],
+        capture_output=True,
+    )
+    if result.returncode == 0:
+        return
+    subprocess.run(
+        [sys.executable, "-m", "ensurepip", "--upgrade"],
+        capture_output=True,
+        check=True,
+    )
+
+
+# Packages commonly needed by experiment scripts.  Pre-installed from the
+# HOST before launching the Codex sandbox because the seatbelt sandbox can
+# use packages already in the venv but cannot download new ones via pip.
+_SCIENTIFIC_PACKAGES = [
+    "numpy",
+    "matplotlib",
+    "scipy",
+    "scikit-learn",
+    "pandas",
+    "seaborn",
+]
+
+
+def _preinstall_scientific_packages() -> None:
+    """Pre-install common scientific packages into the venv.
+
+    Called from the HOST process (not sandboxed) before launching the Codex
+    coder agent.  ``pip install`` skips already-installed packages, so this
+    is cheap after the first run.
+    """
+    subprocess.run(
+        [sys.executable, "-m", "pip", "install", "--quiet", *_SCIENTIFIC_PACKAGES],
+        check=True,
+    )
+
+
+def install_deps(script_path: Path) -> list[str]:
+    """pip-install all PEP 723 dependencies declared in *script_path*.
+
+    Returns the list of dependency strings that were passed to pip.
+    Intended for environments where ``uv run`` is unavailable (e.g. Codex sandbox).
+    Bootstraps pip via ``ensurepip`` if the interpreter lacks it.
+    """
+    source = script_path.read_text(encoding="utf-8")
+    deps = extract_pep723_dep_strings(source)
+    if not deps:
+        return []
+
+    _ensure_pip()
+    subprocess.run(
+        [sys.executable, "-m", "pip", "install", "--quiet", *deps],
+        check=True,
+    )
+    return deps
+
+
+def verify_imports(script_path: Path) -> tuple[bool, str]:
+    """Verify that every third-party import in the script is actually importable.
+
+    Returns ``(True, "")`` if all imports work, or ``(False, message)`` with
+    details about which package failed and why.
+    """
+    source = script_path.read_text(encoding="utf-8")
+    third_party = extract_imports(source)
+    if not third_party:
+        return True, ""
+
+    failures: list[str] = []
+    for imp in sorted(third_party):
+        result = subprocess.run(
+            [sys.executable, "-c", f"import {imp}"],
+            capture_output=True,
+            text=True,
+        )
+        if result.returncode != 0:
+            # Extract just the last line of stderr (the actual error)
+            stderr_stripped = result.stderr.strip()
+            err_line = stderr_stripped.splitlines()[-1] if stderr_stripped else "unknown error"
+            failures.append(f"  - {imp}: {err_line}")
+
+    if failures:
+        return False, "The following imports failed after installation:\n" + "\n".join(failures)
+    return True, ""
+
+
 def validate_deps(script_path: Path) -> tuple[bool, str]:
     """Check that every third-party import is covered by PEP 723 deps.
 
@@ -193,11 +304,21 @@ def validate_deps(script_path: Path) -> tuple[bool, str]:
 
 
 if __name__ == "__main__":
-    if len(sys.argv) != 2:
-        print("Usage: python -m auto_scientist.ensure_deps <script_path>", file=sys.stderr)
+    install = False
+    args = sys.argv[1:]
+
+    if args and args[0] == "--install":
+        install = True
+        args = args[1:]
+
+    if len(args) != 1:
+        print(
+            "Usage: python -m auto_scientist.ensure_deps [--install] <script_path>",
+            file=sys.stderr,
+        )
         sys.exit(1)
 
-    path = Path(sys.argv[1])
+    path = Path(args[0])
     if not path.exists():
         print(f"ensure_deps: {path} not found", file=sys.stderr)
         sys.exit(1)
@@ -205,3 +326,14 @@ if __name__ == "__main__":
     added = ensure_deps(path)
     if added:
         print(f"ensure_deps: added {', '.join(added)} to PEP 723 deps in {path.name}")
+
+    if install:
+        deps = install_deps(path)
+        if deps:
+            print(f"ensure_deps: installed {', '.join(deps)}")
+
+        ok, msg = verify_imports(path)
+        if not ok:
+            print(f"ensure_deps: {msg}", file=sys.stderr)
+            sys.exit(1)
+        print("ensure_deps: all imports verified")

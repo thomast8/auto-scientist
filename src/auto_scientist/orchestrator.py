@@ -2285,15 +2285,24 @@ class Orchestrator:
                 import auto_scientist.ensure_deps as _ed_mod
 
                 # Bootstrap pip and pre-install common scientific packages
-                # from the HOST.  The Codex seatbelt sandbox can USE packages
-                # already in the venv but cannot download new ones via pip.
-                _ed_mod._ensure_pip()
-                _ed_mod._preinstall_scientific_packages()
+                # from the HOST as a performance optimization (avoids
+                # download time inside the sandbox).  The coder sandbox
+                # has network access (danger-full-access) so it can also
+                # pip-install at runtime via ensure_deps --install.
+                try:
+                    _ed_mod._ensure_pip()
+                    _ed_mod._preinstall_scientific_packages()
+                except Exception:
+                    logger.warning(
+                        "Failed to pre-install scientific packages from host; "
+                        "coder will fall back to in-sandbox pip install"
+                    )
 
                 ed_src = Path(_ed_mod.__file__)
                 ed_dst = self.output_dir / "_ensure_deps.py"
                 shutil.copy2(ed_src, ed_dst)
-                run_cmd = f"python3 _ensure_deps.py --install {{script_path}} && {run_cmd}"
+                # Use absolute path so it works even if the coder cd's into a subdirectory
+                run_cmd = f"python3 {ed_dst} --install {{script_path}} && {run_cmd}"
             else:
                 run_cmd = (
                     f"{sys.executable} -m auto_scientist.ensure_deps {{script_path}} && {run_cmd}"
