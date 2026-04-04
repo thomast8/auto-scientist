@@ -1234,10 +1234,11 @@ class Orchestrator:
         return plan
 
     def _load_final_plan_from_disk(self, version_dir: Path) -> dict[str, Any] | None:
-        """Load the final (post-debate) plan from disk and replay prediction updates.
+        """Load the final (post-debate) plan from disk.
 
         Used when resuming from coder: the plan on disk is the post-debate
-        revision, so we also replay _apply_prediction_updates.
+        revision.  Prediction updates are applied only if they are not
+        already present in state (rewind_run preserves them on coder resume).
         """
         plan_path = version_dir / "plan.json"
         if not plan_path.exists():
@@ -1249,7 +1250,18 @@ class Orchestrator:
             logger.error(f"Cannot load final plan: {e}")
             return None
 
-        self._apply_prediction_updates(plan)
+        existing = {
+            p.pred_id
+            for p in self.state.prediction_history
+            if p.iteration_prescribed == self.state.iteration
+        }
+        if not existing:
+            self._apply_prediction_updates(plan)
+        else:
+            logger.info(
+                f"Predictions for iteration {self.state.iteration} already in state, "
+                f"skipping re-application ({len(existing)} found)"
+            )
 
         logger.info(f"Loaded final plan from {plan_path}")
         return plan
@@ -2272,10 +2284,16 @@ class Orchestrator:
             if cfg.provider == "openai":
                 import auto_scientist.ensure_deps as _ed_mod
 
+                # Bootstrap pip and pre-install common scientific packages
+                # from the HOST.  The Codex seatbelt sandbox can USE packages
+                # already in the venv but cannot download new ones via pip.
+                _ed_mod._ensure_pip()
+                _ed_mod._preinstall_scientific_packages()
+
                 ed_src = Path(_ed_mod.__file__)
                 ed_dst = self.output_dir / "_ensure_deps.py"
                 shutil.copy2(ed_src, ed_dst)
-                run_cmd = f"python3 _ensure_deps.py {{script_path}} && {run_cmd}"
+                run_cmd = f"python3 _ensure_deps.py --install {{script_path}} && {run_cmd}"
             else:
                 run_cmd = (
                     f"{sys.executable} -m auto_scientist.ensure_deps {{script_path}} && {run_cmd}"

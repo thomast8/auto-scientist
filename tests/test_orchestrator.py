@@ -2510,6 +2510,86 @@ class TestApplyPredictionUpdates:
         assert orchestrator.state.prediction_history == []
 
 
+class TestLoadFinalPlanDedup:
+    """Regression: resuming from coder must not duplicate predictions already in state."""
+
+    def test_no_duplicate_predictions_on_resume(self, orchestrator, tmp_path):
+        from auto_scientist.state import PredictionRecord
+
+        orchestrator.state.iteration = 1
+        # Simulate state restored by rewind_run: predictions already present
+        orchestrator.state.prediction_history = [
+            PredictionRecord(
+                pred_id="1.1",
+                iteration_prescribed=1,
+                prediction="spline fits better locally",
+                diagnostic="compare regional RMSE",
+                if_confirmed="focus on local fit",
+                if_refuted="problem is elsewhere",
+            ),
+            PredictionRecord(
+                pred_id="1.2",
+                iteration_prescribed=1,
+                prediction="smoothing parameter identifiable",
+                diagnostic="profile s on grid",
+                if_confirmed="fine-tune s",
+                if_refuted="fix s",
+            ),
+        ]
+
+        # Write a plan.json to disk (as would exist from the original run)
+        import json
+
+        version_dir = tmp_path / "v01"
+        version_dir.mkdir()
+        plan = {
+            "testable_predictions": [
+                {
+                    "prediction": "spline fits better locally",
+                    "diagnostic": "compare regional RMSE",
+                    "pred_id": "1.1",
+                },
+                {
+                    "prediction": "smoothing parameter identifiable",
+                    "diagnostic": "profile s on grid",
+                    "pred_id": "1.2",
+                },
+            ],
+        }
+        (version_dir / "plan.json").write_text(json.dumps(plan))
+
+        loaded = orchestrator._load_final_plan_from_disk(version_dir)
+
+        assert loaded is not None
+        # Must still have exactly 2 predictions, not 4
+        assert len(orchestrator.state.prediction_history) == 2
+        assert {p.pred_id for p in orchestrator.state.prediction_history} == {"1.1", "1.2"}
+
+    def test_applies_predictions_when_none_exist(self, orchestrator, tmp_path):
+        import json
+
+        orchestrator.state.iteration = 1
+        orchestrator.state.prediction_history = []
+
+        version_dir = tmp_path / "v01"
+        version_dir.mkdir()
+        plan = {
+            "testable_predictions": [
+                {
+                    "prediction": "spline fits better locally",
+                    "diagnostic": "compare regional RMSE",
+                },
+            ],
+        }
+        (version_dir / "plan.json").write_text(json.dumps(plan))
+
+        loaded = orchestrator._load_final_plan_from_disk(version_dir)
+
+        assert loaded is not None
+        assert len(orchestrator.state.prediction_history) == 1
+        assert orchestrator.state.prediction_history[0].pred_id == "1.1"
+
+
 class TestResolvePredictionOutcomes:
     def _add_pending(self, orchestrator, prediction_text, pred_id=""):
         from auto_scientist.state import PredictionRecord
