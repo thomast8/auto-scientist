@@ -670,8 +670,8 @@ class Orchestrator:
         from auto_scientist.resume import AGENT_ORDER
 
         logger.info(f"=== Iteration {self.state.iteration} start ===")
-        self._live.start_iteration(self.state.iteration)
-        self._live.update_status(iteration=self.state.iteration)
+        self._live.start_iteration(self.state.iteration, max_iterations=self.max_iterations)
+        self._live.update_status(iteration=self.state.iteration, max_iterations=self.max_iterations)
 
         version = f"v{self.state.iteration:02d}"
         version_dir = self.output_dir / version

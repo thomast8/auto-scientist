@@ -474,6 +474,7 @@ class MetricsBar(Widget):
         super().__init__()
         self.start_time = time.monotonic()
         self.iteration = 0
+        self.max_iterations: int | None = None
         self.phase = ""
         self.total_input_tokens = 0
         self.total_output_tokens = 0
@@ -490,12 +491,15 @@ class MetricsBar(Widget):
         self,
         iteration: int | None = None,
         phase: str | None = None,
+        max_iterations: int | None = None,
     ) -> None:
         """Update metrics bar fields. Only non-None values are changed."""
         if iteration is not None:
             self.iteration = iteration
         if phase is not None:
             self.phase = phase
+        if max_iterations is not None:
+            self.max_iterations = max_iterations
         self.refresh()
 
     def finish(self) -> None:
@@ -516,7 +520,10 @@ class MetricsBar(Widget):
         phase_style = PHASE_STYLES.get(self.phase, "cyan")
 
         line = Text()
-        line.append(f" Iteration {self.iteration}", style="bold")
+        iter_label = f" Iteration {self.iteration}"
+        if self.max_iterations is not None:
+            iter_label += f"/{self.max_iterations}"
+        line.append(iter_label, style="bold")
         line.append("  ")
         line.append(self.phase, style=phase_style)
         line.append("  ", style="dim")
@@ -1013,9 +1020,14 @@ class PipelineLive:
                 f"[{panel.panel_name}] {panel.done_summary} ({panel._build_footer()})"
             )
 
-    def start_iteration(self, title: int | str) -> None:
+    def start_iteration(self, title: int | str, max_iterations: int | None = None) -> None:
         """Begin an iteration container."""
-        iter_title = f"Iteration {title}" if isinstance(title, int) else title
+        if isinstance(title, int) and max_iterations is not None:
+            iter_title = f"Iteration {title}/{max_iterations}"
+        elif isinstance(title, int):
+            iter_title = f"Iteration {title}"
+        else:
+            iter_title = title
         container = IterationContainer(iter_title=iter_title)
         self._current_iteration = container
         if self._app is not None:
