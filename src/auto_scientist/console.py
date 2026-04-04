@@ -522,7 +522,7 @@ class MetricsBar(Widget):
         line = Text()
         iter_label = f" Iteration {self.iteration}"
         if self.max_iterations is not None:
-            iter_label += f"/{self.max_iterations}"
+            iter_label += f"/{self.max_iterations - 1}"
         line.append(iter_label, style="bold")
         line.append("  ")
         line.append(self.phase, style=phase_style)
@@ -1023,7 +1023,7 @@ class PipelineLive:
     def start_iteration(self, title: int | str, max_iterations: int | None = None) -> None:
         """Begin an iteration container."""
         if isinstance(title, int) and max_iterations is not None:
-            iter_title = f"Iteration {title}/{max_iterations}"
+            iter_title = f"Iteration {title}/{max_iterations - 1}"
         elif isinstance(title, int):
             iter_title = f"Iteration {title}"
         else:
