@@ -466,6 +466,9 @@ class Orchestrator:
             self._live.start(log_path=self.output_dir / "console.log")
             self._live.mount_banner(self._build_startup_banner())
 
+        # Expose max_iterations to the metrics bar from the start
+        self._live.update_status(max_iterations=self.max_iterations)
+
         # Restore previous iterations from manifest (for fork / resume)
         self._restore_iterations_from_manifest()
 
