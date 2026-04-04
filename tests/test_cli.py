@@ -604,8 +604,8 @@ class TestResumeCommand:
 
     @patch("auto_scientist.cli.PipelineApp")
     @patch("auto_scientist.cli.Orchestrator")
-    def test_resume_completed_fork_extends_to_default(self, mock_orch, mock_app_cls, tmp_path):
-        """Forking a completed run should extend max_iterations to default, not restore."""
+    def test_resume_completed_fork_respects_saved_max(self, mock_orch, mock_app_cls, tmp_path):
+        """Forking a completed run should respect the saved max_iterations."""
         state = ExperimentState(
             domain="auto", goal="g", phase="stopped", iteration=3, max_iterations=3
         )
@@ -617,8 +617,8 @@ class TestResumeCommand:
         result = runner.invoke(cli, ["resume", "--state", str(tmp_path), "--fork"])
 
         assert result.exit_code == 0
-        assert mock_orch.call_args.kwargs["max_iterations"] == 20
-        assert "Extending to 20" in result.output
+        assert mock_orch.call_args.kwargs["max_iterations"] == 3
+        assert "restored from original run" in result.output
 
     def test_resume_old_state_past_default_requires_explicit(self, tmp_path):
         """Old state at iteration >= 20 must require explicit --max-iterations."""

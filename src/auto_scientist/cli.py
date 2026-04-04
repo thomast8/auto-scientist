@@ -580,7 +580,6 @@ def resume(
     _cli_source = click.core.ParameterSource.COMMANDLINE
     user_set_max_iter = ctx.get_parameter_source("max_iterations") == _cli_source
     saved_max = source_state.max_iterations
-    is_completed = source_state.phase in ("stopped", "report")
 
     if user_set_max_iter:
         assert max_iterations is not None
@@ -588,17 +587,6 @@ def resume(
         console.print(
             f"Max iterations: {effective_max} (from --max-iterations)",
             style="bold",
-        )
-    elif is_completed:
-        # Completed run being forked: the original cap is exhausted, so extend
-        # to the default to give new iterations room to run.
-        effective_max = default_max
-        console.print(
-            f"[yellow]Original run completed with max_iterations={saved_max or '?'}. "
-            f"Extending to {effective_max} for the forked run.[/yellow]",
-        )
-        console.print(
-            "[dim]Use --max-iterations to set a different cap.[/dim]",
         )
     elif saved_max is not None:
         effective_max = saved_max
