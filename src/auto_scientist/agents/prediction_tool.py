@@ -9,6 +9,8 @@ Also provides `_handle_read_predictions()` for direct use in tests.
 
 from __future__ import annotations
 
+import contextlib
+import json
 import logging
 from pathlib import Path
 from typing import Any
@@ -25,7 +27,7 @@ logger = logging.getLogger(__name__)
 _READ_PREDICTIONS_DESCRIPTION = (
     "Drill into prediction history details. The compact prediction tree "
     "is already in your prompt; use this tool for full records. "
-    "Use status=true for counts, chain/pred_ids/filter/iteration for "
+    "Use summary=true for counts, chain/pred_ids/outcome/iteration for "
     "specific predictions with full detail (evidence, diagnostics, "
     "implications). Prefer fewer targeted queries over exhaustive audits."
 )
@@ -33,7 +35,7 @@ _READ_PREDICTIONS_DESCRIPTION = (
 _READ_PREDICTIONS_SCHEMA: dict[str, Any] = {
     "type": "object",
     "properties": {
-        "status": {
+        "summary": {
             "type": "boolean",
             "description": (
                 "Returns a count header: total predictions and "
@@ -59,7 +61,7 @@ _READ_PREDICTIONS_SCHEMA: dict[str, Any] = {
                 "E.g. ['2.1', '3.4']."
             ),
         },
-        "filter": {
+        "outcome": {
             "type": "string",
             "enum": [
                 "pending",
@@ -69,7 +71,7 @@ _READ_PREDICTIONS_SCHEMA: dict[str, Any] = {
                 "active_chains",
             ],
             "description": (
-                "Return all predictions with this status. "
+                "Return all predictions with this outcome. "
                 "'active_chains' returns pending predictions plus their "
                 "full ancestor chains."
             ),
@@ -81,6 +83,41 @@ _READ_PREDICTIONS_SCHEMA: dict[str, Any] = {
     },
 }
 
+
+def _normalize_args(args: dict[str, Any]) -> dict[str, Any]:
+    """Coerce common LLM type mistakes into the canonical schema.
+
+    Fixes observed in production:
+      - ``pred_ids: '["0.1"]'`` (JSON string) instead of ``["0.1"]`` (array)
+      - ``pred_ids: "0.1"`` (bare string) instead of ``["0.1"]``
+      - ``iteration: "1"`` (string) instead of ``1`` (int)
+    """
+    out = dict(args)
+
+    # pred_ids: string -> parse as JSON array or wrap bare string
+    # Also coerce elements to str (models sometimes send numeric IDs like [0.1])
+    pred_ids = out.get("pred_ids")
+    if isinstance(pred_ids, str):
+        try:
+            parsed = json.loads(pred_ids)
+            if isinstance(parsed, list):
+                out["pred_ids"] = [str(x) for x in parsed]
+            else:
+                out["pred_ids"] = [pred_ids]
+        except (json.JSONDecodeError, ValueError):
+            out["pred_ids"] = [pred_ids]
+    elif isinstance(pred_ids, list):
+        out["pred_ids"] = [str(x) for x in pred_ids]
+
+    # iteration: numeric string -> int
+    iteration = out.get("iteration")
+    if isinstance(iteration, str):
+        with contextlib.suppress(ValueError):
+            out["iteration"] = int(iteration)
+
+    return out
+
+
 PREDICTION_SPEC = MCPToolSpec(
     server_name="predictions",
     tool_name="read_predictions",
@@ -88,7 +125,7 @@ PREDICTION_SPEC = MCPToolSpec(
     input_schema=_READ_PREDICTIONS_SCHEMA,
     deferred_description=(
         "mcp__predictions__read_predictions("
-        "status?, chain?, pred_ids?, filter?, iteration?) "
+        "summary?, chain?, pred_ids?, outcome?, iteration?) "
         "- Drill into prediction details. Tree is already in your prompt."
     ),
 )
@@ -271,30 +308,32 @@ async def _handle_read_predictions(
     args: dict[str, Any],
 ) -> dict[str, Any]:
     """Core handler logic for the read_predictions tool."""
+    args = _normalize_args(args)
+
     if not prediction_history:
         return {"content": [{"type": "text", "text": "No predictions in history yet."}]}
 
     by_id = {r.pred_id: r for r in prediction_history if r.pred_id}
     available = ", ".join(sorted(by_id.keys()))
 
-    # Status mode: counts only (tree is already in the prompt)
-    if args.get("status"):
+    # Summary mode: counts only (tree is already in the prompt)
+    if args.get("summary"):
         return _build_status_response(prediction_history)
 
     pred_ids = args.get("pred_ids")
     chain_id = args.get("chain")
-    status_filter = args.get("filter")
+    outcome_value = args.get("outcome")
     iteration = args.get("iteration")
 
     # Require at least one query parameter
-    if not pred_ids and not chain_id and not status_filter and iteration is None:
+    if not pred_ids and not chain_id and not outcome_value and iteration is None:
         return {
             "content": [
                 {
                     "type": "text",
                     "text": (
-                        "Please specify a query: status, pred_ids, chain, "
-                        f"filter, or iteration. Available IDs: {available}"
+                        "Please specify a query: summary, pred_ids, chain, "
+                        f"outcome, or iteration. Available IDs: {available}"
                     ),
                 }
             ]
@@ -338,7 +377,7 @@ async def _handle_read_predictions(
             key=lambda r: (r.iteration_prescribed, r.pred_id),
         )
 
-    elif status_filter == "active_chains":
+    elif outcome_value == "active_chains":
         pending = [r for r in prediction_history if r.outcome == "pending"]
         active_ids: set[str] = set()
         id_less_pending: list[PredictionRecord] = []
@@ -351,8 +390,8 @@ async def _handle_read_predictions(
         selected = [r for r in prediction_history if r.pred_id in active_ids]
         selected.extend(id_less_pending)
 
-    elif status_filter:
-        selected = [r for r in prediction_history if r.outcome == status_filter]
+    elif outcome_value:
+        selected = [r for r in prediction_history if r.outcome == outcome_value]
 
     elif iteration is not None:
         selected = [r for r in prediction_history if r.iteration_prescribed == iteration]

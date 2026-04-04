@@ -263,7 +263,7 @@ history, lab notebook, and domain knowledge.
 
 A compact summary of the prediction history is included in the context below.
 When you need more detail on a specific prediction (full reasoning, chain of
-related predictions, or statistics by status/iteration), use the prediction
+related predictions, or statistics by outcome/iteration), use the prediction
 query tool rather than guessing from the summary.
 </pipeline_context>
 

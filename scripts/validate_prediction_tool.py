@@ -135,9 +135,9 @@ def show_mcp_tool_demo(state: ExperimentState) -> None:
     preds = state.prediction_history
 
     queries: list[tuple[str, dict[str, Any]]] = [
-        ("All pending predictions", {"filter": "pending"}),
-        ("All refuted (dead ends)", {"filter": "refuted"}),
-        ("Active chains (pending + ancestors)", {"filter": "active_chains"}),
+        ("All pending predictions", {"outcome": "pending"}),
+        ("All refuted (dead ends)", {"outcome": "refuted"}),
+        ("Active chains (pending + ancestors)", {"outcome": "active_chains"}),
         ("Specific prediction [0.2]", {"pred_ids": ["0.2"]}),
         ("Iteration 1 predictions", {"iteration": 1}),
     ]

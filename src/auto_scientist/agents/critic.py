@@ -550,7 +550,7 @@ def _build_critic_prompt(
         prediction_pipeline_text = (
             "\nA compact summary of the prediction history is included in the context "
             "below.\nWhen you need more detail on a specific prediction (full reasoning, "
-            "chain of\nrelated predictions, or statistics by status/iteration), use the "
+            "chain of\nrelated predictions, or statistics by outcome/iteration), use the "
             "prediction\nquery tool rather than guessing from the summary."
         )
         prediction_history_section = (

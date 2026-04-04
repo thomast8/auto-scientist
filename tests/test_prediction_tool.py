@@ -8,6 +8,7 @@ import pytest
 
 from auto_scientist.agents.prediction_tool import (
     _handle_read_predictions,
+    _normalize_args,
     build_prediction_mcp_server,
 )
 from auto_scientist.state import PredictionRecord
@@ -112,22 +113,22 @@ class TestHandleReadPredictions:
         assert "not found" in text.lower() or "no predictions" in text.lower()
 
     @pytest.mark.asyncio
-    async def test_filter_pending(self, sample_history):
-        result = await _handle_read_predictions(sample_history, {"filter": "pending"})
+    async def test_outcome_pending(self, sample_history):
+        result = await _handle_read_predictions(sample_history, {"outcome": "pending"})
         text = result["content"][0]["text"]
         assert "[2.1]" in text
         assert "[0.1]" not in text  # confirmed, not pending
 
     @pytest.mark.asyncio
-    async def test_filter_refuted(self, sample_history):
-        result = await _handle_read_predictions(sample_history, {"filter": "refuted"})
+    async def test_outcome_refuted(self, sample_history):
+        result = await _handle_read_predictions(sample_history, {"outcome": "refuted"})
         text = result["content"][0]["text"]
         assert "[0.2]" in text
         assert "[0.1]" not in text
 
     @pytest.mark.asyncio
-    async def test_filter_active_chains(self, sample_history):
-        result = await _handle_read_predictions(sample_history, {"filter": "active_chains"})
+    async def test_outcome_active_chains(self, sample_history):
+        result = await _handle_read_predictions(sample_history, {"outcome": "active_chains"})
         text = result["content"][0]["text"]
         # 2.1 is pending
         assert "[2.1]" in text
@@ -147,8 +148,8 @@ class TestHandleReadPredictions:
         assert "[0.1]" not in text
 
     @pytest.mark.asyncio
-    async def test_filter_confirmed_returns_subset(self, sample_history):
-        result = await _handle_read_predictions(sample_history, {"filter": "confirmed"})
+    async def test_outcome_confirmed_returns_subset(self, sample_history):
+        result = await _handle_read_predictions(sample_history, {"outcome": "confirmed"})
         text = result["content"][0]["text"]
         assert "[0.1] CONFIRMED" in text
         assert "[1.1] CONFIRMED" in text
@@ -207,9 +208,9 @@ class TestHandleReadPredictions:
         assert "[2.1]" in text  # self
 
     @pytest.mark.asyncio
-    async def test_status_returns_counts_only(self, sample_history):
-        """status=true returns counts header without the compact tree."""
-        result = await _handle_read_predictions(sample_history, {"status": True})
+    async def test_summary_returns_counts_only(self, sample_history):
+        """summary=true returns counts header without the compact tree."""
+        result = await _handle_read_predictions(sample_history, {"summary": True})
         text = result["content"][0]["text"]
         # Counts header
         assert "Total: 6 predictions" in text
@@ -228,6 +229,74 @@ class TestHandleReadPredictions:
         assert "Prediction:" in text
         assert "Diagnostic:" in text
         assert "Evidence:" in text
+
+
+class TestNormalizeArgs:
+    """Models sometimes pass wrong types; normalization coerces them."""
+
+    def test_pred_ids_json_string_parsed(self):
+        """'["0.1", "0.2"]' -> ['0.1', '0.2']"""
+        args = _normalize_args({"pred_ids": '["0.1", "0.2"]'})
+        assert args == {"pred_ids": ["0.1", "0.2"]}
+
+    def test_pred_ids_single_string_wrapped(self):
+        """A bare string '0.1' -> ['0.1']"""
+        args = _normalize_args({"pred_ids": "0.1"})
+        assert args == {"pred_ids": ["0.1"]}
+
+    def test_pred_ids_array_unchanged(self):
+        args = _normalize_args({"pred_ids": ["0.1", "0.2"]})
+        assert args == {"pred_ids": ["0.1", "0.2"]}
+
+    def test_pred_ids_numeric_array_coerced_to_strings(self):
+        """[0.1, 0.2] -> ['0.1', '0.2']"""
+        args = _normalize_args({"pred_ids": [0.1, 0.2]})
+        assert args == {"pred_ids": ["0.1", "0.2"]}
+
+    def test_pred_ids_json_numeric_array_coerced(self):
+        """'[0.1]' parsed as JSON gives floats, should become strings."""
+        args = _normalize_args({"pred_ids": "[0.1]"})
+        assert args == {"pred_ids": ["0.1"]}
+
+    def test_iteration_string_coerced_to_int(self):
+        """'1' -> 1"""
+        args = _normalize_args({"iteration": "1"})
+        assert args == {"iteration": 1}
+
+    def test_iteration_int_unchanged(self):
+        args = _normalize_args({"iteration": 2})
+        assert args == {"iteration": 2}
+
+    def test_iteration_non_numeric_string_left_alone(self):
+        args = _normalize_args({"iteration": "abc"})
+        assert args == {"iteration": "abc"}
+
+    def test_empty_args_unchanged(self):
+        assert _normalize_args({}) == {}
+
+    def test_valid_args_pass_through(self):
+        original = {"chain": "1.1"}
+        assert _normalize_args(original) == {"chain": "1.1"}
+
+
+class TestHandlerToleratesMalformedTypes:
+    """End-to-end: handler produces correct results from type-coerced inputs."""
+
+    @pytest.mark.asyncio
+    async def test_pred_ids_json_string(self, sample_history):
+        """pred_ids as JSON string should work."""
+        result = await _handle_read_predictions(sample_history, {"pred_ids": '["0.1", "0.2"]'})
+        text = result["content"][0]["text"]
+        assert "[0.1]" in text
+        assert "[0.2]" in text
+
+    @pytest.mark.asyncio
+    async def test_iteration_string(self, sample_history):
+        """iteration as string should work."""
+        result = await _handle_read_predictions(sample_history, {"iteration": "2"})
+        text = result["content"][0]["text"]
+        assert "[2.1]" in text
+        assert "[2.2]" in text
 
 
 class TestBuildPredictionMcpServer:

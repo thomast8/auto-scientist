@@ -148,11 +148,46 @@ def _build_status(predictions: list[dict]) -> str:
 # ---------------------------------------------------------------------------
 
 
+def _normalize_args(args: dict[str, Any]) -> dict[str, Any]:
+    """Coerce common LLM type mistakes into the canonical schema.
+
+    Duplicated from prediction_tool.py to avoid importing framework code
+    in this standalone subprocess script.
+    """
+    import json as _json
+
+    out = dict(args)
+
+    pred_ids = out.get("pred_ids")
+    if isinstance(pred_ids, str):
+        try:
+            parsed = _json.loads(pred_ids)
+            if isinstance(parsed, list):
+                out["pred_ids"] = [str(x) for x in parsed]
+            else:
+                out["pred_ids"] = [pred_ids]
+        except (ValueError, _json.JSONDecodeError):
+            out["pred_ids"] = [pred_ids]
+    elif isinstance(pred_ids, list):
+        out["pred_ids"] = [str(x) for x in pred_ids]
+
+    import contextlib as _contextlib
+
+    iteration = out.get("iteration")
+    if isinstance(iteration, str):
+        with _contextlib.suppress(ValueError):
+            out["iteration"] = int(iteration)
+
+    return out
+
+
 def _query(predictions: list[dict[str, Any]], args: dict[str, Any]) -> str:
+    args = _normalize_args(args)
+
     if not predictions:
         return "No predictions in history yet."
 
-    if args.get("status"):
+    if args.get("summary"):
         return _build_status(predictions)
 
     by_id = {r["pred_id"]: r for r in predictions if r.get("pred_id")}
@@ -160,12 +195,12 @@ def _query(predictions: list[dict[str, Any]], args: dict[str, Any]) -> str:
 
     pred_ids = args.get("pred_ids")
     chain_id = args.get("chain")
-    status_filter = args.get("filter")
+    outcome_value = args.get("outcome")
     iteration = args.get("iteration")
 
-    if not pred_ids and not chain_id and not status_filter and iteration is None:
+    if not pred_ids and not chain_id and not outcome_value and iteration is None:
         return (
-            "Please specify a query: status, pred_ids, chain, filter, "
+            "Please specify a query: summary, pred_ids, chain, outcome, "
             f"or iteration. Available IDs: {available}"
         )
 
@@ -189,7 +224,7 @@ def _query(predictions: list[dict[str, Any]], args: dict[str, Any]) -> str:
             key=lambda r: (r.get("iteration_prescribed", 0), r.get("pred_id", "")),
         )
 
-    elif status_filter == "active_chains":
+    elif outcome_value == "active_chains":
         pending = [r for r in predictions if r.get("outcome") == "pending"]
         active_ids: set[str] = set()
         id_less = []
@@ -203,8 +238,8 @@ def _query(predictions: list[dict[str, Any]], args: dict[str, Any]) -> str:
         selected = [r for r in predictions if r.get("pred_id") in active_ids]
         selected.extend(id_less)
 
-    elif status_filter:
-        selected = [r for r in predictions if r.get("outcome") == status_filter]
+    elif outcome_value:
+        selected = [r for r in predictions if r.get("outcome") == outcome_value]
 
     elif iteration is not None:
         selected = [r for r in predictions if r.get("iteration_prescribed") == iteration]
@@ -229,15 +264,15 @@ if __name__ == "__main__":
             "Drill into prediction history details. The "
             "compact prediction tree is already in your "
             "prompt; use this tool for full records. "
-            "Use status=true for counts, chain/pred_ids/"
-            "filter/iteration for specific predictions "
+            "Use summary=true for counts, chain/pred_ids/"
+            "outcome/iteration for specific predictions "
             "with full detail (evidence, diagnostics, "
             "implications)."
         ),
         input_schema={
             "type": "object",
             "properties": {
-                "status": {
+                "summary": {
                     "type": "boolean",
                     "description": (
                         "Returns a count header: total "
@@ -265,7 +300,7 @@ if __name__ == "__main__":
                         "implications)."
                     ),
                 },
-                "filter": {
+                "outcome": {
                     "type": "string",
                     "enum": [
                         "pending",
@@ -275,7 +310,7 @@ if __name__ == "__main__":
                         "active_chains",
                     ],
                     "description": (
-                        "Return all predictions with this status. "
+                        "Return all predictions with this outcome. "
                         "'active_chains' returns pending "
                         "predictions plus their full ancestor "
                         "chains."
@@ -289,7 +324,7 @@ if __name__ == "__main__":
         },
         deferred_description=(
             "mcp__predictions__read_predictions("
-            "status?, chain?, pred_ids?, filter?, iteration?) "
+            "summary?, chain?, pred_ids?, outcome?, iteration?) "
             "- Drill into prediction details. Tree is already in your prompt."
         ),
     )

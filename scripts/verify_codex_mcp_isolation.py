@@ -267,7 +267,7 @@ args = ["{server_script}", "{predictions_path}"]
         # 2. Spawn Codex and ask it to use the tool
         prompt = (
             "You have a tool called mcp__predictions__read_predictions. "
-            "Call it with overview=true. Report the prediction IDs and their statuses. "
+            "Call it with summary=true. Report the prediction IDs and their outcomes. "
             "If you cannot find this tool, say exactly: TOOL_NOT_FOUND"
         )
 

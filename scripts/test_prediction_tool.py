@@ -98,7 +98,7 @@ async def run_validation():
         "\n\n<available_tools>\n"
         "Your available tools (call directly, do NOT use ToolSearch):\n"
         "  - WebSearch(query: str) - Search the web.\n"
-        "  - mcp__predictions__read_predictions(pred_ids?, filter?, iteration?) "
+        "  - mcp__predictions__read_predictions(pred_ids?, outcome?, iteration?) "
         "- Query prediction history for full detail.\n"
         "</available_tools>"
         "\n<turn_budget>You have a budget of 15 turns for this task.</turn_budget>"
