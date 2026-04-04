@@ -175,6 +175,38 @@ no previous iteration.
 
 <example>
 <input>
+Domain: molecular simulation of polymer crystallization
+Results: script timed out after 120 minutes
+  Hypothesis: Full atomistic simulation with explicit solvent will
+  capture crystallization kinetics missed by the coarse-grained model
+  Partial results: none
+Previous iteration: v01 coarse-grained baseline, crystallization_rate=0.15/ns
+Plots: none generated due to timeout
+</input>
+<reasoning>
+Script timed out before producing results. No metrics, no plots.
+Timeout was 120 minutes. Hypothesis involved full atomistic simulation
+with explicit solvent, which is computationally expensive. Report
+timeout duration and hypothesis for the Scientist.
+</reasoning>
+<output>
+{{
+  "key_metrics": {{"timeout_minutes": 120}},
+  "improvements": [],
+  "regressions": [],
+  "observations": [
+    "script timed out after 120 minutes while testing: Full atomistic \
+simulation with explicit solvent will capture crystallization kinetics \
+missed by the coarse-grained model",
+    "no partial results were produced before timeout"
+  ],
+  "prediction_outcomes": []
+}}
+</output>
+</example>
+
+<example>
+<input>
 Domain: coastal erosion monitoring along a 50 km shoreline
 Results: mean_erosion=2.3 m/yr, max_erosion=5.1 m/yr at transect 12,
   deposition_rate=0.8 m/yr, wave_energy_corr=0.72, n_transects=48,
@@ -337,6 +369,12 @@ Fallback rules:
 - No experiment results (data characterization mode): key_metrics is empty,
   domain_knowledge and data_summary are populated
 - Normal iteration mode: domain_knowledge and data_summary are omitted
+- Script timed out: report the timeout as the first observation
+  ("script timed out after N minutes while testing: <hypothesis>").
+  Include timeout_minutes in key_metrics. If partial results exist,
+  extract whatever metrics are available. improvements and regressions
+  are empty (incomplete run cannot be compared). prediction_outcomes
+  are empty (tests did not complete).
 </output_format>
 
 <recap>

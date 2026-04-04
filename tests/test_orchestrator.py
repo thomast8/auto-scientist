@@ -462,6 +462,7 @@ class TestEvaluate:
         entry = VersionEntry(version="v01", iteration=1, script_path="/tmp/s.py")
         orchestrator._evaluate(None, entry)
         assert entry.status == "failed"
+        assert entry.failure_reason == "no_result"
         assert orchestrator.state.consecutive_failures == 1
 
     def test_timed_out_records_failure(self, orchestrator):
@@ -469,6 +470,7 @@ class TestEvaluate:
         entry = VersionEntry(version="v01", iteration=1, script_path="/tmp/s.py")
         orchestrator._evaluate(result, entry)
         assert entry.status == "failed"
+        assert entry.failure_reason == "timed_out"
         assert orchestrator.state.consecutive_failures == 1
 
     def test_nonzero_exit_records_failure(self, orchestrator):
@@ -476,6 +478,7 @@ class TestEvaluate:
         entry = VersionEntry(version="v01", iteration=1, script_path="/tmp/s.py")
         orchestrator._evaluate(result, entry)
         assert entry.status == "failed"
+        assert entry.failure_reason == "crash"
         assert orchestrator.state.consecutive_failures == 1
 
     def test_success_records_completion(self, orchestrator, tmp_path):
@@ -1444,6 +1447,69 @@ class TestRunAnalystNormal:
         ):
             result = await orchestrator._run_analyst()
 
+        assert result is None
+
+
+class TestRunAnalystTimeout:
+    @pytest.mark.asyncio
+    async def test_timeout_routes_to_analyst(self, orchestrator, tmp_path):
+        """When latest version timed out, _run_analyst invokes analyst with timeout_context."""
+        orchestrator.output_dir.mkdir(parents=True, exist_ok=True)
+
+        version_dir = tmp_path / "v01"
+        version_dir.mkdir()
+        script_path = version_dir / "experiment.py"
+        script_path.write_text("print('hello')")
+
+        latest = VersionEntry(
+            version="v01",
+            iteration=1,
+            script_path=str(script_path),
+            results_path=None,
+            status="failed",
+            failure_reason="timed_out",
+            hypothesis="Heavy computation hypothesis",
+        )
+        orchestrator.state.versions = [latest]
+
+        captured_kwargs = {}
+
+        async def fake_analyst(**kwargs):
+            captured_kwargs.update(kwargs)
+            return {
+                "key_metrics": {"timeout_minutes": 120},
+                "improvements": [],
+                "regressions": [],
+                "observations": ["script timed out"],
+            }
+
+        with patch("auto_scientist.agents.analyst.run_analyst", side_effect=fake_analyst):
+            result = await orchestrator._run_analyst()
+
+        assert result is not None
+        assert result["observations"] == ["script timed out"]
+        assert captured_kwargs.get("timeout_context") is not None
+        ctx = captured_kwargs["timeout_context"]
+        assert ctx["hypothesis"] == "Heavy computation hypothesis"
+        assert ctx["timeout_minutes"] == 120
+
+    @pytest.mark.asyncio
+    async def test_non_timeout_failure_still_skips(self, orchestrator, tmp_path):
+        """When latest version failed (not timeout) with no results, analyst is skipped."""
+        orchestrator.output_dir.mkdir(parents=True, exist_ok=True)
+
+        orchestrator.state.versions = [
+            VersionEntry(
+                version="v01",
+                iteration=1,
+                script_path="/tmp/s.py",
+                results_path=None,
+                status="failed",
+                failure_reason="crash",
+            ),
+        ]
+
+        result = await orchestrator._run_analyst()
         assert result is None
 
 

@@ -646,7 +646,11 @@ class Orchestrator:
 
         return canonical_data_dir
 
-    async def _fail_iteration(self, label: str) -> None:
+    async def _fail_iteration(
+        self,
+        label: str,
+        failure_reason: Literal["timed_out", "crash", "no_script", "no_result"] | None = None,
+    ) -> None:
         """Record a failed iteration and finalize the TUI with a red border."""
         version = f"v{self.state.iteration:02d}"
         version_entry = VersionEntry(
@@ -655,6 +659,7 @@ class Orchestrator:
             script_path="",
             hypothesis="",
             status="failed",
+            failure_reason=failure_reason,
         )
         self.state.record_failure()
         self.state.record_version(version_entry)
@@ -816,7 +821,7 @@ class Orchestrator:
         new_script = await self._run_coder(final_plan)
 
         if new_script is None:
-            await self._fail_iteration("failed (no script)")
+            await self._fail_iteration("failed (no script)", failure_reason="no_script")
             return
 
         # Step 6: Read run result from Coder's output files
@@ -1409,12 +1414,31 @@ class Orchestrator:
 
         # Find results file (resolve to absolute for agent cwd consistency)
         results_path = Path(latest.results_path).resolve() if latest.results_path else None
+
+        # Build timeout context if previous version timed out
+        timeout_context: dict[str, Any] | None = None
+        if latest.failure_reason == "timed_out":
+            run_timeout = self.config.run_timeout_minutes if self.config else 120
+            timeout_context = {
+                "timeout_minutes": run_timeout,
+                "hypothesis": latest.hypothesis,
+            }
+
         if not results_path or not results_path.exists():
-            self._live.log("ANALYZE: skipped (no results file)")
-            return None
+            if timeout_context is None:
+                self._live.log("ANALYZE: skipped (no results file)")
+                return None
+            # Timeout: check for partial results/plots in the version directory
+            version_dir = Path(latest.script_path).parent if latest.script_path else None
+            if version_dir:
+                partial_results = version_dir / "results.txt"
+                results_path = partial_results.resolve() if partial_results.exists() else None
 
         # Find plot PNGs in the version directory
-        version_dir = Path(latest.script_path).parent
+        if latest.script_path:
+            version_dir = Path(latest.script_path).parent
+        else:
+            version_dir = notebook_path.parent
         plot_paths = sorted(version_dir.glob("*.png"))
 
         cfg = self.model_config.resolve("analyst")
@@ -1439,6 +1463,7 @@ class Orchestrator:
                     model=cfg.model,
                     message_buffer=buf,
                     provider=cfg.provider,
+                    timeout_context=timeout_context,
                 )
 
             analysis: dict[str, Any] = await self._with_summaries(
@@ -2522,16 +2547,19 @@ class Orchestrator:
         """Evaluate results and update the version entry."""
         if run_result is None:
             version_entry.status = "failed"
+            version_entry.failure_reason = "no_result"
             self.state.record_failure()
             return
 
         if run_result.timed_out:
             version_entry.status = "failed"
+            version_entry.failure_reason = "timed_out"
             self.state.record_failure()
             return
 
         if not run_result.success:
             version_entry.status = "failed"
+            version_entry.failure_reason = "crash"
             self.state.record_failure()
             return
 

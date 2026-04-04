@@ -145,6 +145,43 @@ class TestVersionEntry:
             )
             assert entry.status == status
 
+    def test_failure_reason_defaults_to_none(self):
+        entry = VersionEntry(version="v01", iteration=1, script_path="/tmp/s.py")
+        assert entry.failure_reason is None
+
+    def test_failure_reason_values(self):
+        for reason in ["timed_out", "crash", "no_script", "no_result"]:
+            entry = VersionEntry(
+                version="v01",
+                iteration=1,
+                script_path="/tmp/s.py",
+                failure_reason=reason,
+            )
+            assert entry.failure_reason == reason
+
+    def test_failure_reason_roundtrip(self):
+        entry = VersionEntry(
+            version="v01",
+            iteration=1,
+            script_path="/tmp/s.py",
+            status="failed",
+            failure_reason="timed_out",
+        )
+        json_str = entry.model_dump_json()
+        loaded = VersionEntry.model_validate_json(json_str)
+        assert loaded.failure_reason == "timed_out"
+
+    def test_failure_reason_backward_compat(self):
+        """Loading JSON without failure_reason should default to None."""
+        data = {
+            "version": "v01",
+            "iteration": 1,
+            "script_path": "/tmp/s.py",
+            "status": "failed",
+        }
+        entry = VersionEntry.model_validate(data)
+        assert entry.failure_reason is None
+
 
 class TestExperimentStateExtended:
     def test_record_version_appends_all(self):

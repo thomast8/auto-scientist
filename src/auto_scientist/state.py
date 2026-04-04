@@ -16,6 +16,7 @@ class VersionEntry(BaseModel):
     results_path: str | None = None
     hypothesis: str = ""
     status: Literal["pending", "running", "completed", "failed", "crashed"] = "pending"
+    failure_reason: Literal["timed_out", "crash", "no_script", "no_result"] | None = None
 
 
 class PredictionRecord(BaseModel):

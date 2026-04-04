@@ -58,6 +58,12 @@ when applicable.
    - Incremental improvement: refined the existing approach
    - Dead end: abandoned direction (explain the structural reason,
      not just that metrics stalled)
+   - Timed out: script exceeded time limit before completing. This
+     is a resource constraint, not evidence against the hypothesis.
+     Distinguish between the scientific direction (which may be sound)
+     and the computational approach (which was too expensive). Plan a
+     lighter implementation of the same idea before abandoning the
+     direction entirely.
    Note: are results genuine or overfitting artifacts? Converging,
    stuck, or circling?
 
@@ -766,6 +772,13 @@ Fallback rules:
 - First iteration with no analysis: plan from notebook findings
 - No domain_knowledge: plan from data patterns alone
 - Script crash: plan must address the crash first
+- Script timed out (timeout_minutes in key_metrics): the hypothesis may
+  still be valid but the implementation was too expensive. Plan
+  computationally lighter changes: smaller data samples, simpler
+  algorithms, fewer iterations, approximate methods, or staged
+  computation (quick feasibility check before full run). Do not
+  abandon the scientific direction without first trying a lighter
+  approach.
 - should_stop true: changes and predictions may be empty
 </output_format>
 

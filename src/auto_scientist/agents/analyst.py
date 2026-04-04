@@ -71,6 +71,7 @@ async def run_analyst(
     model: str | None = None,
     message_buffer: list[str] | None = None,
     provider: str = "anthropic",
+    timeout_context: dict | None = None,
 ) -> dict[str, Any]:
     """Analyze experiment results and produce structured observation.
 
@@ -82,6 +83,8 @@ async def run_analyst(
         data_dir: Path to canonical data directory (set on iteration 0).
         model: Model override.
         message_buffer: Optional buffer for streaming messages.
+        timeout_context: If provided, indicates the previous script timed out.
+            Keys: timeout_minutes (int), hypothesis (str).
 
     Returns:
         Structured dict with keys:
@@ -127,6 +130,19 @@ async def run_analyst(
             "</plots>"
         )
         cwd = results_path.parent if results_path else notebook_path.parent
+
+    # Prepend timeout context when the previous script timed out
+    if timeout_context:
+        has_partial = results_path is not None and results_path.exists()
+        timeout_block = (
+            "<timeout_info>\n"
+            "IMPORTANT: The previous experiment script TIMED OUT after "
+            f"{timeout_context['timeout_minutes']} minutes.\n"
+            f"Hypothesis being tested: {timeout_context.get('hypothesis', '(unknown)')}\n"
+            f"Partial results available: {'yes' if has_partial else 'no'}\n"
+            "</timeout_info>\n\n"
+        )
+        data_section = timeout_block + data_section
 
     user_prompt = ANALYST_USER.format(
         domain_knowledge=domain_knowledge or "(no domain knowledge provided)",
