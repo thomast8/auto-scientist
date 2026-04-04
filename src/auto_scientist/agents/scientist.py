@@ -93,7 +93,14 @@ SCIENTIST_PLAN_SCHEMA = {
                     "diagnostic": {"type": "string"},
                     "if_confirmed": {"type": "string"},
                     "if_refuted": {"type": "string"},
-                    "follows_from": {"type": ["string", "null"]},
+                    "follows_from": {
+                        "type": ["string", "null"],
+                        "description": (
+                            "pred_id of a prior prediction (e.g. '0.3', '1.2'). "
+                            "Must be an exact bracketed ID from the prediction "
+                            "history, or null for new trajectories."
+                        ),
+                    },
                 },
                 "required": ["prediction", "diagnostic", "if_confirmed", "if_refuted"],
             },

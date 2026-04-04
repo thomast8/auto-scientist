@@ -636,6 +636,8 @@ Notebook: Three iterations of progressively deeper causal analysis.
   not yet confirmed.
 Prediction history: 14 predictions. 7 confirmed, 4 refuted,
   2 inconclusive (not followed up), 1 pending.
+  [2.1] REFUTED: quadratic dose-response not significant (p=0.19)
+  [1.3] INCONCLUSIVE: missingness tested against one covariate only
 </input>
 <reasoning>
 The investigation has answered the core questions (causal edges,
@@ -707,7 +709,7 @@ stratum data, compare AIC with linear model",
 Estimate the optimal dose from the fitted curve",
       "if_refuted": "The dose-floc relationship is genuinely linear \
 in this stratum; nonlinearity can be closed as a sub-question",
-      "follows_from": null
+      "follows_from": "2.1"
     }},
     {{
       "prediction": "Turbidity values are censored above a ceiling \
@@ -718,7 +720,7 @@ sensor specification; compare null rate in top decile vs bottom",
 events are underrepresented. Revise all analyses that assumed MCAR",
       "if_refuted": "Missingness is consistent with MCAR after this \
 additional check; close the missingness sub-question",
-      "follows_from": null
+      "follows_from": "1.3"
     }}
   ]
 }}
@@ -786,8 +788,9 @@ Fallback rules:
 Output valid JSON with all required keys. Each change has
 what/why/how/priority. Testable predictions test your reasoning
 with conditional outcomes (if confirmed/refuted). Build prediction
-trajectories by linking to prior predictions via follows_from.
-The notebook_entry is a continuous narrative.
+trajectories by linking to prior predictions via follows_from
+(use the exact pred_id from brackets like "0.3", not descriptions
+or bare numbers). The notebook_entry is a continuous narrative.
 
 Actively evaluate whether to stop. The investigation ends when the
 core question is answered, not when all questions are exhausted.

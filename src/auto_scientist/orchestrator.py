@@ -813,12 +813,23 @@ class Orchestrator:
             if final_plan:
                 self._apply_prediction_updates(final_plan)
 
-            # Persist the final plan (post-debate revision if applicable)
+            # Persist the final plan (post-debate revision if applicable).
+            # NOTE: this must happen BEFORE carry-forward injection below,
+            # so plan.json reflects only the Scientist's own predictions.
+            # Carry-forward entries are ephemeral (re-derived on resume).
             if final_plan:
                 self._persist_artifact(version_dir, "plan.json", final_plan)
 
         if "debate" not in agents_to_skip or "revision" not in agents_to_skip:
             self._save_partial_panels(version_dir)
+
+        # Carry forward pending predictions from prior iterations so the
+        # Coder includes them in HYPOTHESIS TESTS and the Analyst can evaluate them.
+        if final_plan:
+            carryforward = self._get_pending_carryforward_predictions()
+            if carryforward:
+                existing = final_plan.get("testable_predictions", [])
+                final_plan["testable_predictions"] = existing + carryforward
 
         # Step 5: Coder implements and runs the plan
         new_script = await self._run_coder(final_plan)
@@ -2368,14 +2379,32 @@ class Orchestrator:
 
     _VALID_OUTCOMES = {"confirmed", "refuted", "inconclusive"}
 
+    @staticmethod
+    def _normalize_follows_from(raw: str | None, known_pred_ids: set[str]) -> str | None:
+        """Validate a follows_from value against known prediction IDs.
+
+        Returns the value unchanged if it matches a known pred_id,
+        otherwise returns None with a warning log.
+        """
+        if not raw or not isinstance(raw, str) or not raw.strip():
+            return None
+        raw = raw.strip()
+        if raw in known_pred_ids:
+            return raw
+        logger.warning(f"follows_from '{raw}' is not a known pred_id; setting to null")
+        return None
+
     def _apply_prediction_updates(self, plan: dict[str, Any]) -> None:
         """Extract testable predictions from the Scientist plan and store as pending records.
 
         Assigns ordinal pred_ids like "1.1", "1.2" and injects them back into the
         plan dict so the Coder can include them in HYPOTHESIS TESTS output.
-        Skips malformed or empty prediction entries.
+        Skips malformed or empty prediction entries and carried-forward predictions
+        (which already have PredictionRecords).
         """
         from auto_scientist.state import PredictionRecord
+
+        known_pred_ids = {r.pred_id for r in self.state.prediction_history if r.pred_id}
 
         predictions = plan.get("testable_predictions", [])
         stored = []
@@ -2385,11 +2414,14 @@ class Orchestrator:
                     f"Prediction {i}: expected dict, got {type(pred).__name__}; skipping"
                 )
                 continue
+            if pred.get("_carried_forward"):
+                continue
             text = pred.get("prediction", "")
             if not text or not isinstance(text, str) or not text.strip():
                 logger.warning(f"Prediction {i}: empty or invalid prediction text; skipping")
                 continue
             pred_id = f"{self.state.iteration}.{i}"
+            follows_from = self._normalize_follows_from(pred.get("follows_from"), known_pred_ids)
             record = PredictionRecord(
                 pred_id=pred_id,
                 iteration_prescribed=self.state.iteration,
@@ -2397,13 +2429,47 @@ class Orchestrator:
                 diagnostic=pred.get("diagnostic", ""),
                 if_confirmed=pred.get("if_confirmed", ""),
                 if_refuted=pred.get("if_refuted", ""),
-                follows_from=pred.get("follows_from"),
+                follows_from=follows_from,
             )
             self.state.prediction_history.append(record)
+            known_pred_ids.add(pred_id)
             pred["pred_id"] = pred_id
+            pred["follows_from"] = follows_from
             stored.append(pred_id)
         if stored:
             logger.info(f"Stored {len(stored)} predictions: {', '.join(stored)}")
+
+    def _get_pending_carryforward_predictions(self) -> list[dict[str, Any]]:
+        """Collect pending predictions from prior iterations for carry-forward.
+
+        Returns prediction dicts (matching testable_predictions schema) with a
+        ``_carried_forward`` marker so ``_apply_prediction_updates`` skips them.
+        """
+        current_iter = self.state.iteration
+        carried: list[dict[str, Any]] = []
+        for rec in self.state.prediction_history:
+            if rec.outcome != "pending":
+                continue
+            if rec.iteration_prescribed >= current_iter:
+                continue
+            carried.append(
+                {
+                    "pred_id": rec.pred_id,
+                    "prediction": rec.prediction,
+                    "diagnostic": rec.diagnostic,
+                    "if_confirmed": rec.if_confirmed,
+                    "if_refuted": rec.if_refuted,
+                    "follows_from": rec.follows_from,
+                    "_carried_forward": True,
+                }
+            )
+        if carried:
+            ids = [p["pred_id"] for p in carried]
+            logger.info(
+                f"Carrying forward {len(carried)} pending predictions "
+                f"from prior iterations: {', '.join(ids)}"
+            )
+        return carried
 
     def _resolve_prediction_outcomes(self, analysis: dict[str, Any] | None) -> None:
         """Match Analyst prediction outcomes against pending records in state.
@@ -2493,6 +2559,13 @@ class Orchestrator:
             if self.state.versions:
                 version_dir = self.output_dir / self.state.versions[-1].version
                 self._persist_artifact(version_dir, "final_analysis.json", analysis)
+        still_pending = [r for r in self.state.prediction_history if r.outcome == "pending"]
+        if still_pending:
+            ids = [r.pred_id or "?" for r in still_pending]
+            logger.warning(
+                f"{len(still_pending)} predictions still pending after "
+                f"final resolution: {', '.join(ids)}"
+            )
 
     _INFRA_FILES = {
         "run_result.json",
