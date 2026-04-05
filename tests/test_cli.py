@@ -29,7 +29,7 @@ class TestStatusCommand:
         assert "Domain:     auto" in result.output
         assert "Goal:       test goal" in result.output
         assert "Phase:      iteration" in result.output
-        assert "Iteration:  5" in result.output
+        assert "Iteration:  6" in result.output
 
     def test_shows_run_dir_and_data_path(self, tmp_path):
         state = ExperimentState(
@@ -906,7 +906,7 @@ class TestForkDestination:
         runner = CliRunner()
         result = runner.invoke(
             cli,
-            ["resume", "--from", str(source_dir), "--fork", "--from-iteration", "0"],
+            ["resume", "--from", str(source_dir), "--fork", "--from-iteration", "1"],
         )
 
         assert result.exit_code == 0

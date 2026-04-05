@@ -358,7 +358,7 @@ class Orchestrator:
         )
         self.state.record_failure()
         self.state.record_version(version_entry)
-        logger.info(f"Iteration {self.state.iteration} complete: status={label}")
+        logger.info(f"Iteration {self.state.iteration + 1} complete: status={label}")
         iter_summary = await generate_iteration_summary(self._live, self._summary_model)
         save_iteration_manifest(
             self._live,
@@ -377,9 +377,11 @@ class Orchestrator:
         """Run one iteration of the pipeline (inlined, not _run_iteration)."""
         from auto_scientist.resume import AGENT_ORDER
 
-        logger.info(f"=== Iteration {self.state.iteration} start ===")
-        self._live.start_iteration(self.state.iteration, max_iterations=self.max_iterations)
-        self._live.update_status(iteration=self.state.iteration, max_iterations=self.max_iterations)
+        logger.info(f"=== Iteration {self.state.iteration + 1} start ===")
+        self._live.start_iteration(self.state.iteration + 1, max_iterations=self.max_iterations)
+        self._live.update_status(
+            iteration=self.state.iteration + 1, max_iterations=self.max_iterations
+        )
 
         version = f"v{self.state.iteration:02d}"
         version_dir = self.output_dir / version
@@ -596,7 +598,7 @@ class Orchestrator:
         self._live.flush_completed()
 
         # Increment at end of loop body
-        logger.info(f"Iteration {self.state.iteration} complete: status={version_entry.status}")
+        logger.info(f"Iteration {self.state.iteration + 1} complete: status={version_entry.status}")
         self.state.iteration += 1
 
     @staticmethod

@@ -568,8 +568,8 @@ def rewind_run(
         raise ValueError(f"target_iteration must be >= 0, got {target_iteration}")
     if target_iteration > state.iteration:
         raise ValueError(
-            f"target_iteration ({target_iteration}) must be <= "
-            f"current iteration ({state.iteration})"
+            f"--from-iteration {target_iteration + 1} is beyond "
+            f"current iteration ({state.iteration + 1})"
         )
 
     # --- Detect old output dir for path rewriting ---
@@ -608,10 +608,10 @@ def rewind_run(
             )
             max_existing = existing[-1] if existing else -1
             raise ValueError(
-                f"Cannot resume from '{from_agent}' at iteration {effective_iteration}: "
+                f"Cannot resume from '{from_agent}' at iteration {effective_iteration + 1}: "
                 f"directory '{target_version_dir.name}/' does not exist. "
                 f"The run has iterations up to v{max_existing:02d}. "
-                f"Did you mean --from-iteration {max_existing}?"
+                f"Did you mean --from-iteration {max_existing + 1}?"
             )
 
     # --- Trim state fields ---

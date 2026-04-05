@@ -352,7 +352,7 @@ class TestRewindRun:
 
 class TestRewindValidation:
     def test_rejects_iteration_beyond_current(self, run_dir):
-        with pytest.raises(ValueError, match="must be <="):
+        with pytest.raises(ValueError, match="is beyond current iteration"):
             rewind_run(run_dir, 4)
 
     def test_rejects_negative_iteration(self, run_dir):

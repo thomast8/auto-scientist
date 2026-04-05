@@ -84,7 +84,7 @@ def collect_iteration_record(
     iteration_key: int | Literal["ingestion", "report"]
     if isinstance(title, int):
         iteration_key = state.iteration
-        display_title = f"Iteration {title}"
+        display_title = f"Iteration {title + 1}"
     elif title == "Report":
         iteration_key = "report"
         display_title = "Report"
@@ -235,7 +235,7 @@ def load_final_plan_from_disk(version_dir: Path, state: ExperimentState) -> dict
         apply_prediction_updates(plan, state)
     else:
         logger.info(
-            f"Predictions for iteration {state.iteration} already in state, "
+            f"Predictions for iteration {state.iteration + 1} already in state, "
             f"skipping re-application ({len(existing)} found)"
         )
 
