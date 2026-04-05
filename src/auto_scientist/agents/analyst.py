@@ -13,7 +13,7 @@ from dataclasses import replace
 from pathlib import Path
 from typing import Any
 
-from auto_scientist.prompts.analyst import ANALYST_SYSTEM, ANALYST_USER
+from auto_scientist.prompts.analyst import ANALYST_USER, build_analyst_system
 from auto_scientist.retry import QueryResult, agent_retry_loop
 from auto_scientist.schemas import AnalystOutput
 from auto_scientist.sdk_backend import SDKOptions, get_backend
@@ -151,7 +151,7 @@ async def run_analyst(
 
     json_instruction = (
         "\n\n## Output Format\n"
-        "You MUST respond with ONLY valid JSON matching the schema below.\n"
+        "Respond with valid JSON matching the schema below.\n"
         "No markdown fencing. No explanation. No other text.\n\n"
         f"Schema:\n{json.dumps(ANALYST_SCHEMA, indent=2)}"
     )
@@ -161,8 +161,10 @@ async def run_analyst(
     # prompts when running as a sub-agent via the SDK.
     max_turns = 30
     allowed_tools = ["Read", "Glob"]
+    prompt_provider = "gpt" if provider == "openai" else "claude"
+    analyst_system = build_analyst_system(prompt_provider)
     budget = prepare_turn_budget(
-        ANALYST_SYSTEM + json_instruction, max_turns, allowed_tools, provider=provider
+        analyst_system + json_instruction, max_turns, allowed_tools, provider=provider
     )
     backend = get_backend(provider)
     options = SDKOptions(

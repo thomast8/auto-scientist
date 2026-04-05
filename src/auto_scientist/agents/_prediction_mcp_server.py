@@ -261,13 +261,13 @@ if __name__ == "__main__":
         server_name="predictions",
         tool_name="read_predictions",
         description=(
-            "Drill into prediction history details. The "
-            "compact prediction tree is already in your "
-            "prompt; use this tool for full records. "
-            "Use summary=true for counts, chain/pred_ids/"
-            "outcome/iteration for specific predictions "
-            "with full detail (evidence, diagnostics, "
-            "implications)."
+            "Read full evidence, diagnostics, and conditional outcomes "
+            "for specific predictions. The compact tree in your prompt "
+            "shows status and short summaries only. Call this tool when "
+            "you need to verify a claim, inspect why a prediction was "
+            "confirmed or refuted, check the diagnostic used, or trace "
+            "a reasoning chain. Use summary=true for counts, chain/ "
+            "pred_ids/outcome/iteration for detailed records."
         ),
         input_schema={
             "type": "object",
@@ -325,7 +325,8 @@ if __name__ == "__main__":
         deferred_description=(
             "mcp__predictions__read_predictions("
             "summary?, chain?, pred_ids?, outcome?, iteration?) "
-            "- Drill into prediction details. Tree is already in your prompt."
+            "- Read evidence, diagnostics, outcomes for predictions. "
+            "Tree in prompt shows summaries only."
         ),
     )
 

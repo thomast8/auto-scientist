@@ -9,7 +9,7 @@ Returns the report content as a string; the orchestrator handles file writing.
 import logging
 from pathlib import Path
 
-from auto_scientist.prompts.report import REPORT_SYSTEM, REPORT_USER
+from auto_scientist.prompts.report import REPORT_USER, build_report_system
 from auto_scientist.retry import QueryResult, agent_retry_loop
 from auto_scientist.retry import ValidationError as RetryValidationError
 from auto_scientist.sdk_backend import SDKOptions, get_backend
@@ -60,7 +60,9 @@ async def run_report(
 
     max_turns = 10
     allowed_tools = ["Read", "Glob"]
-    budget = prepare_turn_budget(REPORT_SYSTEM, max_turns, allowed_tools, provider=provider)
+    prompt_provider = "gpt" if provider == "openai" else "claude"
+    report_system = build_report_system(prompt_provider)
+    budget = prepare_turn_budget(report_system, max_turns, allowed_tools, provider=provider)
     backend = get_backend(provider)
     options = SDKOptions(
         system_prompt=budget.system_prompt,
@@ -80,7 +82,7 @@ async def run_report(
         if resume_session_id is not None:
             retry_max_turns = 10
             retry_allowed_tools = ["Read", "Glob"]
-            retry_budget = prepare_turn_budget(REPORT_SYSTEM, retry_max_turns, retry_allowed_tools)
+            retry_budget = prepare_turn_budget(report_system, retry_max_turns, retry_allowed_tools)
             opts = SDKOptions(
                 system_prompt=retry_budget.system_prompt,
                 allowed_tools=retry_budget.allowed_tools,

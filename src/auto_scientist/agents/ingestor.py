@@ -14,7 +14,7 @@ from pydantic import ValidationError
 
 from auto_scientist.config import DomainConfig
 from auto_scientist.notebook import NOTEBOOK_FILENAME
-from auto_scientist.prompts.ingestor import INGESTOR_SYSTEM, INGESTOR_USER
+from auto_scientist.prompts.ingestor import INGESTOR_USER, build_ingestor_system
 from auto_scientist.retry import QueryResult, agent_retry_loop
 from auto_scientist.retry import ValidationError as RetryValidationError
 from auto_scientist.sdk_backend import CODEX_SANDBOX_ADDENDUM, SDKOptions, get_backend
@@ -61,7 +61,8 @@ async def run_ingestor(
     mode = "interactive" if interactive else "autonomous"
 
     max_turns = 30
-    system_prompt = INGESTOR_SYSTEM
+    prompt_provider = "gpt" if provider == "openai" else "claude"
+    system_prompt = build_ingestor_system(prompt_provider)
     if provider == "openai":
         system_prompt += CODEX_SANDBOX_ADDENDUM
     budget = prepare_turn_budget(system_prompt, max_turns, tools, provider=provider)
@@ -94,7 +95,7 @@ async def run_ingestor(
         if resume_session_id is not None:
             clarification_max_turns = 10
             retry_budget = prepare_turn_budget(
-                INGESTOR_SYSTEM, clarification_max_turns, tools, provider=provider
+                system_prompt, clarification_max_turns, tools, provider=provider
             )
             current_options[0] = SDKOptions(
                 system_prompt=retry_budget.system_prompt,

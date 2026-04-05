@@ -763,7 +763,8 @@ class TestFormatCompactTree:
             ),
         ]
         result = _format_compact_tree(history)
-        assert "A" * 100 in result
+        # Truncation at 60 chars (word-boundary), evidence is all "A"s so no word break
+        assert "A" * 60 in result
         assert "..." in result
         assert "A" * 150 not in result
 
@@ -813,8 +814,8 @@ class TestFormatCompactTree:
             ),
         ]
         result = _format_compact_tree(history)
-        assert "== PREDICTION TREE ==" in result
-        assert "read_predictions" not in result
+        assert "== PREDICTION TREE" in result
+        assert "read_predictions" in result
 
     def test_one_line_per_prediction(self):
         """Each prediction should be a single line (not multi-line like the full formatter)."""

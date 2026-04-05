@@ -21,8 +21,8 @@ from auto_scientist.model_config import ReasoningConfig, reasoning_to_cc_extra_a
 from auto_scientist.prompts.scientist import (
     SCIENTIST_REVISION_SYSTEM,
     SCIENTIST_REVISION_USER,
-    SCIENTIST_SYSTEM,
     SCIENTIST_USER,
+    build_scientist_system,
 )
 from auto_scientist.retry import QueryResult, agent_retry_loop
 from auto_scientist.schemas import ScientistPlanOutput
@@ -225,11 +225,12 @@ async def run_scientist(
         version=version,
     )
 
-    system_prompt = SCIENTIST_SYSTEM
+    prompt_provider = "gpt" if provider == "openai" else "claude"
+    system_prompt = build_scientist_system(prompt_provider)
 
     json_instruction = (
         "\n\n## Output Format\n"
-        "You MUST respond with ONLY valid JSON matching the schema below.\n"
+        "Respond with valid JSON matching the schema below.\n"
         "No markdown fencing. No explanation. No other text.\n\n"
         f"Schema:\n{json.dumps(SCIENTIST_PLAN_SCHEMA, indent=2)}"
     )
@@ -325,7 +326,7 @@ async def run_scientist_revision(
 
     json_instruction = (
         "\n\n## Output Format\n"
-        "You MUST respond with ONLY valid JSON matching the schema below.\n"
+        "Respond with valid JSON matching the schema below.\n"
         "No markdown fencing. No explanation. No other text.\n\n"
         f"Schema:\n{json.dumps(SCIENTIST_PLAN_SCHEMA, indent=2)}"
     )
@@ -340,7 +341,10 @@ async def run_scientist_revision(
 
     max_turns = 15
     budget = prepare_turn_budget(
-        SCIENTIST_REVISION_SYSTEM + json_instruction, max_turns, tools, provider=provider
+        SCIENTIST_REVISION_SYSTEM + json_instruction,
+        max_turns,
+        tools,
+        provider=provider,
     )
     backend = get_backend(provider)
     options = SDKOptions(

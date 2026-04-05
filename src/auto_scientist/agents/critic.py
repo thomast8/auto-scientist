@@ -41,12 +41,12 @@ from auto_scientist.model_config import AgentModelConfig, reasoning_to_cc_extra_
 from auto_scientist.models.google_client import query_google
 from auto_scientist.models.openai_client import query_openai
 from auto_scientist.prompts.critic import (
-    CRITIC_SYSTEM_BASE,
     CRITIC_USER,
     DEFAULT_CRITIC_INSTRUCTIONS,
     ITERATION_0_PERSONAS,
     PERSONAS,
     PREDICTION_PERSONAS,
+    build_critic_system,
     get_model_index_for_debate,
 )
 from auto_scientist.retry import QueryResult, agent_retry_loop
@@ -345,6 +345,7 @@ async def run_single_critic_debate(
         goal=goal,
         has_predictions=has_predictions,
         has_mcp_tool=has_mcp_tool,
+        provider=config.provider,
     )
     critic_output, critic_result = await _query_critic_structured(
         config,
@@ -536,6 +537,7 @@ def _build_critic_prompt(
     goal: str = "",
     has_predictions: bool = True,
     has_mcp_tool: bool = True,
+    provider: str = "anthropic",
 ) -> tuple[str, str]:
     """Build the (system, user) prompt pair sent to critic models.
 
@@ -598,7 +600,8 @@ def _build_critic_prompt(
         prediction_history_section = ""
         prediction_task_text = ""
 
-    system = CRITIC_SYSTEM_BASE.format(
+    prompt_provider = "gpt" if provider == "openai" else "claude"
+    system = build_critic_system(prompt_provider).format(
         persona_text=persona_text,
         persona_instructions=effective_instructions,
         critic_output_schema=json.dumps(CRITIC_OUTPUT_SCHEMA, indent=2),

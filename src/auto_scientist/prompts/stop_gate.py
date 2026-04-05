@@ -45,15 +45,20 @@ ASSESSMENT_SCHEMA = {
     "required": ["sub_questions", "overall_coverage", "recommendation"],
 }
 
-ASSESSMENT_SYSTEM = """\
+# ---------------------------------------------------------------------------
+# Composable blocks for Assessment prompt
+# ---------------------------------------------------------------------------
+
+_ASSESS_ROLE = """\
 <role>
 You are a completeness assessment system. You evaluate whether a scientific
 investigation has thoroughly addressed its stated goal. You are factual and
 structured, not argumentative. You map the goal to evidence and report gaps.
 You have web search and a mcp__predictions__read_predictions tool available
 for drilling into specific predictions for full detail.
-</role>
+</role>"""
 
+_ASSESS_INSTRUCTIONS = """\
 <instructions>
 1. Read the investigation goal carefully. Decompose it into distinct
    sub-questions. Each aspect of the goal that could be independently
@@ -91,8 +96,18 @@ for drilling into specific predictions for full detail.
    - stop: Only if overall_coverage is thorough
    - continue: If any sub-question is shallow or unexplored and further
      investigation would plausibly improve the answer
-</instructions>
-"""
+</instructions>"""
+
+
+def build_assessment_system(provider: str = "claude") -> str:
+    """Assemble Assessment system prompt in provider-optimal order."""
+    if provider == "gpt":
+        return "\n\n".join([_ASSESS_ROLE, _ASSESS_INSTRUCTIONS])
+    return "\n\n".join([_ASSESS_ROLE, _ASSESS_INSTRUCTIONS])
+
+
+# Backward-compatible alias
+ASSESSMENT_SYSTEM = build_assessment_system("claude")
 
 ASSESSMENT_USER = """\
 <context>
@@ -140,12 +155,6 @@ STOP_PERSONAS: list[dict[str, str]] = [
             "- 'Variable Z is listed in the goal but was only used as a\n"
             "   control, never as a primary subject of investigation.'\n"
             "\n"
-            "NOT in your lane (belongs to other persona):\n"
-            "- 'The single test that was done used inadequate methodology'\n"
-            "   -> Depth Challenger (evidence quality, not topic coverage)\n"
-            "- 'The investigation arc was inefficient'\n"
-            "   -> Not relevant to stop decisions\n"
-            "\n"
             "Use web search to check whether standard approaches to the stated\n"
             "goal type include analyses that the investigation did not attempt.\n"
             "</persona>"
@@ -167,7 +176,7 @@ STOP_PERSONAS: list[dict[str, str]] = [
             "4. For each gap, state what specifically should be investigated\n"
             "   and why it matters for answering the goal.\n"
             "\n"
-            "IMPORTANT: Do not critique the quality of analyses that were\n"
+            "Do not critique the quality of analyses that were\n"
             "performed. That is the Depth Challenger's job. Your job is\n"
             "about breadth: what topics were not covered at all or were\n"
             "covered too thinly.\n"
@@ -199,12 +208,6 @@ STOP_PERSONAS: list[dict[str, str]] = [
             "   potential mechanism, when several plausible mechanisms\n"
             "   remain untested.'\n"
             "\n"
-            "NOT in your lane (belongs to other persona):\n"
-            "- 'The goal mentions X but it was never investigated'\n"
-            "   -> Goal Coverage Auditor (topic-level gap)\n"
-            "- 'Standard approaches for this problem type were not tried'\n"
-            "   -> Goal Coverage Auditor (coverage gap)\n"
-            "\n"
             "Use web search to look up domain-specific pitfalls, common\n"
             "alternative methodologies, and functional forms that should\n"
             "have been tested.\n"
@@ -229,7 +232,7 @@ STOP_PERSONAS: list[dict[str, str]] = [
             "4. For each gap, state what additional test or analysis would\n"
             "   strengthen or challenge the current conclusion.\n"
             "\n"
-            "IMPORTANT: Do not flag topics that were never investigated. That\n"
+            "Do not flag topics that were never investigated. That\n"
             "is the Goal Coverage Auditor's job. Your job is about depth:\n"
             "were the topics that were covered investigated thoroughly enough?\n"
             "</instructions>"
@@ -237,16 +240,19 @@ STOP_PERSONAS: list[dict[str, str]] = [
     },
 ]
 
-STOP_CRITIC_SYSTEM_BASE = """\
+# ---------------------------------------------------------------------------
+# Composable blocks for Stop Critic prompt (template format strings)
+# ---------------------------------------------------------------------------
+
+_STOP_CRITIC_ROLE = """\
 <role>
 You are a scientific critique system. You challenge a decision to stop an
 investigation. You have web search available to verify claims and look up
 relevant methods, and a mcp__predictions__read_predictions tool to drill
 into specific predictions for full detail.
-</role>
+</role>"""
 
-{persona_text}
-
+_STOP_CRITIC_PIPELINE_CONTEXT = """\
 <pipeline_context>
 The Scientist has proposed stopping this investigation. A completeness
 assessment has been performed, identifying which aspects of the goal have
@@ -265,18 +271,49 @@ A compact summary of the prediction history is included in the context below.
 When you need more detail on a specific prediction (full reasoning, chain of
 related predictions, or statistics by outcome/iteration), call the
 mcp__predictions__read_predictions tool rather than guessing from the summary.
-</pipeline_context>
+</pipeline_context>"""
 
-{persona_instructions}
-
+_STOP_CRITIC_OUTPUT_FORMAT = """\
 <output_format>
-You MUST respond with ONLY valid JSON matching this schema. No markdown
+Respond with valid JSON matching this schema. No markdown
 fencing, no explanation, no other text.
 
 Schema:
-{critic_output_schema}
-</output_format>
-"""
+{{critic_output_schema}}
+</output_format>"""
+
+
+def build_stop_critic_system(provider: str = "claude") -> str:
+    """Assemble Stop Critic system prompt template in provider-optimal order.
+
+    Returns a template with {persona_text}, {persona_instructions},
+    {critic_output_schema} placeholders.
+    """
+    if provider == "gpt":
+        raw = "\n\n".join(
+            [
+                _STOP_CRITIC_ROLE,
+                "{persona_text}",
+                "{persona_instructions}",
+                _STOP_CRITIC_OUTPUT_FORMAT,
+                _STOP_CRITIC_PIPELINE_CONTEXT,
+            ]
+        )
+    else:
+        raw = "\n\n".join(
+            [
+                _STOP_CRITIC_ROLE,
+                "{persona_text}",
+                _STOP_CRITIC_PIPELINE_CONTEXT,
+                "{persona_instructions}",
+                _STOP_CRITIC_OUTPUT_FORMAT,
+            ]
+        )
+    return raw.replace("{{", "{").replace("}}", "}")
+
+
+# Backward-compatible alias
+STOP_CRITIC_SYSTEM_BASE = build_stop_critic_system("claude")
 
 STOP_CRITIC_USER = """\
 <context>
@@ -306,7 +343,7 @@ chains when evaluating whether an avenue was properly explored.
 </task>
 
 <recap>
-CRITICAL: Your entire response must be a single JSON object matching the schema
+Your response is a single JSON object matching the schema
 in the output_format section. Do not include any text before or after the JSON.
 No markdown fencing. No explanations. Just the raw JSON object.
 </recap>
@@ -316,15 +353,20 @@ No markdown fencing. No explanations. Just the raw JSON object.
 # Scientist Stop Revision (after debate)
 # ---------------------------------------------------------------------------
 
-STOP_REVISION_SYSTEM = """\
+# ---------------------------------------------------------------------------
+# Composable blocks for Stop Revision prompt
+# ---------------------------------------------------------------------------
+
+_STOP_REV_ROLE = """\
 <role>
 You are a scientific hypothesis and planning system. You have just proposed
 stopping an investigation, and your stop decision has been challenged in a
 debate. You must now revise your decision. You have web search and a
 mcp__predictions__read_predictions tool available for drilling into
 specific predictions.
-</role>
+</role>"""
 
+_STOP_REV_PIPELINE_CONTEXT = """\
 <pipeline_context>
 After proposing to stop, a completeness assessment identified gaps in
 your investigation's coverage of the stated goal. Critics challenged
@@ -341,8 +383,9 @@ When withdrawing a stop, your plan should:
 - Focus on the most important gaps identified by the assessment and debate
 - Produce testable predictions that will resolve the open questions
 - Be concrete enough for the Coder to implement
-</pipeline_context>
+</pipeline_context>"""
 
+_STOP_REV_INSTRUCTIONS = """\
 <instructions>
 1. Review the completeness assessment and the concern ledger from the
    stop debate.
@@ -361,8 +404,30 @@ When withdrawing a stop, your plan should:
    - Update the stop_reason to address each concern from the debate
    - Explain why each identified gap is peripheral
    - Write a notebook entry documenting the decision
-</instructions>
-"""
+</instructions>"""
+
+
+def build_stop_revision_system(provider: str = "claude") -> str:
+    """Assemble Stop Revision system prompt in provider-optimal order."""
+    if provider == "gpt":
+        return "\n\n".join(
+            [
+                _STOP_REV_ROLE,
+                _STOP_REV_INSTRUCTIONS,
+                _STOP_REV_PIPELINE_CONTEXT,
+            ]
+        )
+    return "\n\n".join(
+        [
+            _STOP_REV_ROLE,
+            _STOP_REV_PIPELINE_CONTEXT,
+            _STOP_REV_INSTRUCTIONS,
+        ]
+    )
+
+
+# Backward-compatible alias
+STOP_REVISION_SYSTEM = build_stop_revision_system("claude")
 
 STOP_REVISION_USER = """\
 <context>
@@ -392,7 +457,7 @@ The new version is: {version}
 </task>
 
 <output_format>
-You MUST respond with ONLY valid JSON matching the schema below.
+Respond with valid JSON matching the schema below.
 No markdown fencing. No explanation. No other text.
 
 Schema:
