@@ -257,6 +257,7 @@ async def run_scientist(
         model=model,
         extra_args=extra_args,
         mcp_servers=mcp_servers,
+        response_schema=ScientistPlanOutput,
     )
 
     async def _query(prompt: str, resume_session_id: str | None) -> QueryResult:
@@ -358,6 +359,7 @@ async def run_scientist_revision(
         model=model,
         extra_args=extra_args,
         mcp_servers=mcp_servers,
+        response_schema=ScientistPlanOutput,
     )
 
     async def _query(prompt: str, resume_session_id: str | None) -> QueryResult:

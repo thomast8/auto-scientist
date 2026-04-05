@@ -679,7 +679,7 @@ class TestRunScientistStopRevision:
                 stop_reason="seemed complete",
                 completeness_assessment=valid_assessment,
                 concern_ledger=[],
-                analysis={"key_metrics": {"r2": 0.85}},
+                analysis={"key_metrics": [{"name": "r2", "value": 0.85}]},
                 notebook_path=stop_notebook,
                 version="v03",
                 goal="discover alloy fatigue",

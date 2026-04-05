@@ -9,8 +9,9 @@ from auto_scientist.images import ImageData
 from auto_scientist.model_config import ReasoningConfig
 from auto_scientist.models.anthropic_client import query_anthropic
 from auto_scientist.models.google_client import query_google
-from auto_scientist.models.openai_client import _make_strict_schema, query_openai
+from auto_scientist.models.openai_client import query_openai
 from auto_scientist.schemas import ScientistPlanOutput
+from auto_scientist.sdk_utils import make_strict_schema
 
 FAKE_IMAGE = ImageData(data="aW1hZ2VieXRlcw==", media_type="image/png")
 
@@ -756,7 +757,7 @@ class TestMakeStrictSchema:
             "type": "object",
             "properties": {"name": {"type": "string"}},
         }
-        result = _make_strict_schema(schema)
+        result = make_strict_schema(schema)
         assert result["additionalProperties"] is False
 
     def test_recursive_into_defs(self):
@@ -770,7 +771,7 @@ class TestMakeStrictSchema:
             "type": "object",
             "properties": {"items": {"type": "array"}},
         }
-        result = _make_strict_schema(schema)
+        result = make_strict_schema(schema)
         assert result["additionalProperties"] is False
         assert result["$defs"]["Item"]["additionalProperties"] is False
 
@@ -780,13 +781,64 @@ class TestMakeStrictSchema:
             "additionalProperties": True,
             "properties": {},
         }
-        result = _make_strict_schema(schema)
+        result = make_strict_schema(schema)
         assert result["additionalProperties"] is True
 
     def test_non_object_types_unchanged(self):
         schema = {"type": "string"}
-        result = _make_strict_schema(schema)
+        result = make_strict_schema(schema)
         assert "additionalProperties" not in result
+
+    def test_forces_all_properties_required(self):
+        schema = {
+            "type": "object",
+            "properties": {
+                "name": {"type": "string"},
+                "score": {"type": "number"},
+                "notes": {"type": "string"},
+            },
+            "required": ["name"],
+        }
+        result = make_strict_schema(schema)
+        assert set(result["required"]) == {"name", "score", "notes"}
+
+    def test_forces_required_in_defs(self):
+        schema = {
+            "$defs": {
+                "Item": {
+                    "type": "object",
+                    "properties": {
+                        "id": {"type": "integer"},
+                        "label": {"type": "string"},
+                    },
+                    "required": ["id"],
+                },
+            },
+            "type": "object",
+            "properties": {"items": {"type": "array"}},
+        }
+        result = make_strict_schema(schema)
+        assert set(result["$defs"]["Item"]["required"]) == {"id", "label"}
+
+    def test_overwrites_existing_required(self):
+        """required is set to all property keys, not merged with original."""
+        schema = {
+            "type": "object",
+            "properties": {
+                "a": {"type": "string"},
+                "b": {"type": "string"},
+            },
+            "required": ["a"],
+        }
+        result = make_strict_schema(schema)
+        assert sorted(result["required"]) == ["a", "b"]
+
+    def test_real_schema_all_required(self):
+        """ScientistPlanOutput schema gets all properties in required."""
+        schema = make_strict_schema(ScientistPlanOutput.model_json_schema())
+        assert "testable_predictions" in schema["required"]
+        hp_def = schema["$defs"]["HypothesisPrediction"]
+        assert "follows_from" in hp_def["required"]
 
 
 class TestOpenAIStructuredOutputWithWebSearch:

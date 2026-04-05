@@ -36,9 +36,10 @@ To serve both agents well, your canonical output should be:
   make the contents obvious without external documentation
 - Loadable in a few lines of Python: avoid formats that require complex
   parsing, custom decoders, or undocumented schemas
-- Complete: include everything needed to work with the data (e.g., if there
-  are relationships between tables, preserve them; if there is metadata,
-  keep it)
+- Complete: the canonical output must contain every table, file, and
+  column from the source. If there are relationships between tables,
+  preserve them. Do not selectively omit data that looks less relevant -
+  downstream agents decide what matters.
 </downstream_contract>"""
 
 _DOWNSTREAM_CONTRACT_SLIM = """\
@@ -50,20 +51,24 @@ understands the dataset only from your notebook entry.
 Make the canonical output:
 - self-describing
 - loadable in a few lines of Python
-- complete enough for downstream experiments
+- complete: the canonical output must contain every table, file, and
+  column from the source. Dropping data that looks "less relevant" will
+  cripple downstream agents.
 </downstream_contract>"""
 
 _INSTRUCTIONS = """\
 <instructions>
 1. Examine the raw data: file types and format, schema and columns, data
    types, encodings, row counts, file sizes, and sample rows to understand
-   the content. For large files, sample first (head/random rows) to understand
-   structure before full conversion.
+   the content. For databases, list ALL tables and inspect every one of
+   them - not just the most obvious table. For directories, list ALL files.
+   For large files, sample first (head/random rows) to understand structure
+   before full conversion.
 
-2. The investigation goal is provided in the context. Use it to decide which
-   parts of the data are relevant to canonicalize and how to structure the
-   output. Preserve all data that could be useful for the goal, even if its
-   relevance isn't immediately obvious.
+2. The investigation goal is provided in the context. Use it to decide how
+   to structure the output. Transfer ALL data from the source into the
+   canonical output. Do not selectively omit tables, files, or columns
+   based on perceived relevance - downstream agents decide what matters.
 
 3. Clarify ambiguities based on mode:
    - Interactive mode: ask the human about column semantics, table
@@ -102,10 +107,10 @@ _INSTRUCTIONS = """\
      only if originals are genuinely ambiguous like "col1", "V2")
    - Consistent types: no mixed-type columns (e.g., "N/A" mixed with
      floats); use proper null representation for the format
-   - Deduplication: remove exact-duplicate rows only if clearly accidental;
-     log the decision
-   - Do NOT drop data, impute missing values, or apply domain-specific
-     transformations. Those are scientific decisions for later agents.
+   - Do NOT drop any data: no dropping tables, files, columns, or rows
+     (including exact-duplicate rows - they may be valid repeated
+     measurements). Do not impute missing values or apply domain-specific
+     transforms. Those are scientific decisions for later agents.
 
 6. Write a self-contained conversion script to {{data_dir}}/ingest.py:
    - Read from the original data at the provided absolute path (preserve
@@ -219,11 +224,12 @@ and interpretation of the data's meaning.
 _RECAP_GPT = """\
 <recap>
 Rules (quick reference):
-1. Canonicalize raw data into a loadable format
-2. Write ingest.py conversion script with PEP 723 metadata
-3. Update lab notebook with structural facts only (no science)
-4. Write domain config JSON if config path provided
-5. run_command must be exactly "uv run {script_path}" (literal braces)
+1. Transfer ALL raw data (every table, file, and column) into canonical format
+2. Do NOT drop tables, files, or columns - downstream agents decide relevance
+3. Write ingest.py conversion script with PEP 723 metadata
+4. Update lab notebook with structural facts only (no science)
+5. Write domain config JSON if config path provided
+6. run_command must be exactly "uv run {script_path}" (literal braces)
 </recap>"""
 
 

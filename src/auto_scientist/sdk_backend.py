@@ -9,6 +9,7 @@ unknown message types are silently skipped instead of crashing the stream.
 """
 
 import asyncio
+import json
 import logging
 import os
 import re
@@ -31,6 +32,7 @@ from claude_code_sdk import query as claude_query
 from claude_code_sdk._errors import MessageParseError
 from codex_app_server_sdk import CodexClient, ThreadConfig, TurnOverrides
 from codex_app_server_sdk.errors import CodexProtocolError
+from pydantic import BaseModel
 
 logger = logging.getLogger(__name__)
 
@@ -260,6 +262,7 @@ class SDKOptions:
     env: dict[str, str] = field(default_factory=dict)
     mcp_servers: dict[str, Any] = field(default_factory=dict)
     network_access: bool = False
+    response_schema: type[BaseModel] | None = None
 
 
 @dataclass
@@ -365,6 +368,16 @@ class ClaudeBackend:
             kwargs["env"] = env
         if options.mcp_servers:
             kwargs["mcp_servers"] = options.mcp_servers
+
+        if options.response_schema is not None:
+            schema_str = json.dumps(options.response_schema.model_json_schema(), indent=2)
+            kwargs["append_system_prompt"] = (
+                "\n\nMANDATORY OUTPUT FORMAT: Your final response must be ONLY "
+                "valid JSON matching this exact schema. No markdown fencing "
+                "(```), no prose before or after the JSON, no trailing text. "
+                "Output the raw JSON object and nothing else.\n\n"
+                f"Schema:\n{schema_str}"
+            )
 
         return ClaudeCodeOptions(**kwargs)
 
@@ -622,6 +635,14 @@ class CodexBackend:
         if effort:
             turn_overrides.effort = effort  # type: ignore[assignment]
 
+        # Structured output: set output_schema on the turn overrides so
+        # Codex mechanically constrains the model to valid JSON.
+        if options.response_schema is not None:
+            from auto_scientist.sdk_utils import make_strict_schema
+
+            strict = make_strict_schema(options.response_schema.model_json_schema())
+            turn_overrides.output_schema = strict
+
         # --- Resume path: reuse existing client ---
         if options.resume:
             if self._client is not None:
@@ -689,22 +710,36 @@ class CodexBackend:
         if options.cwd:
             thread_config.cwd = str(options.cwd)
 
-        # Codex + GPT models ignore MCP tool calls in long/complex prompts
-        # (confirmed empirically: MCP=0 at 33K+ chars, stochastic at shorter).
         # developer_instructions carry higher priority than base_instructions
-        # for behavioral directives.  Placing the MCP mandate here raises
-        # MCP usage from ~0% to ~67% with production-length prompts.
+        # for behavioral directives in Codex.
+        dev_instructions: list[str] = []
+
+        # MCP mandate: GPT models ignore MCP tool calls in long/complex prompts
+        # (confirmed empirically: MCP=0 at 33K+ chars, stochastic at shorter).
+        # Placing the mandate here raises MCP usage from ~0% to ~67%.
         if has_mcp:
             mcp_tool_names = [t for t in (options.allowed_tools or []) if t.startswith("mcp__")]
             if mcp_tool_names:
                 names_str = ", ".join(mcp_tool_names)
-                thread_config.developer_instructions = (
+                dev_instructions.append(
                     "MANDATORY TOOL REQUIREMENT: Before producing your final output, "
                     f"you MUST call at least one of these MCP tools: {names_str}. "
                     "Call with summary=true first, then drill into specifics. "
                     "If your output does not include at least one MCP tool call, "
                     "it will be rejected."
                 )
+
+        # Structured output behavioral reinforcement (complements the
+        # mechanical output_schema on TurnOverrides).
+        if options.response_schema is not None:
+            dev_instructions.append(
+                "MANDATORY OUTPUT FORMAT: Your final output MUST be valid JSON "
+                "matching the structured output schema. No markdown fencing, "
+                "no prose before or after the JSON. Output ONLY the raw JSON object."
+            )
+
+        if dev_instructions:
+            thread_config.developer_instructions = "\n\n".join(dev_instructions)
 
         logger.debug(
             f"CodexBackend new client: model={model}, sandbox={sandbox_mode}, effort={effort}"

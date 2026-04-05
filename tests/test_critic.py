@@ -492,7 +492,7 @@ class TestBuildCriticPromptContext:
             {"h": "p"},
             "",
             "",
-            analysis_json='{"key_metrics": {"rmse": 0.52}}',
+            analysis_json='{"key_metrics": [{"name": "rmse", "value": 0.52}]}',
         )
         assert "<analysis>" in user
         assert "rmse" in user
@@ -542,7 +542,7 @@ class TestRunDebateWithContext:
                 critic_configs=two_critics,
                 plan=plan,
                 notebook_content="",
-                analysis_json='{"key_metrics": {"rmse": 0.52}}',
+                analysis_json='{"key_metrics": [{"name": "rmse", "value": 0.52}]}',
             )
 
         critic_prompt = mock_openai.call_args[0][1]

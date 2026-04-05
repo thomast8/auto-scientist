@@ -23,7 +23,7 @@ class TestAnalystOutput:
     @pytest.fixture
     def minimal_valid(self):
         return {
-            "key_metrics": {},
+            "key_metrics": [],
             "improvements": [],
             "regressions": [],
             "observations": ["data loaded"],
@@ -36,14 +36,14 @@ class TestAnalystOutput:
 
     def test_full_iteration_0(self, minimal_valid):
         minimal_valid["domain_knowledge"] = "This is SpO2 pulse oximetry data"
-        minimal_valid["data_summary"] = {"rows": 1000, "columns": 5}
+        minimal_valid["data_summary"] = "Files: data.csv (1000 rows, 5 columns)"
         a = AnalystOutput.model_validate(minimal_valid)
         assert a.domain_knowledge == "This is SpO2 pulse oximetry data"
-        assert a.data_summary == {"rows": 1000, "columns": 5}
+        assert a.data_summary == "Files: data.csv (1000 rows, 5 columns)"
 
     def test_missing_required_field(self):
         with pytest.raises(ValidationError):
-            AnalystOutput.model_validate({"key_metrics": {}})
+            AnalystOutput.model_validate({"key_metrics": []})
 
     def test_extra_fields_ignored(self, minimal_valid):
         minimal_valid["unexpected_key"] = "should be ignored"
@@ -310,7 +310,7 @@ class TestAnalystOutputPredictions:
     @pytest.fixture
     def minimal_analysis(self):
         return {
-            "key_metrics": {},
+            "key_metrics": [],
             "improvements": [],
             "regressions": [],
             "observations": [],

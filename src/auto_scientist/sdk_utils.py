@@ -86,6 +86,39 @@ async def safe_query(
 
 
 # ---------------------------------------------------------------------------
+# Strict JSON schema for structured output
+# ---------------------------------------------------------------------------
+
+
+def make_strict_schema(schema: Any) -> Any:
+    """Transform a JSON schema for OpenAI/Codex strict structured output.
+
+    Applies two transformations required by OpenAI's strict mode
+    (Chat Completions ``response_format``, Responses API ``text.format``,
+    and Codex SDK ``TurnOverrides.output_schema``):
+
+    1. ``additionalProperties: false`` on every object type.
+    2. All ``properties`` keys added to ``required`` (Codex silently
+       returns an empty response if any property is not required).
+    """
+    if isinstance(schema, list):
+        return [make_strict_schema(item) for item in schema]
+    if not isinstance(schema, dict):
+        return schema
+
+    result = {}
+    for key, value in schema.items():
+        result[key] = make_strict_schema(value)
+
+    if result.get("type") == "object" and "properties" in result:
+        if "additionalProperties" not in result:
+            result["additionalProperties"] = False
+        result["required"] = list(result["properties"].keys())
+
+    return result
+
+
+# ---------------------------------------------------------------------------
 # Output validation and retry
 # ---------------------------------------------------------------------------
 

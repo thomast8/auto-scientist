@@ -131,6 +131,7 @@ async def _query_critic(
             max_turns=budget.max_turns,
             extra_args=extra_args,
             mcp_servers=mcp_servers or {},
+            response_schema=response_schema,
         )
         text, usage, _session_id = await collect_text_from_query(
             prompt, options, backend, message_buffer
@@ -183,6 +184,7 @@ async def _query_critic(
             max_turns=budget.max_turns,
             extra_args=extra_args_api,
             mcp_servers=mcp_servers or {},
+            response_schema=response_schema,
         )
         text, usage, _session_id = await collect_text_from_query(
             prompt, options, backend, message_buffer

@@ -9,19 +9,19 @@
     "LOHO-Inference R2 for RV#4 = -1.08 (outlier)",
     "gamma = 1.30 at upper bound in Stage B"
   ],
-  "key_metrics": {
-    "tau_0": 15.01,
-    "b_s": 1.75,
-    "p": 3.52,
-    "saturation_pct": 0.4,
-    "delta_range_s": 20.2,
-    "loho_timing_s": 0.0,
-    "qc_pass_r2a": 0.97,
-    "qc_pass_r2n": 0.98,
-    "weaklag_divergence_pct": 9.6,
-    "gamma": 1.30,
-    "gamma_at_bound": 1
-  },
+  "key_metrics": [
+    {"name": "tau_0", "value": 15.01},
+    {"name": "b_s", "value": 1.75},
+    {"name": "p", "value": 3.52},
+    {"name": "saturation_pct", "value": 0.4},
+    {"name": "delta_range_s", "value": 20.2},
+    {"name": "loho_timing_s", "value": 0.0},
+    {"name": "qc_pass_r2a", "value": 0.97},
+    {"name": "qc_pass_r2n", "value": 0.98},
+    {"name": "weaklag_divergence_pct", "value": 9.6},
+    {"name": "gamma", "value": 1.30},
+    {"name": "gamma_at_bound", "value": 1}
+  ],
   "what_worked": [
     "Baseline-corrected measurement equation eliminated saturation: 0.4% vs 17.6%",
     "Power-law curvature is identifiable (both tau_0 and p profiles are non-monotone)",

@@ -1428,7 +1428,7 @@ class TestRunAnalystNormal:
         async def fake_analyst(**kwargs):
             return {
                 "observations": ["RMSE improved"],
-                "key_metrics": {"rmse": 0.3},
+                "key_metrics": [{"name": "rmse", "value": 0.3}],
             }
 
         with patch("auto_scientist.agents.analyst.run_analyst", side_effect=fake_analyst):
@@ -1488,7 +1488,7 @@ class TestRunAnalystTimeout:
         async def fake_analyst(**kwargs):
             captured_kwargs.update(kwargs)
             return {
-                "key_metrics": {"timeout_minutes": 120},
+                "key_metrics": [{"name": "timeout_minutes", "value": 120}],
                 "improvements": [],
                 "regressions": [],
                 "observations": ["script timed out"],
@@ -1582,7 +1582,7 @@ class TestRunDebateOrchestrator:
         orchestrator.model_config.summarizer = None  # disable summarizer to test run_debate path
         orchestrator.state.domain_knowledge = "test knowledge"
         plan = {"hypothesis": "test"}
-        analysis = {"key_metrics": {"rmse": 0.52}}
+        analysis = {"key_metrics": [{"name": "rmse", "value": 0.52}]}
 
         critique = [{"model": "openai:gpt-4o", "critique": "looks good", "transcript": []}]
 

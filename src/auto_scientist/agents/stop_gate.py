@@ -118,6 +118,7 @@ async def run_completeness_assessment(
         model=model,
         extra_args={},
         mcp_servers=mcp_servers,
+        response_schema=CompletenessAssessmentOutput,
     )
 
     async def _query(prompt: str, resume_session_id: str | None) -> QueryResult:
@@ -346,6 +347,7 @@ async def run_scientist_stop_revision(
         model=model,
         extra_args={},
         mcp_servers=mcp_servers,
+        response_schema=ScientistPlanOutput,
     )
 
     async def _query(prompt: str, resume_session_id: str | None) -> QueryResult:

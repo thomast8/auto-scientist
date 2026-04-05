@@ -16,7 +16,7 @@ class TestRunAnalyst:
     @patch("auto_scientist.sdk_backend.claude_query")
     async def test_returns_parsed_json(self, mock_query, tmp_path):
         analysis = {
-            "key_metrics": {"rmse": 0.5},
+            "key_metrics": [{"name": "rmse", "value": 0.5}],
             "improvements": ["better"],
             "regressions": [],
             "observations": ["noted"],
@@ -43,13 +43,13 @@ class TestRunAnalyst:
             notebook_path=notebook_path,
         )
 
-        assert result["key_metrics"]["rmse"] == 0.5
+        assert result["key_metrics"] == [{"name": "rmse", "value": 0.5}]
 
     @pytest.mark.asyncio
     @patch("auto_scientist.sdk_backend.claude_query")
     async def test_handles_markdown_fenced_json(self, mock_query, tmp_path):
         analysis = {
-            "key_metrics": {},
+            "key_metrics": [],
             "improvements": [],
             "regressions": [],
             "observations": [],
@@ -106,12 +106,12 @@ class TestRunAnalyst:
     async def test_accepts_data_dir_param(self, mock_query, tmp_path):
         """run_analyst should accept a data_dir parameter."""
         analysis = {
-            "key_metrics": {},
+            "key_metrics": [],
             "improvements": [],
             "regressions": [],
             "observations": ["2 CSV files found"],
             "domain_knowledge": "Environmental sensor data",
-            "data_summary": {"files": [], "total_rows": 0},
+            "data_summary": "Files: sample.csv (2 rows, 2 columns: x, y)",
         }
 
         from claude_code_sdk import ResultMessage
@@ -142,7 +142,7 @@ class TestRunAnalyst:
     async def test_data_dir_in_prompt(self, mock_query, tmp_path):
         """When data_dir is provided, it should appear in the prompt."""
         analysis = {
-            "key_metrics": {},
+            "key_metrics": [],
             "improvements": [],
             "regressions": [],
             "observations": [],
@@ -179,15 +179,12 @@ class TestRunAnalyst:
     async def test_iteration0_output_shape(self, mock_query, tmp_path):
         """Iteration 0 output: success_score null, optional domain_knowledge/data_summary."""
         analysis = {
-            "key_metrics": {},
+            "key_metrics": [],
             "improvements": [],
             "regressions": [],
             "observations": ["200 rows, 2 float columns"],
             "domain_knowledge": "This dataset contains sensor readings",
-            "data_summary": {
-                "files": [{"name": "data.csv", "rows": 200, "columns": ["x", "y"]}],
-                "total_rows": 200,
-            },
+            "data_summary": "Files: data.csv (200 rows, columns: x, y). Total: 200 rows.",
         }
 
         from claude_code_sdk import ResultMessage
@@ -212,13 +209,13 @@ class TestRunAnalyst:
             data_dir=data_dir,
         )
         assert result["domain_knowledge"] == "This dataset contains sensor readings"
-        assert result["data_summary"]["total_rows"] == 200
+        assert "200 rows" in result["data_summary"]
 
     @pytest.mark.asyncio
     @patch("auto_scientist.sdk_backend.claude_query")
     async def test_missing_results_file_uses_fallback(self, mock_query, tmp_path):
         analysis = {
-            "key_metrics": {},
+            "key_metrics": [],
             "improvements": [],
             "regressions": [],
             "observations": [],
@@ -248,7 +245,7 @@ class TestRunAnalyst:
     @patch("auto_scientist.sdk_backend.claude_query")
     async def test_populates_message_buffer(self, mock_query, tmp_path):
         analysis = {
-            "key_metrics": {},
+            "key_metrics": [],
             "improvements": [],
             "regressions": [],
             "observations": [],
@@ -288,7 +285,7 @@ class TestRunAnalyst:
     @patch("auto_scientist.sdk_backend.claude_query")
     async def test_fallback_to_assistant_text(self, mock_query, tmp_path):
         analysis = {
-            "key_metrics": {},
+            "key_metrics": [],
             "improvements": [],
             "regressions": [],
             "observations": [],
@@ -325,7 +322,7 @@ class TestRunAnalyst:
     @patch("auto_scientist.sdk_backend.claude_query")
     async def test_iteration0_uses_data_dir(self, mock_query, tmp_path):
         analysis = {
-            "key_metrics": {},
+            "key_metrics": [],
             "improvements": [],
             "regressions": [],
             "observations": [],
@@ -365,7 +362,7 @@ class TestRunAnalyst:
         result_msg = MagicMock(spec=ResultMessage)
         result_msg.result = json.dumps(
             {
-                "key_metrics": {},
+                "key_metrics": [],
                 "improvements": [],
                 "regressions": [],
                 "observations": [],
@@ -402,7 +399,7 @@ class TestAnalystRetry:
     async def test_retry_on_invalid_json_then_succeed(self, mock_query, tmp_path):
         """First attempt returns invalid JSON, second returns valid."""
         valid_analysis = {
-            "key_metrics": {},
+            "key_metrics": [],
             "improvements": [],
             "regressions": [],
             "observations": ["ok"],
@@ -441,7 +438,7 @@ class TestAnalystRetry:
     async def test_retry_on_schema_violation_then_succeed(self, mock_query, tmp_path):
         """First attempt returns JSON missing required fields, second is valid."""
         valid_analysis = {
-            "key_metrics": {},
+            "key_metrics": [],
             "improvements": [],
             "regressions": [],
             "observations": [],
@@ -503,7 +500,7 @@ class TestAnalystRetry:
     async def test_correction_hint_in_retry_prompt(self, mock_query, tmp_path):
         """On retry, the prompt should include a validation_error correction hint."""
         valid_analysis = {
-            "key_metrics": {},
+            "key_metrics": [],
             "improvements": [],
             "regressions": [],
             "observations": [],
@@ -545,7 +542,7 @@ class TestTimeoutContext:
     async def test_timeout_context_prepends_to_prompt(self, mock_query, tmp_path):
         """When timeout_context is provided, the prompt should contain timeout info."""
         analysis = {
-            "key_metrics": {"timeout_minutes": 120},
+            "key_metrics": [{"name": "timeout_minutes", "value": 120}],
             "improvements": [],
             "regressions": [],
             "observations": ["script timed out after 120 minutes"],
@@ -585,7 +582,7 @@ class TestTimeoutContext:
     async def test_timeout_context_with_partial_results(self, mock_query, tmp_path):
         """When timeout_context is provided with existing results file, indicate partial."""
         analysis = {
-            "key_metrics": {"timeout_minutes": 60},
+            "key_metrics": [{"name": "timeout_minutes", "value": 60}],
             "improvements": [],
             "regressions": [],
             "observations": ["partial results"],
@@ -625,7 +622,7 @@ class TestTimeoutContext:
     async def test_no_timeout_context_omits_block(self, mock_query, tmp_path):
         """Without timeout_context, prompt should not contain timeout info."""
         analysis = {
-            "key_metrics": {},
+            "key_metrics": [],
             "improvements": [],
             "regressions": [],
             "observations": [],

@@ -29,7 +29,17 @@ logger = logging.getLogger(__name__)
 ANALYST_SCHEMA = {
     "type": "object",
     "properties": {
-        "key_metrics": {"type": "object", "additionalProperties": {"type": "number"}},
+        "key_metrics": {
+            "type": "array",
+            "items": {
+                "type": "object",
+                "properties": {
+                    "name": {"type": "string"},
+                    "value": {"type": "number"},
+                },
+                "required": ["name", "value"],
+            },
+        },
         "improvements": {"type": "array", "items": {"type": "string"}},
         "regressions": {"type": "array", "items": {"type": "string"}},
         "observations": {"type": "array", "items": {"type": "string"}},
@@ -50,7 +60,7 @@ ANALYST_SCHEMA = {
             },
         },
         "domain_knowledge": {"type": "string"},
-        "data_summary": {"type": "object"},
+        "data_summary": {"type": "string"},
     },
     "required": [
         "key_metrics",
@@ -87,12 +97,12 @@ async def run_analyst(
 
     Returns:
         Structured dict with keys:
-            key_metrics: dict[str, float]
+            key_metrics: list[{name: str, value: float}]
             improvements: list[str]
             regressions: list[str]
             observations: list[str]
             domain_knowledge: str (optional, iteration 0 only)
-            data_summary: dict (optional, iteration 0 only)
+            data_summary: str (optional, iteration 0 only)
     """
     notebook_content = notebook_path.read_text() if notebook_path.exists() else "(no notebook)"
 
@@ -177,6 +187,7 @@ async def run_analyst(
         cwd=cwd,
         model=model,
         extra_args={},
+        response_schema=AnalystOutput,
     )
 
     async def _query(prompt: str, resume_session_id: str | None) -> QueryResult:

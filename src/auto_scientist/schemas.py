@@ -9,7 +9,7 @@ All models use extra="ignore" so unexpected fields from the LLM don't
 cause validation failures.
 """
 
-from typing import Any, Literal
+from typing import Literal
 
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
@@ -26,18 +26,27 @@ class PredictionOutcome(BaseModel):
     summary: str = ""
 
 
+class KeyMetric(BaseModel):
+    """A single named numeric metric from experiment results."""
+
+    model_config = ConfigDict(extra="ignore")
+
+    name: str
+    value: float
+
+
 class AnalystOutput(BaseModel):
     """Validated output from the Analyst agent."""
 
     model_config = ConfigDict(extra="ignore")
 
-    key_metrics: dict[str, float]
+    key_metrics: list[KeyMetric]
     improvements: list[str]
     regressions: list[str]
     observations: list[str]
     prediction_outcomes: list[PredictionOutcome] = Field(default_factory=list)
     domain_knowledge: str = ""
-    data_summary: dict[str, Any] | None = None
+    data_summary: str | None = None
 
 
 class PlanChange(BaseModel):

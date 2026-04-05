@@ -71,7 +71,7 @@ Data characterization mode (data directory instead of results):
 3. Write domain_knowledge: data structure only (types, ranges, distributions,
    noise). No hypotheses, no model recommendations, no interpretations.
 4. Populate data_summary with file and column details
-5. Set key_metrics to empty
+5. Set key_metrics to []
 
 Every claim references a specific number from the results.
 </instructions>"""
@@ -109,11 +109,15 @@ as coliform outlier (320 vs 32.5 average). pH upstream 7.5 vs downstream 6.9.
 </reasoning>
 <output>
 {{
-  "key_metrics": {{
-    "pH_mean": 7.2, "turbidity_mean": 3.1, "coliform_mean": 45,
-    "coliform_mean_site7": 320, "coliform_mean_other_sites": 32.5,
-    "pH_mean_upstream": 7.5, "pH_mean_downstream": 6.9
-  }},
+  "key_metrics": [
+    {{"name": "pH_mean", "value": 7.2}},
+    {{"name": "turbidity_mean", "value": 3.1}},
+    {{"name": "coliform_mean", "value": 45}},
+    {{"name": "coliform_mean_site7", "value": 320}},
+    {{"name": "coliform_mean_other_sites", "value": 32.5}},
+    {{"name": "pH_mean_upstream", "value": 7.5}},
+    {{"name": "pH_mean_downstream", "value": 6.9}}
+  ],
   "improvements": ["turbidity 4.5->3.1 NTU (-31%)", "coliform 80->45 CFU (-44%)"],
   "regressions": [],
   "observations": [
@@ -137,7 +141,7 @@ Script crashed. No metrics, no plots.
 </reasoning>
 <output>
 {{
-  "key_metrics": {{}},
+  "key_metrics": [],
   "improvements": [],
   "regressions": [],
   "observations": ["script crashed: ZeroDivisionError at line 142"],
@@ -159,7 +163,7 @@ Script timed out. Report duration and hypothesis for Scientist.
 </reasoning>
 <output>
 {{
-  "key_metrics": {{"timeout_minutes": 120}},
+  "key_metrics": [{{"name": "timeout_minutes", "value": 120}}],
   "improvements": [],
   "regressions": [],
   "observations": [
@@ -182,7 +186,7 @@ Data characterization mode. CSV: 500 rows, 4 columns. Temperature
 </reasoning>
 <output>
 {{
-  "key_metrics": {{}},
+  "key_metrics": [],
   "improvements": [],
   "regressions": [],
   "observations": [
@@ -192,18 +196,10 @@ Data characterization mode. CSV: 500 rows, 4 columns. Temperature
   "prediction_outcomes": [],
   "domain_knowledge": "Environmental sensor dataset with temperature, humidity, and \
 pressure readings sampled hourly over 21 days. Three humidity values missing.",
-  "data_summary": {{
-    "files": [{{"name": "sensor_readings.csv", "rows": 500,
-      "columns": ["timestamp", "temperature", "humidity", "pressure"]}}],
-    "total_rows": 500,
-    "column_details": [
-      {{"name": "timestamp", "dtype": "datetime",
-        "min": "2025-01-01", "max": "2025-01-21", "missing": 0}},
-      {{"name": "temperature", "dtype": "float64", "min": 15.2, "max": 38.7, "missing": 0}},
-      {{"name": "humidity", "dtype": "float64", "min": 22.0, "max": 98.5, "missing": 3}},
-      {{"name": "pressure", "dtype": "float64", "min": 990.1, "max": 1025.3, "missing": 0}}
-    ]
-  }}
+  "data_summary": "Files: sensor_readings.csv (500 rows, 4 columns: timestamp, \
+temperature, humidity, pressure). timestamp: datetime 2025-01-01 to 2025-01-21, \
+0 missing. temperature: float64 15.2-38.7, 0 missing. humidity: float64 22.0-98.5, \
+3 missing. pressure: float64 990.1-1025.3, 0 missing."
 }}
 </output>
 </example>
@@ -226,11 +222,15 @@ as coliform outlier (320 vs 32.5 average). pH upstream 7.5 vs downstream 6.9.
 </reasoning>
 <output>
 {{
-  "key_metrics": {{
-    "pH_mean": 7.2, "turbidity_mean": 3.1, "coliform_mean": 45,
-    "coliform_mean_site7": 320, "coliform_mean_other_sites": 32.5,
-    "pH_mean_upstream": 7.5, "pH_mean_downstream": 6.9
-  }},
+  "key_metrics": [
+    {{"name": "pH_mean", "value": 7.2}},
+    {{"name": "turbidity_mean", "value": 3.1}},
+    {{"name": "coliform_mean", "value": 45}},
+    {{"name": "coliform_mean_site7", "value": 320}},
+    {{"name": "coliform_mean_other_sites", "value": 32.5}},
+    {{"name": "pH_mean_upstream", "value": 7.5}},
+    {{"name": "pH_mean_downstream", "value": 6.9}}
+  ],
   "improvements": ["turbidity 4.5->3.1 NTU (-31%)", "coliform 80->45 CFU (-44%)"],
   "regressions": [],
   "observations": [
@@ -255,7 +255,7 @@ Script timed out. Report duration and hypothesis for Scientist.
 </reasoning>
 <output>
 {{
-  "key_metrics": {{"timeout_minutes": 120}},
+  "key_metrics": [{{"name": "timeout_minutes", "value": 120}}],
   "improvements": [],
   "regressions": [],
   "observations": [
@@ -278,7 +278,7 @@ Data characterization mode. CSV: 500 rows, 4 columns. Temperature
 </reasoning>
 <output>
 {{
-  "key_metrics": {{}},
+  "key_metrics": [],
   "improvements": [],
   "regressions": [],
   "observations": [
@@ -288,11 +288,9 @@ Data characterization mode. CSV: 500 rows, 4 columns. Temperature
   "prediction_outcomes": [],
   "domain_knowledge": "Environmental sensor dataset with temperature, humidity, \
 and pressure readings sampled hourly over 21 days. Three humidity values missing.",
-  "data_summary": {{
-    "files": [{{"name": "sensor_readings.csv", "rows": 500,
-      "columns": ["timestamp", "temperature", "humidity", "pressure"]}}],
-    "total_rows": 500
-  }}
+  "data_summary": "Files: sensor_readings.csv (500 rows, 4 columns: timestamp, \
+temperature, humidity, pressure). timestamp: datetime, temperature: float64 \
+15.2-38.7, humidity: float64 22.0-98.5 (3 missing), pressure: float64 990.1-1025.3."
 }}
 </output>
 </example>
@@ -303,7 +301,7 @@ _OUTPUT_FORMAT = """\
 Produce a JSON object with these exact keys and types:
 
 {{
-  "key_metrics": dict,
+  "key_metrics": [{{"name": str, "value": float}}, ...],
   "improvements": [str],
   "regressions": [str],
   "observations": [str],
@@ -317,18 +315,15 @@ Produce a JSON object with these exact keys and types:
     }}
   ],
   "domain_knowledge": str,
-  "data_summary": {{
-    "files": [{{"name": str, "rows": int, "columns": [str]}}],
-    "total_rows": int,
-    "column_details": [{{"name": str, "dtype": str, "min": any, "max": any, "missing": int}}]
-  }}
+  "data_summary": str
 }}
 
-key_metrics: all important numeric values, keyed by name. When the data
-  involves distinct groups or categories, include per-group summary
-  statistics using the naming convention {{metric}}_{{stat}}_{{group}}
-  (e.g., pH_mean_upstream, turbidity_std_siteB). Per-group breakdowns
-  are structured data and belong here, not in observations.
+key_metrics: array of named numeric values. Each entry has a "name" and
+  "value". When the data involves distinct groups or categories, include
+  per-group summary statistics using the naming convention
+  {{metric}}_{{stat}}_{{group}} (e.g., pH_mean_upstream,
+  turbidity_std_siteB). Per-group breakdowns are structured data and
+  belong here, not in observations.
 improvements/regressions: vs previous iteration, with numbers.
 observations: notable patterns from plots/results, factual. Use for
   qualitative descriptions (trends, shapes, distributions, spatial
@@ -343,14 +338,14 @@ domain_knowledge: (optional) structural description of the dataset: variable
   types, ranges, distributions, noise characteristics, data format. Must NOT
   contain hypotheses, model recommendations, or scientific interpretations.
   Populated during data characterization.
-data_summary: (optional) structured file and column details. Populated
-  during data characterization.
+data_summary: (optional) plain-text summary of file and column details.
+  Populated during data characterization.
 
 Fallback rules:
 - No plots: return empty "observations" list
 - No previous iteration: empty "improvements" and "regressions"
 - No HYPOTHESIS TESTS section: empty "prediction_outcomes"
-- No experiment results (data characterization mode): key_metrics is empty,
+- No experiment results (data characterization mode): key_metrics is [],
   domain_knowledge and data_summary are populated
 - Normal iteration mode: domain_knowledge and data_summary are omitted
 - Script timed out: report the timeout as the first observation

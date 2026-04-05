@@ -10,30 +10,13 @@ from openai import AsyncOpenAI
 from pydantic import BaseModel
 
 from auto_scientist.agent_result import AgentResult
+from auto_scientist.sdk_utils import make_strict_schema
 
 if TYPE_CHECKING:
     from auto_scientist.images import ImageData
     from auto_scientist.model_config import ReasoningConfig
 
 logger = logging.getLogger(__name__)
-
-
-def _make_strict_schema(schema: Any) -> Any:
-    """Add additionalProperties: false to all object types in a JSON schema.
-
-    OpenAI's structured output (both Chat Completions and Responses API)
-    requires this for strict mode compliance.
-    """
-    if isinstance(schema, dict):
-        result = {}
-        for key, value in schema.items():
-            result[key] = _make_strict_schema(value)
-        if result.get("type") == "object" and "additionalProperties" not in result:
-            result["additionalProperties"] = False
-        return result
-    if isinstance(schema, list):
-        return [_make_strict_schema(item) for item in schema]
-    return schema
 
 
 OPENAI_EFFORT_MAP: dict[str, str] = {
@@ -109,7 +92,7 @@ async def query_openai(
                 "format": {
                     "type": "json_schema",
                     "name": "response",
-                    "schema": _make_strict_schema(response_schema.model_json_schema()),
+                    "schema": make_strict_schema(response_schema.model_json_schema()),
                 },
             }
 
@@ -173,7 +156,7 @@ async def query_openai(
             "type": "json_schema",
             "json_schema": {
                 "name": "response",
-                "schema": _make_strict_schema(response_schema.model_json_schema()),
+                "schema": make_strict_schema(response_schema.model_json_schema()),
             },
         }
 
