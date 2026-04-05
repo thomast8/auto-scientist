@@ -452,6 +452,7 @@ class MetricsBar(Widget):
         super().__init__()
         self.start_time = time.monotonic()
         self.iteration = 0
+        self.max_iterations: int | None = None
         self.phase = ""
         self.total_input_tokens = 0
         self.total_output_tokens = 0
@@ -468,12 +469,15 @@ class MetricsBar(Widget):
         self,
         iteration: int | None = None,
         phase: str | None = None,
+        max_iterations: int | None = None,
     ) -> None:
         """Update metrics bar fields. Only non-None values are changed."""
         if iteration is not None:
             self.iteration = iteration
         if phase is not None:
             self.phase = phase
+        if max_iterations is not None:
+            self.max_iterations = max_iterations
         self.refresh()
 
     def finish(self) -> None:
@@ -494,7 +498,12 @@ class MetricsBar(Widget):
         phase_style = PHASE_STYLES.get(self.phase, "cyan")
 
         line = Text()
-        line.append(f" Iteration {self.iteration}", style="bold")
+        iter_label = (
+            f"{self.iteration}/{self.max_iterations}"
+            if self.max_iterations
+            else str(self.iteration)
+        )
+        line.append(f" Iteration {iter_label}", style="bold")
         line.append("  ")
         line.append(self.phase, style=phase_style)
         line.append("  ", style="dim")

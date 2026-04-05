@@ -222,6 +222,12 @@ prediction history and notebook, rate coverage, and identify gaps.
 
 Output your assessment as structured JSON.
 </task>
+
+<recap>
+Multiple iterations using the same approach count as one line of
+evidence. Rate shallow when only one method or form was tested.
+Output raw JSON only.
+</recap>
 """
 
 # ---------------------------------------------------------------------------
@@ -470,11 +476,6 @@ above identifies gaps in coverage. Challenge the stop decision based on these
 gaps. Output your critique as structured JSON with concerns (each tagged with
 severity, confidence, and category), alternative hypotheses (investigations
 that should still be pursued), and an overall assessment.
-
-Use web search to check the literature for standard approaches and verify
-whether the investigation's coverage is genuinely complete. Call
-mcp__predictions__read_predictions to check specific prediction outcomes and
-chains when evaluating whether an avenue was properly explored.
 </task>
 
 <recap>
@@ -563,6 +564,40 @@ contradicts your draft reasoning, update your reasoning.
 </tool_use>"""
 
 
+_STOP_REV_OUTPUT_FORMAT = """\
+<output_format>
+Same JSON schema as the Scientist's plan. Respond with valid JSON.
+No markdown fencing. No explanation. No other text.
+
+Example (withdrawal):
+{{
+  "hypothesis": "Untested nonlinear response forms may change the answer.",
+  "strategy": "incremental",
+  "changes": [
+    {{
+      "what": "Test saturating and piecewise nonlinear response models",
+      "why": "Stop debate showed only one functional form tested",
+      "how": "Compare linear, saturating, and piecewise fits on held-out data",
+      "priority": 1
+    }}
+  ],
+  "expected_impact": "Resolve the remaining nonlinearity gap.",
+  "should_stop": false,
+  "stop_reason": null,
+  "notebook_entry": "Stop withdrawn\\n\\nNonlinearity gap too shallow. One follow-up.",
+  "testable_predictions": [
+    {{
+      "prediction": "A saturating or piecewise response fits better than linear",
+      "diagnostic": "Compare held-out fit quality across candidate forms",
+      "if_confirmed": "Keep investigation open; refine nonlinear mechanism",
+      "if_refuted": "Close nonlinearity gap and revisit stopping",
+      "follows_from": null
+    }}
+  ]
+}}
+</output_format>"""
+
+
 def build_stop_revision_system(provider: str = "claude") -> str:
     """Assemble Stop Revision system prompt in provider-optimal order."""
     if provider == "gpt":
@@ -571,6 +606,7 @@ def build_stop_revision_system(provider: str = "claude") -> str:
                 _STOP_REV_ROLE,
                 _STOP_REV_TOOL_USE_GUIDANCE,
                 _STOP_REV_INSTRUCTIONS,
+                _STOP_REV_OUTPUT_FORMAT,
                 _STOP_REV_PIPELINE_CONTEXT,
             ]
         )
@@ -580,6 +616,7 @@ def build_stop_revision_system(provider: str = "claude") -> str:
             _STOP_REV_PIPELINE_CONTEXT,
             _STOP_REV_TOOL_USE_GUIDANCE,
             _STOP_REV_INSTRUCTIONS,
+            _STOP_REV_OUTPUT_FORMAT,
         ]
     )
 
@@ -606,7 +643,8 @@ STOP_REVISION_USER = """\
 Based on the completeness assessment and debate feedback, decide whether to
 maintain or withdraw your stop decision.
 
-If maintaining: update stop_reason to address all concerns.
+If maintaining: update stop_reason to address each concern
+(explain why peripheral ones are not blocking).
 If withdrawing: produce a full experiment plan targeting the identified gaps.
 
 Output a complete plan (all fields).
@@ -614,38 +652,7 @@ Output a complete plan (all fields).
 The new version is: {version}
 </task>
 
-<output_format>
-Respond with valid JSON matching the schema below.
-No markdown fencing. No explanation. No other text.
-
-Schema:
+<schema>
 {plan_schema}
-
-Example:
-{{
-  "hypothesis": "Untested nonlinear response forms may change the answer.",
-  "strategy": "incremental",
-  "changes": [
-    {{
-      "what": "Test saturating and piecewise nonlinear response models",
-      "why": "The stop debate showed that only one functional form had been tested",
-      "how": "Compare linear, saturating, and piecewise fits on the same held-out evaluation",
-      "priority": 1
-    }}
-  ],
-  "expected_impact": "Resolve the remaining nonlinearity gap before stopping.",
-  "should_stop": false,
-  "stop_reason": null,
-  "notebook_entry": "Stop withdrawn\\n\\nNonlinearity gap too shallow. Running one more follow-up.",
-  "testable_predictions": [
-    {{
-      "prediction": "A saturating or piecewise response fits better than linear",
-      "diagnostic": "Compare held-out fit quality across the candidate functional forms",
-      "if_confirmed": "Keep the investigation open and refine the nonlinear mechanism",
-      "if_refuted": "Close the nonlinearity gap and revisit stopping",
-      "follows_from": null
-    }}
-  ]
-}}
-</output_format>
+</schema>
 """

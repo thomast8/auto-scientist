@@ -907,10 +907,13 @@ class TestStopGatePromptBuilders:
         assert '"sub_questions"' in system
         assert '"recommendation": "continue"' in system
 
-    def test_stop_revision_user_includes_example_plan(self):
-        from auto_scientist.prompts.stop_gate import STOP_REVISION_USER
+    def test_stop_revision_example_in_system_not_user(self):
+        from auto_scientist.prompts.stop_gate import (
+            STOP_REVISION_USER,
+            build_stop_revision_system,
+        )
 
-        prompt = STOP_REVISION_USER.format(
+        user = STOP_REVISION_USER.format(
             goal="goal",
             domain_knowledge="dk",
             notebook_content="nb",
@@ -922,6 +925,9 @@ class TestStopGatePromptBuilders:
             version="v02",
             plan_schema="{}",
         )
+        system = build_stop_revision_system("claude")
 
-        assert "Example:" in prompt
-        assert '"hypothesis": "Untested nonlinear response forms may change the answer."' in prompt
+        # Example moved from user to system prompt
+        assert "Example" not in user
+        assert "Example (withdrawal):" in system
+        assert "Untested nonlinear response forms" in system

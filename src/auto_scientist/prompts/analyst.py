@@ -426,4 +426,10 @@ ANALYST_USER = """\
 Produce your structured JSON analysis. Ground every claim in
 specific numbers from the results or data files.
 </task>
+
+<recap>
+Report what you observe. Every claim cites a specific number.
+No recommendations, no hypotheses, no interpretations.
+Output raw JSON only.
+</recap>
 """

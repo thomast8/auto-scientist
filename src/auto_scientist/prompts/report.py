@@ -180,7 +180,7 @@ REPORT_USER = """\
 
 <task>
 Output the complete final report as text. Do not write any files. Your text
-output will be saved by the orchestrator. Use Glob and Read to inspect version
+output will be saved by the orchestrator. Use `Glob` and `Read` to inspect version
 directories and results before writing.
 </task>
 """

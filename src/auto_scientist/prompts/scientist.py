@@ -715,6 +715,11 @@ SCIENTIST_USER = """\
 
 The new version is: {version}
 </task>
+
+<recap>
+One hypothesis, 1-2 tightly coupled changes per iteration.
+Output raw JSON only. No markdown fencing.
+</recap>
 """
 
 SCIENTIST_REVISION_SYSTEM = """\
@@ -1015,4 +1020,9 @@ update the testable_predictions from the original plan.
 
 The new version is: {version}
 </task>
+
+<recap>
+Address the 1-2 highest-severity concerns. Reject low-confidence
+or out-of-lane concerns in the notebook entry. Output raw JSON only.
+</recap>
 """

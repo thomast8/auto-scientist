@@ -374,8 +374,7 @@ Critique the scientist's plan. Output your critique as structured JSON with
 concerns (each tagged with severity, confidence, and category), alternative
 hypotheses, and an overall assessment.
 
-Use web search to check the literature for prior work and verify scientific \
-claims.{prediction_task_text}
+Evaluate the plan against the evidence base.{prediction_task_text}
 </task>
 
 <recap>
