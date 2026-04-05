@@ -41,6 +41,18 @@ To serve both agents well, your canonical output should be:
   keep it)
 </downstream_contract>"""
 
+_DOWNSTREAM_CONTRACT_SLIM = """\
+<downstream_contract>
+The Coder receives only the canonical directory path and must load what you
+produce without modifying it. The Scientist never sees raw data; it
+understands the dataset only from your notebook entry.
+
+Make the canonical output:
+- self-describing
+- loadable in a few lines of Python
+- complete enough for downstream experiments
+</downstream_contract>"""
+
 _INSTRUCTIONS = """\
 <instructions>
 1. Examine the raw data: file types and format, schema and columns, data
@@ -221,10 +233,10 @@ def build_ingestor_system(provider: str = "claude") -> str:
         return "\n\n".join(
             [
                 _ROLE,
-                _INSTRUCTIONS,
                 _RECAP_GPT,
+                _INSTRUCTIONS,
                 _SCOPE_BOUNDARY_SLIM,
-                _DOWNSTREAM_CONTRACT,
+                _DOWNSTREAM_CONTRACT_SLIM,
                 _RECAP_GPT,
             ]
         )

@@ -97,6 +97,8 @@ async def run_completeness_assessment(
 
     json_instruction = (
         "\n\n## Output Format\n"
+        "Tool calls are allowed before the final JSON response.\n"
+        'The "JSON only" rule applies only to the final assistant message.\n'
         "You MUST respond with ONLY valid JSON matching the schema below.\n"
         "No markdown fencing. No explanation. No other text.\n\n"
         f"Schema:\n{json.dumps(ASSESSMENT_SCHEMA, indent=2)}"
@@ -323,6 +325,8 @@ async def run_scientist_stop_revision(
 
     json_instruction = (
         "\n\n## Output Format\n"
+        "Tool calls are allowed before the final JSON response.\n"
+        'The "JSON only" rule applies only to the final assistant message.\n'
         "Respond with valid JSON matching the schema below.\n"
         "No markdown fencing. No explanation. No other text.\n\n"
         f"Schema:\n{json.dumps(SCIENTIST_PLAN_SCHEMA, indent=2)}"

@@ -570,22 +570,31 @@ def _build_critic_prompt(
                 "drill into specific predictions for full detail (evidence, diagnostics,\n"
                 "implications)"
             )
+            prediction_tool_guidance = (
+                f"- If {tool_name} is available and you need details about a specific "
+                "pred_id,\n"
+                "  outcome, or prediction chain, call it rather than guessing from the\n"
+                "  compact summary."
+            )
             prediction_pipeline_text = (
                 "\nA compact summary of the prediction history is included in the context "
                 f"below.\nWhen you need more detail on a specific prediction, call the "
-                f"{tool_name}\ntool rather than guessing from the summary. You MUST call "
-                f"this tool at least\nonce before writing your critique to verify prediction "
-                "details firsthand."
+                f"{tool_name}\ntool rather than guessing from the summary. If you reference "
+                "a specific pred_id,\na prior confirmed/refuted outcome, or a prediction "
+                "chain, inspect it with\nthe tool before finalizing your critique."
             )
             prediction_task_text = (
                 f"\nThe prediction tree is provided above. Call {tool_name} to "
-                "look up\nspecific prediction chains or full detail when you need more than "
-                "the summary.\nYou MUST call this tool at least once before writing your "
-                "response."
+                "look up\nspecific prediction chains or full detail when the compact summary "
+                "is\ninsufficient, especially for specific pred_ids or prior outcomes."
             )
         else:
             # API mode: prediction data is inline, no tool available
             prediction_role_text = ""
+            prediction_tool_guidance = (
+                "- Use the inline prediction history when it is relevant to your critique;\n"
+                "  do not guess or invent prior outcomes."
+            )
             prediction_pipeline_text = (
                 "\nA compact summary of the prediction history is included in the context below."
             )
@@ -595,6 +604,7 @@ def _build_critic_prompt(
             )
     else:
         prediction_role_text = ""
+        prediction_tool_guidance = ""
         prediction_evidence_text = ""
         prediction_pipeline_text = ""
         prediction_history_section = ""
@@ -608,6 +618,7 @@ def _build_critic_prompt(
         prediction_role_text=prediction_role_text,
         prediction_evidence_text=prediction_evidence_text,
         prediction_pipeline_text=prediction_pipeline_text,
+        prediction_tool_guidance=prediction_tool_guidance,
     )
 
     user = CRITIC_USER.format(

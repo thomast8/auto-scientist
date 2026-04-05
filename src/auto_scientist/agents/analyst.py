@@ -151,6 +151,8 @@ async def run_analyst(
 
     json_instruction = (
         "\n\n## Output Format\n"
+        "Tool calls are allowed before the final JSON response.\n"
+        'The "JSON only" rule applies only to the final assistant message.\n'
         "Respond with valid JSON matching the schema below.\n"
         "No markdown fencing. No explanation. No other text.\n\n"
         f"Schema:\n{json.dumps(ANALYST_SCHEMA, indent=2)}"

@@ -895,3 +895,33 @@ class TestRunScientistStopRevision:
 
         prompt = mock_collect.call_args[0][0]
         assert "(empty notebook)" in prompt
+
+
+class TestStopGatePromptBuilders:
+    def test_assessment_system_includes_schema_example_and_tool_guidance(self):
+        from auto_scientist.prompts.stop_gate import build_assessment_system
+
+        system = build_assessment_system("gpt")
+
+        assert "Tool calls are allowed before the final JSON response." in system
+        assert '"sub_questions"' in system
+        assert '"recommendation": "continue"' in system
+
+    def test_stop_revision_user_includes_example_plan(self):
+        from auto_scientist.prompts.stop_gate import STOP_REVISION_USER
+
+        prompt = STOP_REVISION_USER.format(
+            goal="goal",
+            domain_knowledge="dk",
+            notebook_content="nb",
+            analysis_json="{}",
+            prediction_history="ph",
+            stop_reason="done",
+            completeness_assessment="{}",
+            concern_ledger="[]",
+            version="v02",
+            plan_schema="{}",
+        )
+
+        assert "Example:" in prompt
+        assert '"hypothesis": "Untested nonlinear response forms may change the answer."' in prompt

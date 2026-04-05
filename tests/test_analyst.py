@@ -654,3 +654,23 @@ class TestTimeoutContext:
             notebook_path=notebook_path,
         )
         assert "<timeout_info>" not in captured_prompt["prompt"]
+
+
+class TestAnalystPromptBuilder:
+    def test_gpt_prompt_uses_exact_read_tool_name_and_tool_use_guidance(self):
+        from auto_scientist.prompts.analyst import build_analyst_system
+
+        system = build_analyst_system("gpt")
+
+        assert "Tool calls are allowed before the final JSON response." in system
+        assert "with the `Read` tool" in system
+        assert "`Glob` only when you need to verify file presence" in system
+
+    def test_gpt_prompt_keeps_double_recap_and_three_examples(self):
+        from auto_scientist.prompts.analyst import build_analyst_system
+
+        system = build_analyst_system("gpt")
+
+        assert system.count("<recap>") == 2
+        assert system.count("<example>") == 3
+        assert "script crashed: ZeroDivisionError at line 142" not in system

@@ -421,3 +421,21 @@ class TestReportStructuralValidation:
         )
         assert result.startswith("> **WARNING: This report is incomplete.**")
         assert "Missing sections:" in result
+
+
+class TestReportPromptBuilder:
+    def test_gpt_report_prompt_uses_exact_tool_names(self):
+        from auto_scientist.prompts.report import build_report_system
+
+        system = build_report_system("gpt")
+
+        assert "Use the available `Glob` tool" in system
+        assert "use the available `Read` tool" in system
+
+    def test_gpt_report_prompt_keeps_double_recap_and_compact_context(self):
+        from auto_scientist.prompts.report import build_report_system
+
+        system = build_report_system("gpt")
+
+        assert system.count("<recap>") == 2
+        assert "You run once after the investigation ends." in system

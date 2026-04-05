@@ -37,6 +37,8 @@ PERSONAS: list[dict[str, str]] = [
             "4. Data quality and label noise\n"
             "\n"
             "Use web search to check for established statistical methods.\n"
+            "Do not raise trajectory, goal-drift, or evidence-auditing points.\n"
+            "Those are the Trajectory Critic's and Evidence Auditor's responsibilities.\n"
             "</persona>"
         ),
     },
@@ -56,6 +58,8 @@ PERSONAS: list[dict[str, str]] = [
             "\n"
             "Read the notebook and prediction history first. "
             "Use web search for established solutions.\n"
+            "Do not restate methodology or evidence-auditing concerns.\n"
+            "Those are the Methodologist's and Evidence Auditor's responsibilities.\n"
             "</persona>"
         ),
         "instructions": (
@@ -109,6 +113,8 @@ PERSONAS: list[dict[str, str]] = [
             "Every concern takes the form: "
             "'If [condition], then [hypothesis fails because]'.\n"
             "Use web search for published failure modes.\n"
+            "Do not critique goal drift or general trajectory issues.\n"
+            "Those are the Trajectory Critic's and Evidence Auditor's responsibilities.\n"
             "</persona>"
         ),
     },
@@ -126,8 +132,11 @@ PERSONAS: list[dict[str, str]] = [
             "4. Check prediction outcomes referenced by the plan\n"
             "\n"
             "You are a fact-checker. Quote the plan's claim, quote the "
-            "contradicting data, explain the discrepancy.\n"
+            "contradicting data, explain the discrepancy. Each concern must "
+            "name the concrete plan statement and the conflicting metric, "
+            "observation, or prediction outcome.\n"
             "Use mcp__predictions__read_predictions to check outcomes.\n"
+            "Leave statistical rigor to the Methodologist.\n"
             "</persona>"
         ),
     },
@@ -184,6 +193,13 @@ DEFAULT_CRITIC_INSTRUCTIONS = """\
 
 7. The investigation goal is provided in the context. Keep your critique
    oriented toward whether the plan serves this goal.
+
+8. Every concern must stay in your lane and point to a concrete claim,
+   metric, observation, prediction outcome, or gap from the provided
+   evidence. Do not raise generic concerns.
+
+9. If your lane has no substantive concerns, return an empty concerns list
+   rather than inventing weak criticism.
 </instructions>"""
 
 # ---------------------------------------------------------------------------
@@ -196,6 +212,24 @@ You are a scientific critique system. You challenge experiment plans, propose
 alternative hypotheses, and identify blind spots. You have web search available
 to verify claims and look up relevant methods{{prediction_role_text}}.
 </role>"""
+
+_CRITIC_TOOL_USE_GUIDANCE = """\
+<tool_use>
+Tool calls are allowed before the final JSON response.
+The "raw JSON only" rule applies only to your final assistant message.
+
+Before responding:
+- Use targeted web search only when you need literature or standard-method
+  evidence for a critique in your lane.
+{prediction_tool_guidance}
+- If the provided evidence already resolves the point, do not browse
+  unnecessarily.
+
+Limit to 1-2 targeted searches per response. More searches rarely
+improve critique quality and can introduce contradictory information.
+If you call a tool, reference its result in your output. If the result
+contradicts your draft reasoning, update your reasoning.
+</tool_use>"""
 
 _CRITIC_PIPELINE_CONTEXT = """\
 <pipeline_context>
@@ -260,6 +294,22 @@ fencing, no explanation, no other text.
 
 Schema:
 {{critic_output_schema}}
+
+Example:
+{{{{
+  "concerns": [
+    {{{{
+      "claim": "Plan assumes monotonic improvement, but analysis reports a reversal above x=4.2.",
+      "severity": "high",
+      "confidence": "high",
+      "category": "consistency"
+    }}}}
+  ],
+  "alternative_hypotheses": [
+    "The observed gain may reflect group imbalance correction, not the proposed mechanism."
+  ],
+  "overall_assessment": "Promising direction, but one core assumption conflicts with evidence."
+}}}}
 </output_format>"""
 
 
@@ -268,7 +318,8 @@ def build_critic_system(provider: str = "claude") -> str:
 
     Returns a template string with {persona_text}, {persona_instructions},
     {prediction_role_text}, {prediction_evidence_text},
-    {prediction_pipeline_text}, and {critic_output_schema} placeholders.
+    {prediction_pipeline_text}, {prediction_tool_guidance}, and
+    {critic_output_schema} placeholders.
     The caller must .format() the result.
 
     Note: blocks use {{double braces}} for the format placeholders to
@@ -279,17 +330,19 @@ def build_critic_system(provider: str = "claude") -> str:
         raw = "\n\n".join(
             [
                 _CRITIC_ROLE,
+                _CRITIC_TOOL_USE_GUIDANCE,
                 "{persona_text}",
                 "{persona_instructions}",
                 _CRITIC_OUTPUT_FORMAT,
                 _CRITIC_PIPELINE_CONTEXT,
-                _CRITIC_SCOPE_BOUNDARY_SLIM,
+                _CRITIC_SCOPE_BOUNDARY,
             ]
         )
     else:
         raw = "\n\n".join(
             [
                 _CRITIC_ROLE,
+                _CRITIC_TOOL_USE_GUIDANCE,
                 "{persona_text}",
                 _CRITIC_PIPELINE_CONTEXT,
                 "{persona_instructions}",
@@ -329,5 +382,7 @@ claims.{prediction_task_text}
 Your response is a single JSON object matching the schema
 in the output_format section. Do not include any text before or after the JSON.
 No markdown fencing. No explanations. Just the raw JSON object.
+An empty concerns list is correct when your lane has no substantive issues.
+Do not invent weak criticism.
 </recap>
 """

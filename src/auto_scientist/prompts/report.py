@@ -22,10 +22,33 @@ complete. You have access to:
 Your report is the final deliverable. No further agents run after you.
 </pipeline_context>"""
 
+_PIPELINE_CONTEXT_GPT = """\
+<pipeline_context>
+You run once after the investigation ends.
+
+You have access to:
+- the lab notebook
+- version directories with scripts, results.txt, and plots
+- experiment state, including version history and prediction outcomes
+
+Your report is the final deliverable. No further agents run after you.
+</pipeline_context>"""
+
+_TOOL_USE_GUIDANCE = """\
+<tool_use>
+Tool calls are allowed before the final report text.
+
+Use the available `Glob` tool to find version directories and candidate files.
+Use the available `Read` tool to inspect the best version's `results.txt` and
+script before writing. If you mention another version in Journey, Results, or
+the comparison table, inspect it with `Read` first.
+</tool_use>"""
+
 _INSTRUCTIONS = """\
 <instructions>
-1. Use Glob to find the best version's directory, then Read its results file
-   and script to understand the best approach in detail.
+1. Use the available `Glob` tool to find the best version's directory, then
+   use the available `Read` tool on its results file and script to understand
+   the best approach in detail.
 
 2. If there are other notable versions (paradigm shifts, regressions), read
    their results too for the journey section.
@@ -121,10 +144,11 @@ def build_report_system(provider: str = "claude") -> str:
         return "\n\n".join(
             [
                 _ROLE,
+                _TOOL_USE_GUIDANCE,
                 _INSTRUCTIONS,
                 _RECAP_GPT,
                 _SCOPE_BOUNDARY_SLIM,
-                _PIPELINE_CONTEXT,
+                _PIPELINE_CONTEXT_GPT,
                 _RECAP_GPT,
             ]
         )
@@ -132,6 +156,7 @@ def build_report_system(provider: str = "claude") -> str:
         [
             _ROLE,
             _PIPELINE_CONTEXT,
+            _TOOL_USE_GUIDANCE,
             _INSTRUCTIONS,
             _SCOPE_BOUNDARY,
         ]

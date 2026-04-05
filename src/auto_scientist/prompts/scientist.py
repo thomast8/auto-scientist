@@ -55,6 +55,44 @@ studied and what methods worked. Ground your hypotheses in published work
 when applicable.
 </pipeline_context>"""
 
+_PIPELINE_CONTEXT_GPT = """\
+<pipeline_context>
+You receive:
+- the investigation goal
+- Analyst JSON with metrics, improvements, regressions, and observations
+- the lab notebook and any domain knowledge
+- on iteration 0, analysis may be empty; plan from the notebook's data
+  characterization
+
+You produce:
+- a JSON plan for the Coder, who implements it literally
+- on iteration 1+, a plan that will be critiqued before revision; the Coder
+  receives only the revised plan
+
+You never see raw data, code, plots, or experiment files. Plan only from the
+Analyst's structured observations and notebook history.
+</pipeline_context>"""
+
+_TOOL_USE_GUIDANCE = """\
+<tool_use>
+Tool calls are allowed before the final JSON response.
+The "raw JSON only" rule applies only to your final assistant message.
+
+Before responding:
+1. If mcp__predictions__read_predictions is available and you rely on a
+   specific pred_id, prior confirmed/refuted outcome, or prediction chain,
+   call it for the relevant prediction(s) before finalizing the plan.
+2. If you are proposing a structural or exploratory change, or citing a
+   method not already established in the notebook or domain context, do one
+   targeted web search batch before finalizing the plan.
+3. If neither condition applies, do not browse just to browse.
+
+Limit to 1-2 targeted searches per response. More searches rarely
+improve plan quality and can introduce contradictory information.
+If you call a tool, reference its result in your output. If the result
+contradicts your draft reasoning, update your reasoning.
+</tool_use>"""
+
 _INSTRUCTIONS = """\
 <instructions>
 1. Read the analysis and notebook. Understand the current state.
@@ -75,10 +113,15 @@ _INSTRUCTIONS = """\
    - structural: fundamental change (tuning cannot fix limitations)
    - exploratory: something entirely new (current line exhausted)
 
-5. Create prioritized changes (what/why/how, priority 1-3).
+5. Default to one decisive experiment. Pick the single bottleneck most likely
+   to move the investigation toward the goal. Use at most 1 main hypothesis
+   and 1-2 tightly coupled changes. Do not bundle unrelated ideas into one
+   iteration.
+
+6. Create prioritized changes (what/why/how, priority 1-3).
    For threshold rules, verify the direction against analysis data.
 
-6. Define 1-4 testable predictions with conditional outcomes:
+7. Define 1-4 testable predictions with conditional outcomes:
    - prediction: falsifiable expectation
    - diagnostic: what the Coder should compute
    - if_confirmed / if_refuted: next direction
@@ -87,10 +130,10 @@ _INSTRUCTIONS = """\
    iterations via follows_from. A refuted prediction is valuable.
    On iteration 0, predictions may be empty.
 
-7. Write a notebook entry: title on first line, narrative below.
+8. Write a notebook entry: title on first line, narrative below.
    Include arc reflection and plan.
 
-8. Evaluate whether to stop. Set should_stop=true when the core
+9. Evaluate whether to stop. Set should_stop=true when the core
    question is answered. Before stopping, verify:
    - Coverage: every sub-question from the goal was investigated
    - Depth: a single negative result does not close a sub-question
@@ -131,7 +174,7 @@ Out-of-scope implementation details:
 - "In line 47 of the script, change the loop to..." (you do not see code)
 </scope_boundary>"""
 
-# GPT slim variant: positive framing only, no out-of-scope examples
+# Slim variant: positive framing only, no out-of-scope examples (kept for reference)
 _SCOPE_BOUNDARY_SLIM = """\
 <scope_boundary>
 Your job is strictly hypothesis and planning. You reason about what to try next
@@ -384,59 +427,45 @@ sensor censoring.",
 </example>
 </examples>"""
 
-# GPT slim variant: 3 examples (exploration, incremental, structural)
-# Omits sediment (stop) and causal discovery (follows_from) to save ~3.7K chars
+# GPT slim variant: 3 behavior-diverse examples
 _EXAMPLES_SLIM = """\
 <examples>
 <example>
 <input>
-Domain: algal bloom timing in a freshwater lake
-Analysis: timing_error=12 days, nutrient_corr=0.68,
-  temperature_corr=0.55, prev timing_error=18 days
-Notebook: v01 temperature only, v02 added nutrients
+Domain: (no domain knowledge yet)
+Analysis: (empty, first encounter with the data)
+Notebook: (empty, first iteration)
 </input>
 <reasoning>
-Error improved 18->12 days with nutrients. Nutrient corr (0.68)
-beats temperature (0.55). Residual errors cluster around rapid-
-onset events. Mechanism: stratification traps nutrients in the
-photic zone. Incremental: add stratification data.
+No analysis, no notebook. First iteration. Plan exploration to
+establish baselines before forming hypotheses.
 </reasoning>
 <output>
 {{
-  "hypothesis": "Adding thermal stratification data will capture \
-rapid-onset blooms that nutrients alone miss, reducing timing \
-error below 7 days.",
-  "strategy": "incremental",
+  "hypothesis": "Data exploration will establish baselines and expose \
+candidate relationships worth testing.",
+  "strategy": "exploratory",
   "changes": [
     {{
-      "what": "Compute thermal stratification index",
-      "why": "Stratification traps nutrients, accelerating bloom onset",
-      "how": "Delta T between surface (0-2 m) and bottom (>8 m); stratified when > 3 C",
+      "what": "Compute summary statistics for all columns",
+      "why": "Need distributions, ranges, and missingness before choosing a method",
+      "how": "Mean, std, min, max, quartiles, null counts, value counts for categorical fields",
       "priority": 1
     }},
     {{
-      "what": "Add wind speed as mixing proxy",
-      "why": "High winds break stratification, delaying blooms",
-      "how": "Daily mean wind speed from lake weather station",
+      "what": "Compute pairwise relationships and basic diagnostics",
+      "why": "Need to identify obvious dependencies and anomalies",
+      "how": "Correlation matrix, scatter plots, histograms, and simple baseline models",
       "priority": 1
     }}
   ],
-  "expected_impact": "Timing error below 7 days for rapid-onset events.",
+  "expected_impact": "Baseline understanding of the dataset and plausible next hypotheses.",
   "should_stop": false,
   "stop_reason": null,
-  "notebook_entry": "Stratification hypothesis\\n\\nv02 reduced timing error 18->12 days \
-via nutrients. Residual errors cluster in rapid-onset events. Adding stratification \
-index and wind data to capture the physical trigger.",
-  "testable_predictions": [
-    {{
-      "prediction": "Rapid-onset blooms coincide with strong stratification (delta T > 5 C) \
-within 5 days before onset",
-      "diagnostic": "Cross-reference bloom onset dates with stratification time series",
-      "if_confirmed": "Stratification is the missing trigger; refine threshold",
-      "if_refuted": "Investigate light availability or inflow events instead",
-      "follows_from": null
-    }}
-  ]
+  "notebook_entry": "Data exploration\\n\\nFirst iteration. No prior results. \
+Establishing distributions, missingness, and baseline relationships before \
+committing to a scientific hypothesis.",
+  "testable_predictions": []
 }}
 </output>
 </example>
@@ -487,70 +516,6 @@ shift to cell-transmission simulation.",
       "follows_from": null
     }}
   ]
-}}
-</output>
-</example>
-
-<example>
-<input>
-Domain: (no domain knowledge yet)
-Analysis: (empty, first encounter with the data)
-Notebook: (empty, first iteration)
-</input>
-<reasoning>
-No analysis, no notebook. First iteration. Plan thorough
-data exploration before forming hypotheses.
-</reasoning>
-<output>
-{{
-  "hypothesis": "Data exploration to establish baselines and identify patterns.",
-  "strategy": "exploratory",
-  "changes": [
-    {{
-      "what": "Compute summary statistics for all columns",
-      "why": "Need to understand distributions and ranges",
-      "how": "Mean, std, min, max, quartiles; value counts for categorical",
-      "priority": 1
-    }},
-    {{
-      "what": "Compute pairwise correlations and diagnostic plots",
-      "why": "Identify relationships and visual patterns",
-      "how": "Correlation matrix, scatter plots, histograms",
-      "priority": 1
-    }}
-  ],
-  "expected_impact": "Baseline understanding of the dataset.",
-  "should_stop": false,
-  "stop_reason": null,
-  "notebook_entry": "Data exploration\\n\\nFirst iteration. No prior results. \
-Plan: compute distributions, correlations, and diagnostic plots.",
-  "testable_predictions": []
-}}
-</output>
-</example>
-
-<example>
-<input>
-Domain: river sediment transport modeling
-Analysis: transport_rmse=0.08, settling_error=3%, shear_r2=0.94
-Notebook: Converging since v06. Targets: RMSE<0.15 (met),
-  settling<10% (met), shear r2>0.85 (met).
-</input>
-<reasoning>
-All three targets met. Converging since v06. Time to stop.
-</reasoning>
-<output>
-{{
-  "hypothesis": "Investigation complete, all targets met.",
-  "strategy": "incremental",
-  "changes": [],
-  "expected_impact": "No further changes needed.",
-  "should_stop": true,
-  "stop_reason": "All targets met: RMSE=0.08 (<0.15), settling=3% \
-(<10%), shear R2=0.94 (>0.85). Converged since v06.",
-  "notebook_entry": "Investigation complete\\n\\nAll metrics converged. \
-Stopping: all targets met.",
-  "testable_predictions": []
 }}
 </output>
 </example>
@@ -666,6 +631,9 @@ or bare numbers). The notebook_entry is a continuous narrative.
 Actively evaluate whether to stop. The investigation ends when the
 core question is answered, not when all questions are exhausted.
 Check that all sub-problems are sound, not just the aggregate.
+
+One hypothesis, 1-2 tightly coupled changes per iteration.
+Do not bundle unrelated ideas. A refuted prediction is valuable.
 </recap>"""
 
 _RECAP_GPT = """\
@@ -687,18 +655,19 @@ def build_scientist_system(provider: str = "claude") -> str:
     """Assemble Scientist system prompt in provider-optimal order.
 
     Claude: context first, instructions at end (recency effect).
-    GPT: instructions first, fewer examples, no out-of-scope (primacy).
+    GPT: instructions first, compact context, three behavioral examples.
     """
     if provider == "gpt":
-        # GPT: instructions first (primacy), recap at both top and end
+        # GPT: instructions first, smaller context/examples, recap at top and end
         return "\n\n".join(
             [
                 _ROLE,
+                _TOOL_USE_GUIDANCE,
                 _INSTRUCTIONS,
                 _OUTPUT_FORMAT,
                 _RECAP_GPT,
-                _PIPELINE_CONTEXT,
-                _SCOPE_BOUNDARY_SLIM,
+                _PIPELINE_CONTEXT_GPT,
+                _SCOPE_BOUNDARY,
                 _EXAMPLES_SLIM,
                 _RECAP_GPT,
             ]
@@ -707,6 +676,7 @@ def build_scientist_system(provider: str = "claude") -> str:
         [
             _ROLE,
             _PIPELINE_CONTEXT,
+            _TOOL_USE_GUIDANCE,
             _INSTRUCTIONS,
             _SCOPE_BOUNDARY,
             _EXAMPLES_FULL,
@@ -771,6 +741,24 @@ you need to verify, or if you want to find alternative approaches suggested
 by the critic.
 </pipeline_context>
 
+<tool_use>
+Tool calls are allowed before the final JSON response.
+The "raw JSON only" rule applies only to your final assistant message.
+
+Before responding:
+1. If mcp__predictions__read_predictions is available and you rely on a
+   specific pred_id, prior outcome, or prediction chain from the debate,
+   call it before finalizing the revision.
+2. If you adopt a new method family or cite outside literature to resolve
+   the debate, do one targeted web search batch first.
+3. If neither condition applies, do not browse just to browse.
+
+Limit to 1-2 targeted searches per response. More searches rarely
+improve plan quality and can introduce contradictory information.
+If you call a tool, reference its result in your output. If the result
+contradicts your draft reasoning, update your reasoning.
+</tool_use>
+
 <instructions>
 1. Read the original plan and the concern ledger. The ledger is a structured
    JSON list where each entry has: claim, severity, confidence, category,
@@ -821,7 +809,11 @@ by the critic.
    suggestions worth noting. The reader should understand the key
    shifts in 30 seconds.
 
-10. Output a complete revised plan with all fields populated.
+10. Address the 1-2 highest-severity, highest-confidence concerns.
+    Dismiss low-confidence or out-of-lane concerns in the notebook entry
+    with brief reasoning. Do not try to satisfy every critic.
+
+11. Output a complete revised plan with all fields populated.
 </instructions>
 
 <scope_boundary>

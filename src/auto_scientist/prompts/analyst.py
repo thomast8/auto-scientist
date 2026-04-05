@@ -32,17 +32,41 @@ its only window into what happened. Be precise with numbers; vague
 observations like "improved significantly" leave the Scientist blind.
 </pipeline_context>"""
 
+_PIPELINE_CONTEXT_GPT = """\
+<pipeline_context>
+You receive:
+- results.txt metrics and diagnostic plots from the latest experiment
+- on iteration 0, the canonical data directory for data characterization
+
+You produce:
+- structured JSON for the Scientist
+- precise numeric observations that become the Scientist's only view of
+  what happened
+
+The Scientist never sees raw results or plots directly.
+</pipeline_context>"""
+
+_TOOL_USE_GUIDANCE = """\
+<tool_use>
+Tool calls are allowed before the final JSON response.
+The "raw JSON only" rule applies only to your final assistant message.
+
+Use the available `Read` tool to inspect plots and data files before writing
+your JSON assessment. Use `Glob` only when you need to verify file presence
+or enumerate files beyond what is already listed in the prompt.
+</tool_use>"""
+
 _INSTRUCTIONS = """\
 <instructions>
 1. Extract all numeric metrics from results.
-2. Examine plots with Read tool: describe trends, patterns, outliers factually.
+2. Examine plots with the `Read` tool: describe trends, patterns, outliers factually.
 3. Compare to previous iterations with specific numbers (e.g., "RMSE 12.3->8.7").
 4. Transcribe HYPOTHESIS TESTS section into prediction_outcomes. Each test
    has a bracketed ID like [1.2]. Record confirmed/refuted/inconclusive
    with evidence. No HYPOTHESIS TESTS section means empty prediction_outcomes.
 
 Data characterization mode (data directory instead of results):
-1. Read each data file with Read tool
+1. Read each data file with the `Read` tool
 2. Report column types, row counts, value ranges, missing values
 3. Write domain_knowledge: data structure only (types, ranges, distributions,
    noise). No hypotheses, no model recommendations, no interpretations.
@@ -185,7 +209,8 @@ pressure readings sampled hourly over 21 days. Three humidity values missing.",
 </example>
 </examples>"""
 
-# GPT slim: 2 examples (normal results + crash/timeout). Data characterization is Claude-only.
+# GPT slim: 3 behavior-diverse examples (normal results, timeout, characterization).
+# Crash behavior is fully covered by the instructions and output contract.
 _EXAMPLES_SLIM = """\
 <examples>
 <example>
@@ -212,27 +237,6 @@ as coliform outlier (320 vs 32.5 average). pH upstream 7.5 vs downstream 6.9.
     "heatmap: site #7 is coliform outlier",
     "temporal: seasonal turbidity spike months 6-8"
   ],
-  "prediction_outcomes": []
-}}
-</output>
-</example>
-
-<example>
-<input>
-Domain: bridge stress analysis under variable load
-Results: script crashed with ZeroDivisionError
-Previous: none (v01, first iteration)
-Plots: none generated
-</input>
-<reasoning>
-Script crashed. No metrics, no plots.
-</reasoning>
-<output>
-{{
-  "key_metrics": {{}},
-  "improvements": [],
-  "regressions": [],
-  "observations": ["script crashed: ZeroDivisionError at line 142"],
   "prediction_outcomes": []
 }}
 </output>
@@ -381,10 +385,11 @@ def build_analyst_system(provider: str = "claude") -> str:
         return "\n\n".join(
             [
                 _ROLE,
+                _TOOL_USE_GUIDANCE,
                 _INSTRUCTIONS,
                 _OUTPUT_FORMAT,
                 _RECAP_GPT,
-                _PIPELINE_CONTEXT,
+                _PIPELINE_CONTEXT_GPT,
                 _SCOPE_BOUNDARY,
                 _EXAMPLES_SLIM,
                 _RECAP_GPT,
@@ -394,6 +399,7 @@ def build_analyst_system(provider: str = "claude") -> str:
         [
             _ROLE,
             _PIPELINE_CONTEXT,
+            _TOOL_USE_GUIDANCE,
             _INSTRUCTIONS,
             _SCOPE_BOUNDARY,
             _EXAMPLES_FULL,
