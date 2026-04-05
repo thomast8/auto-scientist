@@ -2729,6 +2729,150 @@ class TestResolvePredictionOutcomes:
         resolve_prediction_outcomes(analysis, orchestrator.state)
         assert orchestrator.state.prediction_history[0].summary == ""
 
+    def test_normalizes_bracketed_pred_id(self, orchestrator):
+        """[1] from GPT Analyst matches pending '0.1' after normalization."""
+        orchestrator.state.iteration = 1
+        self._add_pending(orchestrator, "spline fits better locally", pred_id="0.1")
+        analysis = {
+            "prediction_outcomes": [
+                {
+                    "pred_id": "[1]",
+                    "prediction": "totally paraphrased text",
+                    "outcome": "confirmed",
+                    "evidence": "RMSE 0.31",
+                },
+            ],
+        }
+        resolve_prediction_outcomes(analysis, orchestrator.state)
+        assert orchestrator.state.prediction_history[0].outcome == "confirmed"
+
+    def test_normalizes_bare_integer_pred_id(self, orchestrator):
+        """Bare '2' matches pending '1.2' when unambiguous."""
+        orchestrator.state.iteration = 2
+        self._add_pending(orchestrator, "first prediction", pred_id="1.1")
+        self._add_pending(orchestrator, "second prediction", pred_id="1.2")
+        analysis = {
+            "prediction_outcomes": [
+                {
+                    "pred_id": "2",
+                    "prediction": "irrelevant",
+                    "outcome": "refuted",
+                    "evidence": "data shows otherwise",
+                },
+            ],
+        }
+        resolve_prediction_outcomes(analysis, orchestrator.state)
+        assert orchestrator.state.prediction_history[0].outcome == "pending"
+        assert orchestrator.state.prediction_history[1].outcome == "refuted"
+
+    def test_ambiguous_bare_integer_falls_through(self, orchestrator):
+        """Bare '1' with both '0.1' and '1.1' pending is ambiguous, falls to text."""
+        orchestrator.state.iteration = 2
+        self._add_pending(orchestrator, "first prediction", pred_id="0.1")
+        self._add_pending(orchestrator, "second prediction", pred_id="1.1")
+        analysis = {
+            "prediction_outcomes": [
+                {
+                    "pred_id": "1",
+                    "prediction": "completely different text",
+                    "outcome": "confirmed",
+                    "evidence": "some evidence",
+                },
+            ],
+        }
+        resolve_prediction_outcomes(analysis, orchestrator.state)
+        # Both stay pending because ID is ambiguous and text doesn't match
+        assert orchestrator.state.prediction_history[0].outcome == "pending"
+        assert orchestrator.state.prediction_history[1].outcome == "pending"
+
+    def test_token_overlap_fallback(self, orchestrator):
+        """Paraphrased prediction matches via word overlap."""
+        orchestrator.state.iteration = 1
+        self._add_pending(
+            orchestrator,
+            "SCADA missingness is not completely at random: null indicators "
+            "for key process variables will be associated with observed state",
+            pred_id="0.1",
+        )
+        analysis = {
+            "prediction_outcomes": [
+                {
+                    "pred_id": "99.99",
+                    "prediction": "SCADA missingness depends on observed process state or time",
+                    "outcome": "confirmed",
+                    "evidence": "strong association found",
+                },
+            ],
+        }
+        resolve_prediction_outcomes(analysis, orchestrator.state)
+        assert orchestrator.state.prediction_history[0].outcome == "confirmed"
+
+    def test_token_overlap_rejects_low_similarity(self, orchestrator):
+        """Unrelated text does not false-positive match."""
+        orchestrator.state.iteration = 1
+        self._add_pending(
+            orchestrator,
+            "The pilot will exhibit a distinct high-dose regime",
+            pred_id="0.1",
+        )
+        analysis = {
+            "prediction_outcomes": [
+                {
+                    "pred_id": "99.99",
+                    "prediction": "Temperature affects turbidity in summer months only",
+                    "outcome": "refuted",
+                    "evidence": "no seasonal effect",
+                },
+            ],
+        }
+        resolve_prediction_outcomes(analysis, orchestrator.state)
+        assert orchestrator.state.prediction_history[0].outcome == "pending"
+
+    def test_normalizes_bracketed_dotted_pred_id(self, orchestrator):
+        """[0.1] with brackets stripped matches pending '0.1'."""
+        orchestrator.state.iteration = 1
+        self._add_pending(orchestrator, "some prediction", pred_id="0.1")
+        analysis = {
+            "prediction_outcomes": [
+                {
+                    "pred_id": "[0.1]",
+                    "prediction": "paraphrased",
+                    "outcome": "refuted",
+                    "evidence": "data disagrees",
+                },
+            ],
+        }
+        resolve_prediction_outcomes(analysis, orchestrator.state)
+        assert orchestrator.state.prediction_history[0].outcome == "refuted"
+
+    def test_token_overlap_rejects_near_duplicate_predictions(self, orchestrator):
+        """Two similar pending predictions both stay pending on ambiguous overlap."""
+        orchestrator.state.iteration = 1
+        self._add_pending(
+            orchestrator,
+            "SCADA dose is reactive to upstream turbidity conditions",
+            pred_id="0.1",
+        )
+        self._add_pending(
+            orchestrator,
+            "SCADA dose is NOT reactive to upstream turbidity conditions",
+            pred_id="0.2",
+        )
+        analysis = {
+            "prediction_outcomes": [
+                {
+                    "pred_id": "99.99",
+                    "prediction": "dose is reactive to upstream turbidity in SCADA",
+                    "outcome": "confirmed",
+                    "evidence": "strong correlation",
+                },
+            ],
+        }
+        resolve_prediction_outcomes(analysis, orchestrator.state)
+        # Both stay pending because overlap scores are too close
+        assert orchestrator.state.prediction_history[0].outcome == "pending"
+        assert orchestrator.state.prediction_history[1].outcome == "pending"
+
 
 class TestNormalizeFollowsFrom:
     """Tests for normalize_follows_from()."""

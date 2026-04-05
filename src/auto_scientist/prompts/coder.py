@@ -159,10 +159,10 @@ Keep the script self-contained so any version can be rerun with
 _OUTPUT_FORMAT = """\
 <output_format>
 If the plan includes a `testable_predictions` list, the script's stdout must
-end with a HYPOTHESIS TESTS section. Number each prediction sequentially
-starting from 1 (the orchestrator will map these to tracking IDs). Print the
-number in brackets at the start of each test line so the Analyst can match
-results back to predictions:
+end with a HYPOTHESIS TESTS section. Each prediction in the plan has a
+`pred_id` field (e.g., "0.1", "1.2"). Print that exact pred_id in brackets
+at the start of each test line so the Analyst can match results back to
+predictions:
 
 HYPOTHESIS TESTS
 ----------------

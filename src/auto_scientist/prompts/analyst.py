@@ -102,10 +102,16 @@ Domain: water quality monitoring across 12 sampling sites
 Results: pH_mean=7.2, turbidity_mean=3.1, coliform_mean=45, coliform_max=320
 Previous: turbidity_mean=4.5, coliform_mean=80
 Plots: spatial_heatmap.png, temporal_trend.png
+
+HYPOTHESIS TESTS
+----------------
+[1.2] pH drops more than 0.5 units downstream: CONFIRMED (pH 7.5->6.9, delta=0.6)
+[1.3] Coliform exceeds 200 CFU at any site: CONFIRMED (site #7: 320 CFU)
 </input>
 <reasoning>
 Turbidity improved 4.5->3.1, coliform 80->45. Heatmap shows site #7
 as coliform outlier (320 vs 32.5 average). pH upstream 7.5 vs downstream 6.9.
+Two hypothesis tests: both confirmed.
 </reasoning>
 <output>
 {{
@@ -124,7 +130,22 @@ as coliform outlier (320 vs 32.5 average). pH upstream 7.5 vs downstream 6.9.
     "heatmap: site #7 is coliform outlier",
     "temporal: seasonal turbidity spike months 6-8"
   ],
-  "prediction_outcomes": []
+  "prediction_outcomes": [
+    {{
+      "pred_id": "1.2",
+      "prediction": "pH drops more than 0.5 units downstream",
+      "outcome": "confirmed",
+      "evidence": "pH 7.5 upstream to 6.9 downstream, delta=0.6",
+      "summary": "pH delta=0.6 exceeds 0.5 threshold"
+    }},
+    {{
+      "pred_id": "1.3",
+      "prediction": "Coliform exceeds 200 CFU at any site",
+      "outcome": "confirmed",
+      "evidence": "site #7 coliform=320 CFU, exceeds 200 threshold",
+      "summary": "Site #7 coliform=320 CFU"
+    }}
+  ]
 }}
 </output>
 </example>
@@ -215,10 +236,15 @@ Domain: water quality monitoring across 12 sampling sites
 Results: pH_mean=7.2, turbidity_mean=3.1, coliform_mean=45, coliform_max=320
 Previous: turbidity_mean=4.5, coliform_mean=80
 Plots: spatial_heatmap.png, temporal_trend.png
+
+HYPOTHESIS TESTS
+----------------
+[1.2] pH drops more than 0.5 units downstream: CONFIRMED (pH 7.5->6.9, delta=0.6)
+[1.3] Coliform exceeds 200 CFU at any site: CONFIRMED (site #7: 320 CFU)
 </input>
 <reasoning>
 Turbidity improved 4.5->3.1, coliform 80->45. Heatmap shows site #7
-as coliform outlier (320 vs 32.5 average). pH upstream 7.5 vs downstream 6.9.
+as coliform outlier (320 vs 32.5 average). Two hypothesis tests confirmed.
 </reasoning>
 <output>
 {{
@@ -237,7 +263,22 @@ as coliform outlier (320 vs 32.5 average). pH upstream 7.5 vs downstream 6.9.
     "heatmap: site #7 is coliform outlier",
     "temporal: seasonal turbidity spike months 6-8"
   ],
-  "prediction_outcomes": []
+  "prediction_outcomes": [
+    {{
+      "pred_id": "1.2",
+      "prediction": "pH recovery within 0.3 units downstream",
+      "outcome": "confirmed",
+      "evidence": "pH 7.5->6.9, delta=0.6",
+      "summary": "pH delta=0.6 exceeds 0.5 threshold"
+    }},
+    {{
+      "pred_id": "1.3",
+      "prediction": "Coliform exceeds 200 CFU at any site",
+      "outcome": "confirmed",
+      "evidence": "site #7 coliform=320 CFU",
+      "summary": "Site #7 coliform=320 CFU"
+    }}
+  ]
 }}
 </output>
 </example>
