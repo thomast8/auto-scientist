@@ -25,6 +25,23 @@ _logger = logging.getLogger(__name__)
 
 
 # ---------------------------------------------------------------------------
+# Suppress asyncio child-watcher noise
+# ---------------------------------------------------------------------------
+# When SDK subprocesses exit after the event loop is closed, asyncio's
+# child watcher logs "Loop ... that handles pid ... is closed" at WARNING
+# level.  These are harmless (the child is already dead) but spam the
+# terminal with dozens of lines.  Filter them out.
+
+
+class _ChildWatcherFilter(logging.Filter):
+    def filter(self, record: logging.LogRecord) -> bool:
+        return "that handles pid" not in record.getMessage()
+
+
+logging.getLogger("asyncio").addFilter(_ChildWatcherFilter())
+
+
+# ---------------------------------------------------------------------------
 # Process cleanup: kill SDK subprocesses on unexpected exit
 # ---------------------------------------------------------------------------
 # When auto-scientist is killed by SIGHUP (terminal closed) or SIGTERM,

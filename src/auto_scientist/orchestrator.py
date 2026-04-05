@@ -271,6 +271,12 @@ class Orchestrator:
             self._live.wait_for_dismiss()
             self._live.stop()
             try:
+                from auto_scientist.sdk_backend import close_all_backends
+
+                await close_all_backends()
+            except Exception:
+                logger.debug("Backend cleanup failed", exc_info=True)
+            try:
                 from auto_scientist.sdk_backend import cleanup_sessions
 
                 cleanup_sessions()

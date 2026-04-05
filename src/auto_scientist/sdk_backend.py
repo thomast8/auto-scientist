@@ -838,13 +838,35 @@ class CodexBackend:
 # Factory
 # ---------------------------------------------------------------------------
 
+# Registry of all backends created during this process, so they can be
+# closed at shutdown to avoid asyncio "Loop ... is closed" warnings from
+# orphaned subprocess transports.
+_backend_registry: list[SDKBackend] = []
+
 
 def get_backend(provider: str) -> SDKBackend:
     """Return the SDK backend for the given provider."""
     if provider == "anthropic":
-        return ClaudeBackend()
-    if provider == "openai":
-        return CodexBackend()
-    raise ValueError(
-        f"No SDK backend for provider {provider!r}. SDK mode requires 'anthropic' or 'openai'."
-    )
+        backend: SDKBackend = ClaudeBackend()
+    elif provider == "openai":
+        backend = CodexBackend()
+    else:
+        raise ValueError(
+            f"No SDK backend for provider {provider!r}. SDK mode requires 'anthropic' or 'openai'."
+        )
+    _backend_registry.append(backend)
+    return backend
+
+
+async def close_all_backends() -> None:
+    """Close every backend created via ``get_backend()`` and clear the registry.
+
+    Called at shutdown to properly terminate subprocess transports before
+    the event loop closes, preventing asyncio child-watcher warnings.
+    """
+    while _backend_registry:
+        backend = _backend_registry.pop()
+        try:
+            await backend.close()
+        except Exception:
+            logger.debug("Error closing backend %s", type(backend).__name__, exc_info=True)
