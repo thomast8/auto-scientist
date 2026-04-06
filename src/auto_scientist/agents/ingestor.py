@@ -105,7 +105,7 @@ async def run_ingestor(
                 cwd=output_dir,
                 model=model,
                 resume=resume_session_id,
-                extra_args={"setting-sources": ""},
+                extra_args={},
             )
         else:
             current_options[0] = options

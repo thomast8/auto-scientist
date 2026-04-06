@@ -350,6 +350,15 @@ class ClaudeBackend:
         extra_args.update(isolation.extra_args)
         env.update(isolation.env)
 
+        # Strip ANTHROPIC_API_KEY so Claude Code CLI uses OAuth instead
+        # of direct API billing (the key may leak in via .env / dotenv).
+        if "ANTHROPIC_API_KEY" not in options.env and os.environ.get("ANTHROPIC_API_KEY"):
+            logger.info(
+                "Stripping ANTHROPIC_API_KEY from Claude Code subprocess env "
+                "(using OAuth instead of direct API billing)"
+            )
+            env["ANTHROPIC_API_KEY"] = ""
+
         kwargs: dict[str, Any] = {
             "system_prompt": options.system_prompt,
             "allowed_tools": options.allowed_tools,
@@ -509,19 +518,19 @@ class CodexBackend:
         MCP servers run as child subprocesses of the Codex app-server.
         The read-only and workspace-write sandboxes block subprocess
         creation, which prevents MCP servers from starting.  When MCP
-        servers are configured we must use danger-full-access; the
-        security boundary is maintained by the allowed_tools list, not
-        the sandbox.
+        servers are configured we must escalate the sandbox.
 
-        ``network_access=True`` escalates to danger-full-access so that
-        pip can download packages (e.g. for the Coder agent).
+        Only ``network_access=True`` (coder needing pip) escalates all the
+        way to ``danger-full-access``.  MCP-only agents (analyst, scientist,
+        critics) escalate to ``workspace-write`` which allows subprocess
+        creation without granting unrestricted filesystem access.
         """
-        if has_mcp:
-            logger.debug("Sandbox escalated to danger-full-access for MCP subprocess spawning")
-            return "danger-full-access"
         if network_access:
             logger.debug("Sandbox escalated to danger-full-access for network access (pip install)")
             return "danger-full-access"
+        if has_mcp:
+            logger.debug("Sandbox escalated to workspace-write for MCP subprocess spawning")
+            return "workspace-write"
         write_tools = {"Write", "Edit", "Bash"}
         if write_tools & set(allowed_tools):
             return "workspace-write"
@@ -838,14 +847,21 @@ class CodexBackend:
 # Factory
 # ---------------------------------------------------------------------------
 
-# Registry of all backends created during this process, so they can be
-# closed at shutdown to avoid asyncio "Loop ... is closed" warnings from
-# orphaned subprocess transports.
-_backend_registry: list[SDKBackend] = []
+# Cache of backends by provider, so repeated calls reuse the same instance
+# instead of accumulating temp dirs and subprocess handles.
+_backend_cache: dict[str, SDKBackend] = {}
 
 
 def get_backend(provider: str) -> SDKBackend:
-    """Return the SDK backend for the given provider."""
+    """Return a cached SDK backend for the given provider.
+
+    Creates a new instance on first call for each provider, then reuses it.
+    All backends are closed at shutdown via ``close_all_backends()``.
+    """
+    cached = _backend_cache.get(provider)
+    if cached is not None:
+        return cached
+
     if provider == "anthropic":
         backend: SDKBackend = ClaudeBackend()
     elif provider == "openai":
@@ -854,19 +870,19 @@ def get_backend(provider: str) -> SDKBackend:
         raise ValueError(
             f"No SDK backend for provider {provider!r}. SDK mode requires 'anthropic' or 'openai'."
         )
-    _backend_registry.append(backend)
+    _backend_cache[provider] = backend
     return backend
 
 
 async def close_all_backends() -> None:
-    """Close every backend created via ``get_backend()`` and clear the registry.
+    """Close every backend created via ``get_backend()`` and clear the cache.
 
     Called at shutdown to properly terminate subprocess transports before
     the event loop closes, preventing asyncio child-watcher warnings.
     """
-    while _backend_registry:
-        backend = _backend_registry.pop()
+    for backend in _backend_cache.values():
         try:
             await backend.close()
         except Exception:
             logger.debug("Error closing backend %s", type(backend).__name__, exc_info=True)
+    _backend_cache.clear()

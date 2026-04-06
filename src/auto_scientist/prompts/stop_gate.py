@@ -51,13 +51,17 @@ ASSESSMENT_SCHEMA = {
 # Composable blocks for Assessment prompt
 # ---------------------------------------------------------------------------
 
+_PREDICTION_TOOL_NOTE = (
+    " You also have a mcp__predictions__read_predictions tool"
+    " for drilling into specific predictions for full detail."
+)
+
 _ASSESS_ROLE = """\
 <role>
 You are a completeness assessment system. You evaluate whether a scientific
 investigation has thoroughly addressed its stated goal. You are factual and
 structured, not argumentative. You map the goal to evidence and report gaps.
-You have web search and a mcp__predictions__read_predictions tool available
-for drilling into specific predictions for full detail.
+You have web search available.{prediction_tool_note}
 </role>"""
 
 _ASSESS_TOOL_USE_GUIDANCE = """\
@@ -176,12 +180,18 @@ Rules (quick reference):
 </recap>"""
 
 
-def build_assessment_system(provider: str = "claude") -> str:
-    """Assemble Assessment system prompt in provider-optimal order."""
+def build_assessment_system(provider: str = "claude", *, has_predictions: bool = True) -> str:
+    """Assemble Assessment system prompt in provider-optimal order.
+
+    When *has_predictions* is False, MCP tool references are omitted.
+    """
+    note = _PREDICTION_TOOL_NOTE if has_predictions else ""
+    role = _ASSESS_ROLE.format(prediction_tool_note=note)
+
     if provider == "gpt":
         return "\n\n".join(
             [
-                _ASSESS_ROLE,
+                role,
                 _ASSESS_TOOL_USE_GUIDANCE,
                 _ASSESS_INSTRUCTIONS,
                 _ASSESS_OUTPUT_FORMAT,
@@ -191,7 +201,7 @@ def build_assessment_system(provider: str = "claude") -> str:
         )
     return "\n\n".join(
         [
-            _ASSESS_ROLE,
+            role,
             _ASSESS_PIPELINE_CONTEXT,
             _ASSESS_TOOL_USE_GUIDANCE,
             _ASSESS_INSTRUCTIONS,
@@ -201,7 +211,7 @@ def build_assessment_system(provider: str = "claude") -> str:
     )
 
 
-# Backward-compatible alias
+# Backward-compatible alias (assumes predictions available)
 ASSESSMENT_SYSTEM = build_assessment_system("claude")
 
 ASSESSMENT_USER = """\
@@ -351,8 +361,7 @@ _STOP_CRITIC_ROLE = """\
 <role>
 You are a scientific critique system. You challenge a decision to stop an
 investigation. You have web search available to verify claims and look up
-relevant methods, and a mcp__predictions__read_predictions tool to drill
-into specific predictions for full detail.
+relevant methods.{prediction_tool_note}
 </role>"""
 
 _STOP_CRITIC_TOOL_USE_GUIDANCE = """\
@@ -422,16 +431,19 @@ Example:
 </output_format>"""
 
 
-def build_stop_critic_system(provider: str = "claude") -> str:
+def build_stop_critic_system(provider: str = "claude", *, has_predictions: bool = True) -> str:
     """Assemble Stop Critic system prompt template in provider-optimal order.
 
     Returns a template with {persona_text}, {persona_instructions},
     {critic_output_schema} placeholders.
     """
+    note = _PREDICTION_TOOL_NOTE if has_predictions else ""
+    role = _STOP_CRITIC_ROLE.format(prediction_tool_note=note)
+
     if provider == "gpt":
         raw = "\n\n".join(
             [
-                _STOP_CRITIC_ROLE,
+                role,
                 _STOP_CRITIC_TOOL_USE_GUIDANCE,
                 "{persona_text}",
                 "{persona_instructions}",
@@ -442,7 +454,7 @@ def build_stop_critic_system(provider: str = "claude") -> str:
     else:
         raw = "\n\n".join(
             [
-                _STOP_CRITIC_ROLE,
+                role,
                 _STOP_CRITIC_TOOL_USE_GUIDANCE,
                 "{persona_text}",
                 _STOP_CRITIC_PIPELINE_CONTEXT,
@@ -453,7 +465,7 @@ def build_stop_critic_system(provider: str = "claude") -> str:
     return raw.replace("{{", "{").replace("}}", "}")
 
 
-# Backward-compatible alias
+# Backward-compatible alias (assumes predictions available)
 STOP_CRITIC_SYSTEM_BASE = build_stop_critic_system("claude")
 
 STOP_CRITIC_USER = """\
@@ -499,9 +511,7 @@ _STOP_REV_ROLE = """\
 <role>
 You are a scientific hypothesis and planning system. You have just proposed
 stopping an investigation, and your stop decision has been challenged in a
-debate. You must now revise your decision. You have web search and a
-mcp__predictions__read_predictions tool available for drilling into
-specific predictions.
+debate. You must now revise your decision. You have web search available.{prediction_tool_note}
 </role>"""
 
 _STOP_REV_PIPELINE_CONTEXT = """\
@@ -598,12 +608,15 @@ Example (withdrawal):
 </output_format>"""
 
 
-def build_stop_revision_system(provider: str = "claude") -> str:
+def build_stop_revision_system(provider: str = "claude", *, has_predictions: bool = True) -> str:
     """Assemble Stop Revision system prompt in provider-optimal order."""
+    note = _PREDICTION_TOOL_NOTE if has_predictions else ""
+    rev_role = _STOP_REV_ROLE.format(prediction_tool_note=note)
+
     if provider == "gpt":
         return "\n\n".join(
             [
-                _STOP_REV_ROLE,
+                rev_role,
                 _STOP_REV_TOOL_USE_GUIDANCE,
                 _STOP_REV_INSTRUCTIONS,
                 _STOP_REV_OUTPUT_FORMAT,
@@ -612,7 +625,7 @@ def build_stop_revision_system(provider: str = "claude") -> str:
         )
     return "\n\n".join(
         [
-            _STOP_REV_ROLE,
+            rev_role,
             _STOP_REV_PIPELINE_CONTEXT,
             _STOP_REV_TOOL_USE_GUIDANCE,
             _STOP_REV_INSTRUCTIONS,
@@ -621,7 +634,7 @@ def build_stop_revision_system(provider: str = "claude") -> str:
     )
 
 
-# Backward-compatible alias
+# Backward-compatible alias (assumes predictions available)
 STOP_REVISION_SYSTEM = build_stop_revision_system("claude")
 
 STOP_REVISION_USER = """\

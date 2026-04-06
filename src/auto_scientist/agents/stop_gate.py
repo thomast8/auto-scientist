@@ -106,7 +106,8 @@ async def run_completeness_assessment(
 
     max_turns = 10
     prompt_provider = "gpt" if provider == "openai" else "claude"
-    assessment_system = build_assessment_system(prompt_provider)
+    has_predictions = bool(prediction_history)
+    assessment_system = build_assessment_system(prompt_provider, has_predictions=has_predictions)
     budget = prepare_turn_budget(
         assessment_system + json_instruction, max_turns, tools, provider=provider
     )
@@ -230,7 +231,10 @@ async def run_single_stop_debate(
     )
 
     prompt_provider = "gpt" if config.provider == "openai" else "claude"
-    critic_system = build_stop_critic_system(prompt_provider).format(
+    has_predictions = bool(prediction_history_records)
+    critic_system = build_stop_critic_system(
+        prompt_provider, has_predictions=has_predictions
+    ).format(
         persona_text=persona_text,
         persona_instructions=persona_instructions or "",
         critic_output_schema=json.dumps(CRITIC_OUTPUT_SCHEMA, indent=2),
@@ -335,7 +339,8 @@ async def run_scientist_stop_revision(
 
     max_turns = 15
     prompt_provider = "gpt" if provider == "openai" else "claude"
-    stop_rev_system = build_stop_revision_system(prompt_provider)
+    has_predictions = bool(prediction_history)
+    stop_rev_system = build_stop_revision_system(prompt_provider, has_predictions=has_predictions)
     budget = prepare_turn_budget(
         stop_rev_system + json_instruction, max_turns, tools, provider=provider
     )

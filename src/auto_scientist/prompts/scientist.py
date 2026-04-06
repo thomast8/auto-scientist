@@ -15,9 +15,14 @@ You are a scientific hypothesis and planning system. You analyze
 experimental assessments, formulate hypotheses, and produce detailed
 implementation plans as JSON. You plan from results, observations,
 and your notebook. A separate Coder implements your plans; you never
-see or write code. You have web search and a mcp__predictions__read_predictions
-tool available for drilling into specific predictions for full detail.
+see or write code. You have web search available.{prediction_tool_note}
 </role>"""
+
+_PREDICTION_TOOL_NOTE = (
+    " You also have a mcp__predictions__read_predictions tool"
+    " for drilling into specific predictions for full detail."
+)
+_NO_PREDICTION_TOOL_NOTE = ""
 
 _PIPELINE_CONTEXT = """\
 <pipeline_context>
@@ -651,17 +656,24 @@ Rules (quick reference):
 </recap>"""
 
 
-def build_scientist_system(provider: str = "claude") -> str:
+def build_scientist_system(provider: str = "claude", *, has_predictions: bool = True) -> str:
     """Assemble Scientist system prompt in provider-optimal order.
 
     Claude: context first, instructions at end (recency effect).
     GPT: instructions first, compact context, three behavioral examples.
+
+    When *has_predictions* is False (iteration 0, no prediction history),
+    the MCP tool reference is omitted from the role block so the model
+    doesn't hallucinate calls to a tool that isn't wired.
     """
+    note = _PREDICTION_TOOL_NOTE if has_predictions else _NO_PREDICTION_TOOL_NOTE
+    role = _ROLE.format(prediction_tool_note=note)
+
     if provider == "gpt":
         # GPT: instructions first, smaller context/examples, recap at top and end
         return "\n\n".join(
             [
-                _ROLE,
+                role,
                 _TOOL_USE_GUIDANCE,
                 _INSTRUCTIONS,
                 _OUTPUT_FORMAT,
@@ -674,7 +686,7 @@ def build_scientist_system(provider: str = "claude") -> str:
         )
     return "\n\n".join(
         [
-            _ROLE,
+            role,
             _PIPELINE_CONTEXT,
             _TOOL_USE_GUIDANCE,
             _INSTRUCTIONS,
@@ -686,7 +698,7 @@ def build_scientist_system(provider: str = "claude") -> str:
     )
 
 
-# Backward-compatible alias (Claude default)
+# Backward-compatible alias (Claude default, assumes predictions available)
 SCIENTIST_SYSTEM = build_scientist_system("claude")
 
 SCIENTIST_USER = """\
@@ -722,14 +734,15 @@ Output raw JSON only. No markdown fencing.
 </recap>
 """
 
-SCIENTIST_REVISION_SYSTEM = """\
+_REVISION_ROLE = """\
 <role>
 You are a scientific plan revision system. You incorporate feedback
 from a critic debate into a revised experiment plan. You produce a
 complete revised plan as JSON, not a diff against the original. You
-have web search and a mcp__predictions__read_predictions tool available
-for drilling into specific predictions for full detail.
-</role>
+have web search available.{prediction_tool_note}
+</role>"""
+
+_REVISION_BODY = """\
 
 <pipeline_context>
 You receive the original Scientist plan plus a structured concern ledger
@@ -998,6 +1011,16 @@ documents what the debate changed and what was rejected, not the
 original reflection. Preserve or update testable_predictions.
 </recap>
 """
+
+
+def build_revision_system(*, has_predictions: bool = True) -> str:
+    """Assemble revision system prompt with conditional MCP tool reference."""
+    note = _PREDICTION_TOOL_NOTE if has_predictions else _NO_PREDICTION_TOOL_NOTE
+    return _REVISION_ROLE.format(prediction_tool_note=note) + "\n" + _REVISION_BODY
+
+
+# Backward-compatible alias (assumes predictions available)
+SCIENTIST_REVISION_SYSTEM = build_revision_system()
 
 SCIENTIST_REVISION_USER = """\
 <context>

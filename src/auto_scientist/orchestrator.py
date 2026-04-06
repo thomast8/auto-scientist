@@ -46,6 +46,9 @@ from auto_scientist.widgets import AGENT_STYLES, AgentPanel, console
 
 logger = logging.getLogger(__name__)
 
+# Default from DomainConfig, used when self.config is None (e.g. tests)
+_DEFAULT_RUN_TIMEOUT = DomainConfig.model_fields["run_timeout_minutes"].default
+
 
 class Orchestrator:
     """Drives the Ingestion -> Iteration -> Report pipeline.
@@ -748,7 +751,7 @@ class Orchestrator:
         # Build timeout context if previous version timed out
         timeout_context: dict[str, Any] | None = None
         if latest.failure_reason == "timed_out":
-            run_timeout = self.config.run_timeout_minutes if self.config else 120
+            run_timeout = self.config.run_timeout_minutes if self.config else _DEFAULT_RUN_TIMEOUT
             timeout_context = {
                 "timeout_minutes": run_timeout,
                 "hypothesis": latest.hypothesis,
@@ -1670,7 +1673,7 @@ class Orchestrator:
         else:
             previous_script = Path("nonexistent")
 
-        run_timeout = self.config.run_timeout_minutes if self.config else 120
+        run_timeout = self.config.run_timeout_minutes if self.config else _DEFAULT_RUN_TIMEOUT
         run_cmd = self.config.run_command if self.config else "uv run {script_path}"
 
         cfg = self.model_config.resolve("coder")

@@ -7,6 +7,11 @@ from a JSON file passed as the first CLI argument and exposes a
 
 Usage (by the Claude Code CLI, not directly):
     python3 _prediction_mcp_server.py /path/to/predictions.json
+
+NOTE: Query helpers (_format_record, _get_ancestors, _build_compact_tree, etc.)
+are intentionally duplicated from prediction_tool.py. This module runs as an
+isolated subprocess and must not import framework code (Pydantic, persistence,
+etc.). Keep both files in sync when changing query semantics.
 """
 
 from __future__ import annotations

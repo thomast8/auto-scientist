@@ -19,9 +19,9 @@ from auto_scientist.agents.prediction_tool import (
 )
 from auto_scientist.model_config import ReasoningConfig, reasoning_to_cc_extra_args
 from auto_scientist.prompts.scientist import (
-    SCIENTIST_REVISION_SYSTEM,
     SCIENTIST_REVISION_USER,
     SCIENTIST_USER,
+    build_revision_system,
     build_scientist_system,
 )
 from auto_scientist.retry import QueryResult, agent_retry_loop
@@ -226,7 +226,8 @@ async def run_scientist(
     )
 
     prompt_provider = "gpt" if provider == "openai" else "claude"
-    system_prompt = build_scientist_system(prompt_provider)
+    has_predictions = bool(prediction_history)
+    system_prompt = build_scientist_system(prompt_provider, has_predictions=has_predictions)
 
     json_instruction = (
         "\n\n## Output Format\n"
@@ -344,9 +345,12 @@ async def run_scientist_revision(
         prediction_history, provider, output_dir=output_dir
     )
 
+    has_predictions = bool(prediction_history)
+    revision_system = build_revision_system(has_predictions=has_predictions)
+
     max_turns = 15
     budget = prepare_turn_budget(
-        SCIENTIST_REVISION_SYSTEM + json_instruction,
+        revision_system + json_instruction,
         max_turns,
         tools,
         provider=provider,

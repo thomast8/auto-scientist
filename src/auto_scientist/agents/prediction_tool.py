@@ -5,6 +5,10 @@ config that the Claude Code CLI can connect to. The server reads predictions
 from a temporary JSON file and exposes a `read_predictions` tool.
 
 Also provides `_handle_read_predictions()` for direct use in tests.
+
+NOTE: Query helpers (_format_record_detail, _get_ancestor_ids, etc.) are
+intentionally duplicated in _prediction_mcp_server.py, which runs as an
+isolated subprocess. Keep both files in sync when changing query semantics.
 """
 
 from __future__ import annotations

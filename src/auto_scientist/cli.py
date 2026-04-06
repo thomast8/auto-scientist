@@ -35,7 +35,8 @@ _logger = logging.getLogger(__name__)
 
 class _ChildWatcherFilter(logging.Filter):
     def filter(self, record: logging.LogRecord) -> bool:
-        return "that handles pid" not in record.getMessage()
+        msg = record.getMessage()
+        return not ("that handles pid" in msg and "is closed" in msg)
 
 
 logging.getLogger("asyncio").addFilter(_ChildWatcherFilter())
@@ -668,6 +669,16 @@ def resume(
         state = result.state
         from_agent = result.from_agent  # may have been normalized
         restored_panels = result.restored_panels
+
+        # Guard: if the rewound state already meets the cap, the orchestrator
+        # would exit immediately.  Auto-bump so the fork can actually advance.
+        if state.iteration >= max_iterations:
+            max_iterations = state.iteration + 5
+            console.print(
+                f"[yellow]Bumped max_iterations to {max_iterations} "
+                f"(forked state already at iteration {state.iteration + 1}).[/yellow]"
+            )
+            console.print("[dim]Use --max-iterations to set a different cap.[/dim]")
 
         agent_info = f", from agent '{from_agent}'" if from_agent else ""
         console.print(

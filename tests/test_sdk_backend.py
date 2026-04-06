@@ -156,6 +156,14 @@ class TestSDKMessage:
 
 
 class TestGetBackend:
+    @pytest.fixture(autouse=True)
+    def _clear_cache(self):
+        from auto_scientist.sdk_backend import _backend_cache
+
+        _backend_cache.clear()
+        yield
+        _backend_cache.clear()
+
     def test_anthropic_returns_claude_backend(self):
         from auto_scientist.sdk_backend import ClaudeBackend, get_backend
 
@@ -167,6 +175,13 @@ class TestGetBackend:
 
         backend = get_backend("openai")
         assert isinstance(backend, CodexBackend)
+
+    def test_reuses_cached_instance(self):
+        from auto_scientist.sdk_backend import get_backend
+
+        b1 = get_backend("anthropic")
+        b2 = get_backend("anthropic")
+        assert b1 is b2
 
     def test_google_raises_value_error(self):
         from auto_scientist.sdk_backend import get_backend
@@ -300,6 +315,84 @@ class TestClaudeBackend:
         assert cc_opts.env.get("CLAUDE_CODE_DISABLE_CLAUDE_MDS") == "1"
 
     @pytest.mark.asyncio
+    async def test_strips_anthropic_api_key(self):
+        """When ANTHROPIC_API_KEY is in env, ClaudeBackend strips it from subprocess."""
+        from auto_scientist.sdk_backend import ClaudeBackend, SDKOptions
+
+        async def fake_query(**kwargs):
+            return
+            yield
+
+        backend = ClaudeBackend()
+        opts = SDKOptions(system_prompt="", allowed_tools=[], max_turns=5)
+
+        with (
+            patch("auto_scientist.sdk_backend.claude_query", side_effect=fake_query) as mock_q,
+            patch.dict("os.environ", {"ANTHROPIC_API_KEY": "sk-ant-test"}, clear=False),
+        ):
+            async for _ in backend.query("test", opts):
+                pass
+
+        call_kwargs = mock_q.call_args
+        cc_opts = call_kwargs.kwargs.get("options") or call_kwargs[1].get("options")
+        assert cc_opts.env.get("ANTHROPIC_API_KEY") == ""
+
+    @pytest.mark.asyncio
+    async def test_preserves_explicit_anthropic_api_key(self):
+        """When ANTHROPIC_API_KEY is explicitly passed in options.env, it is preserved."""
+        from auto_scientist.sdk_backend import ClaudeBackend, SDKOptions
+
+        async def fake_query(**kwargs):
+            return
+            yield
+
+        backend = ClaudeBackend()
+        opts = SDKOptions(
+            system_prompt="",
+            allowed_tools=[],
+            max_turns=5,
+            env={"ANTHROPIC_API_KEY": "sk-ant-explicit"},
+        )
+
+        with (
+            patch("auto_scientist.sdk_backend.claude_query", side_effect=fake_query) as mock_q,
+            patch.dict("os.environ", {"ANTHROPIC_API_KEY": "sk-ant-leaked"}, clear=False),
+        ):
+            async for _ in backend.query("test", opts):
+                pass
+
+        call_kwargs = mock_q.call_args
+        cc_opts = call_kwargs.kwargs.get("options") or call_kwargs[1].get("options")
+        assert cc_opts.env.get("ANTHROPIC_API_KEY") == "sk-ant-explicit"
+
+    @pytest.mark.asyncio
+    async def test_no_strip_when_key_absent(self):
+        """When ANTHROPIC_API_KEY is not in env, nothing is injected."""
+        from auto_scientist.sdk_backend import ClaudeBackend, SDKOptions
+
+        async def fake_query(**kwargs):
+            return
+            yield
+
+        backend = ClaudeBackend()
+        opts = SDKOptions(system_prompt="", allowed_tools=[], max_turns=5)
+
+        with (
+            patch("auto_scientist.sdk_backend.claude_query", side_effect=fake_query) as mock_q,
+            patch.dict("os.environ", {}, clear=False),
+        ):
+            # Ensure key is not in env for this test
+            import os
+
+            os.environ.pop("ANTHROPIC_API_KEY", None)
+            async for _ in backend.query("test", opts):
+                pass
+
+        call_kwargs = mock_q.call_args
+        cc_opts = call_kwargs.kwargs.get("options") or call_kwargs[1].get("options")
+        assert "ANTHROPIC_API_KEY" not in cc_opts.env
+
+    @pytest.mark.asyncio
     async def test_skips_none_messages(self):
         """None messages (unknown types) are filtered out."""
         from claude_code_sdk import AssistantMessage, TextBlock
@@ -340,10 +433,13 @@ class TestCodexBackend:
         assert CodexBackend._resolve_sandbox(["Read", "Glob"]) == "read-only"
         assert CodexBackend._resolve_sandbox(["WebSearch"]) == "read-only"
         assert CodexBackend._resolve_sandbox([]) == "read-only"
-        # MCP servers need full access for subprocess spawning
-        assert CodexBackend._resolve_sandbox(["WebSearch"], has_mcp=True) == "danger-full-access"
+        # MCP servers escalate to workspace-write for subprocess spawning
+        assert CodexBackend._resolve_sandbox(["WebSearch"], has_mcp=True) == "workspace-write"
+        assert CodexBackend._resolve_sandbox(["Read", "Write"], has_mcp=True) == "workspace-write"
+        # MCP + network_access still goes to danger-full-access
         assert (
-            CodexBackend._resolve_sandbox(["Read", "Write"], has_mcp=True) == "danger-full-access"
+            CodexBackend._resolve_sandbox(["Read"], has_mcp=True, network_access=True)
+            == "danger-full-access"
         )
         # network_access escalates to danger-full-access for pip downloads
         assert (
