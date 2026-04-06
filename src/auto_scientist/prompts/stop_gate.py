@@ -10,6 +10,8 @@ Challenger) that are distinct from the normal debate personas
 (Methodologist, Trajectory Critic, etc.).
 """
 
+import json
+
 # ---------------------------------------------------------------------------
 # Completeness Assessment
 # ---------------------------------------------------------------------------
@@ -45,15 +47,61 @@ ASSESSMENT_SCHEMA = {
     "required": ["sub_questions", "overall_coverage", "recommendation"],
 }
 
-ASSESSMENT_SYSTEM = """\
+# ---------------------------------------------------------------------------
+# Composable blocks for Assessment prompt
+# ---------------------------------------------------------------------------
+
+_PREDICTION_TOOL_NOTE = (
+    " You also have a mcp__predictions__read_predictions tool"
+    " for drilling into specific predictions for full detail."
+)
+
+_ASSESS_ROLE = """\
 <role>
 You are a completeness assessment system. You evaluate whether a scientific
 investigation has thoroughly addressed its stated goal. You are factual and
 structured, not argumentative. You map the goal to evidence and report gaps.
-You have web search and a mcp__predictions__read_predictions tool available
-for drilling into specific predictions for full detail.
-</role>
+You have web search available.{prediction_tool_note}
+</role>"""
 
+_ASSESS_TOOL_USE_GUIDANCE = """\
+<tool_use>
+Tool calls are allowed before the final JSON response.
+The "raw JSON only" rule applies only to your final assistant message.
+
+Before responding:
+1. If mcp__predictions__read_predictions is available and you need details
+   about a specific pred_id, outcome, or prediction chain, call it rather
+   than guessing from the compact summary.
+2. Use web search only when you need to verify standard analyses, standard
+   goal decompositions, or common coverage expectations for the stated goal.
+3. If the notebook and prediction history already settle the point, do not
+   browse unnecessarily.
+
+Limit to 1-2 targeted searches per response. More searches rarely
+improve assessment quality and can introduce contradictory information.
+If you call a tool, reference its result in your output. If the result
+contradicts your draft reasoning, update your reasoning.
+</tool_use>"""
+
+_ASSESS_PIPELINE_CONTEXT = """\
+<pipeline_context>
+You are evaluating whether a stop decision is justified.
+
+You receive:
+- The investigation goal
+- The Scientist's stop_reason
+- The lab notebook
+- Prediction history and outcomes
+- Domain knowledge
+
+You produce:
+- A structured completeness assessment that decomposes the goal into
+  sub-questions, rates coverage, cites evidence, and recommends stop or
+  continue.
+</pipeline_context>"""
+
+_ASSESS_INSTRUCTIONS = """\
 <instructions>
 1. Read the investigation goal carefully. Decompose it into distinct
    sub-questions. Each aspect of the goal that could be independently
@@ -74,7 +122,8 @@ for drilling into specific predictions for full detail.
    - shallow: Addressed but not deeply. One test, one functional form,
      one covariate, or one statistical method was used. A single
      negative result was used to close the sub-question without testing
-     alternative mechanisms or formulations.
+     alternative mechanisms or formulations. Multiple iterations using
+     the same approach count as one line of evidence, not multiple.
    - unexplored: Not investigated at all despite being part of the goal.
 
 3. For shallow and unexplored sub-questions, list specific gaps. Be
@@ -91,8 +140,79 @@ for drilling into specific predictions for full detail.
    - stop: Only if overall_coverage is thorough
    - continue: If any sub-question is shallow or unexplored and further
      investigation would plausibly improve the answer
-</instructions>
-"""
+</instructions>"""
+
+_ASSESS_OUTPUT_FORMAT = f"""\
+<output_format>
+Respond with valid JSON matching this schema. No markdown fencing, no
+explanation, no other text.
+
+Schema:
+{json.dumps(ASSESSMENT_SCHEMA, indent=2)}
+
+Example:
+{{
+  "sub_questions": [
+    {{
+      "question": "Nonlinear effects",
+      "coverage": "shallow",
+      "evidence": [
+        "v02 tested only a quadratic form (p=0.19)"
+      ],
+      "gaps": [
+        "Saturating, piecewise, and interaction effects were not explored"
+      ]
+    }}
+  ],
+  "overall_coverage": "partial",
+  "recommendation": "continue"
+}}
+</output_format>"""
+
+_ASSESS_RECAP = """\
+<recap>
+Rules (quick reference):
+1. Decompose the goal into explicit sub-questions
+2. Rate each sub-question as thorough, shallow, or unexplored
+3. Cite concrete evidence from the notebook, stop_reason, or prediction history
+4. List specific gaps for shallow or unexplored items
+5. Output raw JSON only in the final assistant message
+</recap>"""
+
+
+def build_assessment_system(provider: str = "claude", *, has_predictions: bool = True) -> str:
+    """Assemble Assessment system prompt in provider-optimal order.
+
+    When *has_predictions* is False, MCP tool references are omitted.
+    """
+    note = _PREDICTION_TOOL_NOTE if has_predictions else ""
+    role = _ASSESS_ROLE.format(prediction_tool_note=note)
+
+    if provider == "gpt":
+        return "\n\n".join(
+            [
+                role,
+                _ASSESS_TOOL_USE_GUIDANCE,
+                _ASSESS_INSTRUCTIONS,
+                _ASSESS_OUTPUT_FORMAT,
+                _ASSESS_PIPELINE_CONTEXT,
+                _ASSESS_RECAP,
+            ]
+        )
+    return "\n\n".join(
+        [
+            role,
+            _ASSESS_PIPELINE_CONTEXT,
+            _ASSESS_TOOL_USE_GUIDANCE,
+            _ASSESS_INSTRUCTIONS,
+            _ASSESS_OUTPUT_FORMAT,
+            _ASSESS_RECAP,
+        ]
+    )
+
+
+# Backward-compatible alias (assumes predictions available)
+ASSESSMENT_SYSTEM = build_assessment_system("claude")
 
 ASSESSMENT_USER = """\
 <context>
@@ -112,6 +232,12 @@ prediction history and notebook, rate coverage, and identify gaps.
 
 Output your assessment as structured JSON.
 </task>
+
+<recap>
+Multiple iterations using the same approach count as one line of
+evidence. Rate shallow when only one method or form was tested.
+Output raw JSON only.
+</recap>
 """
 
 # ---------------------------------------------------------------------------
@@ -140,12 +266,6 @@ STOP_PERSONAS: list[dict[str, str]] = [
             "- 'Variable Z is listed in the goal but was only used as a\n"
             "   control, never as a primary subject of investigation.'\n"
             "\n"
-            "NOT in your lane (belongs to other persona):\n"
-            "- 'The single test that was done used inadequate methodology'\n"
-            "   -> Depth Challenger (evidence quality, not topic coverage)\n"
-            "- 'The investigation arc was inefficient'\n"
-            "   -> Not relevant to stop decisions\n"
-            "\n"
             "Use web search to check whether standard approaches to the stated\n"
             "goal type include analyses that the investigation did not attempt.\n"
             "</persona>"
@@ -167,7 +287,7 @@ STOP_PERSONAS: list[dict[str, str]] = [
             "4. For each gap, state what specifically should be investigated\n"
             "   and why it matters for answering the goal.\n"
             "\n"
-            "IMPORTANT: Do not critique the quality of analyses that were\n"
+            "Do not critique the quality of analyses that were\n"
             "performed. That is the Depth Challenger's job. Your job is\n"
             "about breadth: what topics were not covered at all or were\n"
             "covered too thinly.\n"
@@ -199,12 +319,6 @@ STOP_PERSONAS: list[dict[str, str]] = [
             "   potential mechanism, when several plausible mechanisms\n"
             "   remain untested.'\n"
             "\n"
-            "NOT in your lane (belongs to other persona):\n"
-            "- 'The goal mentions X but it was never investigated'\n"
-            "   -> Goal Coverage Auditor (topic-level gap)\n"
-            "- 'Standard approaches for this problem type were not tried'\n"
-            "   -> Goal Coverage Auditor (coverage gap)\n"
-            "\n"
             "Use web search to look up domain-specific pitfalls, common\n"
             "alternative methodologies, and functional forms that should\n"
             "have been tested.\n"
@@ -222,6 +336,8 @@ STOP_PERSONAS: list[dict[str, str]] = [
             "   - Was only one method used when alternatives exist?\n"
             "   - Was a negative result accepted after a single test?\n"
             "   - Does the conclusion depend on assumptions that were not verified?\n"
+            "   Multiple iterations using the same approach count as one line\n"
+            "   of evidence, not multiple.\n"
             "\n"
             "3. Use web search to look up domain-specific pitfalls, alternative\n"
             "   approaches, and common failure modes for the methods used.\n"
@@ -229,7 +345,7 @@ STOP_PERSONAS: list[dict[str, str]] = [
             "4. For each gap, state what additional test or analysis would\n"
             "   strengthen or challenge the current conclusion.\n"
             "\n"
-            "IMPORTANT: Do not flag topics that were never investigated. That\n"
+            "Do not flag topics that were never investigated. That\n"
             "is the Goal Coverage Auditor's job. Your job is about depth:\n"
             "were the topics that were covered investigated thoroughly enough?\n"
             "</instructions>"
@@ -237,16 +353,38 @@ STOP_PERSONAS: list[dict[str, str]] = [
     },
 ]
 
-STOP_CRITIC_SYSTEM_BASE = """\
+# ---------------------------------------------------------------------------
+# Composable blocks for Stop Critic prompt (template format strings)
+# ---------------------------------------------------------------------------
+
+_STOP_CRITIC_ROLE = """\
 <role>
 You are a scientific critique system. You challenge a decision to stop an
 investigation. You have web search available to verify claims and look up
-relevant methods, and a mcp__predictions__read_predictions tool to drill
-into specific predictions for full detail.
-</role>
+relevant methods.{prediction_tool_note}
+</role>"""
 
-{persona_text}
+_STOP_CRITIC_TOOL_USE_GUIDANCE = """\
+<tool_use>
+Tool calls are allowed before the final JSON response.
+The "raw JSON only" rule applies only to your final assistant message.
 
+Before responding:
+- Use targeted web search when you need literature or standard-method support
+  for a coverage or depth challenge.
+- If mcp__predictions__read_predictions is available and you need details
+  about a specific pred_id, outcome, or chain, call it rather than guessing
+  from the compact summary.
+- If the provided evidence already resolves the point, do not browse
+  unnecessarily.
+
+Limit to 1-2 targeted searches per response. More searches rarely
+improve critique quality and can introduce contradictory information.
+If you call a tool, reference its result in your output. If the result
+contradicts your draft reasoning, update your reasoning.
+</tool_use>"""
+
+_STOP_CRITIC_PIPELINE_CONTEXT = """\
 <pipeline_context>
 The Scientist has proposed stopping this investigation. A completeness
 assessment has been performed, identifying which aspects of the goal have
@@ -265,18 +403,70 @@ A compact summary of the prediction history is included in the context below.
 When you need more detail on a specific prediction (full reasoning, chain of
 related predictions, or statistics by outcome/iteration), call the
 mcp__predictions__read_predictions tool rather than guessing from the summary.
-</pipeline_context>
+</pipeline_context>"""
 
-{persona_instructions}
-
+_STOP_CRITIC_OUTPUT_FORMAT = """\
 <output_format>
-You MUST respond with ONLY valid JSON matching this schema. No markdown
+Respond with valid JSON matching this schema. No markdown
 fencing, no explanation, no other text.
 
 Schema:
-{critic_output_schema}
-</output_format>
-"""
+{{critic_output_schema}}
+
+Example:
+{{{{
+  "concerns": [
+    {{{{
+      "claim": "Nonlinearity closed after testing only quadratic; standard alternatives untested.",
+      "severity": "high",
+      "confidence": "high",
+      "category": "criteria"
+    }}}}
+  ],
+  "alternative_hypotheses": [
+    "The relationship may be saturating or piecewise rather than quadratic."
+  ],
+  "overall_assessment": "Stop is premature; one stated goal area is only shallowly covered."
+}}}}
+</output_format>"""
+
+
+def build_stop_critic_system(provider: str = "claude", *, has_predictions: bool = True) -> str:
+    """Assemble Stop Critic system prompt template in provider-optimal order.
+
+    Returns a template with {persona_text}, {persona_instructions},
+    {critic_output_schema} placeholders.
+    """
+    note = _PREDICTION_TOOL_NOTE if has_predictions else ""
+    role = _STOP_CRITIC_ROLE.format(prediction_tool_note=note)
+
+    if provider == "gpt":
+        raw = "\n\n".join(
+            [
+                role,
+                _STOP_CRITIC_TOOL_USE_GUIDANCE,
+                "{persona_text}",
+                "{persona_instructions}",
+                _STOP_CRITIC_OUTPUT_FORMAT,
+                _STOP_CRITIC_PIPELINE_CONTEXT,
+            ]
+        )
+    else:
+        raw = "\n\n".join(
+            [
+                role,
+                _STOP_CRITIC_TOOL_USE_GUIDANCE,
+                "{persona_text}",
+                _STOP_CRITIC_PIPELINE_CONTEXT,
+                "{persona_instructions}",
+                _STOP_CRITIC_OUTPUT_FORMAT,
+            ]
+        )
+    return raw.replace("{{", "{").replace("}}", "}")
+
+
+# Backward-compatible alias (assumes predictions available)
+STOP_CRITIC_SYSTEM_BASE = build_stop_critic_system("claude")
 
 STOP_CRITIC_USER = """\
 <context>
@@ -298,17 +488,14 @@ above identifies gaps in coverage. Challenge the stop decision based on these
 gaps. Output your critique as structured JSON with concerns (each tagged with
 severity, confidence, and category), alternative hypotheses (investigations
 that should still be pursued), and an overall assessment.
-
-Use web search to check the literature for standard approaches and verify
-whether the investigation's coverage is genuinely complete. Call
-mcp__predictions__read_predictions to check specific prediction outcomes and
-chains when evaluating whether an avenue was properly explored.
 </task>
 
 <recap>
-CRITICAL: Your entire response must be a single JSON object matching the schema
+Your response is a single JSON object matching the schema
 in the output_format section. Do not include any text before or after the JSON.
 No markdown fencing. No explanations. Just the raw JSON object.
+An empty concerns list is correct when your lane has no substantive issues.
+Do not invent weak criticism.
 </recap>
 """
 
@@ -316,15 +503,18 @@ No markdown fencing. No explanations. Just the raw JSON object.
 # Scientist Stop Revision (after debate)
 # ---------------------------------------------------------------------------
 
-STOP_REVISION_SYSTEM = """\
+# ---------------------------------------------------------------------------
+# Composable blocks for Stop Revision prompt
+# ---------------------------------------------------------------------------
+
+_STOP_REV_ROLE = """\
 <role>
 You are a scientific hypothesis and planning system. You have just proposed
 stopping an investigation, and your stop decision has been challenged in a
-debate. You must now revise your decision. You have web search and a
-mcp__predictions__read_predictions tool available for drilling into
-specific predictions.
-</role>
+debate. You must now revise your decision. You have web search available.{prediction_tool_note}
+</role>"""
 
+_STOP_REV_PIPELINE_CONTEXT = """\
 <pipeline_context>
 After proposing to stop, a completeness assessment identified gaps in
 your investigation's coverage of the stated goal. Critics challenged
@@ -341,8 +531,9 @@ When withdrawing a stop, your plan should:
 - Focus on the most important gaps identified by the assessment and debate
 - Produce testable predictions that will resolve the open questions
 - Be concrete enough for the Coder to implement
-</pipeline_context>
+</pipeline_context>"""
 
+_STOP_REV_INSTRUCTIONS = """\
 <instructions>
 1. Review the completeness assessment and the concern ledger from the
    stop debate.
@@ -361,8 +552,90 @@ When withdrawing a stop, your plan should:
    - Update the stop_reason to address each concern from the debate
    - Explain why each identified gap is peripheral
    - Write a notebook entry documenting the decision
-</instructions>
-"""
+</instructions>"""
+
+_STOP_REV_TOOL_USE_GUIDANCE = """\
+<tool_use>
+Tool calls are allowed before the final JSON response.
+The "raw JSON only" rule applies only to your final assistant message.
+
+Before responding:
+1. If mcp__predictions__read_predictions is available and you rely on a
+   specific pred_id, prior outcome, or prediction chain, call it before
+   finalizing the revision.
+2. If you cite standard methods or outside literature to justify
+   maintaining or withdrawing the stop, do one targeted web search batch.
+3. If neither condition applies, do not browse just to browse.
+
+Limit to 1-2 targeted searches per response. More searches rarely
+improve plan quality and can introduce contradictory information.
+If you call a tool, reference its result in your output. If the result
+contradicts your draft reasoning, update your reasoning.
+</tool_use>"""
+
+
+_STOP_REV_OUTPUT_FORMAT = """\
+<output_format>
+Same JSON schema as the Scientist's plan. Respond with valid JSON.
+No markdown fencing. No explanation. No other text.
+
+Example (withdrawal):
+{{
+  "hypothesis": "Untested nonlinear response forms may change the answer.",
+  "strategy": "incremental",
+  "changes": [
+    {{
+      "what": "Test saturating and piecewise nonlinear response models",
+      "why": "Stop debate showed only one functional form tested",
+      "how": "Compare linear, saturating, and piecewise fits on held-out data",
+      "priority": 1
+    }}
+  ],
+  "expected_impact": "Resolve the remaining nonlinearity gap.",
+  "should_stop": false,
+  "stop_reason": null,
+  "notebook_entry": "Stop withdrawn\\n\\nNonlinearity gap too shallow. One follow-up.",
+  "testable_predictions": [
+    {{
+      "prediction": "A saturating or piecewise response fits better than linear",
+      "diagnostic": "Compare held-out fit quality across candidate forms",
+      "if_confirmed": "Keep investigation open; refine nonlinear mechanism",
+      "if_refuted": "Close nonlinearity gap and revisit stopping",
+      "follows_from": null
+    }}
+  ]
+}}
+</output_format>"""
+
+
+def build_stop_revision_system(provider: str = "claude", *, has_predictions: bool = True) -> str:
+    """Assemble Stop Revision system prompt in provider-optimal order."""
+    note = _PREDICTION_TOOL_NOTE if has_predictions else ""
+    rev_role = _STOP_REV_ROLE.format(prediction_tool_note=note)
+
+    if provider == "gpt":
+        return "\n\n".join(
+            [
+                rev_role,
+                _STOP_REV_TOOL_USE_GUIDANCE,
+                _STOP_REV_INSTRUCTIONS,
+                _STOP_REV_OUTPUT_FORMAT,
+                _STOP_REV_PIPELINE_CONTEXT,
+            ]
+        )
+    return "\n\n".join(
+        [
+            rev_role,
+            _STOP_REV_PIPELINE_CONTEXT,
+            _STOP_REV_TOOL_USE_GUIDANCE,
+            _STOP_REV_INSTRUCTIONS,
+            _STOP_REV_OUTPUT_FORMAT,
+        ]
+    )
+
+
+# Backward-compatible alias (assumes predictions available)
+STOP_REVISION_SYSTEM = build_stop_revision_system("claude")
 
 STOP_REVISION_USER = """\
 <context>
@@ -383,7 +656,8 @@ STOP_REVISION_USER = """\
 Based on the completeness assessment and debate feedback, decide whether to
 maintain or withdraw your stop decision.
 
-If maintaining: update stop_reason to address all concerns.
+If maintaining: update stop_reason to address each concern
+(explain why peripheral ones are not blocking).
 If withdrawing: produce a full experiment plan targeting the identified gaps.
 
 Output a complete plan (all fields).
@@ -391,11 +665,7 @@ Output a complete plan (all fields).
 The new version is: {version}
 </task>
 
-<output_format>
-You MUST respond with ONLY valid JSON matching the schema below.
-No markdown fencing. No explanation. No other text.
-
-Schema:
+<schema>
 {plan_schema}
-</output_format>
+</schema>
 """

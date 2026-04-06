@@ -17,7 +17,7 @@ from auto_scientist.iteration_manifest import (
     load_manifest,
 )
 from auto_scientist.runner import RunResult
-from auto_scientist.state import ExperimentState, VersionEntry
+from auto_scientist.state import ExperimentState, PredictionRecord, VersionEntry
 
 logger = logging.getLogger(__name__)
 
@@ -84,7 +84,7 @@ def collect_iteration_record(
     iteration_key: int | Literal["ingestion", "report"]
     if isinstance(title, int):
         iteration_key = state.iteration
-        display_title = f"Iteration {title}"
+        display_title = f"Iteration {title + 1}"
     elif title == "Report":
         iteration_key = "report"
         display_title = "Report"
@@ -235,7 +235,7 @@ def load_final_plan_from_disk(version_dir: Path, state: ExperimentState) -> dict
         apply_prediction_updates(plan, state)
     else:
         logger.info(
-            f"Predictions for iteration {state.iteration} already in state, "
+            f"Predictions for iteration {state.iteration + 1} already in state, "
             f"skipping re-application ({len(existing)} found)"
         )
 
@@ -369,7 +369,7 @@ def apply_prediction_updates(plan: dict[str, Any], state: ExperimentState) -> No
     Skips malformed or empty prediction entries and carried-forward predictions
     (which already have PredictionRecords).
     """
-    from auto_scientist.state import PredictionRecord
+    known_pred_ids = {r.pred_id for r in state.prediction_history if r.pred_id}
 
     known_pred_ids = {r.pred_id for r in state.prediction_history if r.pred_id}
 
@@ -438,11 +438,42 @@ def get_pending_carryforward_predictions(state: ExperimentState) -> list[dict[st
     return carried
 
 
+def _normalize_pred_id(raw: str, pending: list[PredictionRecord]) -> str:
+    """Resolve a raw analyst pred_id to a known pending pred_id.
+
+    Handles common Coder/Analyst format mismatches:
+    - Bracketed IDs: "[1]" -> "1", "[0.1]" -> "0.1"
+    - Bare integers: "1" -> "0.1" (if unambiguous among pending)
+    """
+    cleaned = raw.strip().strip("[]").strip()
+    if not cleaned:
+        return raw
+    if "." in cleaned:
+        return cleaned
+    # Bare integer: match against pending pred_ids ending with .{cleaned}
+    candidates = [p for p in pending if p.pred_id.endswith(f".{cleaned}")]
+    if len(candidates) == 1:
+        return candidates[0].pred_id
+    return cleaned
+
+
+def _token_overlap_score(a: str, b: str) -> float:
+    """Fraction of the shorter text's tokens found in the longer text."""
+    tokens_a = set(a.lower().split())
+    tokens_b = set(b.lower().split())
+    if not tokens_a or not tokens_b:
+        return 0.0
+    shorter = tokens_a if len(tokens_a) <= len(tokens_b) else tokens_b
+    overlap = tokens_a & tokens_b
+    return len(overlap) / len(shorter)
+
+
 def resolve_prediction_outcomes(analysis: dict[str, Any] | None, state: ExperimentState) -> None:
     """Match Analyst prediction outcomes against pending records in state.
 
-    Primary matching by pred_id (reliable). Falls back to substring text
-    matching for backward compatibility with a minimum length guard.
+    Primary matching by pred_id with normalization (strips brackets, resolves
+    bare integers). Falls back to token-overlap text matching with a minimum
+    length guard.
     """
     if not analysis:
         return
@@ -477,23 +508,26 @@ def resolve_prediction_outcomes(analysis: dict[str, Any] | None, state: Experime
             )
             continue
 
-        # Primary: match by pred_id
-        oid = outcome.get("pred_id", "")
+        # Primary: match by pred_id (with normalization)
+        raw_oid = outcome.get("pred_id", "")
+        oid = _normalize_pred_id(raw_oid, pending) if raw_oid else ""
         if oid and oid in pending_by_id:
             record = pending_by_id[oid]
             if _resolve(record, outcome):
                 pending_by_id.pop(oid)
                 pending.remove(record)
-                logger.info(f"Prediction {oid}: resolved by ID as '{record.outcome}'")
+                label = f" (normalized from '{raw_oid}')" if oid != raw_oid else ""
+                logger.info(f"Prediction {oid}: resolved by ID{label} as '{record.outcome}'")
             continue
 
-        # Fallback: substring text matching (minimum length guard)
+        # Fallback: text matching (minimum length guard)
         outcome_text = outcome.get("prediction", "")
         outcome_text = outcome_text.lower().strip() if isinstance(outcome_text, str) else ""
         if len(outcome_text) < 10:
             logger.warning(f"Prediction outcome text too short for text matching: '{outcome_text}'")
             continue
 
+        # Try substring match first (original behavior), then token overlap
         best_match = None
         best_score = 0
         for record in pending:
@@ -503,6 +537,28 @@ def resolve_prediction_outcomes(analysis: dict[str, Any] | None, state: Experime
                 if score > best_score:
                     best_match = record
                     best_score = score
+        if best_match is None:
+            # Token overlap fallback: require clear margin over runner-up
+            scored: list[tuple[float, PredictionRecord]] = []
+            for record in pending:
+                record_text = record.prediction.lower()
+                overlap = _token_overlap_score(outcome_text, record_text)
+                if overlap >= 0.4:
+                    scored.append((overlap, record))
+            if scored:
+                scored.sort(key=lambda x: x[0], reverse=True)
+                best_overlap, best_candidate = scored[0]
+                runner_up = scored[1][0] if len(scored) > 1 else 0.0
+                if best_overlap >= runner_up + 0.15:
+                    best_match = best_candidate
+                    logger.debug(
+                        f"Token overlap match: best={best_overlap:.2f} "
+                        f"('{best_candidate.pred_id}'), "
+                        f"runner_up={runner_up:.2f}"
+                    )
+                else:
+                    ids = ", ".join(f"{s:.2f}={r.pred_id}" for s, r in scored)
+                    logger.warning(f"Token overlap ambiguous (no clear margin): {ids}")
         if best_match:
             if _resolve(best_match, outcome):
                 logger.info(
@@ -513,7 +569,7 @@ def resolve_prediction_outcomes(analysis: dict[str, Any] | None, state: Experime
                 pending_by_id.pop(best_match.pred_id, None)
         else:
             logger.warning(
-                f"Prediction outcome unmatched: pred_id='{oid}', text='{outcome_text[:80]}'..."
+                f"Prediction outcome unmatched: pred_id='{raw_oid}', text='{outcome_text[:80]}'..."
             )
 
 

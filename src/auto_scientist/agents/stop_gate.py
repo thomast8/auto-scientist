@@ -26,12 +26,12 @@ from auto_scientist.agents.scientist import SCIENTIST_PLAN_SCHEMA
 from auto_scientist.model_config import AgentModelConfig
 from auto_scientist.prompts.stop_gate import (
     ASSESSMENT_SCHEMA,
-    ASSESSMENT_SYSTEM,
     ASSESSMENT_USER,
-    STOP_CRITIC_SYSTEM_BASE,
     STOP_CRITIC_USER,
-    STOP_REVISION_SYSTEM,
     STOP_REVISION_USER,
+    build_assessment_system,
+    build_stop_critic_system,
+    build_stop_revision_system,
 )
 from auto_scientist.retry import QueryResult, agent_retry_loop
 from auto_scientist.schemas import CompletenessAssessmentOutput, ScientistPlanOutput
@@ -97,14 +97,19 @@ async def run_completeness_assessment(
 
     json_instruction = (
         "\n\n## Output Format\n"
+        "Tool calls are allowed before the final JSON response.\n"
+        'The "JSON only" rule applies only to the final assistant message.\n'
         "You MUST respond with ONLY valid JSON matching the schema below.\n"
         "No markdown fencing. No explanation. No other text.\n\n"
         f"Schema:\n{json.dumps(ASSESSMENT_SCHEMA, indent=2)}"
     )
 
     max_turns = 10
+    prompt_provider = "gpt" if provider == "openai" else "claude"
+    has_predictions = bool(prediction_history)
+    assessment_system = build_assessment_system(prompt_provider, has_predictions=has_predictions)
     budget = prepare_turn_budget(
-        ASSESSMENT_SYSTEM + json_instruction, max_turns, tools, provider=provider
+        assessment_system + json_instruction, max_turns, tools, provider=provider
     )
     backend = get_backend(provider)
     options = SDKOptions(
@@ -114,6 +119,7 @@ async def run_completeness_assessment(
         model=model,
         extra_args={},
         mcp_servers=mcp_servers,
+        response_schema=CompletenessAssessmentOutput,
     )
 
     async def _query(prompt: str, resume_session_id: str | None) -> QueryResult:
@@ -224,7 +230,11 @@ async def run_single_stop_debate(
         prediction_history_records, output_dir=output_dir
     )
 
-    critic_system = STOP_CRITIC_SYSTEM_BASE.format(
+    prompt_provider = "gpt" if config.provider == "openai" else "claude"
+    has_predictions = bool(prediction_history_records)
+    critic_system = build_stop_critic_system(
+        prompt_provider, has_predictions=has_predictions
+    ).format(
         persona_text=persona_text,
         persona_instructions=persona_instructions or "",
         critic_output_schema=json.dumps(CRITIC_OUTPUT_SCHEMA, indent=2),
@@ -320,14 +330,19 @@ async def run_scientist_stop_revision(
 
     json_instruction = (
         "\n\n## Output Format\n"
-        "You MUST respond with ONLY valid JSON matching the schema below.\n"
+        "Tool calls are allowed before the final JSON response.\n"
+        'The "JSON only" rule applies only to the final assistant message.\n'
+        "Respond with valid JSON matching the schema below.\n"
         "No markdown fencing. No explanation. No other text.\n\n"
         f"Schema:\n{json.dumps(SCIENTIST_PLAN_SCHEMA, indent=2)}"
     )
 
     max_turns = 15
+    prompt_provider = "gpt" if provider == "openai" else "claude"
+    has_predictions = bool(prediction_history)
+    stop_rev_system = build_stop_revision_system(prompt_provider, has_predictions=has_predictions)
     budget = prepare_turn_budget(
-        STOP_REVISION_SYSTEM + json_instruction, max_turns, tools, provider=provider
+        stop_rev_system + json_instruction, max_turns, tools, provider=provider
     )
     backend = get_backend(provider)
     options = SDKOptions(
@@ -337,6 +352,7 @@ async def run_scientist_stop_revision(
         model=model,
         extra_args={},
         mcp_servers=mcp_servers,
+        response_schema=ScientistPlanOutput,
     )
 
     async def _query(prompt: str, resume_session_id: str | None) -> QueryResult:

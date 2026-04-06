@@ -214,7 +214,7 @@ class TestOutputValidationError:
 class TestValidateJsonOutput:
     def test_valid_json_valid_schema(self):
         data = {
-            "key_metrics": {},
+            "key_metrics": [],
             "improvements": [],
             "regressions": [],
             "observations": ["ok"],
@@ -226,7 +226,7 @@ class TestValidateJsonOutput:
 
     def test_strips_markdown_fencing(self):
         data = {
-            "key_metrics": {},
+            "key_metrics": [],
             "improvements": [],
             "regressions": [],
             "observations": [],
@@ -248,7 +248,7 @@ class TestValidateJsonOutput:
 
     def test_extra_fields_tolerated(self):
         data = {
-            "key_metrics": {},
+            "key_metrics": [],
             "improvements": [],
             "regressions": [],
             "observations": [],
@@ -260,7 +260,7 @@ class TestValidateJsonOutput:
     def test_trailing_text_after_json(self):
         """raw_decode() handles JSON followed by model commentary."""
         data = {
-            "key_metrics": {},
+            "key_metrics": [],
             "improvements": [],
             "regressions": [],
             "observations": ["ok"],
@@ -272,7 +272,7 @@ class TestValidateJsonOutput:
     def test_leading_prose_before_json(self):
         """Leading prose before JSON object is stripped."""
         data = {
-            "key_metrics": {},
+            "key_metrics": [],
             "improvements": [],
             "regressions": [],
             "observations": ["ok"],
@@ -284,7 +284,7 @@ class TestValidateJsonOutput:
     def test_leading_prose_and_trailing_text(self):
         """Both leading prose and trailing commentary handled."""
         data = {
-            "key_metrics": {},
+            "key_metrics": [],
             "improvements": [],
             "regressions": [],
             "observations": ["ok"],
@@ -302,14 +302,14 @@ class TestValidateJsonOutput:
             '{s:steps.count(s) for s in steps}\\""\\n'
         )
         data = {
-            "key_metrics": {"rmse": 0.5},
+            "key_metrics": [{"name": "rmse", "value": 0.5}],
             "improvements": ["better"],
             "regressions": [],
             "observations": ["ok"],
         }
         raw = shell_noise + json.dumps(data)
         result = validate_json_output(raw, AnalystOutput, "Analyst")
-        assert result["key_metrics"] == {"rmse": 0.5}
+        assert result["key_metrics"] == [{"name": "rmse", "value": 0.5}]
 
     def test_json_after_python_array_indexing(self):
         """JSON extraction skips [0] from Python indexing in shell commands."""
@@ -320,7 +320,7 @@ class TestValidateJsonOutput:
             "print('headers', list(rows[0].keys()) if rows else [])\\\"\"\\n"
         )
         data = {
-            "key_metrics": {},
+            "key_metrics": [],
             "improvements": [],
             "regressions": [],
             "observations": ["ok"],
@@ -332,7 +332,7 @@ class TestValidateJsonOutput:
     def test_json_after_braces_in_prose(self):
         """Handles {curly braces} in prose before the actual JSON."""
         data = {
-            "key_metrics": {},
+            "key_metrics": [],
             "improvements": [],
             "regressions": [],
             "observations": ["ok"],

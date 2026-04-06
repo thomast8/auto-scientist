@@ -9,6 +9,7 @@ unknown message types are silently skipped instead of crashing the stream.
 """
 
 import asyncio
+import json
 import logging
 import os
 import re
@@ -31,6 +32,7 @@ from claude_code_sdk import query as claude_query
 from claude_code_sdk._errors import MessageParseError
 from codex_app_server_sdk import CodexClient, ThreadConfig, TurnOverrides
 from codex_app_server_sdk.errors import CodexProtocolError
+from pydantic import BaseModel
 
 logger = logging.getLogger(__name__)
 
@@ -260,6 +262,7 @@ class SDKOptions:
     env: dict[str, str] = field(default_factory=dict)
     mcp_servers: dict[str, Any] = field(default_factory=dict)
     network_access: bool = False
+    response_schema: type[BaseModel] | None = None
 
 
 @dataclass
@@ -347,6 +350,15 @@ class ClaudeBackend:
         extra_args.update(isolation.extra_args)
         env.update(isolation.env)
 
+        # Strip ANTHROPIC_API_KEY so Claude Code CLI uses OAuth instead
+        # of direct API billing (the key may leak in via .env / dotenv).
+        if "ANTHROPIC_API_KEY" not in options.env and os.environ.get("ANTHROPIC_API_KEY"):
+            logger.info(
+                "Stripping ANTHROPIC_API_KEY from Claude Code subprocess env "
+                "(using OAuth instead of direct API billing)"
+            )
+            env["ANTHROPIC_API_KEY"] = ""
+
         kwargs: dict[str, Any] = {
             "system_prompt": options.system_prompt,
             "allowed_tools": options.allowed_tools,
@@ -365,6 +377,16 @@ class ClaudeBackend:
             kwargs["env"] = env
         if options.mcp_servers:
             kwargs["mcp_servers"] = options.mcp_servers
+
+        if options.response_schema is not None:
+            schema_str = json.dumps(options.response_schema.model_json_schema(), indent=2)
+            kwargs["append_system_prompt"] = (
+                "\n\nMANDATORY OUTPUT FORMAT: Your final response must be ONLY "
+                "valid JSON matching this exact schema. No markdown fencing "
+                "(```), no prose before or after the JSON, no trailing text. "
+                "Output the raw JSON object and nothing else.\n\n"
+                f"Schema:\n{schema_str}"
+            )
 
         return ClaudeCodeOptions(**kwargs)
 
@@ -496,19 +518,19 @@ class CodexBackend:
         MCP servers run as child subprocesses of the Codex app-server.
         The read-only and workspace-write sandboxes block subprocess
         creation, which prevents MCP servers from starting.  When MCP
-        servers are configured we must use danger-full-access; the
-        security boundary is maintained by the allowed_tools list, not
-        the sandbox.
+        servers are configured we must escalate the sandbox.
 
-        ``network_access=True`` escalates to danger-full-access so that
-        pip can download packages (e.g. for the Coder agent).
+        Only ``network_access=True`` (coder needing pip) escalates all the
+        way to ``danger-full-access``.  MCP-only agents (analyst, scientist,
+        critics) escalate to ``workspace-write`` which allows subprocess
+        creation without granting unrestricted filesystem access.
         """
-        if has_mcp:
-            logger.debug("Sandbox escalated to danger-full-access for MCP subprocess spawning")
-            return "danger-full-access"
         if network_access:
             logger.debug("Sandbox escalated to danger-full-access for network access (pip install)")
             return "danger-full-access"
+        if has_mcp:
+            logger.debug("Sandbox escalated to workspace-write for MCP subprocess spawning")
+            return "workspace-write"
         write_tools = {"Write", "Edit", "Bash"}
         if write_tools & set(allowed_tools):
             return "workspace-write"
@@ -622,6 +644,14 @@ class CodexBackend:
         if effort:
             turn_overrides.effort = effort  # type: ignore[assignment]
 
+        # Structured output: set output_schema on the turn overrides so
+        # Codex mechanically constrains the model to valid JSON.
+        if options.response_schema is not None:
+            from auto_scientist.sdk_utils import make_strict_schema
+
+            strict = make_strict_schema(options.response_schema.model_json_schema())
+            turn_overrides.output_schema = strict
+
         # --- Resume path: reuse existing client ---
         if options.resume:
             if self._client is not None:
@@ -689,22 +719,36 @@ class CodexBackend:
         if options.cwd:
             thread_config.cwd = str(options.cwd)
 
-        # Codex + GPT models ignore MCP tool calls in long/complex prompts
-        # (confirmed empirically: MCP=0 at 33K+ chars, stochastic at shorter).
         # developer_instructions carry higher priority than base_instructions
-        # for behavioral directives.  Placing the MCP mandate here raises
-        # MCP usage from ~0% to ~67% with production-length prompts.
+        # for behavioral directives in Codex.
+        dev_instructions: list[str] = []
+
+        # MCP mandate: GPT models ignore MCP tool calls in long/complex prompts
+        # (confirmed empirically: MCP=0 at 33K+ chars, stochastic at shorter).
+        # Placing the mandate here raises MCP usage from ~0% to ~67%.
         if has_mcp:
             mcp_tool_names = [t for t in (options.allowed_tools or []) if t.startswith("mcp__")]
             if mcp_tool_names:
                 names_str = ", ".join(mcp_tool_names)
-                thread_config.developer_instructions = (
+                dev_instructions.append(
                     "MANDATORY TOOL REQUIREMENT: Before producing your final output, "
                     f"you MUST call at least one of these MCP tools: {names_str}. "
                     "Call with summary=true first, then drill into specifics. "
                     "If your output does not include at least one MCP tool call, "
                     "it will be rejected."
                 )
+
+        # Structured output behavioral reinforcement (complements the
+        # mechanical output_schema on TurnOverrides).
+        if options.response_schema is not None:
+            dev_instructions.append(
+                "MANDATORY OUTPUT FORMAT: Your final output MUST be valid JSON "
+                "matching the structured output schema. No markdown fencing, "
+                "no prose before or after the JSON. Output ONLY the raw JSON object."
+            )
+
+        if dev_instructions:
+            thread_config.developer_instructions = "\n\n".join(dev_instructions)
 
         logger.debug(
             f"CodexBackend new client: model={model}, sandbox={sandbox_mode}, effort={effort}"
@@ -803,13 +847,42 @@ class CodexBackend:
 # Factory
 # ---------------------------------------------------------------------------
 
+# Cache of backends by provider, so repeated calls reuse the same instance
+# instead of accumulating temp dirs and subprocess handles.
+_backend_cache: dict[str, SDKBackend] = {}
+
 
 def get_backend(provider: str) -> SDKBackend:
-    """Return the SDK backend for the given provider."""
+    """Return a cached SDK backend for the given provider.
+
+    Creates a new instance on first call for each provider, then reuses it.
+    All backends are closed at shutdown via ``close_all_backends()``.
+    """
+    cached = _backend_cache.get(provider)
+    if cached is not None:
+        return cached
+
     if provider == "anthropic":
-        return ClaudeBackend()
-    if provider == "openai":
-        return CodexBackend()
-    raise ValueError(
-        f"No SDK backend for provider {provider!r}. SDK mode requires 'anthropic' or 'openai'."
-    )
+        backend: SDKBackend = ClaudeBackend()
+    elif provider == "openai":
+        backend = CodexBackend()
+    else:
+        raise ValueError(
+            f"No SDK backend for provider {provider!r}. SDK mode requires 'anthropic' or 'openai'."
+        )
+    _backend_cache[provider] = backend
+    return backend
+
+
+async def close_all_backends() -> None:
+    """Close every backend created via ``get_backend()`` and clear the cache.
+
+    Called at shutdown to properly terminate subprocess transports before
+    the event loop closes, preventing asyncio child-watcher warnings.
+    """
+    for backend in _backend_cache.values():
+        try:
+            await backend.close()
+        except Exception:
+            logger.debug("Error closing backend %s", type(backend).__name__, exc_info=True)
+    _backend_cache.clear()

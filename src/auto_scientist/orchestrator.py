@@ -46,6 +46,9 @@ from auto_scientist.widgets import AGENT_STYLES, AgentPanel, console
 
 logger = logging.getLogger(__name__)
 
+# Default from DomainConfig, used when self.config is None (e.g. tests)
+_DEFAULT_RUN_TIMEOUT = DomainConfig.model_fields["run_timeout_minutes"].default
+
 
 class Orchestrator:
     """Drives the Ingestion -> Iteration -> Report pipeline.
@@ -271,6 +274,12 @@ class Orchestrator:
             self._live.wait_for_dismiss()
             self._live.stop()
             try:
+                from auto_scientist.sdk_backend import close_all_backends
+
+                await close_all_backends()
+            except Exception:
+                logger.debug("Backend cleanup failed", exc_info=True)
+            try:
                 from auto_scientist.sdk_backend import cleanup_sessions
 
                 cleanup_sessions()
@@ -358,7 +367,7 @@ class Orchestrator:
         )
         self.state.record_failure()
         self.state.record_version(version_entry)
-        logger.info(f"Iteration {self.state.iteration} complete: status={label}")
+        logger.info(f"Iteration {self.state.iteration + 1} complete: status={label}")
         iter_summary = await generate_iteration_summary(self._live, self._summary_model)
         save_iteration_manifest(
             self._live,
@@ -377,9 +386,11 @@ class Orchestrator:
         """Run one iteration of the pipeline (inlined, not _run_iteration)."""
         from auto_scientist.resume import AGENT_ORDER
 
-        logger.info(f"=== Iteration {self.state.iteration} start ===")
-        self._live.start_iteration(self.state.iteration, max_iterations=self.max_iterations)
-        self._live.update_status(iteration=self.state.iteration, max_iterations=self.max_iterations)
+        logger.info(f"=== Iteration {self.state.iteration + 1} start ===")
+        self._live.start_iteration(self.state.iteration + 1, max_iterations=self.max_iterations)
+        self._live.update_status(
+            iteration=self.state.iteration + 1, max_iterations=self.max_iterations
+        )
 
         version = f"v{self.state.iteration:02d}"
         version_dir = self.output_dir / version
@@ -596,7 +607,7 @@ class Orchestrator:
         self._live.flush_completed()
 
         # Increment at end of loop body
-        logger.info(f"Iteration {self.state.iteration} complete: status={version_entry.status}")
+        logger.info(f"Iteration {self.state.iteration + 1} complete: status={version_entry.status}")
         self.state.iteration += 1
 
     @staticmethod
@@ -740,7 +751,7 @@ class Orchestrator:
         # Build timeout context if previous version timed out
         timeout_context: dict[str, Any] | None = None
         if latest.failure_reason == "timed_out":
-            run_timeout = self.config.run_timeout_minutes if self.config else 120
+            run_timeout = self.config.run_timeout_minutes if self.config else _DEFAULT_RUN_TIMEOUT
             timeout_context = {
                 "timeout_minutes": run_timeout,
                 "hypothesis": latest.hypothesis,
@@ -1662,7 +1673,7 @@ class Orchestrator:
         else:
             previous_script = Path("nonexistent")
 
-        run_timeout = self.config.run_timeout_minutes if self.config else 120
+        run_timeout = self.config.run_timeout_minutes if self.config else _DEFAULT_RUN_TIMEOUT
         run_cmd = self.config.run_command if self.config else "uv run {script_path}"
 
         cfg = self.model_config.resolve("coder")

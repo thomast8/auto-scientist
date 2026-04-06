@@ -29,7 +29,7 @@ class TestStatusCommand:
         assert "Domain:     auto" in result.output
         assert "Goal:       test goal" in result.output
         assert "Phase:      iteration" in result.output
-        assert "Iteration:  5" in result.output
+        assert "Iteration:  6" in result.output
 
     def test_shows_run_dir_and_data_path(self, tmp_path):
         state = ExperimentState(
@@ -604,8 +604,8 @@ class TestResumeCommand:
 
     @patch("auto_scientist.cli.PipelineApp")
     @patch("auto_scientist.cli.Orchestrator")
-    def test_resume_completed_fork_respects_saved_max(self, mock_orch, mock_app_cls, tmp_path):
-        """Forking a completed run should respect the saved max_iterations."""
+    def test_resume_completed_fork_bumps_max_when_at_cap(self, mock_orch, mock_app_cls, tmp_path):
+        """Forking a completed run at the cap should auto-bump max_iterations."""
         state = ExperimentState(
             domain="auto", goal="g", phase="stopped", iteration=3, max_iterations=3
         )
@@ -617,8 +617,27 @@ class TestResumeCommand:
         result = runner.invoke(cli, ["resume", "--state", str(tmp_path), "--fork"])
 
         assert result.exit_code == 0
-        assert mock_orch.call_args.kwargs["max_iterations"] == 3
-        assert "restored from original run" in result.output
+        # Auto-bumped: iteration(3) + 5 = 8
+        assert mock_orch.call_args.kwargs["max_iterations"] == 8
+        assert "Bumped max_iterations" in result.output
+
+    @patch("auto_scientist.cli.PipelineApp")
+    @patch("auto_scientist.cli.Orchestrator")
+    def test_resume_completed_fork_respects_explicit_max(self, mock_orch, mock_app_cls, tmp_path):
+        """Forking a completed run with explicit --max-iterations uses that value."""
+        state = ExperimentState(
+            domain="auto", goal="g", phase="stopped", iteration=3, max_iterations=3
+        )
+        state.save(tmp_path / "state.json")
+        (tmp_path / "v0").mkdir()
+
+        runner = CliRunner()
+        result = runner.invoke(
+            cli, ["resume", "--state", str(tmp_path), "--fork", "--max-iterations", "10"]
+        )
+
+        assert result.exit_code == 0
+        assert mock_orch.call_args.kwargs["max_iterations"] == 10
 
     def test_resume_old_state_past_default_requires_explicit(self, tmp_path):
         """Old state at iteration >= 20 must require explicit --max-iterations."""
@@ -906,7 +925,7 @@ class TestForkDestination:
         runner = CliRunner()
         result = runner.invoke(
             cli,
-            ["resume", "--from", str(source_dir), "--fork", "--from-iteration", "0"],
+            ["resume", "--from", str(source_dir), "--fork", "--from-iteration", "1"],
         )
 
         assert result.exit_code == 0

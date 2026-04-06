@@ -17,8 +17,8 @@ from typing import Any
 from auto_scientist.prompts.coder import (
     CODER_HAS_PREVIOUS,
     CODER_NO_PREVIOUS,
-    CODER_SYSTEM,
     CODER_USER,
+    build_coder_system,
 )
 from auto_scientist.retry import QueryResult, ValidationError, agent_retry_loop
 from auto_scientist.sdk_backend import CODEX_SANDBOX_ADDENDUM, SDKOptions, get_backend
@@ -149,7 +149,8 @@ async def run_coder(
     if provider == "openai" and "uv run" in run_command:
         run_command = run_command.replace("uv run", "python3", 1)
 
-    system_prompt = CODER_SYSTEM.format(
+    prompt_provider = "gpt" if provider == "openai" else "claude"
+    system_prompt = build_coder_system(prompt_provider).format(
         data_path=data_path or "(not specified)",
         run_timeout_minutes=run_timeout_minutes,
         run_command=run_command,

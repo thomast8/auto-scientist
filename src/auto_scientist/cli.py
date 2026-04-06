@@ -25,6 +25,24 @@ _logger = logging.getLogger(__name__)
 
 
 # ---------------------------------------------------------------------------
+# Suppress asyncio child-watcher noise
+# ---------------------------------------------------------------------------
+# When SDK subprocesses exit after the event loop is closed, asyncio's
+# child watcher logs "Loop ... that handles pid ... is closed" at WARNING
+# level.  These are harmless (the child is already dead) but spam the
+# terminal with dozens of lines.  Filter them out.
+
+
+class _ChildWatcherFilter(logging.Filter):
+    def filter(self, record: logging.LogRecord) -> bool:
+        msg = record.getMessage()
+        return not ("that handles pid" in msg and "is closed" in msg)
+
+
+logging.getLogger("asyncio").addFilter(_ChildWatcherFilter())
+
+
+# ---------------------------------------------------------------------------
 # Process cleanup: kill SDK subprocesses on unexpected exit
 # ---------------------------------------------------------------------------
 # When auto-scientist is killed by SIGHUP (terminal closed) or SIGTERM,
@@ -478,8 +496,8 @@ def run(
     "--resume-from",
     "from_iteration",
     default=None,
-    type=click.IntRange(min=0),
-    help="Resume from this iteration (keeps all prior iterations intact). Requires --fork.",
+    type=click.IntRange(min=1),
+    help="Resume from this iteration (1-based). Requires --fork.",
 )
 @click.option(
     "--from-agent",
@@ -545,7 +563,7 @@ def resume(
 
     By default, resumes in-place. With --fork, copies to a new directory
     first (original untouched). With --fork --from-iteration N, rewinds to
-    iteration N in the copy (keeps iterations 0 through N-1).
+    iteration N in the copy (keeps iterations 1 through N-1).
 
     Use --from-agent to resume from a specific agent within an iteration,
     loading earlier agents' artifacts from disk.
@@ -573,6 +591,10 @@ def resume(
         )
     if output_dir is not None and not fork:
         raise click.UsageError("--output-dir requires --fork")
+
+    # Convert 1-based user input to 0-based internal representation
+    if from_iteration is not None:
+        from_iteration -= 1
 
     src, source_state = _resolve_source(source)
 
@@ -604,7 +626,7 @@ def resume(
         if source_state.iteration >= effective_max:
             raise click.UsageError(
                 f"No max_iterations in saved state (old format) and current "
-                f"iteration ({source_state.iteration}) already >= default ({effective_max}). "
+                f"iteration ({source_state.iteration + 1}) already >= default ({effective_max}). "
                 f"Pass --max-iterations explicitly."
             )
         console.print(
@@ -648,9 +670,19 @@ def resume(
         from_agent = result.from_agent  # may have been normalized
         restored_panels = result.restored_panels
 
+        # Guard: if the rewound state already meets the cap, the orchestrator
+        # would exit immediately.  Auto-bump so the fork can actually advance.
+        if state.iteration >= max_iterations:
+            max_iterations = state.iteration + 5
+            console.print(
+                f"[yellow]Bumped max_iterations to {max_iterations} "
+                f"(forked state already at iteration {state.iteration + 1}).[/yellow]"
+            )
+            console.print("[dim]Use --max-iterations to set a different cap.[/dim]")
+
         agent_info = f", from agent '{from_agent}'" if from_agent else ""
         console.print(
-            f"Resuming from iteration {state.iteration}{agent_info} "
+            f"Resuming from iteration {state.iteration + 1}{agent_info} "
             f"({len(state.versions)} prior iterations preserved)"
         )
     else:
@@ -670,7 +702,7 @@ def resume(
                 restored_panels = result.restored_panels
                 agent_info = f" from agent '{from_agent}'" if from_agent else ""
                 console.print(
-                    f"[yellow]Retrying failed iteration {target}{agent_info} in-place[/yellow]"
+                    f"[yellow]Retrying failed iteration {target + 1}{agent_info} in-place[/yellow]"
                 )
             else:
                 raise click.UsageError(
@@ -745,7 +777,7 @@ def status(source: str):
     click.echo(f"Domain:     {loaded_state.domain}")
     click.echo(f"Goal:       {goal_display}")
     click.echo(f"Phase:      {loaded_state.phase}")
-    click.echo(f"Iteration:  {loaded_state.iteration}")
+    click.echo(f"Iteration:  {loaded_state.iteration + 1}")
     if loaded_state.max_iterations is not None:
         click.echo(f"Max iter:   {loaded_state.max_iterations}")
     click.echo(f"Run dir:    {run_dir}")
@@ -790,7 +822,7 @@ def status(source: str):
                 if (vdir / artifact).exists():
                     steps_present.append(step_name)
             steps_str = ", ".join(steps_present) if steps_present else "(empty)"
-            click.echo(f"  v{idx:02d} (--from-iteration {idx}): {steps_str}")
+            click.echo(f"  v{idx:02d} (--from-iteration {idx + 1}): {steps_str}")
 
         last_idx, last_vdir = version_dirs[-1]
 
@@ -833,7 +865,7 @@ def status(source: str):
             click.echo("Resume examples:")
             click.echo(
                 f"  auto-scientist resume --from {run_dir} --fork "
-                f"--from-iteration {last_idx} --from-agent {next_step}"
+                f"--from-iteration {last_idx + 1} --from-agent {next_step}"
             )
 
 

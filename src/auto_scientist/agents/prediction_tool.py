@@ -5,6 +5,10 @@ config that the Claude Code CLI can connect to. The server reads predictions
 from a temporary JSON file and exposes a `read_predictions` tool.
 
 Also provides `_handle_read_predictions()` for direct use in tests.
+
+NOTE: Query helpers (_format_record_detail, _get_ancestor_ids, etc.) are
+intentionally duplicated in _prediction_mcp_server.py, which runs as an
+isolated subprocess. Keep both files in sync when changing query semantics.
 """
 
 from __future__ import annotations
@@ -25,11 +29,12 @@ logger = logging.getLogger(__name__)
 # ---------------------------------------------------------------------------
 
 _READ_PREDICTIONS_DESCRIPTION = (
-    "Drill into prediction history details. The compact prediction tree "
-    "is already in your prompt; use this tool for full records. "
-    "Use summary=true for counts, chain/pred_ids/outcome/iteration for "
-    "specific predictions with full detail (evidence, diagnostics, "
-    "implications). Prefer fewer targeted queries over exhaustive audits."
+    "Read full evidence, diagnostics, and conditional outcomes for specific "
+    "predictions. The compact tree in your prompt shows status and short "
+    "summaries only. Call this tool when you need to verify a claim, inspect "
+    "why a prediction was confirmed or refuted, check the diagnostic used, "
+    "or trace a reasoning chain. Use summary=true for counts, chain/pred_ids/"
+    "outcome/iteration for detailed records."
 )
 
 _READ_PREDICTIONS_SCHEMA: dict[str, Any] = {
@@ -126,7 +131,8 @@ PREDICTION_SPEC = MCPToolSpec(
     deferred_description=(
         "mcp__predictions__read_predictions("
         "summary?, chain?, pred_ids?, outcome?, iteration?) "
-        "- Drill into prediction details. Tree is already in your prompt."
+        "- Read evidence, diagnostics, outcomes for predictions. "
+        "Tree in prompt shows summaries only."
     ),
 )
 
@@ -138,16 +144,22 @@ register_mcp_tool(PREDICTION_SPEC)
 # ---------------------------------------------------------------------------
 
 
-def _get_display_text(rec: PredictionRecord) -> str:
+def _get_display_text(rec: PredictionRecord, max_chars: int = 60) -> str:
     """Return the summary text for a prediction, falling back to truncated evidence.
 
-    Sanitizes output to ensure single-line (collapses newlines, hard-truncates).
+    Sanitizes output to ensure single-line (collapses newlines, truncates at
+    word boundary to avoid cutting mid-concept).
     """
     text = rec.summary or rec.evidence or rec.prediction
     text = " ".join(text.split())
-    if len(text) > 100:
-        return text[:100] + "..."
-    return text
+    if len(text) <= max_chars:
+        return text
+    # Truncate at last space before limit to avoid cutting mid-word
+    truncated = text[:max_chars]
+    last_space = truncated.rfind(" ")
+    if last_space > max_chars // 2:
+        truncated = truncated[:last_space]
+    return f"{truncated}..."
 
 
 def _build_prediction_forest(
@@ -209,7 +221,7 @@ def format_compact_tree(
             lines.extend(_render_compact(child, indent + 1))
         return lines
 
-    header = "== PREDICTION TREE =="
+    header = "== PREDICTION TREE (mcp__predictions__read_predictions for details) =="
     all_lines = [header]
     for root in children[None]:
         all_lines.extend(_render_compact(root, 0))

@@ -178,6 +178,31 @@ class TestBuildCriticPrompt:
         system, _user = _build_critic_prompt({"h": "p"}, "", "")
         assert "<persona>" not in system
 
+    def test_system_prompt_allows_tool_calls_before_final_json(self):
+        system, _user = _build_critic_prompt({"h": "p"}, "", "")
+
+        assert "Tool calls are allowed before the final JSON response." in system
+        assert 'The "raw JSON only" rule applies only to your final assistant message.' in system
+
+    def test_system_prompt_includes_example_output(self):
+        system, _user = _build_critic_prompt({"h": "p"}, "", "")
+
+        assert "Example:" in system
+        assert '"overall_assessment"' in system
+
+    def test_prediction_tool_guidance_is_conditional_not_unconditional(self):
+        _system, user = _build_critic_prompt(
+            {"h": "p"},
+            "",
+            "",
+            prediction_history="Prediction history text",
+            has_predictions=True,
+            has_mcp_tool=True,
+        )
+
+        assert "You MUST call this tool at least once" not in user
+        assert "specific pred_ids or prior outcomes" in user
+
 
 class TestRunDebate:
     @pytest.mark.asyncio
@@ -467,7 +492,7 @@ class TestBuildCriticPromptContext:
             {"h": "p"},
             "",
             "",
-            analysis_json='{"key_metrics": {"rmse": 0.52}}',
+            analysis_json='{"key_metrics": [{"name": "rmse", "value": 0.52}]}',
         )
         assert "<analysis>" in user
         assert "rmse" in user
@@ -517,7 +542,7 @@ class TestRunDebateWithContext:
                 critic_configs=two_critics,
                 plan=plan,
                 notebook_content="",
-                analysis_json='{"key_metrics": {"rmse": 0.52}}',
+                analysis_json='{"key_metrics": [{"name": "rmse", "value": 0.52}]}',
             )
 
         critic_prompt = mock_openai.call_args[0][1]

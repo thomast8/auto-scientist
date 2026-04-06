@@ -41,12 +41,12 @@ from auto_scientist.model_config import AgentModelConfig, reasoning_to_cc_extra_
 from auto_scientist.models.google_client import query_google
 from auto_scientist.models.openai_client import query_openai
 from auto_scientist.prompts.critic import (
-    CRITIC_SYSTEM_BASE,
     CRITIC_USER,
     DEFAULT_CRITIC_INSTRUCTIONS,
     ITERATION_0_PERSONAS,
     PERSONAS,
     PREDICTION_PERSONAS,
+    build_critic_system,
     get_model_index_for_debate,
 )
 from auto_scientist.retry import QueryResult, agent_retry_loop
@@ -131,6 +131,7 @@ async def _query_critic(
             max_turns=budget.max_turns,
             extra_args=extra_args,
             mcp_servers=mcp_servers or {},
+            response_schema=response_schema,
         )
         text, usage, _session_id = await collect_text_from_query(
             prompt, options, backend, message_buffer
@@ -183,6 +184,7 @@ async def _query_critic(
             max_turns=budget.max_turns,
             extra_args=extra_args_api,
             mcp_servers=mcp_servers or {},
+            response_schema=response_schema,
         )
         text, usage, _session_id = await collect_text_from_query(
             prompt, options, backend, message_buffer
@@ -345,6 +347,7 @@ async def run_single_critic_debate(
         goal=goal,
         has_predictions=has_predictions,
         has_mcp_tool=has_mcp_tool,
+        provider=config.provider,
     )
     critic_output, critic_result = await _query_critic_structured(
         config,
@@ -536,6 +539,7 @@ def _build_critic_prompt(
     goal: str = "",
     has_predictions: bool = True,
     has_mcp_tool: bool = True,
+    provider: str = "anthropic",
 ) -> tuple[str, str]:
     """Build the (system, user) prompt pair sent to critic models.
 
@@ -568,22 +572,31 @@ def _build_critic_prompt(
                 "drill into specific predictions for full detail (evidence, diagnostics,\n"
                 "implications)"
             )
+            prediction_tool_guidance = (
+                f"- If {tool_name} is available and you need details about a specific "
+                "pred_id,\n"
+                "  outcome, or prediction chain, call it rather than guessing from the\n"
+                "  compact summary."
+            )
             prediction_pipeline_text = (
                 "\nA compact summary of the prediction history is included in the context "
                 f"below.\nWhen you need more detail on a specific prediction, call the "
-                f"{tool_name}\ntool rather than guessing from the summary. You MUST call "
-                f"this tool at least\nonce before writing your critique to verify prediction "
-                "details firsthand."
+                f"{tool_name}\ntool rather than guessing from the summary. If you reference "
+                "a specific pred_id,\na prior confirmed/refuted outcome, or a prediction "
+                "chain, inspect it with\nthe tool before finalizing your critique."
             )
             prediction_task_text = (
                 f"\nThe prediction tree is provided above. Call {tool_name} to "
-                "look up\nspecific prediction chains or full detail when you need more than "
-                "the summary.\nYou MUST call this tool at least once before writing your "
-                "response."
+                "look up\nspecific prediction chains or full detail when the compact summary "
+                "is\ninsufficient, especially for specific pred_ids or prior outcomes."
             )
         else:
             # API mode: prediction data is inline, no tool available
             prediction_role_text = ""
+            prediction_tool_guidance = (
+                "- Use the inline prediction history when it is relevant to your critique;\n"
+                "  do not guess or invent prior outcomes."
+            )
             prediction_pipeline_text = (
                 "\nA compact summary of the prediction history is included in the context below."
             )
@@ -593,18 +606,21 @@ def _build_critic_prompt(
             )
     else:
         prediction_role_text = ""
+        prediction_tool_guidance = ""
         prediction_evidence_text = ""
         prediction_pipeline_text = ""
         prediction_history_section = ""
         prediction_task_text = ""
 
-    system = CRITIC_SYSTEM_BASE.format(
+    prompt_provider = "gpt" if provider == "openai" else "claude"
+    system = build_critic_system(prompt_provider).format(
         persona_text=persona_text,
         persona_instructions=effective_instructions,
         critic_output_schema=json.dumps(CRITIC_OUTPUT_SCHEMA, indent=2),
         prediction_role_text=prediction_role_text,
         prediction_evidence_text=prediction_evidence_text,
         prediction_pipeline_text=prediction_pipeline_text,
+        prediction_tool_guidance=prediction_tool_guidance,
     )
 
     user = CRITIC_USER.format(

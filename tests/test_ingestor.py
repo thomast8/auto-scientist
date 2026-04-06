@@ -166,6 +166,30 @@ class TestRunIngestorValidation:
             await run_ingestor(raw_data, output_dir, "test goal")
 
 
+class TestIngestorPromptBuilder:
+    def test_gpt_prompt_uses_double_recap(self):
+        from auto_scientist.prompts.ingestor import build_ingestor_system
+
+        system = build_ingestor_system("gpt")
+
+        assert system.count("<recap>") == 2
+
+    def test_gpt_prompt_uses_slim_downstream_contract(self):
+        from auto_scientist.prompts.ingestor import build_ingestor_system
+
+        system = build_ingestor_system("gpt")
+
+        assert "The Coder receives only the canonical directory path" in system
+        assert "Must discover what files are inside and how to load them" not in system
+
+    def test_gpt_prompt_keeps_literal_run_command_rule(self):
+        from auto_scientist.prompts.ingestor import build_ingestor_system
+
+        system = build_ingestor_system("gpt")
+
+        assert 'run_command must be exactly "uv run {script_path}" (literal braces)' in system
+
+
 class TestRunIngestorMessageProcessing:
     @pytest.mark.asyncio
     @patch("auto_scientist.agents.ingestor.safe_query")

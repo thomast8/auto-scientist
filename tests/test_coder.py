@@ -805,3 +805,21 @@ class TestCheckRuntimeSuccess:
         (tmp_path / "stderr.txt").write_text("some error\n")
         ok, err = _check_runtime_success(tmp_path)
         assert ok is False
+
+
+class TestCoderPromptBuilder:
+    def test_gpt_prompt_limits_runtime_retries(self):
+        from auto_scientist.prompts.coder import build_coder_system
+
+        system = build_coder_system("gpt")
+
+        assert "Make at most 3 total execution attempts for the script." in system
+        assert "Retry runtime bugs at most 3 total attempts" in system
+
+    def test_gpt_prompt_keeps_double_recap_and_compact_context(self):
+        from auto_scientist.prompts.coder import build_coder_system
+
+        system = build_coder_system("gpt")
+
+        assert system.count("<recap>") == 2
+        assert "You do not change methodology or use the lab notebook." in system

@@ -763,7 +763,8 @@ class TestFormatCompactTree:
             ),
         ]
         result = _format_compact_tree(history)
-        assert "A" * 100 in result
+        # Truncation at 60 chars (word-boundary), evidence is all "A"s so no word break
+        assert "A" * 60 in result
         assert "..." in result
         assert "A" * 150 not in result
 
@@ -813,8 +814,8 @@ class TestFormatCompactTree:
             ),
         ]
         result = _format_compact_tree(history)
-        assert "== PREDICTION TREE ==" in result
-        assert "read_predictions" not in result
+        assert "== PREDICTION TREE" in result
+        assert "read_predictions" in result
 
     def test_one_line_per_prediction(self):
         """Each prediction should be a single line (not multi-line like the full formatter)."""
@@ -878,3 +879,46 @@ class TestGoalInPrompts:
         )
         assert "find classification rules" in prompt
         assert "<goal>" in prompt
+
+
+class TestScientistPromptBuilder:
+    def test_gpt_prompt_explicitly_allows_tool_calls(self):
+        from auto_scientist.prompts.scientist import build_scientist_system
+
+        system = build_scientist_system("gpt")
+
+        assert "Tool calls are allowed before the final JSON response." in system
+        assert 'The "raw JSON only" rule applies only to your final assistant message.' in system
+
+    def test_gpt_prompt_pushes_one_decisive_experiment(self):
+        from auto_scientist.prompts.scientist import build_scientist_system
+
+        system = build_scientist_system("gpt")
+
+        assert "Default to one decisive experiment." in system
+        assert "Use at most 1 main hypothesis" in system
+
+    def test_gpt_prompt_restores_scope_examples(self):
+        from auto_scientist.prompts.scientist import build_scientist_system
+
+        system = build_scientist_system("gpt")
+
+        assert "In-scope plan details:" in system
+        assert "Out-of-scope implementation details:" in system
+
+    def test_gpt_prompt_uses_three_behavioral_examples(self):
+        from auto_scientist.prompts.scientist import build_scientist_system
+
+        system = build_scientist_system("gpt")
+
+        assert system.count("<example>") == 3
+        assert "river sediment transport modeling" not in system
+        assert 'follows_from": "2.1"' in system
+
+    def test_gpt_prompt_uses_double_recap_and_compact_context(self):
+        from auto_scientist.prompts.scientist import build_scientist_system
+
+        system = build_scientist_system("gpt")
+
+        assert system.count("<recap>") == 2
+        assert "You never see raw data, code, plots, or experiment files." in system

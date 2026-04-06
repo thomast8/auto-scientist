@@ -7,6 +7,11 @@ from a JSON file passed as the first CLI argument and exposes a
 
 Usage (by the Claude Code CLI, not directly):
     python3 _prediction_mcp_server.py /path/to/predictions.json
+
+NOTE: Query helpers (_format_record, _get_ancestors, _build_compact_tree, etc.)
+are intentionally duplicated from prediction_tool.py. This module runs as an
+isolated subprocess and must not import framework code (Pydantic, persistence,
+etc.). Keep both files in sync when changing query semantics.
 """
 
 from __future__ import annotations
@@ -261,13 +266,13 @@ if __name__ == "__main__":
         server_name="predictions",
         tool_name="read_predictions",
         description=(
-            "Drill into prediction history details. The "
-            "compact prediction tree is already in your "
-            "prompt; use this tool for full records. "
-            "Use summary=true for counts, chain/pred_ids/"
-            "outcome/iteration for specific predictions "
-            "with full detail (evidence, diagnostics, "
-            "implications)."
+            "Read full evidence, diagnostics, and conditional outcomes "
+            "for specific predictions. The compact tree in your prompt "
+            "shows status and short summaries only. Call this tool when "
+            "you need to verify a claim, inspect why a prediction was "
+            "confirmed or refuted, check the diagnostic used, or trace "
+            "a reasoning chain. Use summary=true for counts, chain/ "
+            "pred_ids/outcome/iteration for detailed records."
         ),
         input_schema={
             "type": "object",
@@ -325,7 +330,8 @@ if __name__ == "__main__":
         deferred_description=(
             "mcp__predictions__read_predictions("
             "summary?, chain?, pred_ids?, outcome?, iteration?) "
-            "- Drill into prediction details. Tree is already in your prompt."
+            "- Read evidence, diagnostics, outcomes for predictions. "
+            "Tree in prompt shows summaries only."
         ),
     )
 
