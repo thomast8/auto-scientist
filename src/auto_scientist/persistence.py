@@ -371,6 +371,8 @@ def apply_prediction_updates(plan: dict[str, Any], state: ExperimentState) -> No
     """
     known_pred_ids = {r.pred_id for r in state.prediction_history if r.pred_id}
 
+    known_pred_ids = {r.pred_id for r in state.prediction_history if r.pred_id}
+
     predictions = plan.get("testable_predictions", [])
     stored = []
     for i, pred in enumerate(predictions, 1):
