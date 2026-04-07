@@ -568,8 +568,8 @@ class TestRunIngestion:
         new_callable=AsyncMock,
         side_effect=RuntimeError("LLM error"),
     )
-    async def test_error_returns_none_and_records_failure(self, _mock_ingestor, tmp_path):
-        """Ingestor error returns None instead of raising, records failure."""
+    async def test_error_propagates(self, _mock_ingestor, tmp_path):
+        """Ingestor error propagates instead of returning None."""
         state = ExperimentState(
             domain="test",
             goal="g",
@@ -581,10 +581,8 @@ class TestRunIngestion:
             data_path=tmp_path / "raw.csv",
             output_dir=tmp_path / "experiments",
         )
-        result = await o._run_ingestion()
-
-        assert result is None
-        assert state.consecutive_failures == 1
+        with pytest.raises(RuntimeError, match="LLM error"):
+            await o._run_ingestion()
 
 
 class TestPhaseTransitions:
@@ -730,6 +728,7 @@ class TestPhaseTransitions:
         with (
             patch("auto_scientist.orchestrator.validate_prerequisites"),
             patch.object(o, "_run_iteration_body", new_callable=AsyncMock) as mock_iter,
+            patch.object(o, "_run_report", new_callable=AsyncMock, return_value=True),
         ):
             # Simulate iteration body completing (resetting consecutive_failures)
             async def fake_iter():
@@ -2081,7 +2080,7 @@ class TestRunReportOrchestrator:
         with patch(
             "auto_scientist.agents.report.run_report",
             new_callable=AsyncMock,
-            return_value="# Report\nDone.",
+            return_value="# Report content",
         ) as mock_report:
             result = await orchestrator._run_report()
 
@@ -2092,19 +2091,18 @@ class TestRunReportOrchestrator:
         assert result is True
 
     @pytest.mark.asyncio
-    async def test_error_returns_false_and_records_failure(self, orchestrator, tmp_path):
-        """Report error returns False and records failure instead of raising."""
+    async def test_error_propagates(self, orchestrator, tmp_path):
         orchestrator.output_dir.mkdir(parents=True, exist_ok=True)
 
-        with patch(
-            "auto_scientist.agents.report.run_report",
-            new_callable=AsyncMock,
-            side_effect=RuntimeError("Report failed"),
+        with (
+            patch(
+                "auto_scientist.agents.report.run_report",
+                new_callable=AsyncMock,
+                side_effect=RuntimeError("Report failed"),
+            ),
+            pytest.raises(RuntimeError, match="Report failed"),
         ):
-            result = await orchestrator._run_report()
-
-        assert result is False
-        assert orchestrator.state.consecutive_failures == 1
+            await orchestrator._run_report()
 
 
 class TestRunFullOrchestration:

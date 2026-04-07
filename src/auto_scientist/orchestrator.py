@@ -140,7 +140,15 @@ class Orchestrator:
                 self.state.raw_data_path = self.state.data_path
                 self.state.save(state_path)
 
-                canonical_data_dir = await self._run_ingestion()
+                try:
+                    canonical_data_dir = await self._run_ingestion()
+                except Exception:
+                    try:
+                        self._live.end_iteration("failed", "red", "")
+                        self._live.flush_completed()
+                    except Exception:
+                        logger.warning("Failed to finalize iteration box", exc_info=True)
+                    raise
 
                 if canonical_data_dir is None:
                     self.state.phase = "stopped"
@@ -236,7 +244,18 @@ class Orchestrator:
                 # Schedule check
                 await wait_for_window(self.state.schedule)
 
-                await self._run_iteration_body()
+                try:
+                    await self._run_iteration_body()
+                except Exception:
+                    # Catches orchestration errors (state, evaluation, summary).
+                    # Individual agent failures are handled inside
+                    # _run_iteration_body via _fail_iteration().
+                    try:
+                        self._live.end_iteration("failed", "red", "")
+                        self._live.flush_completed()
+                    except Exception:
+                        logger.warning("Failed to finalize iteration box", exc_info=True)
+                    raise
                 self.state.save(state_path)
 
             # Phase 2: Report (with its own border)
@@ -248,7 +267,15 @@ class Orchestrator:
                     await self._resolve_final_predictions()
                     self.state.save(state_path)
 
-                report_ok = await self._run_report()
+                try:
+                    report_ok = await self._run_report()
+                except Exception:
+                    try:
+                        self._live.end_iteration("failed", "red", "")
+                        self._live.flush_completed()
+                    except Exception:
+                        logger.warning("Failed to finalize iteration box", exc_info=True)
+                    raise
                 self.state.phase = "stopped"
                 self.state.save(state_path)
 
@@ -343,8 +370,7 @@ class Orchestrator:
             logger.exception(f"Ingestor error: {e}")
             panel.error(str(e))
             self._live.collapse_panel(panel)
-            self.state.record_failure()
-            return None
+            raise
         finally:
             persist_buffer(self.output_dir, "ingestor", buffer, self.state.iteration)
 
@@ -1842,7 +1868,6 @@ class Orchestrator:
             logger.exception(f"Report error: {e}")
             panel.error(str(e))
             self._live.collapse_panel(panel)
-            self.state.record_failure()
-            return False
+            raise
         finally:
             persist_buffer(self.output_dir, "report", buffer, self.state.iteration)
