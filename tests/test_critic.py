@@ -1093,3 +1093,106 @@ class TestMcpToolNameInPrompts:
 
         # Both should have the same base tools
         assert tools_by_provider["anthropic"] == tools_by_provider["openai"]
+
+
+# ---------------------------------------------------------------------------
+# create_backend isolation and resume wiring
+# ---------------------------------------------------------------------------
+
+CREATE_BACKEND_PATH = "auto_scientist.agents.critic.create_backend"
+
+
+class TestCriticBackendIsolation:
+    @pytest.mark.asyncio
+    async def test_sdk_critic_uses_create_backend(self, plan):
+        """SDK-mode critic dispatches through create_backend, not get_backend."""
+        critic = AgentModelConfig(provider="openai", model="gpt-5.4", mode="sdk")
+        valid_json = _pad(_valid_critic_json())
+        usage = {"input_tokens": 10, "output_tokens": 5}
+
+        mock_backend = AsyncMock()
+        mock_cm = AsyncMock()
+        mock_cm.__aenter__ = AsyncMock(return_value=mock_backend)
+        mock_cm.__aexit__ = AsyncMock(return_value=False)
+
+        with (
+            patch(CREATE_BACKEND_PATH, return_value=mock_cm) as mock_create,
+            patch(SDK_PATH, new_callable=AsyncMock, return_value=(valid_json, usage, "sess-1")),
+        ):
+            result = await run_single_critic_debate(
+                config=critic,
+                plan=plan,
+                notebook_content="",
+            )
+
+        mock_create.assert_called_once_with("openai")
+        assert isinstance(result, DebateResult)
+
+    @pytest.mark.asyncio
+    async def test_api_critic_does_not_use_create_backend(self, plan):
+        """API-mode critic skips create_backend (nullcontext path)."""
+        critic = AgentModelConfig(provider="openai", model="gpt-4o", mode="api")
+
+        with (
+            patch(CREATE_BACKEND_PATH) as mock_create,
+            patch(OPENAI_PATH, new_callable=AsyncMock, return_value=_CR()),
+        ):
+            await run_single_critic_debate(
+                config=critic,
+                plan=plan,
+                notebook_content="",
+            )
+
+        mock_create.assert_not_called()
+
+    @pytest.mark.asyncio
+    async def test_session_id_captured_for_resume(self, plan):
+        """SDK critic captures session_id from collect_text_from_query for resume."""
+        from auto_scientist.agents.critic import _query_critic
+
+        critic = AgentModelConfig(provider="openai", model="gpt-5.4", mode="sdk")
+        valid_json = _pad(_valid_critic_json())
+        usage = {"input_tokens": 10, "output_tokens": 5}
+        mock_backend = AsyncMock()
+
+        with patch(
+            SDK_PATH,
+            new_callable=AsyncMock,
+            return_value=(valid_json, usage, "sess-42"),
+        ):
+            result, session_id = await _query_critic(
+                critic,
+                "test prompt",
+                system_prompt="test system",
+                backend=mock_backend,
+            )
+
+        assert session_id == "sess-42"
+        assert result.text == valid_json
+
+    @pytest.mark.asyncio
+    async def test_resume_forwarded_to_sdk_options(self, plan):
+        """When resume session_id is provided, it reaches the SDKOptions."""
+        from auto_scientist.agents.critic import _query_critic
+
+        critic = AgentModelConfig(provider="openai", model="gpt-5.4", mode="sdk")
+        valid_json = _pad(_valid_critic_json())
+        usage = {"input_tokens": 10, "output_tokens": 5}
+        mock_backend = AsyncMock()
+
+        with patch(
+            SDK_PATH,
+            new_callable=AsyncMock,
+            return_value=(valid_json, usage, "sess-43"),
+        ) as mock_collect:
+            await _query_critic(
+                critic,
+                "fix your output",
+                system_prompt="test system",
+                backend=mock_backend,
+                resume="sess-42",
+            )
+
+        # The SDKOptions passed to collect_text_from_query should have resume set
+        options = mock_collect.call_args[0][1]
+        assert options.resume == "sess-42"

@@ -1,5 +1,6 @@
 """Tests for SDK backend abstraction (SDKOptions, SDKMessage, backends, factory)."""
 
+import asyncio
 from pathlib import Path
 from unittest.mock import AsyncMock, MagicMock, patch
 
@@ -973,3 +974,122 @@ class TestCodexBackend:
         assert backend._client is None
         assert backend._codex_home is None
         mock_client.close.assert_called_once()
+
+
+# ---------------------------------------------------------------------------
+# create_backend() async context manager
+# ---------------------------------------------------------------------------
+
+
+class TestCreateBackend:
+    @pytest.mark.asyncio
+    async def test_returns_fresh_codex_instance(self):
+        """create_backend('openai') yields a new CodexBackend not in the cache."""
+        from auto_scientist.sdk_backend import CodexBackend, _backend_cache, create_backend
+
+        async with create_backend("openai") as backend:
+            assert isinstance(backend, CodexBackend)
+            assert backend not in _backend_cache.values()
+
+    @pytest.mark.asyncio
+    async def test_returns_fresh_claude_instance(self):
+        """create_backend('anthropic') yields a ClaudeBackend."""
+        from auto_scientist.sdk_backend import ClaudeBackend, create_backend
+
+        async with create_backend("anthropic") as backend:
+            assert isinstance(backend, ClaudeBackend)
+
+    @pytest.mark.asyncio
+    async def test_distinct_instances(self):
+        """Two calls yield distinct backend objects."""
+        from auto_scientist.sdk_backend import create_backend
+
+        async with create_backend("openai") as b1, create_backend("openai") as b2:
+            assert b1 is not b2
+
+    @pytest.mark.asyncio
+    async def test_closes_on_exit(self):
+        """Backend.close() is called when the context manager exits normally."""
+        from auto_scientist.sdk_backend import CodexBackend, create_backend
+
+        with patch.object(CodexBackend, "close", new_callable=AsyncMock) as mock_close:
+            async with create_backend("openai"):
+                pass
+            mock_close.assert_called_once()
+
+    @pytest.mark.asyncio
+    async def test_closes_on_exception(self):
+        """Backend.close() is called even when the body raises."""
+        from auto_scientist.sdk_backend import CodexBackend, create_backend
+
+        with patch.object(CodexBackend, "close", new_callable=AsyncMock) as mock_close:
+            with pytest.raises(ValueError, match="boom"):
+                async with create_backend("openai"):
+                    raise ValueError("boom")
+            mock_close.assert_called_once()
+
+    @pytest.mark.asyncio
+    async def test_unknown_provider_raises(self):
+        """create_backend with an unsupported provider raises ValueError."""
+        from auto_scientist.sdk_backend import create_backend
+
+        with pytest.raises(ValueError, match="No SDK backend"):
+            async with create_backend("google"):
+                pass
+
+    @pytest.mark.asyncio
+    async def test_parallel_backends_get_separate_clients(self):
+        """Two parallel create_backend calls produce independent CodexBackend instances."""
+        from auto_scientist.sdk_backend import SDKOptions, create_backend
+
+        mock_client_a = AsyncMock()
+        mock_client_a.start = AsyncMock()
+        mock_client_a.close = AsyncMock()
+
+        mock_client_b = AsyncMock()
+        mock_client_b.start = AsyncMock()
+        mock_client_b.close = AsyncMock()
+
+        clients = iter([mock_client_a, mock_client_b])
+
+        def make_mock_step(text: str, thread_id: str):
+            step = MagicMock()
+            step.text = text
+            step.thread_id = thread_id
+            step.step_type = "text"
+            return step
+
+        async def mock_chat_a(*args, **kwargs):
+            yield make_mock_step("response-a", "thr-a")
+
+        async def mock_chat_b(*args, **kwargs):
+            yield make_mock_step("response-b", "thr-b")
+
+        mock_client_a.chat = mock_chat_a
+        mock_client_b.chat = mock_chat_b
+
+        with patch(
+            "auto_scientist.sdk_backend.CodexClient.connect_stdio",
+            side_effect=lambda **kw: next(clients),
+        ):
+            opts = SDKOptions(
+                system_prompt="test",
+                allowed_tools=["Read"],
+                max_turns=5,
+                model="gpt-5.4",
+            )
+
+            results = {}
+
+            async def run_query(label: str):
+                async with create_backend("openai") as backend:
+                    async for msg in backend.query(f"prompt-{label}", opts):
+                        if msg.type == "result":
+                            results[label] = msg.result
+
+            await asyncio.gather(run_query("a"), run_query("b"))
+
+        assert results["a"] == "response-a"
+        assert results["b"] == "response-b"
+        mock_client_a.close.assert_called_once()
+        mock_client_b.close.assert_called_once()

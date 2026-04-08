@@ -16,6 +16,7 @@ import re
 import shutil
 import tempfile
 from collections.abc import AsyncIterator
+from contextlib import asynccontextmanager
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Literal, Protocol
@@ -886,3 +887,29 @@ async def close_all_backends() -> None:
         except Exception:
             logger.debug("Error closing backend %s", type(backend).__name__, exc_info=True)
     _backend_cache.clear()
+
+
+@asynccontextmanager
+async def create_backend(provider: str) -> AsyncIterator[SDKBackend]:
+    """Yield a fresh, non-cached SDK backend instance.
+
+    Unlike :func:`get_backend` which returns a cached singleton, this creates
+    a new instance each time.  The backend is closed automatically when the
+    context manager exits.
+
+    Use this for one-shot or concurrent callers (e.g. parallel critics) that
+    need their own isolated subprocess and temp directory.  Sequential agents
+    that rely on session resume should use :func:`get_backend` instead.
+    """
+    if provider == "anthropic":
+        backend: SDKBackend = ClaudeBackend()
+    elif provider == "openai":
+        backend = CodexBackend()
+    else:
+        raise ValueError(
+            f"No SDK backend for provider {provider!r}. SDK mode requires 'anthropic' or 'openai'."
+        )
+    try:
+        yield backend
+    finally:
+        await backend.close()
