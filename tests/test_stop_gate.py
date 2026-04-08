@@ -344,7 +344,7 @@ class TestQueryStopAgent:
         valid_json = _valid_critic_json()
         mock_result = AgentResult(text=_pad(valid_json), input_tokens=10, output_tokens=5)
 
-        with patch(QUERY_CRITIC_PATH, new_callable=AsyncMock, return_value=mock_result):
+        with patch(QUERY_CRITIC_PATH, new_callable=AsyncMock, return_value=(mock_result, None)):
             parsed, result = await _query_stop_agent(
                 config=openai_config,
                 user_prompt="Evaluate this stop decision",
@@ -369,7 +369,7 @@ class TestQueryStopAgent:
         with patch(
             QUERY_CRITIC_PATH,
             new_callable=AsyncMock,
-            side_effect=[invalid_result, valid_result],
+            side_effect=[(invalid_result, None), (valid_result, "sess-2")],
         ):
             parsed, result = await _query_stop_agent(
                 config=openai_config,
@@ -393,7 +393,7 @@ class TestQueryStopAgent:
         with patch(
             QUERY_CRITIC_PATH,
             new_callable=AsyncMock,
-            side_effect=[RuntimeError("Rate limit"), valid_result],
+            side_effect=[RuntimeError("Rate limit"), (valid_result, None)],
         ):
             parsed, result = await _query_stop_agent(
                 config=openai_config,
@@ -437,7 +437,7 @@ class TestQueryStopAgent:
             patch(
                 QUERY_CRITIC_PATH,
                 new_callable=AsyncMock,
-                return_value=invalid_result,
+                return_value=(invalid_result, None),
             ),
             pytest.raises(OutputValidationError),
         ):
@@ -458,7 +458,9 @@ class TestQueryStopAgent:
             text=_pad(_valid_critic_json()), input_tokens=10, output_tokens=5
         )
 
-        with patch(QUERY_CRITIC_PATH, new_callable=AsyncMock, return_value=valid_result) as mock_qc:
+        with patch(
+            QUERY_CRITIC_PATH, new_callable=AsyncMock, return_value=(valid_result, None)
+        ) as mock_qc:
             await _query_stop_agent(
                 config=openai_config,
                 user_prompt="Evaluate stop",
@@ -487,7 +489,7 @@ class TestRunSingleStopDebate:
             text=_pad(_valid_critic_json()), input_tokens=10, output_tokens=5
         )
 
-        with patch(QUERY_CRITIC_PATH, new_callable=AsyncMock, return_value=valid_result):
+        with patch(QUERY_CRITIC_PATH, new_callable=AsyncMock, return_value=(valid_result, None)):
             result = await run_single_stop_debate(
                 config=openai_config,
                 stop_reason="All criteria met",
@@ -517,7 +519,7 @@ class TestRunSingleStopDebate:
             output_tokens=5,
         )
 
-        with patch(QUERY_CRITIC_PATH, new_callable=AsyncMock, return_value=valid_result):
+        with patch(QUERY_CRITIC_PATH, new_callable=AsyncMock, return_value=(valid_result, None)):
             result = await run_single_stop_debate(
                 config=openai_config,
                 stop_reason="done",
@@ -541,7 +543,7 @@ class TestRunSingleStopDebate:
         )
         persona = {"name": "Completeness Auditor", "system_text": "<persona>Auditor</persona>"}
 
-        with patch(QUERY_CRITIC_PATH, new_callable=AsyncMock, return_value=valid_result):
+        with patch(QUERY_CRITIC_PATH, new_callable=AsyncMock, return_value=(valid_result, None)):
             result = await run_single_stop_debate(
                 config=openai_config,
                 stop_reason="done",
@@ -561,7 +563,7 @@ class TestRunSingleStopDebate:
             text=_pad(_valid_critic_json()), input_tokens=10, output_tokens=5
         )
 
-        with patch(QUERY_CRITIC_PATH, new_callable=AsyncMock, return_value=valid_result):
+        with patch(QUERY_CRITIC_PATH, new_callable=AsyncMock, return_value=(valid_result, None)):
             result = await run_single_stop_debate(
                 config=openai_config,
                 stop_reason="done",
@@ -583,7 +585,7 @@ class TestRunSingleStopDebate:
             thinking_tokens=5,
         )
 
-        with patch(QUERY_CRITIC_PATH, new_callable=AsyncMock, return_value=valid_result):
+        with patch(QUERY_CRITIC_PATH, new_callable=AsyncMock, return_value=(valid_result, None)):
             result = await run_single_stop_debate(
                 config=openai_config,
                 stop_reason="done",
@@ -604,7 +606,7 @@ class TestRunSingleStopDebate:
             text=_pad(_valid_critic_json()), input_tokens=10, output_tokens=5
         )
 
-        with patch(QUERY_CRITIC_PATH, new_callable=AsyncMock, return_value=valid_result):
+        with patch(QUERY_CRITIC_PATH, new_callable=AsyncMock, return_value=(valid_result, None)):
             result = await run_single_stop_debate(
                 config=openai_config,
                 stop_reason="done",
@@ -624,7 +626,9 @@ class TestRunSingleStopDebate:
             text=_pad(_valid_critic_json()), input_tokens=10, output_tokens=5
         )
 
-        with patch(QUERY_CRITIC_PATH, new_callable=AsyncMock, return_value=valid_result) as mock_qc:
+        with patch(
+            QUERY_CRITIC_PATH, new_callable=AsyncMock, return_value=(valid_result, None)
+        ) as mock_qc:
             await run_single_stop_debate(
                 config=openai_config,
                 stop_reason="done",
@@ -646,7 +650,7 @@ class TestRunSingleStopDebate:
             text=_pad(_valid_critic_json()), input_tokens=10, output_tokens=5
         )
 
-        with patch(QUERY_CRITIC_PATH, new_callable=AsyncMock, return_value=valid_result):
+        with patch(QUERY_CRITIC_PATH, new_callable=AsyncMock, return_value=(valid_result, None)):
             result = await run_single_stop_debate(
                 config=openai_config,
                 stop_reason="done",

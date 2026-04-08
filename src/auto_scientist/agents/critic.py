@@ -20,6 +20,7 @@ import asyncio
 import json
 import logging
 import random
+from contextlib import nullcontext
 from pathlib import Path
 from typing import Any
 
@@ -50,7 +51,7 @@ from auto_scientist.prompts.critic import (
     get_model_index_for_debate,
 )
 from auto_scientist.retry import QueryResult, agent_retry_loop
-from auto_scientist.sdk_backend import SDKOptions, get_backend
+from auto_scientist.sdk_backend import SDKBackend, SDKOptions, create_backend, get_backend
 from auto_scientist.sdk_utils import (
     collect_text_from_query,
     prepare_turn_budget,
@@ -102,7 +103,9 @@ async def _query_critic(
     message_buffer: list[str] | None = None,
     allowed_tools: list[str] | None = None,
     mcp_servers: dict[str, Any] | None = None,
-) -> AgentResult:
+    backend: SDKBackend | None = None,
+    resume: str | None = None,
+) -> tuple[AgentResult, str | None]:
     """Dispatch a prompt to the appropriate provider and mode.
 
     Routes based on config.mode first:
@@ -111,6 +114,17 @@ async def _query_critic(
 
     SDK mode receives optional MCP servers for agentic prediction tree access.
     Direct API mode ignores mcp_servers (prompt text is the fallback).
+
+    Args:
+        backend: Pre-created SDK backend (from :func:`create_backend`).
+            When provided, used instead of the cached singleton from
+            ``get_backend()``.  Required for concurrent critics.
+        resume: Session ID from a previous query to continue the
+            conversation (e.g. for validation retry with correction hint).
+
+    Returns:
+        ``(AgentResult, session_id)`` where ``session_id`` can be passed
+        back as ``resume`` on the next attempt.
     """
     effective_tools = allowed_tools or list(CRITIC_BASE_TOOLS)
 
@@ -123,7 +137,7 @@ async def _query_critic(
         budget = prepare_turn_budget(
             system_prompt, max_turns, effective_tools, provider=config.provider
         )
-        backend = get_backend(config.provider)
+        effective_backend = backend or get_backend(config.provider)
         options = SDKOptions(
             model=config.model,
             system_prompt=budget.system_prompt,
@@ -132,9 +146,10 @@ async def _query_critic(
             extra_args=extra_args,
             mcp_servers=mcp_servers or {},
             response_schema=response_schema,
+            resume=resume,
         )
-        text, usage, _session_id = await collect_text_from_query(
-            prompt, options, backend, message_buffer
+        text, usage, session_id = await collect_text_from_query(
+            prompt, options, effective_backend, message_buffer
         )
         in_tok = (
             usage.get("input_tokens", 0)
@@ -146,27 +161,29 @@ async def _query_critic(
             input_tokens=in_tok,
             output_tokens=usage.get("output_tokens", 0),
             thinking_tokens=usage.get("thinking_tokens", 0),
-        )
+        ), session_id
 
     # API mode: direct provider API calls (MCP not available)
     effective_prompt = f"{system_prompt}\n\n{prompt}" if system_prompt else prompt
 
     if config.provider == "openai":
-        return await query_openai(
+        result = await query_openai(
             config.model,
             effective_prompt,
             web_search=True,
             reasoning=config.reasoning,
             response_schema=response_schema,
         )
+        return result, None
     elif config.provider == "google":
-        return await query_google(
+        result = await query_google(
             config.model,
             effective_prompt,
             web_search=True,
             reasoning=config.reasoning,
             response_schema=response_schema,
         )
+        return result, None
     elif config.provider == "anthropic":
         # Anthropic in API mode falls back to SDK (no direct API web search yet)
         extra_args_api: dict[str, str | None] = {}
@@ -176,7 +193,7 @@ async def _query_critic(
         budget = prepare_turn_budget(
             system_prompt, max_turns, effective_tools, provider="anthropic"
         )
-        backend = get_backend("anthropic")
+        effective_backend = backend or get_backend("anthropic")
         options = SDKOptions(
             model=config.model,
             system_prompt=budget.system_prompt,
@@ -185,9 +202,10 @@ async def _query_critic(
             extra_args=extra_args_api,
             mcp_servers=mcp_servers or {},
             response_schema=response_schema,
+            resume=resume,
         )
-        text, usage, _session_id = await collect_text_from_query(
-            prompt, options, backend, message_buffer
+        text, usage, session_id = await collect_text_from_query(
+            prompt, options, effective_backend, message_buffer
         )
         in_tok = (
             usage.get("input_tokens", 0)
@@ -199,7 +217,7 @@ async def _query_critic(
             input_tokens=in_tok,
             output_tokens=usage.get("output_tokens", 0),
             thinking_tokens=usage.get("thinking_tokens", 0),
-        )
+        ), session_id
     else:
         raise ValueError(f"Unsupported mode/provider: {config.mode}/{config.provider!r}")
 
@@ -218,16 +236,22 @@ async def _query_critic_structured(
     message_buffer: list[str] | None = None,
     allowed_tools: list[str] | None = None,
     mcp_servers: dict[str, Any] | None = None,
+    backend: SDKBackend | None = None,
 ) -> tuple[CriticOutput, AgentResult]:
     """Query a critic and validate the response as structured CriticOutput.
 
     Returns (validated CriticOutput, raw AgentResult).
     Uses agent_retry_loop (3 attempts) with selective retryable errors.
+
+    Args:
+        backend: Pre-created SDK backend for this critic.  Passed through
+            to :func:`_query_critic` and kept alive across retries so
+            validation failures can resume the conversation.
     """
     last_agent_result: list[AgentResult] = [AgentResult(text="")]
 
     async def _query(prompt_text: str, resume_session_id: str | None) -> QueryResult:
-        result = await _query_critic(
+        result, session_id = await _query_critic(
             config,
             prompt_text,
             system_prompt=system_prompt,
@@ -235,9 +259,11 @@ async def _query_critic_structured(
             message_buffer=message_buffer,
             allowed_tools=allowed_tools,
             mcp_servers=mcp_servers,
+            backend=backend,
+            resume=resume_session_id,
         )
         last_agent_result[0] = result
-        return QueryResult(raw_output=result.text, session_id=None, usage={})
+        return QueryResult(raw_output=result.text, session_id=session_id, usage={})
 
     def _validate(result: QueryResult) -> tuple[CriticOutput, AgentResult]:
         validated = validate_json_output(result.raw_output, CriticOutput, "Critic")
@@ -349,15 +375,22 @@ async def run_single_critic_debate(
         has_mcp_tool=has_mcp_tool,
         provider=config.provider,
     )
-    critic_output, critic_result = await _query_critic_structured(
-        config,
-        critic_user,
-        system_prompt=critic_system,
-        label=f"Critic ({persona_name}, {label})",
-        message_buffer=message_buffer,
-        allowed_tools=tools,
-        mcp_servers=mcp_servers,
-    )
+    # Each critic gets its own isolated backend so parallel debates don't
+    # share CodexBackend state (which would race in _ensure_client).  The
+    # backend stays alive across retry attempts, enabling session resume
+    # for validation corrections.  API-mode critics don't need a backend.
+    backend_cm = create_backend(config.provider) if config.mode == "sdk" else nullcontext()
+    async with backend_cm as critic_backend:
+        critic_output, critic_result = await _query_critic_structured(
+            config,
+            critic_user,
+            system_prompt=critic_system,
+            label=f"Critic ({persona_name}, {label})",
+            message_buffer=message_buffer,
+            allowed_tools=tools,
+            mcp_servers=mcp_servers,
+            backend=critic_backend,
+        )
     if message_buffer is not None:
         message_buffer.append(f"[Critic/{persona_name}] {critic_result.text}")
 
