@@ -897,9 +897,14 @@ async def create_backend(provider: str) -> AsyncIterator[SDKBackend]:
     a new instance each time.  The backend is closed automatically when the
     context manager exits.
 
-    Use this for one-shot or concurrent callers (e.g. parallel critics) that
-    need their own isolated subprocess and temp directory.  Sequential agents
-    that rely on session resume should use :func:`get_backend` instead.
+    Use this for any bounded scope that needs private backend state:
+    concurrent callers (parallel critics, stop-gate debates) that must not
+    share a ``CodexBackend`` subprocess, and retryable conversations where
+    the backend must stay alive across validation retries for session resume.
+
+    :func:`get_backend` is appropriate only for long-lived sequential agents
+    (analyst, scientist, coder) where a single shared instance with cross-call
+    resume is desired and no concurrent access occurs.
     """
     if provider == "anthropic":
         backend: SDKBackend = ClaudeBackend()

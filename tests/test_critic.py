@@ -1105,7 +1105,11 @@ CREATE_BACKEND_PATH = "auto_scientist.agents.critic.create_backend"
 class TestCriticBackendIsolation:
     @pytest.mark.asyncio
     async def test_sdk_critic_uses_create_backend(self, plan):
-        """SDK-mode critic dispatches through create_backend, not get_backend."""
+        """SDK-mode critic dispatches through create_backend, not get_backend.
+
+        Also verifies the created backend is actually passed through to
+        collect_text_from_query (not silently falling back to get_backend).
+        """
         critic = AgentModelConfig(provider="openai", model="gpt-5.4", mode="sdk")
         valid_json = _pad(_valid_critic_json())
         usage = {"input_tokens": 10, "output_tokens": 5}
@@ -1117,7 +1121,13 @@ class TestCriticBackendIsolation:
 
         with (
             patch(CREATE_BACKEND_PATH, return_value=mock_cm) as mock_create,
-            patch(SDK_PATH, new_callable=AsyncMock, return_value=(valid_json, usage, "sess-1")),
+            patch(
+                SDK_PATH, new_callable=AsyncMock, return_value=(valid_json, usage, "sess-1")
+            ) as mock_collect,
+            patch(
+                "auto_scientist.agents.critic.get_backend",
+                side_effect=AssertionError("get_backend must not be called for SDK critics"),
+            ),
         ):
             result = await run_single_critic_debate(
                 config=critic,
@@ -1127,6 +1137,8 @@ class TestCriticBackendIsolation:
 
         mock_create.assert_called_once_with("openai")
         assert isinstance(result, DebateResult)
+        # Verify the mock backend was actually passed to collect_text_from_query
+        assert mock_collect.call_args[0][2] is mock_backend
 
     @pytest.mark.asyncio
     async def test_api_critic_does_not_use_create_backend(self, plan):

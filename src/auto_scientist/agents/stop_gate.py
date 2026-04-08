@@ -6,6 +6,7 @@ investigation goal has been thoroughly addressed before honoring the decision.
 
 import json
 import logging
+from contextlib import nullcontext
 from dataclasses import replace
 from pathlib import Path
 from typing import Any
@@ -35,7 +36,7 @@ from auto_scientist.prompts.stop_gate import (
 )
 from auto_scientist.retry import QueryResult, agent_retry_loop
 from auto_scientist.schemas import CompletenessAssessmentOutput, ScientistPlanOutput
-from auto_scientist.sdk_backend import SDKOptions, get_backend
+from auto_scientist.sdk_backend import SDKBackend, SDKOptions, create_backend, get_backend
 from auto_scientist.sdk_utils import (
     collect_text_from_query,
     prepare_turn_budget,
@@ -156,11 +157,17 @@ async def _query_stop_agent(
     message_buffer: list[str] | None = None,
     allowed_tools: list[str] | None = None,
     mcp_servers: dict[str, Any] | None = None,
+    backend: SDKBackend | None = None,
 ) -> tuple[Any, Any]:
     """Query a stop gate agent (critic or scientist) via provider-aware dispatch.
 
     Uses direct API clients for OpenAI/Google, Claude Code SDK for Anthropic.
     Returns (validated_model_instance, result_obj with text/token counts).
+
+    Args:
+        backend: Pre-created SDK backend for this stop-gate critic.
+            Passed through to :func:`_query_critic` for subprocess isolation
+            and session resume across retries.
     """
     from auto_scientist.agents.critic import _query_critic
 
@@ -175,6 +182,7 @@ async def _query_stop_agent(
             message_buffer=message_buffer,
             allowed_tools=allowed_tools,
             mcp_servers=mcp_servers,
+            backend=backend,
             resume=resume_session_id,
         )
         last_agent_result.clear()
@@ -256,16 +264,22 @@ async def run_single_stop_debate(
         completeness_assessment=assessment_json,
     )
 
-    critic_output, critic_result = await _query_stop_agent(
-        config,
-        critic_user,
-        system_prompt=critic_system,
-        output_model=CriticOutput,
-        label=f"Stop Critic ({persona_name}, {label})",
-        message_buffer=message_buffer,
-        allowed_tools=tools,
-        mcp_servers=mcp_servers,
-    )
+    # Same isolation as run_single_critic_debate: each parallel stop critic
+    # gets its own backend so concurrent asyncio.gather calls in the
+    # orchestrator don't race through the shared CodexBackend singleton.
+    backend_cm = create_backend(config.provider) if config.mode == "sdk" else nullcontext()
+    async with backend_cm as stop_backend:
+        critic_output, critic_result = await _query_stop_agent(
+            config,
+            critic_user,
+            system_prompt=critic_system,
+            output_model=CriticOutput,
+            label=f"Stop Critic ({persona_name}, {label})",
+            message_buffer=message_buffer,
+            allowed_tools=tools,
+            mcp_servers=mcp_servers,
+            backend=stop_backend,
+        )
 
     return DebateResult(
         persona=persona_name,
