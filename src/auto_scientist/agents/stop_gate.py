@@ -167,7 +167,7 @@ async def _query_stop_agent(
     last_agent_result: list[Any] = []
 
     async def _query(prompt: str, resume_session_id: str | None) -> QueryResult:
-        result = await _query_critic(
+        result, session_id = await _query_critic(
             config,
             prompt,
             system_prompt=system_prompt,
@@ -175,10 +175,11 @@ async def _query_stop_agent(
             message_buffer=message_buffer,
             allowed_tools=allowed_tools,
             mcp_servers=mcp_servers,
+            resume=resume_session_id,
         )
         last_agent_result.clear()
         last_agent_result.append(result)
-        return QueryResult(raw_output=result.text, session_id=None, usage={})
+        return QueryResult(raw_output=result.text, session_id=session_id, usage={})
 
     def _validate(result: QueryResult) -> tuple[Any, Any]:
         parsed = validate_json_output(result.raw_output, output_model, label)
