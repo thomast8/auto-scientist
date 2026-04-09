@@ -104,6 +104,35 @@ SCIENTIST_PLAN_SCHEMA = {
                 "required": ["prediction", "diagnostic", "if_confirmed", "if_refuted"],
             },
         },
+        "refutation_reasoning": {
+            "type": "array",
+            "items": {
+                "type": "object",
+                "properties": {
+                    "refuted_pred_id": {"type": "string"},
+                    "assumptions_violated": {"type": "string"},
+                    "alternative_explanation": {"type": "string"},
+                    "testable_consequence": {"type": "string"},
+                },
+                "required": [
+                    "refuted_pred_id",
+                    "assumptions_violated",
+                    "alternative_explanation",
+                    "testable_consequence",
+                ],
+            },
+        },
+        "deprioritized_abductions": {
+            "type": "array",
+            "items": {
+                "type": "object",
+                "properties": {
+                    "refuted_pred_id": {"type": "string"},
+                    "reason": {"type": "string"},
+                },
+                "required": ["refuted_pred_id", "reason"],
+            },
+        },
     },
     "required": [
         "hypothesis",
@@ -189,6 +218,7 @@ async def run_scientist(
     provider: str = "anthropic",
     reasoning: ReasoningConfig | None = None,
     output_dir: Path | None = None,
+    pending_abductions: str = "",
 ) -> dict[str, Any]:
     """Formulate hypothesis and plan based on analysis.
 
@@ -214,6 +244,19 @@ async def run_scientist(
     notebook_path = Path(notebook_path)
     notebook_content = notebook_path.read_text() if notebook_path.exists() else ""
 
+    abductions_section = ""
+    if pending_abductions:
+        abductions_section = (
+            "<pending_abductions>\n"
+            "In the previous iteration, you generated alternative explanations "
+            "for refuted predictions. For each, either include a testable "
+            "prediction that addresses it (with follows_from referencing the "
+            "refuted_pred_id), or list it in deprioritized_abductions with a "
+            "reason.\n\n"
+            f"{pending_abductions}\n"
+            "</pending_abductions>\n"
+        )
+
     user_prompt = SCIENTIST_USER.format(
         goal=goal or "(no goal specified)",
         domain_knowledge=domain_knowledge or "(no domain knowledge provided)",
@@ -222,6 +265,7 @@ async def run_scientist(
         ),
         notebook_content=notebook_content or "(empty notebook - first iteration)",
         prediction_history=format_compact_tree(prediction_history),
+        pending_abductions_section=abductions_section,
         version=version,
     )
 
@@ -293,6 +337,7 @@ async def run_scientist_revision(
     provider: str = "anthropic",
     reasoning: ReasoningConfig | None = None,
     output_dir: Path | None = None,
+    pending_abductions: str = "",
 ) -> dict[str, Any]:
     """Revise the plan after a critic debate.
 
@@ -317,6 +362,17 @@ async def run_scientist_revision(
 
     ledger_text = json.dumps(concern_ledger, indent=2) if concern_ledger else "(no concerns raised)"
 
+    abductions_section = ""
+    if pending_abductions:
+        abductions_section = (
+            "<pending_abductions>\n"
+            "Address these pending alternative explanations: either include "
+            "a testable prediction (with follows_from) or list in "
+            "deprioritized_abductions with a reason.\n\n"
+            f"{pending_abductions}\n"
+            "</pending_abductions>\n"
+        )
+
     user_prompt = SCIENTIST_REVISION_USER.format(
         goal=goal or "(no goal specified)",
         domain_knowledge=domain_knowledge or "(no domain knowledge provided)",
@@ -325,6 +381,7 @@ async def run_scientist_revision(
         original_plan=json.dumps(original_plan, indent=2),
         concern_ledger=ledger_text,
         prediction_history=format_compact_tree(prediction_history),
+        pending_abductions_section=abductions_section,
         version=version,
     )
 

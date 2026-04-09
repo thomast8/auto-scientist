@@ -857,6 +857,7 @@ class TestGoalInPrompts:
             goal="discover causal relationships",
             domain_knowledge="dk",
             prediction_history="ph",
+            pending_abductions_section="",
             notebook_content="nb",
             analysis_json="{}",
             version="v01",
@@ -871,6 +872,7 @@ class TestGoalInPrompts:
             goal="find classification rules",
             domain_knowledge="dk",
             prediction_history="ph",
+            pending_abductions_section="",
             notebook_content="nb",
             analysis_json="{}",
             original_plan="{}",
@@ -895,8 +897,10 @@ class TestScientistPromptBuilder:
 
         system = build_scientist_system("gpt")
 
-        assert "Default to one decisive experiment." in system
-        assert "Use at most 1 main hypothesis" in system
+        # Normalize whitespace for line-wrap tolerance
+        normalized = " ".join(system.split())
+        assert "Default to one decisive experiment." in normalized
+        assert "Use at most 1 main hypothesis" in normalized
 
     def test_gpt_prompt_restores_scope_examples(self):
         from auto_scientist.prompts.scientist import build_scientist_system

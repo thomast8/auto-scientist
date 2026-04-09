@@ -12,10 +12,13 @@ from auto_scientist.persistence import (
     apply_prediction_updates,
     build_concern_ledger,
     evaluate,
+    format_pending_abductions,
     get_pending_carryforward_predictions,
     normalize_follows_from,
     read_run_result,
+    resolve_addressed_abductions,
     resolve_prediction_outcomes,
+    store_refutation_reasoning,
 )
 from auto_scientist.runner import RunResult
 from auto_scientist.state import ExperimentState, VersionEntry
@@ -3090,3 +3093,161 @@ class TestCarryForwardPredictions:
         # Second is the carried-forward pending prediction
         assert preds[1]["pred_id"] == "0.1"
         assert preds[1]["_carried_forward"] is True
+
+
+class TestAbductionPersistence:
+    """Tests for refutation reasoning storage, addressed-check, and formatting."""
+
+    def test_store_refutation_reasoning(self, orchestrator):
+        plan = {
+            "refutation_reasoning": [
+                {
+                    "refuted_pred_id": "0.1",
+                    "assumptions_violated": "assumed independence",
+                    "alternative_explanation": "latent common cause",
+                    "testable_consequence": "partial correlation remains after adjustment",
+                },
+            ],
+        }
+        store_refutation_reasoning(plan, orchestrator.state)
+        assert len(orchestrator.state.pending_abductions) == 1
+        assert orchestrator.state.pending_abductions[0]["refuted_pred_id"] == "0.1"
+
+    def test_store_skips_empty_pred_id(self, orchestrator):
+        plan = {
+            "refutation_reasoning": [
+                {
+                    "refuted_pred_id": "",
+                    "assumptions_violated": "x",
+                    "alternative_explanation": "y",
+                    "testable_consequence": "z",
+                },
+            ],
+        }
+        store_refutation_reasoning(plan, orchestrator.state)
+        assert len(orchestrator.state.pending_abductions) == 0
+
+    def test_store_noop_when_no_reasoning(self, orchestrator):
+        store_refutation_reasoning({}, orchestrator.state)
+        assert len(orchestrator.state.pending_abductions) == 0
+
+    def test_resolve_by_follows_from(self, orchestrator):
+        orchestrator.state.pending_abductions = [
+            {"refuted_pred_id": "0.1", "testable_consequence": "test X"},
+        ]
+        plan = {
+            "testable_predictions": [
+                {
+                    "prediction": "test X",
+                    "diagnostic": "d",
+                    "if_confirmed": "c",
+                    "if_refuted": "r",
+                    "follows_from": "0.1",
+                },
+            ],
+        }
+        resolve_addressed_abductions(plan, orchestrator.state)
+        assert len(orchestrator.state.pending_abductions) == 0
+
+    def test_resolve_by_deprioritization(self, orchestrator):
+        orchestrator.state.pending_abductions = [
+            {"refuted_pred_id": "0.2", "testable_consequence": "test Y"},
+        ]
+        plan = {
+            "deprioritized_abductions": [
+                {"refuted_pred_id": "0.2", "reason": "no longer relevant"},
+            ],
+        }
+        resolve_addressed_abductions(plan, orchestrator.state)
+        assert len(orchestrator.state.pending_abductions) == 0
+
+    def test_keeps_unaddressed_abductions(self, orchestrator):
+        orchestrator.state.pending_abductions = [
+            {"refuted_pred_id": "0.1", "testable_consequence": "test X"},
+            {"refuted_pred_id": "0.3", "testable_consequence": "test Z"},
+        ]
+        plan = {
+            "testable_predictions": [
+                {
+                    "prediction": "p",
+                    "diagnostic": "d",
+                    "if_confirmed": "c",
+                    "if_refuted": "r",
+                    "follows_from": "0.1",
+                },
+            ],
+        }
+        resolve_addressed_abductions(plan, orchestrator.state)
+        assert len(orchestrator.state.pending_abductions) == 1
+        assert orchestrator.state.pending_abductions[0]["refuted_pred_id"] == "0.3"
+
+    def test_format_empty_returns_empty_string(self, orchestrator):
+        assert format_pending_abductions(orchestrator.state) == ""
+
+    def test_format_returns_json(self, orchestrator):
+        orchestrator.state.pending_abductions = [
+            {"refuted_pred_id": "0.1", "testable_consequence": "test X"},
+        ]
+        result = format_pending_abductions(orchestrator.state)
+        assert '"refuted_pred_id"' in result
+        assert '"0.1"' in result
+
+
+class TestSchemaValidation:
+    """Tests for new Pydantic schema models."""
+
+    def test_analyst_output_with_data_diagnostics(self):
+        from auto_scientist.schemas import AnalystOutput
+
+        data = {
+            "key_metrics": [],
+            "improvements": [],
+            "regressions": [],
+            "observations": ["test"],
+            "data_diagnostics": [
+                {"variables": ["a", "b"], "pattern": "co-move", "evidence": "r=0.6"},
+            ],
+        }
+        output = AnalystOutput(**data)
+        assert len(output.data_diagnostics) == 1
+        assert output.data_diagnostics[0].variables == ["a", "b"]
+
+    def test_analyst_output_without_diagnostics(self):
+        from auto_scientist.schemas import AnalystOutput
+
+        data = {
+            "key_metrics": [],
+            "improvements": [],
+            "regressions": [],
+            "observations": [],
+        }
+        output = AnalystOutput(**data)
+        assert output.data_diagnostics == []
+
+    def test_scientist_output_with_refutation_reasoning(self):
+        from auto_scientist.schemas import ScientistPlanOutput
+
+        data = {
+            "hypothesis": "test",
+            "strategy": "incremental",
+            "changes": [{"what": "x", "why": "y", "how": "z", "priority": 1}],
+            "expected_impact": "test",
+            "should_stop": False,
+            "stop_reason": None,
+            "notebook_entry": "test",
+            "refutation_reasoning": [
+                {
+                    "refuted_pred_id": "0.1",
+                    "assumptions_violated": "assumed X",
+                    "alternative_explanation": "Y instead",
+                    "testable_consequence": "should see Z",
+                },
+            ],
+            "deprioritized_abductions": [
+                {"refuted_pred_id": "0.2", "reason": "superseded"},
+            ],
+        }
+        output = ScientistPlanOutput(**data)
+        assert len(output.refutation_reasoning) == 1
+        assert output.refutation_reasoning[0].refuted_pred_id == "0.1"
+        assert len(output.deprioritized_abductions) == 1

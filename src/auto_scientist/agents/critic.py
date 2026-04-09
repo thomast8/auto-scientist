@@ -325,6 +325,7 @@ async def run_single_critic_debate(
     goal: str = "",
     prediction_history_records: list[PredictionRecord] | None = None,
     output_dir: Path | None = None,
+    pending_abductions: str = "",
 ) -> DebateResult:
     """Run a single critique for one persona.
 
@@ -374,6 +375,7 @@ async def run_single_critic_debate(
         has_predictions=has_predictions,
         has_mcp_tool=has_mcp_tool,
         provider=config.provider,
+        pending_abductions=pending_abductions,
     )
     # Each critic gets its own isolated backend so parallel debates don't
     # share CodexBackend state (which would race in _ensure_client).  The
@@ -427,6 +429,7 @@ async def _staggered_debate(
     goal: str = "",
     prediction_history_records: list[PredictionRecord] | None = None,
     output_dir: Path | None = None,
+    pending_abductions: str = "",
 ) -> DebateResult:
     """Wrapper that adds a startup delay before running a critique."""
     if delay > 0:
@@ -443,6 +446,7 @@ async def _staggered_debate(
         goal=goal,
         prediction_history_records=prediction_history_records,
         output_dir=output_dir,
+        pending_abductions=pending_abductions,
     )
 
 
@@ -459,6 +463,7 @@ async def run_debate(
     goal: str = "",
     prediction_history_records: list[PredictionRecord] | None = None,
     output_dir: Path | None = None,
+    pending_abductions: str = "",
 ) -> list[DebateResult]:
     """Run parallel critiques, one per persona, with rotating model assignment.
 
@@ -534,6 +539,7 @@ async def run_debate(
                 goal=goal,
                 prediction_history_records=prediction_history_records,
                 output_dir=output_dir,
+                pending_abductions=pending_abductions,
             )
         )
 
@@ -573,6 +579,7 @@ def _build_critic_prompt(
     has_predictions: bool = True,
     has_mcp_tool: bool = True,
     provider: str = "anthropic",
+    pending_abductions: str = "",
 ) -> tuple[str, str]:
     """Build the (system, user) prompt pair sent to critic models.
 
@@ -645,6 +652,21 @@ def _build_critic_prompt(
         prediction_history_section = ""
         prediction_task_text = ""
 
+    # Pending abductions section for critic context
+    if pending_abductions:
+        pending_abductions_section = (
+            f"\n<pending_abductions>\n{pending_abductions}\n</pending_abductions>"
+        )
+        abduction_task_text = (
+            "\nCheck whether the plan addresses testable consequences from "
+            "prior refutation reasoning. If a consequence was neither included "
+            "as a prediction (via follows_from) nor deprioritized, flag it as "
+            "a dropped thread."
+        )
+    else:
+        pending_abductions_section = ""
+        abduction_task_text = ""
+
     prompt_provider = "gpt" if provider == "openai" else "claude"
     system = build_critic_system(prompt_provider).format(
         persona_text=persona_text,
@@ -662,7 +684,9 @@ def _build_critic_prompt(
         notebook_content=notebook_content or "(empty)",
         analysis_json=analysis_json or "(no analysis yet)",
         prediction_history_section=prediction_history_section,
+        pending_abductions_section=pending_abductions_section,
         plan_json=json.dumps(plan, indent=2),
         prediction_task_text=prediction_task_text,
+        abduction_task_text=abduction_task_text,
     )
     return system, user

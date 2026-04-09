@@ -59,6 +59,18 @@ ANALYST_SCHEMA = {
                 "required": ["pred_id", "prediction", "outcome", "evidence"],
             },
         },
+        "data_diagnostics": {
+            "type": "array",
+            "items": {
+                "type": "object",
+                "properties": {
+                    "variables": {"type": "array", "items": {"type": "string"}},
+                    "pattern": {"type": "string"},
+                    "evidence": {"type": "string"},
+                },
+                "required": ["variables", "pattern", "evidence"],
+            },
+        },
         "domain_knowledge": {"type": "string"},
         "data_summary": {"type": "string"},
     },
