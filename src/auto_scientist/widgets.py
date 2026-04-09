@@ -492,6 +492,18 @@ class MetricsBar(Widget):
         self.total_thinking_tokens += panel.thinking_tokens
         self.total_turns += panel.num_turns
 
+    def carry_over(self, panel: AgentPanel) -> None:
+        """Accumulate a restored panel's stats AND shift start_time backwards.
+
+        Used on resume so the header shows totals and wall clock that include
+        prior sessions' work. Shifting ``start_time`` by ``panel.elapsed``
+        leaves the existing render math (``now - start_time``) producing
+        ``prior_work_time + current_session_wall_time`` with no other
+        changes.
+        """
+        self.add_agent_stats(panel)
+        self.start_time -= panel.elapsed
+
     def render(self) -> Text:
         end = self._end_time if self._end_time else time.monotonic()
         elapsed = _format_elapsed(end - self.start_time)

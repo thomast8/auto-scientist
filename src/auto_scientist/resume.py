@@ -199,7 +199,14 @@ def _build_panels_from_buffers(
         except (json.JSONDecodeError, OSError) as e:
             logger.warning(f"Could not load {panels_path}, falling back to buffers: {e}")
 
-    # Fallback: reconstruct from buffer files and artifacts
+    # Fallback: reconstruct from buffer files and artifacts. Usage counters
+    # (tokens, turns, elapsed) are not recoverable from buffers alone, so the
+    # restored panels will carry zeros and the MetricsBar totals will be
+    # incomplete for this iteration.
+    logger.debug(
+        f"panels.json missing for iteration {iteration}; "
+        "reconstructing panels from buffers with zero usage counters"
+    )
     agent_idx = AGENT_ORDER.index(from_agent)
     agents_to_restore = AGENT_ORDER[:agent_idx]
 
