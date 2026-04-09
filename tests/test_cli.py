@@ -752,6 +752,163 @@ class TestResumeCommand:
         assert "scientist" in result.output
         assert mock_orch.call_args.kwargs["skip_to_agent"] == "scientist"
 
+    @patch("auto_scientist.cli.PipelineApp")
+    @patch("auto_scientist.cli.Orchestrator")
+    def test_resume_mid_iteration_crash_resumes_from_next_agent(
+        self, mock_orch, mock_app_cls, tmp_path
+    ):
+        """Mid-iteration crash with phase=iteration: resume from the next agent.
+
+        Simulates a crash (Ctrl-C, transport error, etc.) that bypassed
+        _fail_iteration, leaving phase='iteration' and state.iteration
+        pointing at the in-progress iteration (not incremented).
+        """
+        state = ExperimentState(
+            domain="auto",
+            goal="g",
+            phase="iteration",
+            iteration=0,
+            max_iterations=5,
+        )
+        state.save(tmp_path / "state.json")
+        v00 = tmp_path / "v00"
+        v00.mkdir()
+        # Only analyst artifact exists - crash happened during scientist
+        (v00 / "analysis.json").write_text('{"data_summary": "test"}')
+
+        runner = CliRunner()
+        result = runner.invoke(cli, ["resume", "--state", str(tmp_path)])
+
+        assert result.exit_code == 0, result.output
+        assert "Resuming interrupted iteration 1" in result.output
+        assert "scientist" in result.output
+        # State should remain at iteration 0 (the in-progress one)
+        reloaded = ExperimentState.load(tmp_path / "state.json")
+        assert reloaded.phase == "iteration"
+        assert reloaded.iteration == 0
+        # Orchestrator should receive skip_to_agent="scientist"
+        assert mock_orch.call_args.kwargs["skip_to_agent"] == "scientist"
+        # Analyst artifact must be preserved
+        assert (v00 / "analysis.json").exists()
+
+    @patch("auto_scientist.cli.PipelineApp")
+    @patch("auto_scientist.cli.Orchestrator")
+    def test_resume_mid_iteration_crash_preserves_prior_iterations(
+        self, mock_orch, mock_app_cls, tmp_path
+    ):
+        """Mid-iteration crash on iteration 2 must not touch v00/v01."""
+        from auto_scientist.state import VersionEntry
+
+        state = ExperimentState(
+            domain="auto",
+            goal="g",
+            phase="iteration",
+            iteration=2,
+            max_iterations=5,
+        )
+        state.versions = [
+            VersionEntry(
+                version="v00",
+                iteration=0,
+                script_path=str(tmp_path / "v00" / "experiment.py"),
+                results_path=str(tmp_path / "v00" / "results.txt"),
+                status="completed",
+            ),
+            VersionEntry(
+                version="v01",
+                iteration=1,
+                script_path=str(tmp_path / "v01" / "experiment.py"),
+                results_path=str(tmp_path / "v01" / "results.txt"),
+                status="completed",
+            ),
+        ]
+        state.save(tmp_path / "state.json")
+        # Prior iterations on disk - must remain untouched
+        v00 = tmp_path / "v00"
+        v00.mkdir()
+        (v00 / "experiment.py").write_text("# v00 script")
+        (v00 / "results.txt").write_text("v00 results")
+        v01 = tmp_path / "v01"
+        v01.mkdir()
+        (v01 / "experiment.py").write_text("# v01 script")
+        (v01 / "results.txt").write_text("v01 results")
+        # In-progress iteration: analyst + scientist completed, then crashed
+        v02 = tmp_path / "v02"
+        v02.mkdir()
+        (v02 / "analysis.json").write_text('{"data_summary": "iter2"}')
+        (v02 / "plan.json").write_text('{"hypothesis": "h2"}')
+
+        runner = CliRunner()
+        result = runner.invoke(cli, ["resume", "--state", str(tmp_path)])
+
+        assert result.exit_code == 0, result.output
+        assert "Resuming interrupted iteration 3" in result.output
+        # AGENT_ORDER places "assessment" right after "scientist", so the
+        # next agent to run is the (conditional) stop-gate assessor; the
+        # orchestrator will fall through to debate when should_stop is False.
+        assert mock_orch.call_args.kwargs["skip_to_agent"] == "assessment"
+        reloaded = ExperimentState.load(tmp_path / "state.json")
+        assert reloaded.phase == "iteration"
+        assert reloaded.iteration == 2
+        assert len(reloaded.versions) == 2
+        # Prior iterations must be untouched
+        assert (v00 / "experiment.py").read_text() == "# v00 script"
+        assert (v00 / "results.txt").read_text() == "v00 results"
+        assert (v01 / "experiment.py").read_text() == "# v01 script"
+        assert (v01 / "results.txt").read_text() == "v01 results"
+        # In-progress iteration's earlier artifacts must be preserved
+        assert (v02 / "analysis.json").exists()
+        assert (v02 / "plan.json").exists()
+
+    @patch("auto_scientist.cli.PipelineApp")
+    @patch("auto_scientist.cli.Orchestrator")
+    def test_resume_mid_iteration_crash_no_artifacts_does_clean_restart(
+        self, mock_orch, mock_app_cls, tmp_path
+    ):
+        """When the in-progress iteration has no version dir, fall through cleanly.
+
+        This is a crash that happened before the analyst even wrote
+        analysis.json (or a fresh post-ingest state). The orchestrator
+        should pick up at state.iteration with no rewind banner.
+        """
+        from auto_scientist.state import VersionEntry
+
+        state = ExperimentState(
+            domain="auto",
+            goal="g",
+            phase="iteration",
+            iteration=1,
+            max_iterations=5,
+        )
+        state.versions = [
+            VersionEntry(
+                version="v00",
+                iteration=0,
+                script_path=str(tmp_path / "v00" / "experiment.py"),
+                results_path=str(tmp_path / "v00" / "results.txt"),
+                status="completed",
+            ),
+        ]
+        state.save(tmp_path / "state.json")
+        v00 = tmp_path / "v00"
+        v00.mkdir()
+        (v00 / "experiment.py").write_text("# v00 script")
+        # No v01/ directory - crash happened before any analyst output
+
+        runner = CliRunner()
+        result = runner.invoke(cli, ["resume", "--state", str(tmp_path)])
+
+        assert result.exit_code == 0, result.output
+        # No retry banner because there's nothing to rewind
+        assert "Resuming interrupted iteration" not in result.output
+        assert "Retrying failed iteration" not in result.output
+        # Orchestrator should receive skip_to_agent=None (clean iteration start)
+        assert mock_orch.call_args.kwargs["skip_to_agent"] is None
+        reloaded = ExperimentState.load(tmp_path / "state.json")
+        assert reloaded.iteration == 1
+        assert len(reloaded.versions) == 1
+        assert (v00 / "experiment.py").exists()
+
     def test_resume_completed_run_still_blocked(self, tmp_path):
         """Naked resume of a run that completed normally should still require --fork."""
         from auto_scientist.state import VersionEntry

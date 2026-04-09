@@ -690,25 +690,43 @@ def resume(
         state = source_state
         restored_panels = None
 
-        if state.phase in ("stopped", "report"):
-            # Allow in-place retry when the latest version failed
+        retry_target: int | None = None
+        retry_banner: str | None = None
+
+        if state.phase == "iteration":
+            # Mid-iteration crash (e.g. Ctrl-C, transport crash, or any
+            # exception that bypassed _fail_iteration). state.iteration was
+            # not incremented, so it still points to the in-progress iteration.
+            # Only treat as a retry when there's a partial version directory
+            # on disk; otherwise this is a fresh post-ingest state and the
+            # orchestrator can simply pick up where it left off.
+            in_progress_dir = run_dir / f"v{state.iteration:02d}"
+            if in_progress_dir.exists():
+                retry_target = state.iteration
+                retry_banner = f"Resuming interrupted iteration {retry_target + 1}"
+        elif state.phase in ("stopped", "report"):
+            # Allow in-place retry when the latest version failed.
+            # _fail_iteration() already incremented state.iteration past the
+            # failed version, so step back one to find its directory.
             latest = state.versions[-1] if state.versions else None
             if latest and latest.status == "failed":
-                target = state.iteration - 1
-                retry_agent = _detect_retry_agent(run_dir / f"v{target:02d}")
-                result = rewind_run(run_dir, target, from_agent=retry_agent)
-                state = result.state
-                from_agent = result.from_agent
-                restored_panels = result.restored_panels
-                agent_info = f" from agent '{from_agent}'" if from_agent else ""
-                console.print(
-                    f"[yellow]Retrying failed iteration {target + 1}{agent_info} in-place[/yellow]"
-                )
+                retry_target = state.iteration - 1
+                retry_banner = f"Retrying failed iteration {retry_target + 1}"
             else:
                 raise click.UsageError(
                     "This run has already completed. Use --fork to continue "
                     "from a copy (the original run is preserved)."
                 )
+
+        if retry_target is not None:
+            version_dir = run_dir / f"v{retry_target:02d}"
+            retry_agent = _detect_retry_agent(version_dir) if version_dir.exists() else None
+            result = rewind_run(run_dir, retry_target, from_agent=retry_agent)
+            state = result.state
+            from_agent = result.from_agent
+            restored_panels = result.restored_panels
+            agent_info = f" from agent '{from_agent}'" if from_agent else " from the start"
+            console.print(f"[yellow]{retry_banner}{agent_info} in-place[/yellow]")
 
     # Persist resolved max_iterations so future resumes have it
     state.max_iterations = max_iterations
