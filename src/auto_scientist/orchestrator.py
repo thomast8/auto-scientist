@@ -19,6 +19,7 @@ from auto_scientist.persistence import (
     apply_prediction_updates,
     build_concern_ledger,
     evaluate,
+    format_pending_abductions,
     get_pending_carryforward_predictions,
     load_analyst_from_disk,
     load_final_plan_from_disk,
@@ -26,10 +27,12 @@ from auto_scientist.persistence import (
     persist_artifact,
     persist_buffer,
     read_run_result,
+    resolve_addressed_abductions,
     resolve_prediction_outcomes,
     restore_iterations_from_manifest,
     save_iteration_manifest,
     save_partial_panels,
+    store_refutation_reasoning,
 )
 from auto_scientist.pipeline_live import (
     PipelineLive,
@@ -471,6 +474,14 @@ class Orchestrator:
             return
 
         if "scientist" not in agents_to_skip:
+            # Persist the Scientist's plan immediately so it survives any
+            # downstream crash (stop gate, debate, revision). plan.json is
+            # later overwritten by the post-gate fall-through below, by the
+            # post-debate revised plan in the "Debate + Revision" step, or
+            # by the stop-revision plan inside _run_stop_gate on the upheld
+            # path. The pre-debate original is recoverable from
+            # debate.json["original_plan"] via rewind_run.
+            persist_artifact(version_dir, "plan.json", plan)
             save_partial_panels(self._live, version_dir)
 
         # Step 3: Stop gate (if Scientist recommends stopping)
@@ -511,6 +522,11 @@ class Orchestrator:
                 # Stop withdrawn - use the new plan and fall through to normal debate
                 logger.info("Scientist withdrew stop after stop gate, continuing")
                 plan = revised_stop_plan
+            # Re-persist plan.json to reflect the post-gate state: either the
+            # withdrawn-stop revised plan or should_stop=False after a gate
+            # crash. The upheld branch above already returned; _run_stop_gate
+            # wrote plan.json with the stop-revision plan on that path.
+            persist_artifact(version_dir, "plan.json", plan)
             save_partial_panels(self._live, version_dir)
 
         # Step 4: Debate + Revision
@@ -555,6 +571,10 @@ class Orchestrator:
             # Apply prediction updates from the final plan (after debate revision)
             if final_plan:
                 apply_prediction_updates(final_plan, self.state)
+                # Store new abductions then immediately resolve any the same
+                # plan already addresses (via follows_from or deprioritization).
+                store_refutation_reasoning(final_plan, self.state)
+                resolve_addressed_abductions(final_plan, self.state)
 
             # Persist the final plan (post-debate revision if applicable).
             # NOTE: this must happen BEFORE carry-forward injection below,
@@ -880,6 +900,7 @@ class Orchestrator:
                     provider=cfg.provider,
                     reasoning=cfg.reasoning,
                     output_dir=self.output_dir,
+                    pending_abductions=format_pending_abductions(self.state),
                 )
 
             plan: dict[str, Any] = await with_summaries(
@@ -963,6 +984,7 @@ class Orchestrator:
                     message_buffer=buf,
                     provider=cfg.provider,
                     output_dir=self.output_dir,
+                    pending_abductions=format_pending_abductions(self.state),
                 )
 
             assessment: dict[str, Any] = await with_summaries(
@@ -1309,6 +1331,7 @@ class Orchestrator:
                     self.state.goal,
                     prediction_history_records=self.state.prediction_history,
                     output_dir=self.output_dir,
+                    pending_abductions=format_pending_abductions(self.state),
                 )
             else:
                 critiques = await run_debate(
@@ -1323,6 +1346,7 @@ class Orchestrator:
                     goal=self.state.goal,
                     prediction_history_records=self.state.prediction_history,
                     output_dir=self.output_dir,
+                    pending_abductions=format_pending_abductions(self.state),
                 )
             self._live.log(f"DEBATE: received {len(critiques)} critique(s)")
             return critiques
@@ -1347,6 +1371,7 @@ class Orchestrator:
         goal: str = "",
         prediction_history_records: list | None = None,
         output_dir: Path | None = None,
+        pending_abductions: str = "",
     ) -> list:
         """Run per-persona debates in parallel, each with its own summarizer and panel."""
         import asyncio
@@ -1450,6 +1475,7 @@ class Orchestrator:
                     goal=goal,
                     prediction_history_records=prediction_history_records,
                     output_dir=output_dir,
+                    pending_abductions=pending_abductions,
                 )
 
             try:
@@ -1552,6 +1578,7 @@ class Orchestrator:
                     provider=cfg.provider,
                     reasoning=cfg.reasoning,
                     output_dir=self.output_dir,
+                    pending_abductions=format_pending_abductions(self.state),
                 )
 
             revised: dict[str, Any] = await with_summaries(
@@ -1639,6 +1666,7 @@ class Orchestrator:
                     goal=self.state.goal,
                     provider=cfg.provider,
                     reasoning=cfg.reasoning,
+                    pending_abductions=format_pending_abductions(self.state),
                 )
 
             revised: dict[str, Any] = await with_summaries(
@@ -1850,6 +1878,7 @@ class Orchestrator:
                     model=cfg.model,
                     message_buffer=buf,
                     provider=cfg.provider,
+                    pending_abductions=format_pending_abductions(self.state),
                 )
 
             report_content = await with_summaries(

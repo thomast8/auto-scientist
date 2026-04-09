@@ -573,6 +573,69 @@ def resolve_prediction_outcomes(analysis: dict[str, Any] | None, state: Experime
             )
 
 
+def store_refutation_reasoning(plan: dict[str, Any], state: ExperimentState) -> None:
+    """Extract refutation_reasoning from the Scientist's plan and append to state."""
+    reasoning_list = plan.get("refutation_reasoning", [])
+    stored_ids: list[str] = []
+    for entry in reasoning_list:
+        if not isinstance(entry, dict):
+            continue
+        pid = entry.get("refuted_pred_id", "")
+        if not pid:
+            continue
+        state.pending_abductions.append(entry)
+        stored_ids.append(pid)
+    if stored_ids:
+        logger.info(
+            f"Stored {len(stored_ids)} refutation reasoning entries: {', '.join(stored_ids)}"
+        )
+
+
+def resolve_addressed_abductions(plan: dict[str, Any], state: ExperimentState) -> None:
+    """Remove pending abductions that the Scientist addressed.
+
+    An abduction is addressed if:
+    - A new prediction's follows_from matches its refuted_pred_id, OR
+    - It appears in the plan's deprioritized_abductions list.
+    """
+    if not state.pending_abductions:
+        return
+
+    # Collect follows_from references from new predictions
+    follows_refs = set()
+    for pred in plan.get("testable_predictions", []):
+        if isinstance(pred, dict) and pred.get("follows_from"):
+            follows_refs.add(pred["follows_from"])
+
+    # Collect deprioritized references
+    deprioritized_refs = set()
+    for dep in plan.get("deprioritized_abductions", []):
+        if isinstance(dep, dict) and dep.get("refuted_pred_id"):
+            deprioritized_refs.add(dep["refuted_pred_id"])
+
+    addressed = follows_refs | deprioritized_refs
+    if not addressed:
+        return
+
+    before = len(state.pending_abductions)
+    state.pending_abductions = [
+        a for a in state.pending_abductions if a.get("refuted_pred_id") not in addressed
+    ]
+    removed = before - len(state.pending_abductions)
+    if removed:
+        logger.info(f"Resolved {removed} addressed abductions: {', '.join(addressed)}")
+
+
+def format_pending_abductions(state: ExperimentState) -> str:
+    """Format pending abductions as JSON for injection into the Scientist's prompt.
+
+    Returns empty string if no abductions are pending.
+    """
+    if not state.pending_abductions:
+        return ""
+    return json.dumps(state.pending_abductions, indent=2)
+
+
 def build_concern_ledger(debate_results: list) -> list[dict[str, Any]]:
     """Build a concern ledger from structured debate results.
 

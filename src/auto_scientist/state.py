@@ -52,6 +52,7 @@ class ExperimentState(BaseModel):
     domain_knowledge: str = ""
     max_iterations: int | None = Field(default=None, ge=1)
     prediction_history: list[PredictionRecord] = Field(default_factory=list)
+    pending_abductions: list[dict] = Field(default_factory=list)
 
     def save(self, path: Path) -> None:
         """Persist state to JSON file."""

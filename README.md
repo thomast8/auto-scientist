@@ -37,6 +37,18 @@ The Scientist decides when to stop based on scientific judgment (goal satisfied,
 
 Every hypothesis comes with pre-registered testable predictions, each with diagnostics and branching plans ("if confirmed, do X; if refuted, do Y"). The experiment script evaluates them in code, and the Analyst transcribes outcomes. This creates accountability: wrong predictions redirect the investigation instead of being ignored.
 
+### Abductive reasoning on refutations
+
+When a prediction is refuted, the Scientist doesn't just move on - it runs a structured abductive protocol: enumerate the assumptions behind the refuted prediction, identify the weakest one, generate an alternative explanation naming specific measured or unmeasured entities and the mechanism connecting them, then derive a testable consequence that becomes a candidate for the next iteration's predictions. Alternative explanations must describe the system under study (physical, chemical, operational mechanisms), not concerns about the analysis pipeline.
+
+This alternative reasoning is persisted as `pending_abductions` and carried forward. On the next iteration, the Scientist must either address each pending abduction via a new prediction (linked via `follows_from`) or explicitly deprioritize it with a reason. Critics, the stop-time Assessor, and the final Report all see the pending abductions and flag any that get dropped silently.
+
+The result: when the investigation fails to predict something, it generates hypotheses about **why** before planning **what next**. This is how the system catches latent confounders - the Scientist is forced to name what unmeasured factor could explain the gap, which is the exact mental move that turns "my model was wrong" into "there must be something I'm not measuring."
+
+### Meta-observation diagnostics
+
+In parallel with observations and metrics, the Analyst emits `data_diagnostics` entries that flag cross-cutting patterns across its own findings: variables that behave similarly, measurements with structural boundaries, associations that change direction under different conditions, or other connections the Scientist should consider when forming hypotheses. This gives the Scientist raw material for abductive reasoning - patterns that wouldn't be visible from individual metrics in isolation.
+
 ## Quick Start
 
 ```bash

@@ -111,22 +111,39 @@ _INSTRUCTIONS = """\
    If analysis is empty (first iteration), plan data exploration:
    distributions, missing values, correlations, baselines.
 
-3. Formulate a hypothesis about what to change and why.
+3. For each refuted prediction in the current analysis, reason about
+   why it was wrong before planning the next experiment:
+   a. Enumerate the assumptions you made when formulating the prediction.
+   b. Identify the weakest assumption given the evidence.
+   c. Generate an alternative explanation about the system under study.
+      Describe what is actually happening in the phenomenon: name specific
+      measured or unmeasured entities and the mechanism connecting them
+      (e.g., "entity X influences entity Y through process Z"). Do NOT
+      describe concerns about the analysis pipeline (evaluation fragility,
+      fold instability, metric comparability, model fit diagnostics) -
+      those are not abductive reasoning about the phenomenon; record them
+      in notebook_entry if relevant.
+   d. Derive a testable consequence: if the alternative explanation is
+      correct, what specific observation should follow? This becomes a
+      candidate for testable_predictions via follows_from.
+   Record this in refutation_reasoning. Empty list if no refutations.
 
-4. Choose a strategy:
+4. Formulate a hypothesis about what to change and why.
+
+5. Choose a strategy:
    - incremental: tune existing approach (fundamentally sound)
    - structural: fundamental change (tuning cannot fix limitations)
    - exploratory: something entirely new (current line exhausted)
 
-5. Default to one decisive experiment. Pick the single bottleneck most likely
-   to move the investigation toward the goal. Use at most 1 main hypothesis
-   and 1-2 tightly coupled changes. Do not bundle unrelated ideas into one
-   iteration.
+6. Default to one decisive experiment. Pick the single bottleneck most
+   likely to move the investigation toward the goal. Use at most 1 main
+   hypothesis and 1-2 tightly coupled changes. Do not bundle unrelated
+   ideas into one iteration.
 
-6. Create prioritized changes (what/why/how, priority 1-3).
+7. Create prioritized changes (what/why/how, priority 1-3).
    For threshold rules, verify the direction against analysis data.
 
-7. Define 1-4 testable predictions with conditional outcomes:
+8. Define 1-4 testable predictions with conditional outcomes:
    - prediction: falsifiable expectation
    - diagnostic: what the Coder should compute
    - if_confirmed / if_refuted: next direction
@@ -135,10 +152,10 @@ _INSTRUCTIONS = """\
    iterations via follows_from. A refuted prediction is valuable.
    On iteration 0, predictions may be empty.
 
-8. Write a notebook entry: title on first line, narrative below.
+9. Write a notebook entry: title on first line, narrative below.
    Include arc reflection and plan.
 
-9. Evaluate whether to stop. Set should_stop=true when the core
+10. Evaluate whether to stop. Set should_stop=true when the core
    question is answered. Before stopping, verify:
    - Coverage: every sub-question from the goal was investigated
    - Depth: a single negative result does not close a sub-question
@@ -594,6 +611,20 @@ Produce a JSON object with these exact keys and types:
       "if_refuted": str,
       "follows_from": str | null
     }}
+  ],
+  "refutation_reasoning": [
+    {{
+      "refuted_pred_id": str,
+      "assumptions_violated": str,
+      "alternative_explanation": str,
+      "testable_consequence": str
+    }}
+  ],
+  "deprioritized_abductions": [
+    {{
+      "refuted_pred_id": str,
+      "reason": str
+    }}
   ]
 }}
 
@@ -608,6 +639,13 @@ testable_predictions: 1-4 diagnostic predictions with conditional outcomes.
   Each tests your reasoning, not your goals. Include follows_from to link
   to a prior prediction whose outcome motivated this one (null for new
   trajectories). Predictions are persisted across iterations.
+refutation_reasoning: abductive reasoning for each refuted prediction.
+  refuted_pred_id references the pred_id of the refuted prediction.
+  Empty list if no predictions were refuted.
+deprioritized_abductions: explicit decisions to not pursue testable
+  consequences from prior refutation reasoning. refuted_pred_id references
+  the original refuted prediction. Only populated when pending abductions
+  exist and you choose not to test them; include a reason.
 
 Fallback rules:
 - Exploration iteration (no analysis): testable_predictions may be empty
@@ -706,7 +744,7 @@ SCIENTIST_USER = """\
 <goal>{goal}</goal>
 <domain_knowledge>{domain_knowledge}</domain_knowledge>
 <prediction_history>{prediction_history}</prediction_history>
-<notebook>{notebook_content}</notebook>
+{pending_abductions_section}<notebook>{notebook_content}</notebook>
 </context>
 
 <data>
@@ -996,6 +1034,20 @@ Same JSON schema as the Scientist's initial plan:
       "if_refuted": str,
       "follows_from": str | null
     }}
+  ],
+  "refutation_reasoning": [
+    {{
+      "refuted_pred_id": str,
+      "assumptions_violated": str,
+      "alternative_explanation": str,
+      "testable_consequence": str
+    }}
+  ],
+  "deprioritized_abductions": [
+    {{
+      "refuted_pred_id": str,
+      "reason": str
+    }}
   ]
 }}
 
@@ -1003,12 +1055,17 @@ Fallback rules:
 - Empty concern ledger: return original plan unchanged
 - Predictions from original plan should be preserved unless debate
   identified a flaw in the diagnostic or reasoning
+- refutation_reasoning from original plan should be preserved unless
+  debate invalidated the reasoning
+- If pending_abductions are present, address them via testable_predictions
+  (follows_from) or deprioritized_abductions
 </output_format>
 
 <recap>
 Output a complete plan with all required keys. The notebook_entry
 documents what the debate changed and what was rejected, not the
 original reflection. Preserve or update testable_predictions.
+Address any pending abductions.
 </recap>
 """
 
@@ -1027,7 +1084,7 @@ SCIENTIST_REVISION_USER = """\
 <goal>{goal}</goal>
 <domain_knowledge>{domain_knowledge}</domain_knowledge>
 <prediction_history>{prediction_history}</prediction_history>
-<notebook>{notebook_content}</notebook>
+{pending_abductions_section}<notebook>{notebook_content}</notebook>
 </context>
 
 <data>

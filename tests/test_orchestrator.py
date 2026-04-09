@@ -12,10 +12,13 @@ from auto_scientist.persistence import (
     apply_prediction_updates,
     build_concern_ledger,
     evaluate,
+    format_pending_abductions,
     get_pending_carryforward_predictions,
     normalize_follows_from,
     read_run_result,
+    resolve_addressed_abductions,
     resolve_prediction_outcomes,
+    store_refutation_reasoning,
 )
 from auto_scientist.runner import RunResult
 from auto_scientist.state import ExperimentState, VersionEntry
@@ -1362,6 +1365,135 @@ class TestRunIteration:
 
         # Phase must NOT become "report"
         assert orchestrator.state.phase != "report"
+
+    @pytest.mark.asyncio
+    async def test_scientist_plan_persisted_before_stop_gate(self, orchestrator, tmp_path):
+        """plan.json must be written as soon as the Scientist produces a plan.
+
+        Regression for a bug where the Scientist ran and the stop gate was
+        triggered (assessment artifact on disk) but plan.json was missing
+        because persistence only happened after debate+revision. A crash
+        mid-stop-gate therefore lost the Scientist's work and made the
+        status command report "scientist" as never having run.
+        """
+        import json
+
+        orchestrator.output_dir.mkdir(parents=True, exist_ok=True)
+        orchestrator.state.phase = "iteration"
+        orchestrator.state.iteration = 0
+
+        plan = {
+            "should_stop": True,
+            "stop_reason": "investigation seems complete",
+            "hypothesis": "Dose response is saturated",
+            "strategy": "none",
+            "changes": [],
+        }
+
+        async def _stop_gate_crash(*args, **kwargs):
+            raise RuntimeError("simulated stop-gate crash mid-assessment")
+
+        with (
+            patch.object(orchestrator, "_run_analyst", new_callable=AsyncMock, return_value={}),
+            patch.object(
+                orchestrator, "_run_scientist_plan", new_callable=AsyncMock, return_value=plan
+            ),
+            patch.object(orchestrator, "_run_stop_gate", side_effect=_stop_gate_crash),
+            pytest.raises(RuntimeError, match="simulated stop-gate crash"),
+        ):
+            await orchestrator._run_iteration_body()
+
+        plan_path = orchestrator.output_dir / "v00" / "plan.json"
+        assert plan_path.exists(), (
+            "plan.json must exist after Scientist runs, even if a downstream "
+            "agent (stop gate, debate, revision) later crashes."
+        )
+        persisted = json.loads(plan_path.read_text())
+        # Full equality: any downstream consumer reading plan.json must see
+        # exactly what the Scientist produced, not a partial or stale dict.
+        assert persisted == plan
+
+    @pytest.mark.asyncio
+    async def test_withdrawn_stop_persisted_before_debate(self, orchestrator, tmp_path):
+        """plan.json must reflect the stop-gate's revised plan after a withdrawn stop.
+
+        Regression for a silent-stale bug: after the stop gate returns
+        should_stop=False (withdrawn), the orchestrator updates the in-memory
+        plan but previously did not re-persist plan.json. If debate then
+        crashes, plan.json on disk still contained the stale pre-stop-gate
+        proposal (should_stop=True), which resume would silently load.
+        """
+        import json
+
+        orchestrator.output_dir.mkdir(parents=True, exist_ok=True)
+        orchestrator.state.phase = "iteration"
+        orchestrator.state.iteration = 1
+        orchestrator.state.versions = [
+            VersionEntry(
+                version="v00",
+                iteration=0,
+                script_path="/tmp/s.py",
+                results_path=str(tmp_path / "results.txt"),
+            ),
+        ]
+        (tmp_path / "results.txt").write_text("data")
+
+        original_plan = {
+            "should_stop": True,
+            "stop_reason": "thought we were done",
+            "hypothesis": "Original hypothesis",
+            "strategy": "none",
+            "changes": [],
+        }
+        withdrawn_plan = {
+            "should_stop": False,
+            "stop_reason": None,
+            "hypothesis": "Nonlinear effects not yet tested",
+            "strategy": "incremental",
+            "changes": [
+                {
+                    "what": "add polynomial",
+                    "why": "test nonlinearity",
+                    "how": "degree=2",
+                    "priority": 1,
+                }
+            ],
+        }
+
+        async def _debate_crash(*args, **kwargs):
+            raise RuntimeError("simulated debate crash after withdrawn stop")
+
+        with (
+            patch.object(orchestrator, "_run_analyst", new_callable=AsyncMock, return_value={}),
+            patch.object(
+                orchestrator,
+                "_run_scientist_plan",
+                new_callable=AsyncMock,
+                return_value=original_plan,
+            ),
+            patch.object(
+                orchestrator,
+                "_run_stop_gate",
+                new_callable=AsyncMock,
+                return_value=withdrawn_plan,
+            ),
+            patch.object(orchestrator, "_run_debate", side_effect=_debate_crash),
+            pytest.raises(RuntimeError, match="simulated debate crash"),
+        ):
+            await orchestrator._run_iteration_body()
+
+        plan_path = orchestrator.output_dir / "v01" / "plan.json"
+        assert plan_path.exists(), "plan.json must exist after Scientist + stop gate"
+        persisted = json.loads(plan_path.read_text())
+        # Critical: plan.json must be the WITHDRAWN revised plan, not the
+        # stale original. Otherwise a resume from debate would load a
+        # rejected stop proposal as if it were current.
+        assert persisted == withdrawn_plan, (
+            "plan.json must be refreshed to the stop-gate's revised plan "
+            "after a withdrawn stop; otherwise resume will silently load "
+            "the stale pre-stop-gate proposal."
+        )
+        assert persisted["should_stop"] is False
 
 
 class TestRunAnalystInitial:
@@ -3090,3 +3222,161 @@ class TestCarryForwardPredictions:
         # Second is the carried-forward pending prediction
         assert preds[1]["pred_id"] == "0.1"
         assert preds[1]["_carried_forward"] is True
+
+
+class TestAbductionPersistence:
+    """Tests for refutation reasoning storage, addressed-check, and formatting."""
+
+    def test_store_refutation_reasoning(self, orchestrator):
+        plan = {
+            "refutation_reasoning": [
+                {
+                    "refuted_pred_id": "0.1",
+                    "assumptions_violated": "assumed independence",
+                    "alternative_explanation": "latent common cause",
+                    "testable_consequence": "partial correlation remains after adjustment",
+                },
+            ],
+        }
+        store_refutation_reasoning(plan, orchestrator.state)
+        assert len(orchestrator.state.pending_abductions) == 1
+        assert orchestrator.state.pending_abductions[0]["refuted_pred_id"] == "0.1"
+
+    def test_store_skips_empty_pred_id(self, orchestrator):
+        plan = {
+            "refutation_reasoning": [
+                {
+                    "refuted_pred_id": "",
+                    "assumptions_violated": "x",
+                    "alternative_explanation": "y",
+                    "testable_consequence": "z",
+                },
+            ],
+        }
+        store_refutation_reasoning(plan, orchestrator.state)
+        assert len(orchestrator.state.pending_abductions) == 0
+
+    def test_store_noop_when_no_reasoning(self, orchestrator):
+        store_refutation_reasoning({}, orchestrator.state)
+        assert len(orchestrator.state.pending_abductions) == 0
+
+    def test_resolve_by_follows_from(self, orchestrator):
+        orchestrator.state.pending_abductions = [
+            {"refuted_pred_id": "0.1", "testable_consequence": "test X"},
+        ]
+        plan = {
+            "testable_predictions": [
+                {
+                    "prediction": "test X",
+                    "diagnostic": "d",
+                    "if_confirmed": "c",
+                    "if_refuted": "r",
+                    "follows_from": "0.1",
+                },
+            ],
+        }
+        resolve_addressed_abductions(plan, orchestrator.state)
+        assert len(orchestrator.state.pending_abductions) == 0
+
+    def test_resolve_by_deprioritization(self, orchestrator):
+        orchestrator.state.pending_abductions = [
+            {"refuted_pred_id": "0.2", "testable_consequence": "test Y"},
+        ]
+        plan = {
+            "deprioritized_abductions": [
+                {"refuted_pred_id": "0.2", "reason": "no longer relevant"},
+            ],
+        }
+        resolve_addressed_abductions(plan, orchestrator.state)
+        assert len(orchestrator.state.pending_abductions) == 0
+
+    def test_keeps_unaddressed_abductions(self, orchestrator):
+        orchestrator.state.pending_abductions = [
+            {"refuted_pred_id": "0.1", "testable_consequence": "test X"},
+            {"refuted_pred_id": "0.3", "testable_consequence": "test Z"},
+        ]
+        plan = {
+            "testable_predictions": [
+                {
+                    "prediction": "p",
+                    "diagnostic": "d",
+                    "if_confirmed": "c",
+                    "if_refuted": "r",
+                    "follows_from": "0.1",
+                },
+            ],
+        }
+        resolve_addressed_abductions(plan, orchestrator.state)
+        assert len(orchestrator.state.pending_abductions) == 1
+        assert orchestrator.state.pending_abductions[0]["refuted_pred_id"] == "0.3"
+
+    def test_format_empty_returns_empty_string(self, orchestrator):
+        assert format_pending_abductions(orchestrator.state) == ""
+
+    def test_format_returns_json(self, orchestrator):
+        orchestrator.state.pending_abductions = [
+            {"refuted_pred_id": "0.1", "testable_consequence": "test X"},
+        ]
+        result = format_pending_abductions(orchestrator.state)
+        assert '"refuted_pred_id"' in result
+        assert '"0.1"' in result
+
+
+class TestSchemaValidation:
+    """Tests for new Pydantic schema models."""
+
+    def test_analyst_output_with_data_diagnostics(self):
+        from auto_scientist.schemas import AnalystOutput
+
+        data = {
+            "key_metrics": [],
+            "improvements": [],
+            "regressions": [],
+            "observations": ["test"],
+            "data_diagnostics": [
+                {"variables": ["a", "b"], "pattern": "co-move", "evidence": "r=0.6"},
+            ],
+        }
+        output = AnalystOutput(**data)
+        assert len(output.data_diagnostics) == 1
+        assert output.data_diagnostics[0].variables == ["a", "b"]
+
+    def test_analyst_output_without_diagnostics(self):
+        from auto_scientist.schemas import AnalystOutput
+
+        data = {
+            "key_metrics": [],
+            "improvements": [],
+            "regressions": [],
+            "observations": [],
+        }
+        output = AnalystOutput(**data)
+        assert output.data_diagnostics == []
+
+    def test_scientist_output_with_refutation_reasoning(self):
+        from auto_scientist.schemas import ScientistPlanOutput
+
+        data = {
+            "hypothesis": "test",
+            "strategy": "incremental",
+            "changes": [{"what": "x", "why": "y", "how": "z", "priority": 1}],
+            "expected_impact": "test",
+            "should_stop": False,
+            "stop_reason": None,
+            "notebook_entry": "test",
+            "refutation_reasoning": [
+                {
+                    "refuted_pred_id": "0.1",
+                    "assumptions_violated": "assumed X",
+                    "alternative_explanation": "Y instead",
+                    "testable_consequence": "should see Z",
+                },
+            ],
+            "deprioritized_abductions": [
+                {"refuted_pred_id": "0.2", "reason": "superseded"},
+            ],
+        }
+        output = ScientistPlanOutput(**data)
+        assert len(output.refutation_reasoning) == 1
+        assert output.refutation_reasoning[0].refuted_pred_id == "0.1"
+        assert len(output.deprioritized_abductions) == 1

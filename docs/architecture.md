@@ -124,18 +124,21 @@ implementation detail that only the Coder needs.
 - Tools: Read (results file + plot PNGs), Glob (find output files)
 - Input: results text + plot images + lab notebook
 - (Iteration 0: raw data directory instead of results)
-- Output: structured JSON: `key_metrics`, `improvements`, `regressions`, `observations`, `prediction_outcomes[]`
+- Output: structured JSON: `key_metrics`, `improvements`, `regressions`, `observations`, `prediction_outcomes[]`, `data_diagnostics[]`
 - (Iteration 0: also `domain_knowledge`, `data_summary`)
 - `prediction_outcomes` entries: `{pred_id, prediction, outcome, evidence}` where outcome is "confirmed", "refuted", or "inconclusive"
+- `data_diagnostics` entries: `{variables, pattern, evidence}` - cross-cutting structural patterns the Analyst notices across its own observations (co-moving variables, distributional boundaries, sign-flip anomalies). Domain-agnostic meta-observation step that gives the Scientist raw material for abductive reasoning about hidden factors.
 - Role: pure observer, reports facts only, no recommendations
 - `max_turns`: 30
 
 **Scientist Agent** (Phase 1, step 2):
 - Prompt-in, JSON-out call with web search (`max_turns`: 10)
-- Input (via prompt injection): analysis JSON + lab notebook + domain knowledge + prediction history
+- Input (via prompt injection): analysis JSON + lab notebook + domain knowledge + prediction history + pending abductions from prior iterations
 - Does NOT read Python code; analysis + notebook is sufficient for strategic planning
-- Output: structured JSON plan: `hypothesis`, `strategy`, `changes[]`, `expected_impact`, `should_stop`, `stop_reason`, `notebook_entry`, `testable_predictions[]`
+- Output: structured JSON plan: `hypothesis`, `strategy`, `changes[]`, `expected_impact`, `should_stop`, `stop_reason`, `notebook_entry`, `testable_predictions[]`, `refutation_reasoning[]`, `deprioritized_abductions[]`
 - `testable_predictions` entries: `{prediction, diagnostic, if_confirmed, if_refuted, follows_from}` where `follows_from` links to a prior pred_id to form reasoning trajectories
+- `refutation_reasoning` entries: `{refuted_pred_id, assumptions_violated, alternative_explanation, testable_consequence}` - structured abductive reasoning generated for each refuted prediction. The `alternative_explanation` must describe the system under study (naming specific measured or unmeasured entities and the mechanism connecting them), not concerns about the analysis pipeline. The `testable_consequence` becomes a candidate for the next iteration's testable_predictions via follows_from.
+- `deprioritized_abductions` entries: `{refuted_pred_id, reason}` - explicit decisions to not pursue a pending abduction's testable consequence, so the carry-forward mechanism knows the thread is closed by judgment, not by oversight.
 - Role: strategic thinker, formulates hypotheses and plans, does NOT write code
 - Decides when to stop via `should_stop` based on scientific judgment (goal satisfaction, diminishing returns, structural limits), not metric thresholds
 
@@ -186,6 +189,20 @@ Phases: `ingestion -> iteration (loop) -> report -> stopped`
 A markdown file (`experiments/lab_notebook.md`) maintained by the orchestrator. The Scientist writes the notebook entry as part of its plan, and the orchestrator appends it to the file.
 
 The notebook is a **strategic journal**: hypothesis, reasoning, key lessons, dead ends. It is NOT a copy of the approach spec or results. That lives in `results.txt`.
+
+### Abduction Carry-Forward
+
+When the Scientist generates `refutation_reasoning` for a refuted prediction, the `testable_consequence` is typically tested in the next iteration via a new prediction with `follows_from` set to the refuted pred_id. But the Scientist may also raise an abduction without immediately testing it (for example, because the current iteration is already tightly scoped).
+
+The orchestrator tracks these as `pending_abductions` in `ExperimentState`. On every subsequent iteration, pending abductions are injected into the Scientist's prompt with explicit instructions: address each via a new `follows_from` prediction or list it in `deprioritized_abductions` with a reason. An abduction is considered "addressed" if either condition is met (pure string matching, no LLM inference in the orchestrator).
+
+Three downstream agents also receive the pending abductions:
+
+- **Critics** during debate flag any unaddressed abduction as a dropped thread
+- **Assessor** at stop time treats each unaddressed abduction as an open sub-question blocking "thorough" coverage rating
+- **Report** documents remaining open abductions in the Limitations section with explicit "what was raised, why not tested, what would resolve it"
+
+This machinery exists specifically to solve a failure mode observed in early runs: models would generate thoughtful alternative explanations for refuted predictions and then silently forget them. Without structured persistence and multi-agent enforcement, abductive reasoning becomes a one-shot exercise that doesn't drive the investigation forward.
 
 ### Compressed History (for Critic)
 

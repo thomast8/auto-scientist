@@ -35,6 +35,16 @@ class KeyMetric(BaseModel):
     value: float
 
 
+class DataDiagnostic(BaseModel):
+    """A cross-cutting structural pattern noticed by the Analyst."""
+
+    model_config = ConfigDict(extra="ignore")
+
+    variables: list[str]
+    pattern: str
+    evidence: str
+
+
 class AnalystOutput(BaseModel):
     """Validated output from the Analyst agent."""
 
@@ -45,6 +55,7 @@ class AnalystOutput(BaseModel):
     regressions: list[str]
     observations: list[str]
     prediction_outcomes: list[PredictionOutcome] = Field(default_factory=list)
+    data_diagnostics: list[DataDiagnostic] = Field(default_factory=list)
     domain_knowledge: str = ""
     data_summary: str | None = None
 
@@ -84,6 +95,26 @@ class HypothesisPrediction(BaseModel):
     follows_from: str | None = None
 
 
+class RefutationReasoning(BaseModel):
+    """Abductive reasoning about why a prediction was refuted."""
+
+    model_config = ConfigDict(extra="ignore")
+
+    refuted_pred_id: str
+    assumptions_violated: str
+    alternative_explanation: str
+    testable_consequence: str
+
+
+class DeprioritizedAbduction(BaseModel):
+    """An explicit decision to not pursue a prior abduction's testable consequence."""
+
+    model_config = ConfigDict(extra="ignore")
+
+    refuted_pred_id: str
+    reason: str
+
+
 class ScientistPlanOutput(BaseModel):
     """Validated output from the Scientist agent (plan and revision)."""
 
@@ -97,6 +128,8 @@ class ScientistPlanOutput(BaseModel):
     stop_reason: str | None
     notebook_entry: str
     testable_predictions: list[HypothesisPrediction] = Field(default_factory=list)
+    refutation_reasoning: list[RefutationReasoning] = Field(default_factory=list)
+    deprioritized_abductions: list[DeprioritizedAbduction] = Field(default_factory=list)
 
 
 class SubQuestionAssessment(BaseModel):

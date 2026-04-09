@@ -14,10 +14,12 @@ from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
 from rich.console import Console, RenderableType
+from textual.css.query import NoMatches
 
 from auto_scientist.widgets import (
     AgentPanel,
     IterationContainer,
+    MetricsBar,
     console,
 )
 
@@ -96,6 +98,13 @@ class PipelineLive:
                 panel._apply_complete_dom()
                 # Override _end_time AFTER complete() so saved elapsed is preserved
                 panel._end_time = panel.start_time + panel_data.get("elapsed_seconds", 0)
+                # Carry per-panel stats into the persistent header totals
+                try:
+                    bar = self._app.query_one(MetricsBar)
+                except NoMatches:
+                    bar = None
+                if bar is not None:
+                    bar.carry_over(panel)
 
             self._app.call_from_thread(_do_mount)
 
@@ -243,6 +252,10 @@ class PipelineLive:
         def _do_mount():
             container = IterationContainer(iter_title=title, restored=True)
             self._app.query_one("#run-area").mount(container)
+            try:
+                bar = self._app.query_one(MetricsBar)
+            except NoMatches:
+                bar = None
 
             for p in panels:
                 panel = AgentPanel(
@@ -266,6 +279,9 @@ class PipelineLive:
                 panel._apply_complete_dom()
                 # Override _end_time AFTER complete() so saved elapsed is preserved
                 panel._end_time = panel.start_time + p.get("elapsed_seconds", 0)
+                # Carry per-panel stats into the persistent header totals
+                if bar is not None:
+                    bar.carry_over(panel)
 
             container.set_result(result_text, result_style, summary)
 

@@ -35,6 +35,7 @@ async def run_report(
     model: str | None = None,
     message_buffer: list[str] | None = None,
     provider: str = "anthropic",
+    pending_abductions: str = "",
 ) -> str:
     """Generate the final experiment report.
 
@@ -50,12 +51,24 @@ async def run_report(
     """
     notebook_content = notebook_path.read_text() if notebook_path.exists() else "(no notebook)"
 
+    abductions_section = ""
+    if pending_abductions:
+        abductions_section = (
+            "<pending_abductions>\n"
+            "Unaddressed alternative explanations raised during the "
+            "investigation. Document each as an open thread in the "
+            "Limitations section.\n\n"
+            f"{pending_abductions}\n"
+            "</pending_abductions>\n"
+        )
+
     user_prompt = REPORT_USER.format(
         domain=state.domain,
         goal=state.goal,
         total_iterations=state.iteration,
         best_version=state.versions[-1].version if state.versions else "none",
         notebook_content=notebook_content,
+        pending_abductions_section=abductions_section,
     )
 
     max_turns = 10

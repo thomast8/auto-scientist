@@ -64,6 +64,12 @@ _INSTRUCTIONS = """\
 4. Transcribe HYPOTHESIS TESTS section into prediction_outcomes. Each test
    has a bracketed ID like [1.2]. Record confirmed/refuted/inconclusive
    with evidence. No HYPOTHESIS TESTS section means empty prediction_outcomes.
+5. After completing steps 1-4, review your observations and metrics together.
+   Note any cross-cutting patterns: variables that behave similarly,
+   measurements that appear structurally constrained, associations that
+   change direction under different conditions, or other connections across
+   your findings. Record these in data_diagnostics. Empty list if nothing
+   notable.
 
 Data characterization mode (data directory instead of results):
 1. Read each data file with the `Read` tool
@@ -145,6 +151,13 @@ Two hypothesis tests: both confirmed.
       "evidence": "site #7 coliform=320 CFU, exceeds 200 threshold",
       "summary": "Site #7 coliform=320 CFU"
     }}
+  ],
+  "data_diagnostics": [
+    {{
+      "variables": ["coliform_mean_site7", "turbidity_mean"],
+      "pattern": "Sites with highest coliform also show elevated turbidity",
+      "evidence": "site #7: coliform=320, turbidity=5.8 vs avg 32.5, 3.1"
+    }}
   ]
 }}
 </output>
@@ -166,7 +179,8 @@ Script crashed. No metrics, no plots.
   "improvements": [],
   "regressions": [],
   "observations": ["script crashed: ZeroDivisionError at line 142"],
-  "prediction_outcomes": []
+  "prediction_outcomes": [],
+  "data_diagnostics": []
 }}
 </output>
 </example>
@@ -190,7 +204,8 @@ Script timed out. Report duration and hypothesis for Scientist.
   "observations": [
     "script timed out after 120 min while testing: atomistic simulation"
   ],
-  "prediction_outcomes": []
+  "prediction_outcomes": [],
+  "data_diagnostics": []
 }}
 </output>
 </example>
@@ -215,6 +230,7 @@ Data characterization mode. CSV: 500 rows, 4 columns. Temperature
     "temperature: 15.2-38.7 C; humidity: 22.0-98.5%, 3 missing; pressure: 990.1-1025.3 hPa"
   ],
   "prediction_outcomes": [],
+  "data_diagnostics": [],
   "domain_knowledge": "Environmental sensor dataset with temperature, humidity, and \
 pressure readings sampled hourly over 21 days. Three humidity values missing.",
   "data_summary": "Files: sensor_readings.csv (500 rows, 4 columns: timestamp, \
@@ -278,6 +294,13 @@ as coliform outlier (320 vs 32.5 average). Two hypothesis tests confirmed.
       "evidence": "site #7 coliform=320 CFU",
       "summary": "Site #7 coliform=320 CFU"
     }}
+  ],
+  "data_diagnostics": [
+    {{
+      "variables": ["coliform_mean_site7", "turbidity_mean"],
+      "pattern": "Sites with highest coliform also show elevated turbidity",
+      "evidence": "site #7: coliform=320, turbidity=5.8 vs avg 32.5, 3.1"
+    }}
   ]
 }}
 </output>
@@ -302,7 +325,8 @@ Script timed out. Report duration and hypothesis for Scientist.
   "observations": [
     "script timed out after 120 min while testing: atomistic simulation"
   ],
-  "prediction_outcomes": []
+  "prediction_outcomes": [],
+  "data_diagnostics": []
 }}
 </output>
 </example>
@@ -355,6 +379,13 @@ Produce a JSON object with these exact keys and types:
       "summary": str
     }}
   ],
+  "data_diagnostics": [
+    {{
+      "variables": [str],
+      "pattern": str,
+      "evidence": str
+    }}
+  ],
   "domain_knowledge": str,
   "data_summary": str
 }}
@@ -375,6 +406,11 @@ prediction_outcomes: from script's HYPOTHESIS TESTS section. Each outcome is
   for compact display. Focus on the key number or finding, e.g.,
   "Cr r_s near zero; Ni dominates at 0.613" or "RF R^2=0.80 vs EN 0.47".
 
+data_diagnostics: cross-cutting patterns across your observations and metrics.
+  Each entry names the variables involved, describes the pattern, and cites
+  evidence. Populated in normal iteration mode when notable patterns exist.
+  Empty list in data characterization mode, timeout, or crash.
+
 domain_knowledge: (optional) structural description of the dataset: variable
   types, ranges, distributions, noise characteristics, data format. Must NOT
   contain hypotheses, model recommendations, or scientific interpretations.
@@ -389,7 +425,8 @@ Fallback rules:
 - No experiment results (data characterization mode): key_metrics is [],
   domain_knowledge and data_summary are populated
 - Normal iteration mode: domain_knowledge and data_summary are omitted
-- Script timed out: report the timeout as the first observation
+- Data characterization mode: data_diagnostics is []
+- Script timed out: data_diagnostics is []. Report the timeout as the first observation
   ("script timed out after N minutes while testing: <hypothesis>").
   Include timeout_minutes in key_metrics. If partial results exist,
   extract whatever metrics are available. improvements and regressions

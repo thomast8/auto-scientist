@@ -84,6 +84,11 @@ _INSTRUCTIONS = """\
      range" rather than "has some limitations")
    - Write for a technical audience with domain knowledge
    - Include units and confidence intervals where available
+
+6. If pending_abductions are present, document each one in the
+   Limitations section as an explicit open thread: what alternative
+   explanation was raised, why it was not tested, and what would be
+   needed to resolve it.
 </instructions>"""
 
 _SCOPE_BOUNDARY = """\
@@ -176,7 +181,7 @@ REPORT_USER = """\
 
 <data>
 <notebook>{notebook_content}</notebook>
-</data>
+{pending_abductions_section}</data>
 
 <task>
 Output the complete final report as text. Do not write any files. Your text

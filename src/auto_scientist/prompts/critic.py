@@ -362,7 +362,7 @@ CRITIC_USER = """\
 <goal>{goal}</goal>
 <domain_knowledge>{domain_knowledge}</domain_knowledge>
 <notebook>{notebook_content}</notebook>
-<analysis>{analysis_json}</analysis>{prediction_history_section}
+<analysis>{analysis_json}</analysis>{prediction_history_section}{pending_abductions_section}
 </context>
 
 <data>
@@ -374,7 +374,7 @@ Critique the scientist's plan. Output your critique as structured JSON with
 concerns (each tagged with severity, confidence, and category), alternative
 hypotheses, and an overall assessment.
 
-Evaluate the plan against the evidence base.{prediction_task_text}
+Evaluate the plan against the evidence base.{prediction_task_text}{abduction_task_text}
 </task>
 
 <recap>

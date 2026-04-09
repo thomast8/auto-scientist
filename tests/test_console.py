@@ -494,6 +494,70 @@ class TestMetricsBar:
             assert bar.total_turns == 3
 
     @pytest.mark.asyncio
+    async def test_carry_over_shifts_start_time(self):
+        bar = MetricsBar()
+        panel = AgentPanel(
+            name="Analyst",
+            model="claude-sonnet-4-6",
+            style="green",
+        )
+        async with MetricsBarTestApp(bar).run_test():
+            panel.set_stats(input_tokens=200, output_tokens=75, num_turns=4)
+            # Freeze the panel's elapsed at exactly 42 seconds so we can
+            # assert the shift deterministically.
+            panel._end_time = panel.start_time + 42
+            assert panel.elapsed == 42
+
+            original_start = bar.start_time
+            bar.carry_over(panel)
+
+            # Totals accumulate just like add_agent_stats.
+            assert bar.total_input_tokens == 200
+            assert bar.total_output_tokens == 75
+            assert bar.total_turns == 4
+            # start_time shifts backwards by the panel's elapsed so the
+            # header's wall clock carries over the prior session's work.
+            assert bar.start_time == original_start - 42
+
+    @pytest.mark.asyncio
+    async def test_carry_over_multiple_panels_mirrors_restore_loop(self):
+        """Exercise the restore-loop pattern: multiple panels feeding one bar.
+
+        This mirrors what ``PipelineLive.mount_restored_iteration._do_mount``
+        does per panel after populating the panel's token/turn/elapsed
+        fields, without spinning up a full ``PipelineApp``.
+        """
+        bar = MetricsBar()
+        panels_data = [
+            {"name": "Analyst", "style": "green", "in": 1000, "out": 300, "turns": 2, "sec": 10},
+            {"name": "Scientist", "style": "cyan", "in": 2500, "out": 800, "turns": 5, "sec": 30},
+            {
+                "name": "Critic/Methodologist",
+                "style": "yellow",
+                "in": 1500,
+                "out": 450,
+                "turns": 3,
+                "sec": 20,
+            },
+        ]
+        async with MetricsBarTestApp(bar).run_test():
+            original_start = bar.start_time
+            for p in panels_data:
+                panel = AgentPanel(
+                    name=p["name"], model="test-model", style=p["style"], restored=True
+                )
+                panel.input_tokens = p["in"]
+                panel.output_tokens = p["out"]
+                panel.num_turns = p["turns"]
+                panel._end_time = panel.start_time + p["sec"]
+                bar.carry_over(panel)
+
+            assert bar.total_input_tokens == 5000
+            assert bar.total_output_tokens == 1550
+            assert bar.total_turns == 10
+            assert bar.start_time == original_start - 60
+
+    @pytest.mark.asyncio
     async def test_finish_freezes_timer(self):
         bar = MetricsBar()
         async with MetricsBarTestApp(bar).run_test():

@@ -126,17 +126,25 @@ _ASSESS_INSTRUCTIONS = """\
      the same approach count as one line of evidence, not multiple.
    - unexplored: Not investigated at all despite being part of the goal.
 
-3. For shallow and unexplored sub-questions, list specific gaps. Be
+3. Check pending_abductions (if present). These are alternative
+   explanations the Scientist raised for refuted predictions but never
+   tested. Treat each unaddressed pending abduction as an open sub-
+   question. A sub-question cannot be rated thorough if a pending
+   abduction falls under it. Thorough coverage requires pending
+   abductions to be either resolved (via a prediction with follows_from)
+   or explicitly deprioritized with justification.
+
+4. For shallow and unexplored sub-questions, list specific gaps. Be
    concrete: "Only tested quadratic dose-response; saturating,
    piecewise, and interaction effects not explored" is better than
    "insufficient testing."
 
-4. Set overall_coverage:
+5. Set overall_coverage:
    - thorough: All sub-questions are thorough
    - partial: Some sub-questions are thorough, some shallow or unexplored
    - incomplete: Multiple sub-questions are unexplored
 
-5. Set recommendation:
+6. Set recommendation:
    - stop: Only if overall_coverage is thorough
    - continue: If any sub-question is shallow or unexplored and further
      investigation would plausibly improve the answer
@@ -220,7 +228,7 @@ ASSESSMENT_USER = """\
 <stop_reason>{stop_reason}</stop_reason>
 <domain_knowledge>{domain_knowledge}</domain_knowledge>
 <prediction_history>{prediction_history}</prediction_history>
-<notebook>{notebook_content}</notebook>
+{pending_abductions_section}<notebook>{notebook_content}</notebook>
 </context>
 
 <task>
