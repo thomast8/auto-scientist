@@ -660,8 +660,11 @@
 
 Reads: results.txt, plots, lab notebook, domain knowledge
 Reads (iter 0): canonical data files, lab notebook, domain knowledge
-Produces: analysis JSON (key_metrics, improvements, regressions, observations, prediction_outcomes)
+Produces: analysis JSON (key_metrics, improvements, regressions, observations, prediction_outcomes, data_diagnostics)
 Also produces (iter 0): domain_knowledge, data_summary
+
+Meta-observation step: after extracting primary metrics and observations, flags cross-cutting patterns across its own findings (co-moving variables, distributional boundaries, sign-flip anomalies) in data_diagnostics. Gives the Scientist raw material for abductive reasoning.
+
 Does NOT recommend changes or formulate hypotheses.">
           <rect x="25" y="280" width="145" height="58" rx="10"
                 fill="#0f1525" stroke="#4e8fd4" stroke-width="1.5"/>
@@ -675,8 +678,13 @@ Does NOT recommend changes or formulate hypotheses.">
         <g class="agent-group" data-agent="scientist"
            data-tooltip="Scientist (planner)|Uses query() via Claude Code SDK. Has WebSearch tool for grounding hypotheses. max_turns: 10.
 
-Reads (via prompt): analysis JSON, lab notebook, domain knowledge, prediction history, goal
-Produces: plan JSON (hypothesis, strategy, changes, expected_impact, should_stop, stop_reason, notebook_entry, testable_predictions)
+Reads (via prompt): analysis JSON, lab notebook, domain knowledge, prediction history, pending abductions, goal
+Produces: plan JSON (hypothesis, strategy, changes, expected_impact, should_stop, stop_reason, notebook_entry, testable_predictions, refutation_reasoning, deprioritized_abductions)
+
+Abductive protocol on refutations: for each refuted prediction, enumerate assumptions, identify the weakest, generate an alternative explanation naming specific measured or unmeasured entities in the system under study, and derive a testable consequence. Must describe mechanism (physical, chemical, biological, operational), not analysis-pipeline concerns.
+
+On later iterations, must address each pending abduction via a follows_from prediction or list it in deprioritized_abductions with a reason.
+
 Does NOT read or write Python code.">
           <rect x="195" y="280" width="145" height="58" rx="10"
                 fill="#0f1525" stroke="#d4a24e" stroke-width="1.5"/>
@@ -820,6 +828,11 @@ Examples:
   &quot;observations&quot;: [&quot;Bi-exponential model captures fast and slow dynamics&quot;],
   &quot;prediction_outcomes&quot;: [
     {&quot;pred_id&quot;: &quot;1.1&quot;, &quot;outcome&quot;: &quot;confirmed&quot;, &quot;evidence&quot;: &quot;R2=0.987&quot;}
+  ],
+  &quot;data_diagnostics&quot;: [
+    {&quot;variables&quot;: [&quot;turb_ntu&quot;, &quot;org_load_mgl&quot;],
+     &quot;pattern&quot;: &quot;Both shift together across operating modes&quot;,
+     &quot;evidence&quot;: &quot;r=0.62 residual after adjusting for rain&quot;}
   ]
 }">
           <rect x="200" y="118" width="108" height="32" rx="6"
@@ -839,7 +852,14 @@ Examples:
   &quot;expected_impact&quot;: &quot;...&quot;,
   &quot;should_stop&quot;: false,
   &quot;notebook_entry&quot;: &quot;...&quot;,
-  &quot;testable_predictions&quot;: [{&quot;prediction&quot;: &quot;R2 > 0.95&quot;, &quot;diagnostic&quot;: &quot;...&quot;, ...}]
+  &quot;testable_predictions&quot;: [{&quot;prediction&quot;: &quot;R2 > 0.95&quot;, &quot;diagnostic&quot;: &quot;...&quot;, &quot;follows_from&quot;: &quot;1.2&quot;}],
+  &quot;refutation_reasoning&quot;: [{
+    &quot;refuted_pred_id&quot;: &quot;1.2&quot;,
+    &quot;assumptions_violated&quot;: &quot;Assumed single-exponential captures the full decay&quot;,
+    &quot;alternative_explanation&quot;: &quot;Two distinct pools release on different timescales; fast pool dominates early kinetics, slow pool dominates late tail&quot;,
+    &quot;testable_consequence&quot;: &quot;A bi-exponential with tau_fast &lt; 20s and tau_slow &gt; 100s should fit residual structure&quot;
+  }],
+  &quot;deprioritized_abductions&quot;: []
 }">
           <rect x="343" y="118" width="88" height="32" rx="6"
                 fill="rgba(212,162,78,0.1)" stroke="#d4a24e" stroke-width="1" stroke-opacity="0.5"/>
@@ -1684,6 +1704,7 @@ Never modifies original data. Logs assumptions to the lab notebook.">
           <th>Sees analysis?</th>
           <th>Sees notebook?</th>
           <th>Sees predictions?</th>
+          <th>Sees abductions?</th>
           <th>Web search?</th>
           <th>Tools</th>
         </tr>
@@ -1696,6 +1717,7 @@ Never modifies original data. Logs assumptions to the lab notebook.">
           <td><span class="badge yes">writes</span></td>
           <td><span class="badge no">no</span></td>
           <td><span class="badge no">no</span></td>
+          <td><span class="badge no">no</span></td>
           <td>Bash, Read, Write, Glob, Grep</td>
         </tr>
         <tr>
@@ -1705,6 +1727,7 @@ Never modifies original data. Logs assumptions to the lab notebook.">
           <td><span class="badge yes">yes</span></td>
           <td><span class="badge produces">resolves</span></td>
           <td><span class="badge no">no</span></td>
+          <td><span class="badge no">no</span></td>
           <td>Read, Glob</td>
         </tr>
         <tr>
@@ -1713,6 +1736,7 @@ Never modifies original data. Logs assumptions to the lab notebook.">
           <td><span class="badge input">input</span></td>
           <td><span class="badge yes">yes</span></td>
           <td><span class="badge input">input</span></td>
+          <td><span class="badge produces">produces</span></td>
           <td><span class="badge yes">yes</span></td>
           <td>WebSearch</td>
         </tr>
@@ -1722,6 +1746,7 @@ Never modifies original data. Logs assumptions to the lab notebook.">
           <td><span class="badge input">input</span></td>
           <td><span class="badge yes">yes</span></td>
           <td><span class="badge input">input</span></td>
+          <td><span class="badge input">enforces</span></td>
           <td><span class="badge yes">yes</span></td>
           <td>WebSearch, read_predictions (SDK)</td>
         </tr>
@@ -1730,6 +1755,7 @@ Never modifies original data. Logs assumptions to the lab notebook.">
           <td><span class="badge no">no</span></td>
           <td><span class="badge input">input</span></td>
           <td><span class="badge yes">yes</span></td>
+          <td><span class="badge input">input</span></td>
           <td><span class="badge input">input</span></td>
           <td><span class="badge yes">yes</span></td>
           <td>web only (direct API)</td>
@@ -1740,12 +1766,24 @@ Never modifies original data. Logs assumptions to the lab notebook.">
           <td><span class="badge input">input</span></td>
           <td><span class="badge yes">yes</span></td>
           <td><span class="badge input">input</span></td>
+          <td><span class="badge input">input</span></td>
           <td><span class="badge yes">yes</span></td>
           <td>WebSearch</td>
         </tr>
         <tr>
+          <td class="agent-col">Assessor (stop)</td>
+          <td><span class="badge no">no</span></td>
+          <td><span class="badge no">no</span></td>
+          <td><span class="badge yes">yes</span></td>
+          <td><span class="badge input">input</span></td>
+          <td><span class="badge input">enforces</span></td>
+          <td><span class="badge yes">yes</span></td>
+          <td>WebSearch, read_predictions (SDK)</td>
+        </tr>
+        <tr>
           <td class="agent-col">Coder</td>
           <td><span class="badge yes" style="background:var(--accent-green-dim);color:var(--accent-green)">only agent</span></td>
+          <td><span class="badge no">no</span></td>
           <td><span class="badge no">no</span></td>
           <td><span class="badge no">no</span></td>
           <td><span class="badge no">no</span></td>
@@ -1758,6 +1796,7 @@ Never modifies original data. Logs assumptions to the lab notebook.">
           <td><span class="badge yes">reads all</span></td>
           <td><span class="badge yes">yes</span></td>
           <td><span class="badge yes">via state</span></td>
+          <td><span class="badge input">documents</span></td>
           <td><span class="badge no">no</span></td>
           <td>Read, Glob</td>
         </tr>
@@ -1776,6 +1815,16 @@ Never modifies original data. Logs assumptions to the lab notebook.">
     <strong>Prediction history</strong> tracks testable predictions as a tree (via follows_from links).
     The Scientist creates predictions, the experiment script evaluates them in code, and the
     Analyst transcribes outcomes. This replaces the earlier success_criteria system.
+    <br><br>
+    <strong>Pending abductions</strong> capture structured alternative explanations for refuted
+    predictions. The Scientist generates a refutation_reasoning entry (assumptions violated,
+    alternative explanation naming specific mechanisms, testable consequence) whenever a prediction
+    is refuted. These are carried forward as pending_abductions until the Scientist addresses them
+    via a new follows_from prediction or explicitly deprioritizes them. Critics enforce
+    accountability during debate; the Assessor blocks stop while abductions remain open; the Report
+    documents any that remained unaddressed in the Limitations section. The Analyst feeds this loop
+    by emitting data_diagnostics - cross-cutting structural patterns across its own findings that
+    give the Scientist raw material for mechanism hypotheses.
     <br><br>
     <strong>Lab notebook</strong> is a strategic journal (hypothesis, reasoning, dead ends),
     not a copy of approach specs or detailed results. That detail lives in results.txt.
