@@ -1366,6 +1366,135 @@ class TestRunIteration:
         # Phase must NOT become "report"
         assert orchestrator.state.phase != "report"
 
+    @pytest.mark.asyncio
+    async def test_scientist_plan_persisted_before_stop_gate(self, orchestrator, tmp_path):
+        """plan.json must be written as soon as the Scientist produces a plan.
+
+        Regression for a bug where the Scientist ran and the stop gate was
+        triggered (assessment artifact on disk) but plan.json was missing
+        because persistence only happened after debate+revision. A crash
+        mid-stop-gate therefore lost the Scientist's work and made the
+        status command report "scientist" as never having run.
+        """
+        import json
+
+        orchestrator.output_dir.mkdir(parents=True, exist_ok=True)
+        orchestrator.state.phase = "iteration"
+        orchestrator.state.iteration = 0
+
+        plan = {
+            "should_stop": True,
+            "stop_reason": "investigation seems complete",
+            "hypothesis": "Dose response is saturated",
+            "strategy": "none",
+            "changes": [],
+        }
+
+        async def _stop_gate_crash(*args, **kwargs):
+            raise RuntimeError("simulated stop-gate crash mid-assessment")
+
+        with (
+            patch.object(orchestrator, "_run_analyst", new_callable=AsyncMock, return_value={}),
+            patch.object(
+                orchestrator, "_run_scientist_plan", new_callable=AsyncMock, return_value=plan
+            ),
+            patch.object(orchestrator, "_run_stop_gate", side_effect=_stop_gate_crash),
+            pytest.raises(RuntimeError, match="simulated stop-gate crash"),
+        ):
+            await orchestrator._run_iteration_body()
+
+        plan_path = orchestrator.output_dir / "v00" / "plan.json"
+        assert plan_path.exists(), (
+            "plan.json must exist after Scientist runs, even if a downstream "
+            "agent (stop gate, debate, revision) later crashes."
+        )
+        persisted = json.loads(plan_path.read_text())
+        # Full equality: any downstream consumer reading plan.json must see
+        # exactly what the Scientist produced, not a partial or stale dict.
+        assert persisted == plan
+
+    @pytest.mark.asyncio
+    async def test_withdrawn_stop_persisted_before_debate(self, orchestrator, tmp_path):
+        """plan.json must reflect the stop-gate's revised plan after a withdrawn stop.
+
+        Regression for a silent-stale bug: after the stop gate returns
+        should_stop=False (withdrawn), the orchestrator updates the in-memory
+        plan but previously did not re-persist plan.json. If debate then
+        crashes, plan.json on disk still contained the stale pre-stop-gate
+        proposal (should_stop=True), which resume would silently load.
+        """
+        import json
+
+        orchestrator.output_dir.mkdir(parents=True, exist_ok=True)
+        orchestrator.state.phase = "iteration"
+        orchestrator.state.iteration = 1
+        orchestrator.state.versions = [
+            VersionEntry(
+                version="v00",
+                iteration=0,
+                script_path="/tmp/s.py",
+                results_path=str(tmp_path / "results.txt"),
+            ),
+        ]
+        (tmp_path / "results.txt").write_text("data")
+
+        original_plan = {
+            "should_stop": True,
+            "stop_reason": "thought we were done",
+            "hypothesis": "Original hypothesis",
+            "strategy": "none",
+            "changes": [],
+        }
+        withdrawn_plan = {
+            "should_stop": False,
+            "stop_reason": None,
+            "hypothesis": "Nonlinear effects not yet tested",
+            "strategy": "incremental",
+            "changes": [
+                {
+                    "what": "add polynomial",
+                    "why": "test nonlinearity",
+                    "how": "degree=2",
+                    "priority": 1,
+                }
+            ],
+        }
+
+        async def _debate_crash(*args, **kwargs):
+            raise RuntimeError("simulated debate crash after withdrawn stop")
+
+        with (
+            patch.object(orchestrator, "_run_analyst", new_callable=AsyncMock, return_value={}),
+            patch.object(
+                orchestrator,
+                "_run_scientist_plan",
+                new_callable=AsyncMock,
+                return_value=original_plan,
+            ),
+            patch.object(
+                orchestrator,
+                "_run_stop_gate",
+                new_callable=AsyncMock,
+                return_value=withdrawn_plan,
+            ),
+            patch.object(orchestrator, "_run_debate", side_effect=_debate_crash),
+            pytest.raises(RuntimeError, match="simulated debate crash"),
+        ):
+            await orchestrator._run_iteration_body()
+
+        plan_path = orchestrator.output_dir / "v01" / "plan.json"
+        assert plan_path.exists(), "plan.json must exist after Scientist + stop gate"
+        persisted = json.loads(plan_path.read_text())
+        # Critical: plan.json must be the WITHDRAWN revised plan, not the
+        # stale original. Otherwise a resume from debate would load a
+        # rejected stop proposal as if it were current.
+        assert persisted == withdrawn_plan, (
+            "plan.json must be refreshed to the stop-gate's revised plan "
+            "after a withdrawn stop; otherwise resume will silently load "
+            "the stale pre-stop-gate proposal."
+        )
+        assert persisted["should_stop"] is False
+
 
 class TestRunAnalystInitial:
     @pytest.mark.asyncio

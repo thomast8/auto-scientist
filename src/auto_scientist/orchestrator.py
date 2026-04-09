@@ -474,6 +474,14 @@ class Orchestrator:
             return
 
         if "scientist" not in agents_to_skip:
+            # Persist the Scientist's plan immediately so it survives any
+            # downstream crash (stop gate, debate, revision). plan.json is
+            # later overwritten by the post-gate fall-through below, by the
+            # post-debate revised plan in the "Debate + Revision" step, or
+            # by the stop-revision plan inside _run_stop_gate on the upheld
+            # path. The pre-debate original is recoverable from
+            # debate.json["original_plan"] via rewind_run.
+            persist_artifact(version_dir, "plan.json", plan)
             save_partial_panels(self._live, version_dir)
 
         # Step 3: Stop gate (if Scientist recommends stopping)
@@ -514,6 +522,11 @@ class Orchestrator:
                 # Stop withdrawn - use the new plan and fall through to normal debate
                 logger.info("Scientist withdrew stop after stop gate, continuing")
                 plan = revised_stop_plan
+            # Re-persist plan.json to reflect the post-gate state: either the
+            # withdrawn-stop revised plan or should_stop=False after a gate
+            # crash. The upheld branch above already returned; _run_stop_gate
+            # wrote plan.json with the stop-revision plan on that path.
+            persist_artifact(version_dir, "plan.json", plan)
             save_partial_panels(self._live, version_dir)
 
         # Step 4: Debate + Revision
