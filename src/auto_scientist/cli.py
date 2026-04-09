@@ -298,6 +298,7 @@ def _run_from_experiment_config(exp_config: ExperimentConfig, data_path: Path) -
         model_config=model_config,
         interactive=exp_config.interactive,
         verbose=exp_config.verbose,
+        notify_level=exp_config.notify,
     )
 
     _run_orchestrator(orchestrator)
@@ -375,6 +376,16 @@ def cli(ctx: click.Context, config_path: str | None):
     is_flag=True,
     help="Show debug log messages on console (always written to debug.log).",
 )
+@click.option(
+    "--notify",
+    "notify_level",
+    type=click.Choice(["off", "run", "iteration", "agent"], case_sensitive=False),
+    default="off",
+    help=(
+        "Desktop notification level (macOS, requires `alerter`). "
+        "Each level includes coarser ones: run < iteration < agent."
+    ),
+)
 @click.pass_context
 def run(
     ctx: click.Context,
@@ -389,6 +400,7 @@ def run(
     output_dir: str,
     provider: str | None,
     verbose: bool,
+    notify_level: str,
 ):
     """Run autonomous scientific investigation from raw data."""
     # YAML config path: load ExperimentConfig, merge CLI overrides on top
@@ -418,6 +430,8 @@ def run(
             exp_config.summaries = False
         if ctx.get_parameter_source("provider") == _cli and provider is not None:
             exp_config.provider = cast("Literal['anthropic', 'openai']", provider)
+        if ctx.get_parameter_source("notify_level") == _cli:
+            exp_config.notify = cast("Literal['off', 'run', 'iteration', 'agent']", notify_level)
 
         # Override data/goal only if explicitly provided on CLI
         data_cli_override = ctx.get_parameter_source("data") == _cli
@@ -472,6 +486,7 @@ def run(
         model_config=model_config,
         interactive=interactive,
         verbose=verbose,
+        notify_level=notify_level,
     )
 
     _run_orchestrator(orchestrator)
@@ -544,6 +559,16 @@ def run(
     is_flag=True,
     help="Show debug log messages on console (always written to debug.log).",
 )
+@click.option(
+    "--notify",
+    "notify_level",
+    type=click.Choice(["off", "run", "iteration", "agent"], case_sensitive=False),
+    default="off",
+    help=(
+        "Desktop notification level (macOS, requires `alerter`). "
+        "Each level includes coarser ones: run < iteration < agent."
+    ),
+)
 @click.pass_context
 def resume(
     ctx: click.Context,
@@ -558,6 +583,7 @@ def resume(
     no_summaries: bool,
     provider: str | None,
     verbose: bool,
+    notify_level: str,
 ):
     """Resume a previously paused or crashed run.
 
@@ -755,6 +781,7 @@ def resume(
         verbose=verbose,
         skip_to_agent=from_agent,
         restored_panels=restored_panels,
+        notify_level=notify_level,
     )
 
     _run_orchestrator(orchestrator)

@@ -2204,6 +2204,92 @@ class TestReadRunResult:
         assert result.return_code == 124
 
 
+class TestRunSummaryHelpers:
+    """Unit tests for the notifier-summary helpers.
+
+    These exist because Codex's review caught a regression where several
+    "stopped without raising" paths fell through to ``run_ok=True`` and
+    reported a successful run in the terminus notification. The helpers
+    themselves need to produce a user-facing message for every phase.
+    """
+
+    def test_complete_summary_includes_iteration_and_goal(self, orchestrator):
+        orchestrator.state.iteration = 4
+        orchestrator.state.versions = [
+            VersionEntry(
+                version=f"v{i:02d}",
+                iteration=i,
+                script_path="",
+                hypothesis="",
+                status="completed",
+            )
+            for i in range(4)
+        ]
+        orchestrator.state.goal = "Find the hidden function"
+        summary = orchestrator._build_run_complete_summary()
+        assert "4 iterations" in summary
+        assert "4 versions" in summary
+        assert "Find the hidden function" in summary
+
+    def test_complete_summary_truncates_long_goal(self, orchestrator):
+        orchestrator.state.iteration = 1
+        orchestrator.state.goal = "x " * 200
+        summary = orchestrator._build_run_complete_summary()
+        # Find the goal line and check its trimmed length
+        goal_line = next(line for line in summary.splitlines() if line.startswith("Goal:"))
+        # "Goal: " prefix (6 chars) + <=160 trimmed goal = <=166 chars total
+        assert len(goal_line) <= 166
+        assert goal_line.endswith("...")
+
+    def test_failed_summary_for_ingestion_phase(self, orchestrator):
+        orchestrator.state.phase = "ingestion"
+        orchestrator.state.iteration = 0
+        summary = orchestrator._build_run_failed_summary()
+        assert "during ingestion" in summary
+        # Must never leak the raw 0-based counter as "iteration 0"
+        assert "iteration 0" not in summary
+
+    def test_failed_summary_for_iteration_phase_uses_1based(self, orchestrator):
+        orchestrator.state.phase = "iteration"
+        orchestrator.state.iteration = 0  # first iteration, 0-based internally
+        orchestrator.max_iterations = 20
+        summary = orchestrator._build_run_failed_summary()
+        assert "iteration 1/20" in summary
+        assert "iteration 0" not in summary
+
+    def test_failed_summary_for_iteration_phase_midrun(self, orchestrator):
+        orchestrator.state.phase = "iteration"
+        orchestrator.state.iteration = 6
+        orchestrator.max_iterations = 20
+        summary = orchestrator._build_run_failed_summary()
+        assert "iteration 7/20" in summary
+
+    def test_failed_summary_for_report_phase(self, orchestrator):
+        orchestrator.state.phase = "report"
+        summary = orchestrator._build_run_failed_summary()
+        assert "during report" in summary
+
+    def test_failed_summary_for_stopped_phase_before_any_iteration(self, orchestrator):
+        orchestrator.state.phase = "stopped"
+        orchestrator.state.iteration = 0
+        summary = orchestrator._build_run_failed_summary()
+        assert "before first iteration" in summary
+
+    def test_failed_summary_for_stopped_phase_after_iterations(self, orchestrator):
+        orchestrator.state.phase = "stopped"
+        orchestrator.state.iteration = 3
+        orchestrator.max_iterations = 10
+        summary = orchestrator._build_run_failed_summary()
+        assert "after iteration 3/10" in summary
+
+    def test_failed_summary_includes_goal(self, orchestrator):
+        orchestrator.state.phase = "iteration"
+        orchestrator.state.iteration = 2
+        orchestrator.state.goal = "Discover the mystery"
+        summary = orchestrator._build_run_failed_summary()
+        assert "Discover the mystery" in summary
+
+
 class TestRunReportOrchestrator:
     @pytest.mark.asyncio
     async def test_calls_run_report(self, orchestrator, tmp_path):

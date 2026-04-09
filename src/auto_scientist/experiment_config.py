@@ -56,6 +56,7 @@ class ExperimentConfig(BaseModel):
     interactive: bool = False
     verbose: bool = False
     summaries: bool = True
+    notify: Literal["off", "run", "iteration", "agent"] = "off"
 
     # Optional per-agent model overrides
     models: ExperimentModelsConfig | None = None

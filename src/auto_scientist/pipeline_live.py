@@ -20,11 +20,13 @@ from auto_scientist.widgets import (
     AgentPanel,
     IterationContainer,
     MetricsBar,
+    _format_elapsed,
     console,
 )
 
 if TYPE_CHECKING:
     from auto_scientist.app import PipelineApp
+    from auto_scientist.desktop_notifier import DesktopNotifier
 
 logger = logging.getLogger(__name__)
 
@@ -42,6 +44,11 @@ class PipelineLive:
         self._current_iteration: IterationContainer | None = None
         self._file_console: Console | None = None
         self._file_handle: TextIOWrapper | None = None
+        self._notifier: DesktopNotifier | None = None
+
+    def attach_notifier(self, notifier: DesktopNotifier) -> None:
+        """Register a DesktopNotifier for agent/iteration/run lifecycle events."""
+        self._notifier = notifier
 
     def start(self, log_path: Path | None = None) -> None:
         """Open the optional log file."""
@@ -130,6 +137,15 @@ class PipelineLive:
             self._file_console.print(
                 f"[{panel.panel_name}] {panel.done_summary} ({panel._build_footer()})"
             )
+        if self._notifier is not None:
+            total_tokens = panel.input_tokens + panel.output_tokens + panel.thinking_tokens
+            self._notifier.agent_done(
+                panel.panel_name,
+                _format_elapsed(panel.elapsed),
+                panel.done_summary,
+                num_turns=panel.num_turns,
+                total_tokens=total_tokens,
+            )
 
     def start_iteration(self, title: int | str, *, max_iterations: int | None = None) -> None:
         """Begin an iteration container."""
@@ -150,9 +166,12 @@ class PipelineLive:
             self._file_console.print(f"\n{'=' * 60}")
             self._file_console.print(iter_title)
             self._file_console.print(f"{'=' * 60}")
+        if self._notifier is not None:
+            self._notifier.set_iteration(iter_title)
 
     def end_iteration(self, subtitle: str, style: str, summary_text: str = "") -> None:
         """Finalize the iteration container with a result."""
+        label = subtitle
         if self._current_iteration is not None:
             if self._app is not None:
                 self._app.call_from_thread(
@@ -163,11 +182,16 @@ class PipelineLive:
                 )
             else:
                 self._current_iteration.set_result(subtitle, style, summary_text)
+            label = f"{self._current_iteration._iter_title}: {subtitle}"
         if self._file_console is not None:
-            label = subtitle
-            if self._current_iteration is not None:
-                label = f"{self._current_iteration._iter_title}: {subtitle}"
             self._file_console.print(f"--- {label} ---")
+        if self._notifier is not None:
+            self._notifier.iteration_done(label, summary_text)
+
+    def notify_run_complete(self, status: str, summary: str) -> None:
+        """Fire a terminus notification for the whole run, if a notifier is attached."""
+        if self._notifier is not None:
+            self._notifier.run_complete(status, summary)
 
     def flush_completed(self) -> None:
         """Clear iteration state. Panels stay mounted in the DOM."""

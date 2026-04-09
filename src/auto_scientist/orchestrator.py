@@ -73,6 +73,7 @@ class Orchestrator:
         verbose: bool = False,
         skip_to_agent: str | None = None,
         restored_panels: list[dict] | None = None,
+        notify_level: str = "off",
     ):
         self.state = state
         self.data_path = data_path.resolve() if data_path else data_path
@@ -88,6 +89,7 @@ class Orchestrator:
         self.skip_to_report: bool = False
         self._skip_to_agent: str | None = skip_to_agent
         self._restored_panels: list[dict] | None = restored_panels
+        self.notify_level = notify_level
 
     @property
     def _summary_model(self) -> str | None:
@@ -129,12 +131,24 @@ class Orchestrator:
             self._live.start(log_path=self.output_dir / "console.log")
             self._live.mount_banner(self._build_startup_banner())
 
+        # Attach desktop notifier if the user enabled it. Safe no-op otherwise.
+        if self.notify_level != "off":
+            from auto_scientist.desktop_notifier import DesktopNotifier
+
+            self._live.attach_notifier(
+                DesktopNotifier(
+                    level=self.notify_level,
+                    run_name=self.output_dir.name,
+                )
+            )
+
         # Expose max_iterations to the metrics bar from the start
         self._live.update_status(max_iterations=self.max_iterations)
 
         # Restore previous iterations from manifest (for fork / resume)
         restore_iterations_from_manifest(self._live, self.output_dir)
 
+        run_ok = False
         try:
             # Phase 0: Ingestion (with its own border)
             if self.state.phase == "ingestion":
@@ -284,6 +298,12 @@ class Orchestrator:
 
                 if report_ok:
                     label, style = "done", "green"
+                    # A successful report is the only path that counts as a
+                    # "complete" run. Every other fall-through (ingestion
+                    # error, consecutive-failure cap, report failure, exception)
+                    # leaves run_ok=False so the terminus notification
+                    # correctly reports a failure.
+                    run_ok = True
                 else:
                     label, style = "failed (report error)", "red"
                 iter_summary = await generate_iteration_summary(self._live, self._summary_model)
@@ -299,8 +319,26 @@ class Orchestrator:
                 self._live.end_iteration(label, style, iter_summary)
                 self._live.flush_completed()
 
-            logger.info("Run finished successfully")
+            if run_ok:
+                logger.info("Run finished successfully")
+            else:
+                logger.info("Run finished without a successful report")
         finally:
+            # Desktop notification must never mask the real exception if the
+            # run failed, so swallow any notifier/summary errors here.
+            try:
+                if run_ok:
+                    self._live.notify_run_complete(
+                        "complete",
+                        self._build_run_complete_summary(),
+                    )
+                else:
+                    self._live.notify_run_complete(
+                        "failed",
+                        self._build_run_failed_summary(),
+                    )
+            except Exception:
+                logger.debug("Run-complete notification failed", exc_info=True)
             self._live.wait_for_dismiss()
             self._live.stop()
             try:
@@ -668,6 +706,47 @@ class Orchestrator:
         if cfg.mode == "sdk":
             model = CODEX_MODEL_OVERRIDES.get(model, model)
         return model
+
+    def _build_run_complete_summary(self) -> str:
+        """Multi-line summary for the terminal notification fired at run terminus."""
+        iters = self.state.iteration
+        n_versions = len(self.state.versions)
+        goal = " ".join(self.state.goal.split())
+        if len(goal) > 160:
+            goal = goal[:157] + "..."
+        lines = [
+            f"{iters} iterations, {n_versions} versions",
+            f"Goal: {goal}",
+        ]
+        return "\n".join(lines)
+
+    def _build_run_failed_summary(self) -> str:
+        """Multi-line summary for the failure notification at run terminus.
+
+        Chooses a user-facing "where did it stop" description from the current
+        phase rather than a raw 0-based iteration counter (which is misleading
+        when a crash happens before the first iteration completes).
+        """
+        phase = self.state.phase
+        if phase == "ingestion":
+            where = "during ingestion"
+        elif phase == "report":
+            where = "during report"
+        elif phase == "iteration":
+            # state.iteration is 0-based; display 1-based for the operator
+            where = f"at iteration {self.state.iteration + 1}/{self.max_iterations}"
+        else:
+            # "stopped" or unknown — we already passed the loop without a
+            # successful report, so label by the last attempted iteration.
+            if self.state.iteration > 0:
+                where = f"after iteration {self.state.iteration}/{self.max_iterations}"
+            else:
+                where = "before first iteration"
+
+        goal = " ".join(self.state.goal.split())
+        if len(goal) > 160:
+            goal = goal[:157] + "..."
+        return f"Stopped {where}\nGoal: {goal}"
 
     def _build_startup_banner(self) -> Panel:
         """Build the Rich startup banner with run config and model info."""
