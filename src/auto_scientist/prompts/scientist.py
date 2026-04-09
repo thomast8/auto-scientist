@@ -115,8 +115,14 @@ _INSTRUCTIONS = """\
    why it was wrong before planning the next experiment:
    a. Enumerate the assumptions you made when formulating the prediction.
    b. Identify the weakest assumption given the evidence.
-   c. Generate an alternative explanation: what hidden factor, structural
-      change, or violated assumption would make the evidence consistent?
+   c. Generate an alternative explanation about the system under study.
+      Describe what is actually happening in the phenomenon: name specific
+      measured or unmeasured entities and the mechanism connecting them
+      (e.g., "entity X influences entity Y through process Z"). Do NOT
+      describe concerns about the analysis pipeline (evaluation fragility,
+      fold instability, metric comparability, model fit diagnostics) -
+      those are not abductive reasoning about the phenomenon; record them
+      in notebook_entry if relevant.
    d. Derive a testable consequence: if the alternative explanation is
       correct, what specific observation should follow? This becomes a
       candidate for testable_predictions via follows_from.

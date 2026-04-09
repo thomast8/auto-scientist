@@ -971,6 +971,7 @@ class Orchestrator:
                     message_buffer=buf,
                     provider=cfg.provider,
                     output_dir=self.output_dir,
+                    pending_abductions=format_pending_abductions(self.state),
                 )
 
             assessment: dict[str, Any] = await with_summaries(
@@ -1864,6 +1865,7 @@ class Orchestrator:
                     model=cfg.model,
                     message_buffer=buf,
                     provider=cfg.provider,
+                    pending_abductions=format_pending_abductions(self.state),
                 )
 
             report_content = await with_summaries(

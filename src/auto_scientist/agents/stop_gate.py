@@ -71,6 +71,7 @@ async def run_completeness_assessment(
     message_buffer: list[str] | None = None,
     provider: str = "anthropic",
     output_dir: Path | None = None,
+    pending_abductions: str = "",
 ) -> dict[str, Any]:
     """Assess whether the investigation goal has been thoroughly addressed.
 
@@ -88,11 +89,23 @@ async def run_completeness_assessment(
         )
         tools.append(PREDICTION_SPEC.mcp_tool_name)
 
+    abductions_section = ""
+    if pending_abductions:
+        abductions_section = (
+            "<pending_abductions>\n"
+            "Alternative explanations the Scientist raised for refuted "
+            "predictions but never tested. Each unaddressed entry is an "
+            "open sub-question for coverage rating.\n\n"
+            f"{pending_abductions}\n"
+            "</pending_abductions>\n"
+        )
+
     user_prompt = ASSESSMENT_USER.format(
         goal=goal,
         stop_reason=stop_reason,
         domain_knowledge=domain_knowledge or "(no domain knowledge provided)",
         prediction_history=format_compact_tree(prediction_history),
+        pending_abductions_section=abductions_section,
         notebook_content=notebook_content or "(empty notebook)",
     )
 
