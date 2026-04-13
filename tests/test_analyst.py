@@ -387,8 +387,13 @@ class TestRunAnalyst:
             notebook_path=notebook_path,
         )
         opts = captured_opts["options"]
-        assert opts.allowed_tools == ["Read", "Glob"]
+        assert opts.allowed_tools == [
+            "Read",
+            "Glob",
+            "mcp__notebook__read_notebook",
+        ]
         assert opts.max_turns == 30
+        assert "notebook" in opts.mcp_servers
 
 
 class TestAnalystRetry:
