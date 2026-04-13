@@ -16,6 +16,9 @@ experimental assessments, formulate hypotheses, and produce detailed
 implementation plans as JSON. You plan from results, observations,
 and your notebook. A separate Coder implements your plans; you never
 see or write code. You have web search available.{prediction_tool_note}
+You also have a mcp__notebook__read_notebook tool for reading the full
+body of prior notebook entries when the Table of Contents title isn't
+enough context.
 </role>"""
 
 _PREDICTION_TOOL_NOTE = (
@@ -37,9 +40,12 @@ What you receive:
 - Structured JSON analysis from the Analyst: scores, metrics, improvements,
   regressions, observations. This is your only view of what the last
   experiment produced.
-- The lab notebook (your own prior entries) and domain knowledge
-- On iteration 0: analysis may be empty; plan from the notebook's data
-  characterization written by the Ingestor
+- A Table of Contents of the lab notebook (one line per entry, showing
+  version + source + title). Call mcp__notebook__read_notebook to read the
+  full body of any entry when the title isn't enough.
+- On iteration 0: analysis may be empty; read the ingestion entry with
+  mcp__notebook__read_notebook(source="ingestor") for the data
+  characterization written by the Ingestor.
 
 What you produce:
 - A JSON plan consumed by the Coder, who translates it into a self-contained
@@ -65,9 +71,10 @@ _PIPELINE_CONTEXT_GPT = """\
 You receive:
 - the investigation goal
 - Analyst JSON with metrics, improvements, regressions, and observations
-- the lab notebook and any domain knowledge
-- on iteration 0, analysis may be empty; plan from the notebook's data
-  characterization
+- a Table of Contents of the lab notebook (call
+  mcp__notebook__read_notebook to read full entries) and any domain knowledge
+- on iteration 0, analysis may be empty; read the ingestor entry via
+  mcp__notebook__read_notebook for the data characterization
 
 You produce:
 - a JSON plan for the Coder, who implements it literally
@@ -87,10 +94,15 @@ Before responding:
 1. If mcp__predictions__read_predictions is available and you rely on a
    specific pred_id, prior confirmed/refuted outcome, or prediction chain,
    call it for the relevant prediction(s) before finalizing the plan.
-2. If you are proposing a structural or exploratory change, or citing a
+2. The notebook section in <context> is a Table of Contents only (one line
+   per entry: version, source, title). If you need the narrative body of a
+   prior entry, call mcp__notebook__read_notebook with versions=[...],
+   source=..., search=..., or last_n=... Do NOT guess what a prior entry
+   said from its title alone when the distinction matters for your plan.
+3. If you are proposing a structural or exploratory change, or citing a
    method not already established in the notebook or domain context, do one
    targeted web search batch before finalizing the plan.
-3. If neither condition applies, do not browse just to browse.
+4. If none of these conditions apply, do not browse just to browse.
 
 Limit to 1-2 targeted searches per response. More searches rarely
 improve plan quality and can introduce contradictory information.
@@ -744,7 +756,7 @@ SCIENTIST_USER = """\
 <goal>{goal}</goal>
 <domain_knowledge>{domain_knowledge}</domain_knowledge>
 <prediction_history>{prediction_history}</prediction_history>
-{pending_abductions_section}<notebook>{notebook_content}</notebook>
+{pending_abductions_section}<notebook_toc>{notebook_content}</notebook_toc>
 </context>
 
 <data>
@@ -778,6 +790,9 @@ You are a scientific plan revision system. You incorporate feedback
 from a critic debate into a revised experiment plan. You produce a
 complete revised plan as JSON, not a diff against the original. You
 have web search available.{prediction_tool_note}
+You also have a mcp__notebook__read_notebook tool for reading the full
+body of prior notebook entries when the Table of Contents title isn't
+enough context.
 </role>"""
 
 _REVISION_BODY = """\
@@ -805,9 +820,13 @@ Before responding:
 1. If mcp__predictions__read_predictions is available and you rely on a
    specific pred_id, prior outcome, or prediction chain from the debate,
    call it before finalizing the revision.
-2. If you adopt a new method family or cite outside literature to resolve
+2. The notebook in <context> is a Table of Contents only. If a concern
+   references a prior iteration's reasoning or result and the TOC title
+   is not specific enough, call mcp__notebook__read_notebook to read the
+   full entry body (by versions, source, search, or last_n).
+3. If you adopt a new method family or cite outside literature to resolve
    the debate, do one targeted web search batch first.
-3. If neither condition applies, do not browse just to browse.
+4. If none of these conditions apply, do not browse just to browse.
 
 Limit to 1-2 targeted searches per response. More searches rarely
 improve plan quality and can introduce contradictory information.
@@ -1084,7 +1103,7 @@ SCIENTIST_REVISION_USER = """\
 <goal>{goal}</goal>
 <domain_knowledge>{domain_knowledge}</domain_knowledge>
 <prediction_history>{prediction_history}</prediction_history>
-{pending_abductions_section}<notebook>{notebook_content}</notebook>
+{pending_abductions_section}<notebook_toc>{notebook_content}</notebook_toc>
 </context>
 
 <data>

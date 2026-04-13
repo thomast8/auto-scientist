@@ -11,6 +11,11 @@ from dataclasses import replace
 from pathlib import Path
 from typing import Any
 
+from auto_scientist.agents.notebook_tool import (
+    NOTEBOOK_SPEC,
+    build_notebook_mcp_server,
+    format_notebook_toc,
+)
 from auto_scientist.agents.prediction_tool import (
     PREDICTION_SPEC,
     _build_prediction_forest,
@@ -18,6 +23,7 @@ from auto_scientist.agents.prediction_tool import (
     format_compact_tree,
 )
 from auto_scientist.model_config import ReasoningConfig, reasoning_to_cc_extra_args
+from auto_scientist.notebook import parse_notebook_entries
 from auto_scientist.prompts.scientist import (
     SCIENTIST_REVISION_USER,
     SCIENTIST_USER,
@@ -42,6 +48,7 @@ SCIENTIST_BASE_TOOLS = ["WebSearch"]
 def _build_scientist_tools_and_mcp(
     prediction_history: list[PredictionRecord] | None,
     provider: str,
+    notebook_path: Path | None = None,
     output_dir: Path | None = None,
 ) -> tuple[list[str], dict[str, Any]]:
     """Build the tools list and MCP servers dict for a Scientist invocation.
@@ -49,6 +56,10 @@ def _build_scientist_tools_and_mcp(
     Both Claude and Codex backends get the same stdio MCP server config.
     Claude passes it via mcp_servers; the CodexBackend writes it to
     an isolated ``$CODEX_HOME/config.toml`` automatically.
+
+    The notebook tool is wired unconditionally when a notebook path is
+    supplied - on iteration 0 the notebook is empty or ingestion-only, but
+    the tool still returns a useful "no entries" response.
     """
     tools = list(SCIENTIST_BASE_TOOLS)
     mcp_servers: dict[str, Any] = {}
@@ -57,6 +68,9 @@ def _build_scientist_tools_and_mcp(
             prediction_history, output_dir=output_dir
         )
         tools.append(PREDICTION_SPEC.mcp_tool_name)
+    if notebook_path is not None:
+        mcp_servers["notebook"] = build_notebook_mcp_server(notebook_path, output_dir=output_dir)
+        tools.append(NOTEBOOK_SPEC.mcp_tool_name)
     return tools, mcp_servers
 
 
@@ -242,7 +256,7 @@ async def run_scientist(
         Optionally: testable_predictions.
     """
     notebook_path = Path(notebook_path)
-    notebook_content = notebook_path.read_text() if notebook_path.exists() else ""
+    notebook_entries = parse_notebook_entries(notebook_path)
 
     abductions_section = ""
     if pending_abductions:
@@ -263,7 +277,7 @@ async def run_scientist(
         analysis_json=(
             json.dumps(analysis, indent=2) if analysis else "(no analysis yet - first iteration)"
         ),
-        notebook_content=notebook_content or "(empty notebook - first iteration)",
+        notebook_content=format_notebook_toc(notebook_entries),
         prediction_history=format_compact_tree(prediction_history),
         pending_abductions_section=abductions_section,
         version=version,
@@ -287,10 +301,13 @@ async def run_scientist(
         extra_args.update(reasoning_to_cc_extra_args(reasoning))
 
     tools, mcp_servers = _build_scientist_tools_and_mcp(
-        prediction_history, provider, output_dir=output_dir
+        prediction_history,
+        provider,
+        notebook_path=notebook_path,
+        output_dir=output_dir,
     )
 
-    max_turns = 15
+    max_turns = 18
     budget = prepare_turn_budget(
         system_prompt + json_instruction, max_turns, tools, provider=provider
     )
@@ -358,7 +375,7 @@ async def run_scientist_revision(
         Revised plan dict (same schema as the initial plan).
     """
     notebook_path = Path(notebook_path)
-    notebook_content = notebook_path.read_text() if notebook_path.exists() else ""
+    notebook_entries = parse_notebook_entries(notebook_path)
 
     ledger_text = json.dumps(concern_ledger, indent=2) if concern_ledger else "(no concerns raised)"
 
@@ -377,7 +394,7 @@ async def run_scientist_revision(
         goal=goal or "(no goal specified)",
         domain_knowledge=domain_knowledge or "(no domain knowledge provided)",
         analysis_json=(json.dumps(analysis, indent=2) if analysis else "(no analysis)"),
-        notebook_content=notebook_content or "(empty notebook)",
+        notebook_content=format_notebook_toc(notebook_entries),
         original_plan=json.dumps(original_plan, indent=2),
         concern_ledger=ledger_text,
         prediction_history=format_compact_tree(prediction_history),
@@ -399,13 +416,16 @@ async def run_scientist_revision(
         extra_args.update(reasoning_to_cc_extra_args(reasoning))
 
     tools, mcp_servers = _build_scientist_tools_and_mcp(
-        prediction_history, provider, output_dir=output_dir
+        prediction_history,
+        provider,
+        notebook_path=notebook_path,
+        output_dir=output_dir,
     )
 
     has_predictions = bool(prediction_history)
     revision_system = build_revision_system(has_predictions=has_predictions)
 
-    max_turns = 15
+    max_turns = 18
     budget = prepare_turn_budget(
         revision_system + json_instruction,
         max_turns,
