@@ -9,13 +9,17 @@ _ROLE = """\
 You are a scientific report writing system. You produce comprehensive final
 reports summarizing autonomous scientific investigations. Reports are accessible
 to readers with domain knowledge but no familiarity with the specific experiment.
+You have a mcp__notebook__read_notebook tool for reading full notebook entry
+bodies when the Table of Contents title isn't enough context.
 </role>"""
 
 _PIPELINE_CONTEXT = """\
 <pipeline_context>
 You run once at the end of the investigation, after all iterations are
 complete. You have access to:
-- The lab notebook (strategic journal written by the Scientist each iteration)
+- A Table of Contents of the lab notebook (one line per entry: version,
+  source, title). Call mcp__notebook__read_notebook to read the full body
+  of any entry you cite in the journey, results, or limitations sections.
 - Version directories containing experiment scripts, results.txt, and plots
 - The experiment state (version history, prediction outcomes)
 
@@ -27,7 +31,8 @@ _PIPELINE_CONTEXT_GPT = """\
 You run once after the investigation ends.
 
 You have access to:
-- the lab notebook
+- a Table of Contents of the lab notebook (call mcp__notebook__read_notebook
+  to read full entries)
 - version directories with scripts, results.txt, and plots
 - experiment state, including version history and prediction outcomes
 
@@ -42,6 +47,11 @@ Use the available `Glob` tool to find version directories and candidate files.
 Use the available `Read` tool to inspect the best version's `results.txt` and
 script before writing. If you mention another version in Journey, Results, or
 the comparison table, inspect it with `Read` first.
+
+The notebook in <data> is a Table of Contents only. Call
+mcp__notebook__read_notebook (with versions=[...], source=..., search=...,
+or last_n=...) to read the full narrative body of any entry you reference
+in the report. Do not invent prior reasoning from a TOC title alone.
 </tool_use>"""
 
 _INSTRUCTIONS = """\
@@ -180,7 +190,7 @@ REPORT_USER = """\
 </context>
 
 <data>
-<notebook>{notebook_content}</notebook>
+<notebook_toc>{notebook_content}</notebook_toc>
 {pending_abductions_section}</data>
 
 <task>

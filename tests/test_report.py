@@ -172,7 +172,7 @@ class TestRunReport:
 
         with pytest.raises(RuntimeError):
             await run_report(state=state, notebook_path=notebook_path, output_dir=tmp_path)
-        assert "(no notebook)" in captured_prompt["prompt"]
+        assert "(no notebook entries yet)" in captured_prompt["prompt"]
 
 
 class TestReportPrompt:
