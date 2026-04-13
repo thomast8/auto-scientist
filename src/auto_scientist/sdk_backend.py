@@ -724,20 +724,15 @@ class CodexBackend:
         # for behavioral directives in Codex.
         dev_instructions: list[str] = []
 
-        # MCP mandate: GPT models ignore MCP tool calls in long/complex prompts
-        # (confirmed empirically: MCP=0 at 33K+ chars, stochastic at shorter).
-        # Placing the mandate here raises MCP usage from ~0% to ~67%.
-        if has_mcp:
-            mcp_tool_names = [t for t in (options.allowed_tools or []) if t.startswith("mcp__")]
-            if mcp_tool_names:
-                names_str = ", ".join(mcp_tool_names)
-                dev_instructions.append(
-                    "MANDATORY TOOL REQUIREMENT: Before producing your final output, "
-                    f"you MUST call at least one of these MCP tools: {names_str}. "
-                    "Call with summary=true first, then drill into specifics. "
-                    "If your output does not include at least one MCP tool call, "
-                    "it will be rejected."
-                )
+        # NOTE: An earlier MCP-call mandate lived here. It used "you MUST call
+        # at least one of these tools, otherwise your output will be rejected"
+        # framing to push GPT models toward MCP usage on long prompts. In
+        # practice this caused Codex agents to fabricate "rejection" responses
+        # and fall back to shell commands when their tool-call serialization
+        # tripped (observed live in the Report agent). Use prompt-level tool
+        # guidance in the per-agent system prompts instead, not a global
+        # threat-shaped mandate. If MCP usage drops on the GPT path we will
+        # re-introduce a positive nudge here, not a coercive one.
 
         # Structured output behavioral reinforcement (complements the
         # mechanical output_schema on TurnOverrides).
