@@ -1106,7 +1106,7 @@ class Orchestrator:
             prediction_history_text = _format_predictions_for_prompt(
                 self.state.prediction_history,
             )
-            notebook_content = self._notebook_content()
+            notebook_path = self.output_dir / NOTEBOOK_FILENAME
 
             self._live.update_status(phase="STOP_DEBATE")
 
@@ -1178,7 +1178,7 @@ class Orchestrator:
                         config=config,
                         stop_reason=stop_reason,
                         completeness_assessment=assessment,
-                        notebook_content=notebook_content,
+                        notebook_path=notebook_path,
                         domain_knowledge=self.state.domain_knowledge,
                         message_buffer=buf,
                         persona=persona,

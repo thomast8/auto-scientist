@@ -276,10 +276,11 @@ class TestRunCompletenessAssessment:
                 notebook_path=tmp_path / "nonexistent.md",
             )
 
-        # The prompt should have been called (notebook content is empty)
+        # The prompt should have been called and the notebook section should
+        # show the empty-notebook fallback (TOC formatter).
         mock_collect.assert_called_once()
         prompt = mock_collect.call_args[0][0]
-        assert "(empty notebook)" in prompt
+        assert "(no notebook entries yet)" in prompt
 
     @pytest.mark.asyncio
     async def test_goal_and_stop_reason_in_prompt(self, stop_notebook):
@@ -481,7 +482,7 @@ class TestRunSingleStopDebate:
     """Tests for run_single_stop_debate() - one critic persona's challenge."""
 
     @pytest.mark.asyncio
-    async def test_returns_debate_result(self, openai_config, valid_assessment):
+    async def test_returns_debate_result(self, openai_config, valid_assessment, stop_notebook):
         """Happy path: returns a DebateResult with one round."""
         from auto_scientist.agents.stop_gate import run_single_stop_debate
 
@@ -494,14 +495,14 @@ class TestRunSingleStopDebate:
                 config=openai_config,
                 stop_reason="All criteria met",
                 completeness_assessment=valid_assessment,
-                notebook_content="# Lab Notebook",
+                notebook_path=stop_notebook,
                 goal="discover alloy fatigue mechanism",
             )
 
         assert isinstance(result, DebateResult)
 
     @pytest.mark.asyncio
-    async def test_critic_output_is_parsed(self, openai_config, valid_assessment):
+    async def test_critic_output_is_parsed(self, openai_config, valid_assessment, stop_notebook):
         """The critic's response is parsed into a CriticOutput instance."""
         from auto_scientist.agents.stop_gate import run_single_stop_debate
 
@@ -524,7 +525,7 @@ class TestRunSingleStopDebate:
                 config=openai_config,
                 stop_reason="done",
                 completeness_assessment=valid_assessment,
-                notebook_content="",
+                notebook_path=stop_notebook,
             )
 
         critic_out = result.critic_output
@@ -534,7 +535,7 @@ class TestRunSingleStopDebate:
         assert critic_out.overall_assessment == "Needs more work"
 
     @pytest.mark.asyncio
-    async def test_persona_name_in_result(self, openai_config, valid_assessment):
+    async def test_persona_name_in_result(self, openai_config, valid_assessment, stop_notebook):
         """The persona name is recorded in the DebateResult."""
         from auto_scientist.agents.stop_gate import run_single_stop_debate
 
@@ -548,14 +549,16 @@ class TestRunSingleStopDebate:
                 config=openai_config,
                 stop_reason="done",
                 completeness_assessment=valid_assessment,
-                notebook_content="",
+                notebook_path=stop_notebook,
                 persona=persona,
             )
 
         assert result.persona == "Completeness Auditor"
 
     @pytest.mark.asyncio
-    async def test_critic_model_label_in_result(self, openai_config, valid_assessment):
+    async def test_critic_model_label_in_result(
+        self, openai_config, valid_assessment, stop_notebook
+    ):
         """The critic model label (provider:model) is stored in DebateResult."""
         from auto_scientist.agents.stop_gate import run_single_stop_debate
 
@@ -568,13 +571,15 @@ class TestRunSingleStopDebate:
                 config=openai_config,
                 stop_reason="done",
                 completeness_assessment=valid_assessment,
-                notebook_content="",
+                notebook_path=stop_notebook,
             )
 
         assert result.critic_model == "openai:gpt-5.4"
 
     @pytest.mark.asyncio
-    async def test_token_counts_from_critic_result(self, openai_config, valid_assessment):
+    async def test_token_counts_from_critic_result(
+        self, openai_config, valid_assessment, stop_notebook
+    ):
         """Token counts are taken directly from the critic AgentResult."""
         from auto_scientist.agents.stop_gate import run_single_stop_debate
 
@@ -590,7 +595,7 @@ class TestRunSingleStopDebate:
                 config=openai_config,
                 stop_reason="done",
                 completeness_assessment=valid_assessment,
-                notebook_content="",
+                notebook_path=stop_notebook,
             )
 
         assert result.input_tokens == 42
@@ -598,7 +603,9 @@ class TestRunSingleStopDebate:
         assert result.thinking_tokens == 5
 
     @pytest.mark.asyncio
-    async def test_raw_transcript_has_critic_role(self, openai_config, valid_assessment):
+    async def test_raw_transcript_has_critic_role(
+        self, openai_config, valid_assessment, stop_notebook
+    ):
         """Raw transcript entry has role='critic'."""
         from auto_scientist.agents.stop_gate import run_single_stop_debate
 
@@ -611,14 +618,16 @@ class TestRunSingleStopDebate:
                 config=openai_config,
                 stop_reason="done",
                 completeness_assessment=valid_assessment,
-                notebook_content="",
+                notebook_path=stop_notebook,
             )
 
         assert len(result.raw_transcript) == 1
         assert result.raw_transcript[0]["role"] == "critic"
 
     @pytest.mark.asyncio
-    async def test_completeness_assessment_in_prompt(self, openai_config, valid_assessment):
+    async def test_completeness_assessment_in_prompt(
+        self, openai_config, valid_assessment, stop_notebook
+    ):
         """The completeness assessment JSON is included in the critic's user prompt."""
         from auto_scientist.agents.stop_gate import run_single_stop_debate
 
@@ -633,7 +642,7 @@ class TestRunSingleStopDebate:
                 config=openai_config,
                 stop_reason="done",
                 completeness_assessment=valid_assessment,
-                notebook_content="# Lab Notebook",
+                notebook_path=stop_notebook,
             )
 
         # The user_prompt is the second positional arg to _query_critic via _query_stop_agent
@@ -642,7 +651,9 @@ class TestRunSingleStopDebate:
         assert "outlet clarity" in user_prompt  # from valid_assessment sub_question
 
     @pytest.mark.asyncio
-    async def test_default_persona_used_when_none_provided(self, openai_config, valid_assessment):
+    async def test_default_persona_used_when_none_provided(
+        self, openai_config, valid_assessment, stop_notebook
+    ):
         """When no persona is given, defaults to Generic persona."""
         from auto_scientist.agents.stop_gate import run_single_stop_debate
 
@@ -655,7 +666,7 @@ class TestRunSingleStopDebate:
                 config=openai_config,
                 stop_reason="done",
                 completeness_assessment=valid_assessment,
-                notebook_content="",
+                notebook_path=stop_notebook,
                 persona=None,
             )
 
@@ -898,7 +909,7 @@ class TestRunScientistStopRevision:
             )
 
         prompt = mock_collect.call_args[0][0]
-        assert "(empty notebook)" in prompt
+        assert "(no notebook entries yet)" in prompt
 
 
 class TestStopGatePromptBuilders:
