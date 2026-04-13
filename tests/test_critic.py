@@ -138,11 +138,22 @@ def two_critics(openai_critic, google_critic):
 
 
 @pytest.fixture
-def base_kwargs(plan, two_critics):
+def notebook_path(tmp_path):
+    """An empty notebook path the critic can read from.
+
+    Tests don't need real entries because the formatter handles empty
+    notebooks; they only need a valid path so build_notebook_mcp_server
+    can serialize it.
+    """
+    return tmp_path / "lab_notebook.xml"
+
+
+@pytest.fixture
+def base_kwargs(plan, two_critics, notebook_path):
     return {
         "critic_configs": two_critics,
         "plan": plan,
-        "notebook_content": "# Lab Notebook\nEntry 1",
+        "notebook_path": notebook_path,
     }
 
 
@@ -206,11 +217,11 @@ class TestBuildCriticPrompt:
 
 class TestRunDebate:
     @pytest.mark.asyncio
-    async def test_empty_configs_returns_empty(self, plan):
+    async def test_empty_configs_returns_empty(self, plan, notebook_path):
         result = await run_debate(
             critic_configs=[],
             plan=plan,
-            notebook_content="",
+            notebook_path=notebook_path,
         )
         assert result == []
 
@@ -329,7 +340,7 @@ class TestRunDebate:
             assert call.kwargs.get("web_search") is True
 
     @pytest.mark.asyncio
-    async def test_unknown_provider_raises_when_all_fail(self, plan):
+    async def test_unknown_provider_raises_when_all_fail(self, plan, notebook_path):
         """Unknown provider causes all debates to fail, raising RuntimeError."""
         bad_config = AgentModelConfig.model_validate({"provider": "openai", "model": "model"})
         object.__setattr__(bad_config, "provider", "unknown")
@@ -337,17 +348,17 @@ class TestRunDebate:
             await run_debate(
                 critic_configs=[bad_config],
                 plan=plan,
-                notebook_content="",
+                notebook_path=notebook_path,
             )
 
     @pytest.mark.asyncio
-    async def test_anthropic_critic_dispatches_correctly(self, plan):
+    async def test_anthropic_critic_dispatches_correctly(self, plan, notebook_path):
         critic = AgentModelConfig(provider="anthropic", model="claude-sonnet-4-6")
         with patch(SDK_PATH, _sdk_critic_mock(overall="Anthropic critique")):
             result = await run_debate(
                 critic_configs=[critic],
                 plan=plan,
-                notebook_content="",
+                notebook_path=notebook_path,
                 iteration=1,
             )
 
@@ -356,7 +367,7 @@ class TestRunDebate:
             assert r.critic_model == "anthropic:claude-sonnet-4-6"
 
     @pytest.mark.asyncio
-    async def test_reasoning_passed_to_critic(self, plan):
+    async def test_reasoning_passed_to_critic(self, plan, notebook_path):
         """Critic reasoning config is forwarded to model client."""
         critic = AgentModelConfig(
             provider="openai",
@@ -372,7 +383,7 @@ class TestRunDebate:
             await run_debate(
                 critic_configs=[critic],
                 plan=plan,
-                notebook_content="",
+                notebook_path=notebook_path,
             )
 
         assert mock_openai.call_args.kwargs["reasoning"].level == "high"
@@ -393,7 +404,7 @@ class TestRunDebate:
 
 class TestCriticRetry:
     @pytest.mark.asyncio
-    async def test_retry_on_empty_critic_response(self, plan, two_critics):
+    async def test_retry_on_empty_critic_response(self, plan, two_critics, notebook_path):
         """Empty critic response triggers retry."""
         valid = _structured_critic_result()
         with (
@@ -407,7 +418,7 @@ class TestCriticRetry:
             result = await run_debate(
                 critic_configs=two_critics,
                 plan=plan,
-                notebook_content="",
+                notebook_path=notebook_path,
                 iteration=1,
             )
 
@@ -415,7 +426,7 @@ class TestCriticRetry:
         assert mock_openai.call_count == 3
 
     @pytest.mark.asyncio
-    async def test_sdk_error_captured_gracefully(self, plan, two_critics):
+    async def test_sdk_error_captured_gracefully(self, plan, two_critics, notebook_path):
         """Errors in individual debates don't crash the whole run."""
         with (
             patch(OPENAI_PATH, new_callable=AsyncMock, side_effect=RuntimeError("API error")),
@@ -424,12 +435,12 @@ class TestCriticRetry:
             result = await run_debate(
                 critic_configs=two_critics,
                 plan=plan,
-                notebook_content="",
+                notebook_path=notebook_path,
             )
         assert isinstance(result, list)
 
     @pytest.mark.asyncio
-    async def test_all_debates_fail_raises_runtime_error(self, plan, two_critics):
+    async def test_all_debates_fail_raises_runtime_error(self, plan, two_critics, notebook_path):
         """When all debates fail, run_debate raises RuntimeError."""
         with (
             patch(OPENAI_PATH, new_callable=AsyncMock, side_effect=RuntimeError("API error")),
@@ -439,13 +450,13 @@ class TestCriticRetry:
             await run_debate(
                 critic_configs=two_critics,
                 plan=plan,
-                notebook_content="",
+                notebook_path=notebook_path,
             )
 
 
 class TestCriticValidation:
     @pytest.mark.asyncio
-    async def test_valid_json_parsed_to_critic_output(self, plan):
+    async def test_valid_json_parsed_to_critic_output(self, plan, notebook_path):
         """Valid structured JSON is parsed into CriticOutput."""
         critic = AgentModelConfig(provider="openai", model="gpt-4o", mode="api")
         with patch(
@@ -456,7 +467,7 @@ class TestCriticValidation:
             result = await run_single_critic_debate(
                 config=critic,
                 plan=plan,
-                notebook_content="",
+                notebook_path=notebook_path,
             )
 
         assert isinstance(result.critic_output, CriticOutput)
@@ -464,7 +475,7 @@ class TestCriticValidation:
         assert result.critic_output.concerns[0].claim == "Data quality issue"
 
     @pytest.mark.asyncio
-    async def test_invalid_json_preserves_raw_text_as_concern(self, plan):
+    async def test_invalid_json_preserves_raw_text_as_concern(self, plan, notebook_path):
         """Invalid JSON falls back with raw text preserved as a PARSE ERROR concern."""
         critic = AgentModelConfig(provider="openai", model="gpt-4o", mode="api")
         with patch(
@@ -475,7 +486,7 @@ class TestCriticValidation:
             result = await run_single_critic_debate(
                 config=critic,
                 plan=plan,
-                notebook_content="",
+                notebook_path=notebook_path,
             )
 
         co = result.critic_output
@@ -532,7 +543,7 @@ class TestBuildCriticPromptContext:
 
 class TestRunDebateWithContext:
     @pytest.mark.asyncio
-    async def test_analysis_json_in_critic_prompt(self, plan, two_critics):
+    async def test_analysis_json_in_critic_prompt(self, plan, two_critics, notebook_path):
         """When analysis_json is provided, critic prompt includes <analysis> section."""
         with (
             patch(OPENAI_PATH, new_callable=AsyncMock, return_value=_CR()) as mock_openai,
@@ -541,7 +552,7 @@ class TestRunDebateWithContext:
             await run_debate(
                 critic_configs=two_critics,
                 plan=plan,
-                notebook_content="",
+                notebook_path=notebook_path,
                 analysis_json='{"key_metrics": [{"name": "rmse", "value": 0.52}]}',
             )
 
@@ -550,14 +561,14 @@ class TestRunDebateWithContext:
         assert "rmse" in critic_prompt
 
     @pytest.mark.asyncio
-    async def test_prediction_history_in_critic_prompt(self, plan):
+    async def test_prediction_history_in_critic_prompt(self, plan, notebook_path):
         """When prediction_history is provided, prediction persona's prompt includes it."""
         critic = AgentModelConfig(provider="openai", model="gpt-4o", mode="api")
         with patch(OPENAI_PATH, new_callable=AsyncMock, return_value=_CR()) as mock_openai:
             await run_single_critic_debate(
                 config=critic,
                 plan=plan,
-                notebook_content="",
+                notebook_path=notebook_path,
                 prediction_history="[1.0] CONFIRMED: polynomial fits well",
                 persona={"name": "Evidence Auditor", "system_text": ""},
             )
@@ -638,7 +649,7 @@ class TestResponseSchemaPassthrough:
     """Verify response_schema is passed through _query_critic to providers."""
 
     @pytest.mark.asyncio
-    async def test_critic_passes_response_schema_to_provider(self, plan):
+    async def test_critic_passes_response_schema_to_provider(self, plan, notebook_path):
         """Critic structured query passes response_schema=CriticOutput to provider."""
         critic = AgentModelConfig(provider="openai", model="gpt-4o", mode="api")
         with patch(
@@ -649,7 +660,7 @@ class TestResponseSchemaPassthrough:
             await run_single_critic_debate(
                 config=critic,
                 plan=plan,
-                notebook_content="",
+                notebook_path=notebook_path,
             )
 
         assert mock_openai.call_args.kwargs.get("response_schema") is CriticOutput
@@ -673,7 +684,7 @@ class TestAnthropicSDKPath:
     """Verify Anthropic critics use Claude Code SDK instead of direct API."""
 
     @pytest.mark.asyncio
-    async def test_anthropic_critic_uses_sdk(self, plan):
+    async def test_anthropic_critic_uses_sdk(self, plan, notebook_path):
         """Anthropic critics call collect_text_from_query, not query_anthropic."""
         critic = AgentModelConfig(provider="anthropic", model="claude-sonnet-4-6")
         valid_json = _valid_critic_json()
@@ -691,7 +702,7 @@ class TestAnthropicSDKPath:
             result = await run_single_critic_debate(
                 config=critic,
                 plan=plan,
-                notebook_content="",
+                notebook_path=notebook_path,
             )
 
         mock_sdk.assert_called()
@@ -700,7 +711,7 @@ class TestAnthropicSDKPath:
         assert result.output_tokens == 45
 
     @pytest.mark.asyncio
-    async def test_anthropic_sdk_passes_system_prompt(self, plan):
+    async def test_anthropic_sdk_passes_system_prompt(self, plan, notebook_path):
         """Anthropic SDK path passes system_prompt to ClaudeCodeOptions."""
         critic = AgentModelConfig(provider="anthropic", model="claude-sonnet-4-6")
         mock_sdk = _sdk_critic_mock()
@@ -709,7 +720,7 @@ class TestAnthropicSDKPath:
             await run_single_critic_debate(
                 config=critic,
                 plan=plan,
-                notebook_content="",
+                notebook_path=notebook_path,
             )
 
         options = mock_sdk.call_args[0][1]
@@ -753,7 +764,7 @@ class TestCriticMcpIntegration:
     _PREDICTION_PERSONA = {"name": "Evidence Auditor", "system_text": ""}
 
     @pytest.mark.asyncio
-    async def test_sdk_receives_mcp_servers_with_records(self, plan):
+    async def test_sdk_receives_mcp_servers_with_records(self, plan, notebook_path):
         """SDK path receives MCP servers when prediction_history_records is provided."""
         critic = AgentModelConfig(provider="anthropic", model="claude-sonnet-4-6")
         records = [
@@ -771,7 +782,7 @@ class TestCriticMcpIntegration:
             await run_single_critic_debate(
                 config=critic,
                 plan=plan,
-                notebook_content="",
+                notebook_path=notebook_path,
                 prediction_history_records=records,
                 persona=self._PREDICTION_PERSONA,
             )
@@ -781,8 +792,11 @@ class TestCriticMcpIntegration:
         assert PREDICTION_SPEC.mcp_tool_name in options.allowed_tools
 
     @pytest.mark.asyncio
-    async def test_sdk_no_mcp_without_records(self, plan):
-        """SDK path has empty MCP servers when no prediction records."""
+    async def test_sdk_no_prediction_mcp_without_records(self, plan, notebook_path):
+        """SDK path has no prediction MCP server when no prediction records.
+
+        Notebook MCP is always wired in SDK mode regardless of prediction state.
+        """
         critic = AgentModelConfig(provider="anthropic", model="claude-sonnet-4-6")
         mock_sdk = _sdk_critic_mock()
 
@@ -790,15 +804,16 @@ class TestCriticMcpIntegration:
             await run_single_critic_debate(
                 config=critic,
                 plan=plan,
-                notebook_content="",
+                notebook_path=notebook_path,
             )
 
         options = mock_sdk.call_args[0][1]
-        assert options.mcp_servers == {}
+        assert "predictions" not in options.mcp_servers
+        assert "notebook" in options.mcp_servers
         assert PREDICTION_SPEC.mcp_tool_name not in options.allowed_tools
 
     @pytest.mark.asyncio
-    async def test_sdk_max_turns_includes_toolsearch_bump(self, plan):
+    async def test_sdk_max_turns_includes_toolsearch_bump(self, plan, notebook_path):
         """SDK path uses max_turns=11 (10 base + 1 for ToolSearch to resolve WebSearch)."""
         critic = AgentModelConfig(provider="anthropic", model="claude-sonnet-4-6")
         mock_sdk = _sdk_critic_mock()
@@ -807,7 +822,7 @@ class TestCriticMcpIntegration:
             await run_single_critic_debate(
                 config=critic,
                 plan=plan,
-                notebook_content="",
+                notebook_path=notebook_path,
             )
 
         options = mock_sdk.call_args[0][1]
@@ -815,7 +830,7 @@ class TestCriticMcpIntegration:
         assert "ToolSearch" in options.allowed_tools
 
     @pytest.mark.asyncio
-    async def test_api_mode_ignores_records(self, plan):
+    async def test_api_mode_ignores_records(self, plan, notebook_path):
         """Direct API mode (OpenAI) ignores prediction records (no MCP available)."""
         critic = AgentModelConfig(provider="openai", model="gpt-4o", mode="api")
         records = [
@@ -831,7 +846,7 @@ class TestCriticMcpIntegration:
             result = await run_single_critic_debate(
                 config=critic,
                 plan=plan,
-                notebook_content="",
+                notebook_path=notebook_path,
                 prediction_history_records=records,
                 persona=self._PREDICTION_PERSONA,
             )
@@ -841,7 +856,7 @@ class TestCriticMcpIntegration:
         assert "mcp_servers" not in mock_openai.call_args.kwargs
 
     @pytest.mark.asyncio
-    async def test_sdk_with_records_uses_compact_tree_in_prompt(self, plan):
+    async def test_sdk_with_records_uses_compact_tree_in_prompt(self, plan, notebook_path):
         """SDK mode with records uses compact tree from records, not raw text."""
         critic = AgentModelConfig(provider="anthropic", model="claude-sonnet-4-6")
         records = [
@@ -859,7 +874,7 @@ class TestCriticMcpIntegration:
             await run_single_critic_debate(
                 config=critic,
                 plan=plan,
-                notebook_content="",
+                notebook_path=notebook_path,
                 prediction_history="RAW TEXT FALLBACK",
                 prediction_history_records=records,
                 persona=self._PREDICTION_PERSONA,
@@ -872,14 +887,14 @@ class TestCriticMcpIntegration:
         assert "RAW TEXT FALLBACK" not in prompt
 
     @pytest.mark.asyncio
-    async def test_api_mode_keeps_text_in_prompt(self, plan):
+    async def test_api_mode_keeps_text_in_prompt(self, plan, notebook_path):
         """API mode without MCP keeps the full prediction text in the prompt."""
         critic = AgentModelConfig(provider="openai", model="gpt-4o", mode="api")
         with patch(OPENAI_PATH, new_callable=AsyncMock, return_value=_CR()) as mock_openai:
             await run_single_critic_debate(
                 config=critic,
                 plan=plan,
-                notebook_content="",
+                notebook_path=notebook_path,
                 prediction_history="[1.0] CONFIRMED: polynomial fits well",
                 persona=self._PREDICTION_PERSONA,
             )
@@ -895,7 +910,7 @@ class TestPersonaPredictionAccess:
         assert {"Trajectory Critic", "Evidence Auditor"} == PREDICTION_PERSONAS
 
     @pytest.mark.asyncio
-    async def test_prediction_persona_gets_mcp_and_history(self, plan):
+    async def test_prediction_persona_gets_mcp_and_history(self, plan, notebook_path):
         """Trajectory Critic (a prediction persona) gets MCP server + prediction history."""
         from auto_scientist.prompts.critic import PERSONAS
 
@@ -916,7 +931,7 @@ class TestPersonaPredictionAccess:
             await run_single_critic_debate(
                 config=critic,
                 plan=plan,
-                notebook_content="",
+                notebook_path=notebook_path,
                 persona=tc_persona,
                 prediction_history_records=records,
             )
@@ -929,7 +944,7 @@ class TestPersonaPredictionAccess:
         assert "noise is additive" in prompt
 
     @pytest.mark.asyncio
-    async def test_non_prediction_persona_skips_mcp_and_history(self, plan):
+    async def test_non_prediction_persona_skips_mcp_and_history(self, plan, notebook_path):
         """Methodologist (not a prediction persona) gets no MCP and no prediction history."""
         from auto_scientist.prompts.critic import PERSONAS
 
@@ -950,19 +965,20 @@ class TestPersonaPredictionAccess:
             await run_single_critic_debate(
                 config=critic,
                 plan=plan,
-                notebook_content="",
+                notebook_path=notebook_path,
                 persona=meth_persona,
                 prediction_history_records=records,
             )
 
         options = mock_sdk.call_args[0][1]
-        assert options.mcp_servers == {}
+        assert "predictions" not in options.mcp_servers
+        assert "notebook" in options.mcp_servers
         assert PREDICTION_SPEC.mcp_tool_name not in options.allowed_tools
         prompt = mock_sdk.call_args[0][0]
         assert "<prediction_history>" not in prompt
 
     @pytest.mark.asyncio
-    async def test_non_prediction_persona_no_tool_in_system(self, plan):
+    async def test_non_prediction_persona_no_tool_in_system(self, plan, notebook_path):
         """Non-prediction persona's system prompt does not mention read_predictions."""
         from auto_scientist.prompts.critic import PERSONAS
 
@@ -974,7 +990,7 @@ class TestPersonaPredictionAccess:
             await run_single_critic_debate(
                 config=critic,
                 plan=plan,
-                notebook_content="",
+                notebook_path=notebook_path,
                 persona=fals_persona,
             )
 
@@ -986,7 +1002,7 @@ class TestMcpToolNameInPrompts:
     """Verify both Claude and Codex get the full mcp__predictions__read_predictions name."""
 
     @pytest.mark.asyncio
-    async def test_claude_prompt_uses_full_mcp_name(self, plan):
+    async def test_claude_prompt_uses_full_mcp_name(self, plan, notebook_path):
         """Claude (anthropic) prompt references the full MCP tool name."""
         critic = AgentModelConfig(provider="anthropic", model="claude-sonnet-4-6")
         persona = {"name": "Evidence Auditor", "system_text": ""}
@@ -1005,7 +1021,7 @@ class TestMcpToolNameInPrompts:
             await run_single_critic_debate(
                 config=critic,
                 plan=plan,
-                notebook_content="",
+                notebook_path=notebook_path,
                 persona=persona,
                 prediction_history_records=records,
             )
@@ -1021,7 +1037,7 @@ class TestMcpToolNameInPrompts:
         assert "a read_predictions tool" not in options.system_prompt
 
     @pytest.mark.asyncio
-    async def test_codex_prompt_uses_full_mcp_name(self, plan):
+    async def test_codex_prompt_uses_full_mcp_name(self, plan, notebook_path):
         """Codex (openai) prompt references the full MCP tool name."""
         critic = AgentModelConfig(provider="openai", model="gpt-4.1")
         persona = {"name": "Trajectory Critic", "system_text": ""}
@@ -1040,7 +1056,7 @@ class TestMcpToolNameInPrompts:
             await run_single_critic_debate(
                 config=critic,
                 plan=plan,
-                notebook_content="",
+                notebook_path=notebook_path,
                 persona=persona,
                 prediction_history_records=records,
             )
@@ -1057,7 +1073,7 @@ class TestMcpToolNameInPrompts:
         assert full_name in options.allowed_tools
 
     @pytest.mark.asyncio
-    async def test_both_providers_get_same_allowed_tools(self, plan):
+    async def test_both_providers_get_same_allowed_tools(self, plan, notebook_path):
         """Claude and Codex get the same allowed_tools for prediction personas."""
         records = [
             PredictionRecord(
@@ -1082,7 +1098,7 @@ class TestMcpToolNameInPrompts:
                 await run_single_critic_debate(
                     config=critic,
                     plan=plan,
-                    notebook_content="",
+                    notebook_path=notebook_path,
                     persona=persona,
                     prediction_history_records=records,
                 )
@@ -1104,7 +1120,7 @@ CREATE_BACKEND_PATH = "auto_scientist.agents.critic.create_backend"
 
 class TestCriticBackendIsolation:
     @pytest.mark.asyncio
-    async def test_sdk_critic_uses_create_backend(self, plan):
+    async def test_sdk_critic_uses_create_backend(self, plan, notebook_path):
         """SDK-mode critic dispatches through create_backend, not get_backend.
 
         Also verifies the created backend is actually passed through to
@@ -1132,7 +1148,7 @@ class TestCriticBackendIsolation:
             result = await run_single_critic_debate(
                 config=critic,
                 plan=plan,
-                notebook_content="",
+                notebook_path=notebook_path,
             )
 
         mock_create.assert_called_once_with("openai")
@@ -1141,7 +1157,7 @@ class TestCriticBackendIsolation:
         assert mock_collect.call_args[0][2] is mock_backend
 
     @pytest.mark.asyncio
-    async def test_api_critic_does_not_use_create_backend(self, plan):
+    async def test_api_critic_does_not_use_create_backend(self, plan, notebook_path):
         """API-mode critic skips create_backend (nullcontext path)."""
         critic = AgentModelConfig(provider="openai", model="gpt-4o", mode="api")
 
@@ -1152,7 +1168,7 @@ class TestCriticBackendIsolation:
             await run_single_critic_debate(
                 config=critic,
                 plan=plan,
-                notebook_content="",
+                notebook_path=notebook_path,
             )
 
         mock_create.assert_not_called()

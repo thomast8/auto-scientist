@@ -1374,7 +1374,7 @@ class Orchestrator:
         from auto_scientist.agents.critic import run_debate
         from auto_scientist.agents.scientist import _format_predictions_for_prompt
 
-        notebook_content = self._notebook_content()
+        notebook_path = self.output_dir / NOTEBOOK_FILENAME
         domain_knowledge = self.state.domain_knowledge
         scientist_cfg = self.model_config.resolve("scientist")
 
@@ -1402,7 +1402,7 @@ class Orchestrator:
                 critiques = await self._run_debate_with_summaries(
                     buffers,
                     plan,
-                    notebook_content,
+                    notebook_path,
                     domain_knowledge,
                     scientist_cfg,
                     analysis_json,
@@ -1416,7 +1416,7 @@ class Orchestrator:
                 critiques = await run_debate(
                     critic_configs=self.model_config.critics,
                     plan=plan,
-                    notebook_content=notebook_content,
+                    notebook_path=notebook_path,
                     domain_knowledge=domain_knowledge,
                     message_buffers=buffers,
                     iteration=self.state.iteration,
@@ -1442,7 +1442,7 @@ class Orchestrator:
         self,
         buffers: dict[str, list[str]],
         plan: dict,
-        notebook_content: str,
+        notebook_path: Path,
         domain_knowledge: str,
         scientist_cfg: Any,
         analysis_json: str,
@@ -1545,7 +1545,7 @@ class Orchestrator:
                 return await run_single_critic_debate(
                     config=config,
                     plan=plan,
-                    notebook_content=notebook_content,
+                    notebook_path=notebook_path,
                     domain_knowledge=domain_knowledge,
                     message_buffer=buf,
                     persona=persona,
