@@ -1,28 +1,46 @@
-"""MCP tool for querying prediction history on demand.
+"""Framework-side wrappers for the prediction MCP tool.
 
-Provides `build_prediction_mcp_server()` which creates an stdio MCP server
-config that the Claude Code CLI can connect to. The server reads predictions
-from a temporary JSON file and exposes a `read_predictions` tool.
+Owns the pieces that need real framework dependencies:
 
-Also provides `_handle_read_predictions()` for direct use in tests.
+* The ``MCPToolSpec`` (registered with ``_mcp_base`` so sdk_utils can
+  auto-discover the tool description).
+* The Pydantic-based ``format_compact_tree()`` formatter used at
+  prompt-build time by the Scientist, Critic, and Stop Gate to inject
+  the compact prediction tree into agent prompts.
+* The ``build_prediction_mcp_server()`` factory.
+* A thin ``_handle_read_predictions()`` shim that wraps the shared query
+  function in MCP content shape so unit tests can call it directly.
 
-NOTE: Query helpers (_format_record_detail, _get_ancestor_ids, etc.) are
-intentionally duplicated in _prediction_mcp_server.py, which runs as an
-isolated subprocess. Keep both files in sync when changing query semantics.
+The actual query/format logic lives in
+:mod:`auto_scientist.agents.prediction_query`, a stdlib-only module that
+the subprocess script ``_prediction_mcp_server.py`` also imports. There
+is no duplicated query code to keep in sync.
 """
 
 from __future__ import annotations
 
-import contextlib
-import json
 import logging
 from pathlib import Path
 from typing import Any
 
 from auto_scientist.agents._mcp_base import MCPToolSpec, build_mcp_server_config, register_mcp_tool
+from auto_scientist.agents.prediction_query import normalize_args as _normalize_args
+from auto_scientist.agents.prediction_query import query as _query
 from auto_scientist.state import PredictionRecord
 
 logger = logging.getLogger(__name__)
+
+# Re-export so existing tests/scripts can keep importing _normalize_args
+# and the inline-prompt formatters from prediction_tool.py.
+__all__ = [
+    "PREDICTION_SPEC",
+    "build_prediction_mcp_server",
+    "format_compact_tree",
+    "_handle_read_predictions",
+    "_normalize_args",
+    "_build_prediction_forest",
+]
+
 
 # ---------------------------------------------------------------------------
 # Tool spec (registered so sdk_utils can auto-discover the description)
@@ -88,41 +106,6 @@ _READ_PREDICTIONS_SCHEMA: dict[str, Any] = {
     },
 }
 
-
-def _normalize_args(args: dict[str, Any]) -> dict[str, Any]:
-    """Coerce common LLM type mistakes into the canonical schema.
-
-    Fixes observed in production:
-      - ``pred_ids: '["0.1"]'`` (JSON string) instead of ``["0.1"]`` (array)
-      - ``pred_ids: "0.1"`` (bare string) instead of ``["0.1"]``
-      - ``iteration: "1"`` (string) instead of ``1`` (int)
-    """
-    out = dict(args)
-
-    # pred_ids: string -> parse as JSON array or wrap bare string
-    # Also coerce elements to str (models sometimes send numeric IDs like [0.1])
-    pred_ids = out.get("pred_ids")
-    if isinstance(pred_ids, str):
-        try:
-            parsed = json.loads(pred_ids)
-            if isinstance(parsed, list):
-                out["pred_ids"] = [str(x) for x in parsed]
-            else:
-                out["pred_ids"] = [pred_ids]
-        except (json.JSONDecodeError, ValueError):
-            out["pred_ids"] = [pred_ids]
-    elif isinstance(pred_ids, list):
-        out["pred_ids"] = [str(x) for x in pred_ids]
-
-    # iteration: numeric string -> int
-    iteration = out.get("iteration")
-    if isinstance(iteration, str):
-        with contextlib.suppress(ValueError):
-            out["iteration"] = int(iteration)
-
-    return out
-
-
 PREDICTION_SPEC = MCPToolSpec(
     server_name="predictions",
     tool_name="read_predictions",
@@ -142,6 +125,14 @@ register_mcp_tool(PREDICTION_SPEC)
 # ---------------------------------------------------------------------------
 # Compact tree (canonical implementation, inlined in all agent prompts)
 # ---------------------------------------------------------------------------
+#
+# The compact tree formatter is intentionally Pydantic-based because it is
+# called at prompt-build time on a live ``list[PredictionRecord]`` from
+# ExperimentState. The framework-side caller already has the typed objects;
+# round-tripping them through model_dump() just to call a dict-based helper
+# would be wasted work and would lose Pydantic validation. The MCP tool's
+# query path is the only one that needs the dict-based helpers, and those
+# live in prediction_query.py.
 
 
 def _get_display_text(rec: PredictionRecord, max_chars: int = 60) -> str:
@@ -154,7 +145,6 @@ def _get_display_text(rec: PredictionRecord, max_chars: int = 60) -> str:
     text = " ".join(text.split())
     if len(text) <= max_chars:
         return text
-    # Truncate at last space before limit to avoid cutting mid-word
     truncated = text[:max_chars]
     last_space = truncated.rfind(" ")
     if last_space > max_chars // 2:
@@ -230,88 +220,7 @@ def format_compact_tree(
 
 
 # ---------------------------------------------------------------------------
-# Full-detail formatting (used by detail queries and _handle_read_predictions)
-# ---------------------------------------------------------------------------
-
-
-def _format_record_detail(rec: PredictionRecord) -> str:
-    """Format a single PredictionRecord as full-detail text."""
-    tag = rec.pred_id or f"v{rec.iteration_prescribed:02d}"
-    status = rec.outcome.upper()
-    eval_info = f"prescribed iter {rec.iteration_prescribed}"
-    if rec.iteration_evaluated is not None:
-        eval_info += f", evaluated iter {rec.iteration_evaluated}"
-
-    lines = [f"[{tag}] {status} ({eval_info})"]
-    lines.append(f"  Prediction: {rec.prediction}")
-    lines.append(f"  Diagnostic: {rec.diagnostic}")
-    lines.append(f"  If confirmed: {rec.if_confirmed}")
-    lines.append(f"  If refuted: {rec.if_refuted}")
-    if rec.evidence:
-        lines.append(f"  Evidence: {rec.evidence}")
-    if rec.follows_from:
-        lines.append(f"  Follows from: [{rec.follows_from}]")
-    return "\n".join(lines)
-
-
-def _get_ancestor_ids(pred_id: str, by_id: dict[str, PredictionRecord]) -> set[str]:
-    """Walk follows_from links upward, collecting ancestor pred_ids."""
-    ancestors: set[str] = set()
-    current = pred_id
-    while current in by_id:
-        rec = by_id[current]
-        parent = rec.follows_from
-        if not parent or parent in ancestors:
-            break
-        ancestors.add(parent)
-        current = parent
-    return ancestors
-
-
-def _get_descendant_ids(pred_id: str, all_preds: list[PredictionRecord]) -> set[str]:
-    """Walk follows_from links downward, collecting all descendant pred_ids."""
-    descendants: set[str] = set()
-    frontier = {pred_id}
-    while frontier:
-        current = frontier.pop()
-        for rec in all_preds:
-            if rec.follows_from == current and rec.pred_id and rec.pred_id not in descendants:
-                descendants.add(rec.pred_id)
-                frontier.add(rec.pred_id)
-    return descendants
-
-
-def _get_full_chain_ids(
-    pred_id: str,
-    by_id: dict[str, PredictionRecord],
-    all_preds: list[PredictionRecord],
-) -> set[str]:
-    """Get the full chain (ancestors + self + descendants) for a prediction."""
-    chain = {pred_id}
-    chain |= _get_ancestor_ids(pred_id, by_id)
-    chain |= _get_descendant_ids(pred_id, all_preds)
-    return chain
-
-
-def _build_status_response(
-    prediction_history: list[PredictionRecord],
-) -> dict[str, Any]:
-    """Build a counts-only status summary (no tree, since tree is inline in prompt)."""
-    by_status: dict[str, int] = {}
-    for rec in prediction_history:
-        by_status[rec.outcome] = by_status.get(rec.outcome, 0) + 1
-
-    lines = [f"Total: {len(prediction_history)} predictions"]
-    for status in ["confirmed", "refuted", "inconclusive", "pending"]:
-        count = by_status.get(status, 0)
-        if count:
-            lines.append(f"  {status}: {count}")
-
-    return {"content": [{"type": "text", "text": "\n".join(lines)}]}
-
-
-# ---------------------------------------------------------------------------
-# Direct handler (for unit tests - same logic as the MCP server subprocess)
+# Direct handler (for unit tests). Wraps the shared query() in MCP shape.
 # ---------------------------------------------------------------------------
 
 
@@ -319,100 +228,19 @@ async def _handle_read_predictions(
     prediction_history: list[PredictionRecord],
     args: dict[str, Any],
 ) -> dict[str, Any]:
-    """Core handler logic for the read_predictions tool."""
-    args = _normalize_args(args)
+    """Wrap :func:`prediction_query.query` in the MCP content envelope.
 
-    if not prediction_history:
-        return {"content": [{"type": "text", "text": "No predictions in history yet."}]}
+    Used by ``tests/test_prediction_tool.py``. Production traffic goes through
+    the subprocess via ``_prediction_mcp_server.py``, which calls the same
+    underlying ``query()`` function but wraps results in TextContent via
+    ``_mcp_base.run_mcp_server_main``.
 
-    by_id = {r.pred_id: r for r in prediction_history if r.pred_id}
-    available = ", ".join(sorted(by_id.keys()))
-
-    # Summary mode: counts only (tree is already in the prompt)
-    if args.get("summary"):
-        return _build_status_response(prediction_history)
-
-    pred_ids = args.get("pred_ids")
-    chain_id = args.get("chain")
-    outcome_value = args.get("outcome")
-    iteration = args.get("iteration")
-
-    # Require at least one query parameter
-    if not pred_ids and not chain_id and not outcome_value and iteration is None:
-        return {
-            "content": [
-                {
-                    "type": "text",
-                    "text": (
-                        "Please specify a query: summary, pred_ids, chain, "
-                        f"outcome, or iteration. Available IDs: {available}"
-                    ),
-                }
-            ]
-        }
-
-    selected: list[PredictionRecord] = []
-
-    if pred_ids:
-        missing = [pid for pid in pred_ids if pid not in by_id]
-        for pid in pred_ids:
-            if pid in by_id:
-                selected.append(by_id[pid])
-        if not selected:
-            return {
-                "content": [
-                    {
-                        "type": "text",
-                        "text": f"Not found: {', '.join(pred_ids)}. Available IDs: {available}",
-                    }
-                ]
-            }
-        if missing:
-            missing_note = f"Note: IDs not found: {', '.join(missing)}\n\n"
-            formatted = missing_note + "\n\n".join(_format_record_detail(r) for r in selected)
-            return {"content": [{"type": "text", "text": formatted}]}
-
-    elif chain_id:
-        if chain_id not in by_id:
-            return {
-                "content": [
-                    {
-                        "type": "text",
-                        "text": f"Not found: {chain_id}. Available IDs: {available}",
-                    }
-                ]
-            }
-        chain_ids = _get_full_chain_ids(chain_id, by_id, prediction_history)
-        # Return in chronological order (by iteration prescribed)
-        selected = sorted(
-            [r for r in prediction_history if r.pred_id in chain_ids],
-            key=lambda r: (r.iteration_prescribed, r.pred_id),
-        )
-
-    elif outcome_value == "active_chains":
-        pending = [r for r in prediction_history if r.outcome == "pending"]
-        active_ids: set[str] = set()
-        id_less_pending: list[PredictionRecord] = []
-        for rec in pending:
-            if rec.pred_id:
-                active_ids.add(rec.pred_id)
-                active_ids |= _get_ancestor_ids(rec.pred_id, by_id)
-            else:
-                id_less_pending.append(rec)
-        selected = [r for r in prediction_history if r.pred_id in active_ids]
-        selected.extend(id_less_pending)
-
-    elif outcome_value:
-        selected = [r for r in prediction_history if r.outcome == outcome_value]
-
-    elif iteration is not None:
-        selected = [r for r in prediction_history if r.iteration_prescribed == iteration]
-
-    if not selected:
-        return {"content": [{"type": "text", "text": "No predictions match the query."}]}
-
-    formatted = "\n\n".join(_format_record_detail(r) for r in selected)
-    return {"content": [{"type": "text", "text": formatted}]}
+    Converts the typed ``list[PredictionRecord]`` to the dict shape the
+    pure-stdlib ``query()`` expects.
+    """
+    records = [r.model_dump() for r in prediction_history]
+    text = _query(records, args)
+    return {"content": [{"type": "text", "text": text}]}
 
 
 # ---------------------------------------------------------------------------

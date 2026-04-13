@@ -210,7 +210,7 @@ _CRITIC_ROLE = """\
 <role>
 You are a scientific critique system. You challenge experiment plans, propose
 alternative hypotheses, and identify blind spots. You have web search available
-to verify claims and look up relevant methods{{prediction_role_text}}.
+to verify claims and look up relevant methods{{prediction_role_text}}{{notebook_role_text}}.
 </role>"""
 
 _CRITIC_TOOL_USE_GUIDANCE = """\
@@ -221,7 +221,7 @@ The "raw JSON only" rule applies only to your final assistant message.
 Before responding:
 - Use targeted web search only when you need literature or standard-method
   evidence for a critique in your lane.
-{prediction_tool_guidance}
+{prediction_tool_guidance}{notebook_tool_guidance}
 - If the provided evidence already resolves the point, do not browse
   unnecessarily.
 
@@ -238,9 +238,9 @@ Your critique is used by the Scientist to revise the plan before
 implementation.
 
 You receive the full evidence base: the plan, analysis data (metrics,
-observations, prediction outcomes), {{prediction_evidence_text}}lab notebook,
+observations, prediction outcomes), {{prediction_evidence_text}}{{notebook_evidence_text}},
 and domain knowledge. You do not see experiment code, which is an
-implementation detail handled by the Coder.{{prediction_pipeline_text}}
+implementation detail handled by the Coder.{{prediction_pipeline_text}}{{notebook_pipeline_text}}
 </pipeline_context>"""
 
 _CRITIC_SCOPE_BOUNDARY = """\
@@ -318,8 +318,9 @@ def build_critic_system(provider: str = "claude") -> str:
 
     Returns a template string with {persona_text}, {persona_instructions},
     {prediction_role_text}, {prediction_evidence_text},
-    {prediction_pipeline_text}, {prediction_tool_guidance}, and
-    {critic_output_schema} placeholders.
+    {prediction_pipeline_text}, {prediction_tool_guidance},
+    {notebook_role_text}, {notebook_evidence_text}, {notebook_pipeline_text},
+    {notebook_tool_guidance}, and {critic_output_schema} placeholders.
     The caller must .format() the result.
 
     Note: blocks use {{double braces}} for the format placeholders to
@@ -361,7 +362,7 @@ CRITIC_USER = """\
 <context>
 <goal>{goal}</goal>
 <domain_knowledge>{domain_knowledge}</domain_knowledge>
-<notebook>{notebook_content}</notebook>
+{notebook_section}
 <analysis>{analysis_json}</analysis>{prediction_history_section}{pending_abductions_section}
 </context>
 

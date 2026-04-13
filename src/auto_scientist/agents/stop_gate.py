@@ -18,6 +18,11 @@ from auto_scientist.agents.debate_models import (
     CriticOutput,
     DebateResult,
 )
+from auto_scientist.agents.notebook_tool import (
+    NOTEBOOK_SPEC,
+    build_notebook_mcp_server,
+    format_notebook_toc,
+)
 from auto_scientist.agents.prediction_tool import (
     PREDICTION_SPEC,
     build_prediction_mcp_server,
@@ -25,6 +30,7 @@ from auto_scientist.agents.prediction_tool import (
 )
 from auto_scientist.agents.scientist import SCIENTIST_PLAN_SCHEMA
 from auto_scientist.model_config import AgentModelConfig
+from auto_scientist.notebook import parse_notebook_entries, read_notebook
 from auto_scientist.prompts.stop_gate import (
     ASSESSMENT_SCHEMA,
     ASSESSMENT_USER,
@@ -78,11 +84,15 @@ async def run_completeness_assessment(
     Returns a structured assessment with sub-questions, coverage ratings,
     and a stop/continue recommendation.
     """
-    notebook_content = Path(notebook_path).read_text() if Path(notebook_path).exists() else ""
+    notebook_path = Path(notebook_path)
+    notebook_entries = parse_notebook_entries(notebook_path)
 
-    # Build tools: WebSearch + optional MCP for prediction drill-down
+    # Build tools: WebSearch + notebook MCP + optional MCP for prediction drill-down
     tools: list[str] = ["WebSearch"]
-    mcp_servers: dict[str, Any] = {}
+    mcp_servers: dict[str, Any] = {
+        "notebook": build_notebook_mcp_server(notebook_path, output_dir=output_dir),
+    }
+    tools.append(NOTEBOOK_SPEC.mcp_tool_name)
     if prediction_history:
         mcp_servers["predictions"] = build_prediction_mcp_server(
             prediction_history, output_dir=output_dir
@@ -106,7 +116,7 @@ async def run_completeness_assessment(
         domain_knowledge=domain_knowledge or "(no domain knowledge provided)",
         prediction_history=format_compact_tree(prediction_history),
         pending_abductions_section=abductions_section,
-        notebook_content=notebook_content or "(empty notebook)",
+        notebook_content=format_notebook_toc(notebook_entries),
     )
 
     json_instruction = (
@@ -218,7 +228,7 @@ async def run_single_stop_debate(
     config: AgentModelConfig,
     stop_reason: str,
     completeness_assessment: dict[str, Any],
-    notebook_content: str,
+    notebook_path: Path,
     domain_knowledge: str = "",
     message_buffer: list[str] | None = None,
     persona: dict[str, str] | None = None,
@@ -234,6 +244,9 @@ async def run_single_stop_debate(
     all critics have challenged.
 
     Args:
+        notebook_path: Path to the run's lab_notebook.xml. SDK-mode critics
+            get a compact TOC + mcp__notebook__read_notebook tool; API-mode
+            critics fall back to the full inline XML.
         prediction_history: Pre-formatted text for prompt injection.
         prediction_history_records: Raw records for MCP server (SDK mode only).
         output_dir: Directory for MCP data files.
@@ -248,14 +261,27 @@ async def run_single_stop_debate(
     label = f"{config.provider}:{config.model}"
     assessment_json = json.dumps(completeness_assessment, indent=2)
 
+    is_sdk = config.mode == "sdk"
+    notebook_path = Path(notebook_path)
+    if is_sdk:
+        notebook_entries = parse_notebook_entries(notebook_path)
+        notebook_section = f"<notebook_toc>{format_notebook_toc(notebook_entries)}</notebook_toc>"
+    else:
+        notebook_xml = read_notebook(notebook_path) or "(empty notebook)"
+        notebook_section = f"<notebook>{notebook_xml}</notebook>"
+
     tools, mcp_servers = _build_critic_tools_and_mcp(
-        prediction_history_records, output_dir=output_dir
+        prediction_history_records,
+        notebook_path=notebook_path if is_sdk else None,
+        output_dir=output_dir,
     )
 
     prompt_provider = "gpt" if config.provider == "openai" else "claude"
     has_predictions = bool(prediction_history_records)
     critic_system = build_stop_critic_system(
-        prompt_provider, has_predictions=has_predictions
+        prompt_provider,
+        has_predictions=has_predictions,
+        has_notebook_tool=is_sdk,
     ).format(
         persona_text=persona_text,
         persona_instructions=persona_instructions or "",
@@ -270,7 +296,7 @@ async def run_single_stop_debate(
     critic_user = STOP_CRITIC_USER.format(
         goal=goal,
         domain_knowledge=domain_knowledge,
-        notebook_content=notebook_content,
+        notebook_section=notebook_section,
         analysis_json=analysis_json,
         prediction_history=effective_prediction_history,
         stop_reason=stop_reason,
@@ -330,11 +356,15 @@ async def run_scientist_stop_revision(
     Returns a ScientistPlanOutput-compatible dict. If should_stop is still
     true, the stop is upheld. If false, the plan contains a real experiment.
     """
-    notebook_content = Path(notebook_path).read_text() if Path(notebook_path).exists() else ""
+    notebook_path = Path(notebook_path)
+    notebook_entries = parse_notebook_entries(notebook_path)
 
-    # Build tools: WebSearch + MCP prediction tree
+    # Build tools: WebSearch + notebook MCP + MCP prediction tree
     tools = ["WebSearch"]
-    mcp_servers: dict[str, Any] = {}
+    mcp_servers: dict[str, Any] = {
+        "notebook": build_notebook_mcp_server(notebook_path, output_dir=output_dir),
+    }
+    tools.append(NOTEBOOK_SPEC.mcp_tool_name)
     if prediction_history:
         mcp_servers["predictions"] = build_prediction_mcp_server(
             prediction_history, output_dir=output_dir
@@ -345,7 +375,7 @@ async def run_scientist_stop_revision(
         goal=goal or "(no goal specified)",
         domain_knowledge=domain_knowledge or "(no domain knowledge provided)",
         analysis_json=json.dumps(analysis, indent=2) if analysis else "(no analysis)",
-        notebook_content=notebook_content or "(empty notebook)",
+        notebook_content=format_notebook_toc(notebook_entries),
         stop_reason=stop_reason,
         completeness_assessment=json.dumps(completeness_assessment, indent=2),
         concern_ledger=(

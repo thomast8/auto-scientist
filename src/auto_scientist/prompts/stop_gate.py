@@ -55,13 +55,18 @@ _PREDICTION_TOOL_NOTE = (
     " You also have a mcp__predictions__read_predictions tool"
     " for drilling into specific predictions for full detail."
 )
+_NOTEBOOK_TOOL_NOTE = (
+    " You also have a mcp__notebook__read_notebook tool for reading the"
+    " full body of prior notebook entries when the Table of Contents title"
+    " isn't enough context."
+)
 
 _ASSESS_ROLE = """\
 <role>
 You are a completeness assessment system. You evaluate whether a scientific
 investigation has thoroughly addressed its stated goal. You are factual and
 structured, not argumentative. You map the goal to evidence and report gaps.
-You have web search available.{prediction_tool_note}
+You have web search available.{prediction_tool_note}{notebook_tool_note}
 </role>"""
 
 _ASSESS_TOOL_USE_GUIDANCE = """\
@@ -73,9 +78,12 @@ Before responding:
 1. If mcp__predictions__read_predictions is available and you need details
    about a specific pred_id, outcome, or prediction chain, call it rather
    than guessing from the compact summary.
-2. Use web search only when you need to verify standard analyses, standard
+2. The notebook in <context> is a Table of Contents only (one line per
+   entry). Call mcp__notebook__read_notebook to read the full body of any
+   entry when judging whether a sub-question was actually investigated.
+3. Use web search only when you need to verify standard analyses, standard
    goal decompositions, or common coverage expectations for the stated goal.
-3. If the notebook and prediction history already settle the point, do not
+4. If the notebook and prediction history already settle the point, do not
    browse unnecessarily.
 
 Limit to 1-2 targeted searches per response. More searches rarely
@@ -194,7 +202,7 @@ def build_assessment_system(provider: str = "claude", *, has_predictions: bool =
     When *has_predictions* is False, MCP tool references are omitted.
     """
     note = _PREDICTION_TOOL_NOTE if has_predictions else ""
-    role = _ASSESS_ROLE.format(prediction_tool_note=note)
+    role = _ASSESS_ROLE.format(prediction_tool_note=note, notebook_tool_note=_NOTEBOOK_TOOL_NOTE)
 
     if provider == "gpt":
         return "\n\n".join(
@@ -228,7 +236,7 @@ ASSESSMENT_USER = """\
 <stop_reason>{stop_reason}</stop_reason>
 <domain_knowledge>{domain_knowledge}</domain_knowledge>
 <prediction_history>{prediction_history}</prediction_history>
-{pending_abductions_section}<notebook>{notebook_content}</notebook>
+{pending_abductions_section}<notebook_toc>{notebook_content}</notebook_toc>
 </context>
 
 <task>
@@ -369,10 +377,10 @@ _STOP_CRITIC_ROLE = """\
 <role>
 You are a scientific critique system. You challenge a decision to stop an
 investigation. You have web search available to verify claims and look up
-relevant methods.{prediction_tool_note}
+relevant methods.{prediction_tool_note}{notebook_tool_note}
 </role>"""
 
-_STOP_CRITIC_TOOL_USE_GUIDANCE = """\
+_STOP_CRITIC_TOOL_USE_GUIDANCE_SDK = """\
 <tool_use>
 Tool calls are allowed before the final JSON response.
 The "raw JSON only" rule applies only to your final assistant message.
@@ -383,6 +391,33 @@ Before responding:
 - If mcp__predictions__read_predictions is available and you need details
   about a specific pred_id, outcome, or chain, call it rather than guessing
   from the compact summary.
+- The notebook in <context> is a Table of Contents only. Call
+  mcp__notebook__read_notebook to read the full body of any entry when
+  judging whether a sub-question or depth concern is supported by what
+  was actually written down.
+- If the provided evidence already resolves the point, do not browse
+  unnecessarily.
+
+Limit to 1-2 targeted searches per response. More searches rarely
+improve critique quality and can introduce contradictory information.
+If you call a tool, reference its result in your output. If the result
+contradicts your draft reasoning, update your reasoning.
+</tool_use>"""
+
+_STOP_CRITIC_TOOL_USE_GUIDANCE_API = """\
+<tool_use>
+Tool calls are allowed before the final JSON response.
+The "raw JSON only" rule applies only to your final assistant message.
+
+Before responding:
+- Use targeted web search when you need literature or standard-method support
+  for a coverage or depth challenge.
+- If mcp__predictions__read_predictions is available and you need details
+  about a specific pred_id, outcome, or chain, call it rather than guessing
+  from the compact summary.
+- The notebook in <context> is the full lab notebook XML. Read it directly
+  when judging whether a sub-question or depth concern is supported by what
+  was actually written down.
 - If the provided evidence already resolves the point, do not browse
   unnecessarily.
 
@@ -439,20 +474,37 @@ Example:
 </output_format>"""
 
 
-def build_stop_critic_system(provider: str = "claude", *, has_predictions: bool = True) -> str:
+def build_stop_critic_system(
+    provider: str = "claude",
+    *,
+    has_predictions: bool = True,
+    has_notebook_tool: bool = True,
+) -> str:
     """Assemble Stop Critic system prompt template in provider-optimal order.
 
     Returns a template with {persona_text}, {persona_instructions},
     {critic_output_schema} placeholders.
+
+    When *has_notebook_tool* is False (API-mode critics that cannot call
+    MCP tools), the notebook tool note is omitted from the role and the
+    tool-use guidance describes the inline XML payload instead of a TOC.
     """
-    note = _PREDICTION_TOOL_NOTE if has_predictions else ""
-    role = _STOP_CRITIC_ROLE.format(prediction_tool_note=note)
+    pred_note = _PREDICTION_TOOL_NOTE if has_predictions else ""
+    notebook_note = _NOTEBOOK_TOOL_NOTE if has_notebook_tool else ""
+    role = _STOP_CRITIC_ROLE.format(
+        prediction_tool_note=pred_note, notebook_tool_note=notebook_note
+    )
+    tool_use = (
+        _STOP_CRITIC_TOOL_USE_GUIDANCE_SDK
+        if has_notebook_tool
+        else _STOP_CRITIC_TOOL_USE_GUIDANCE_API
+    )
 
     if provider == "gpt":
         raw = "\n\n".join(
             [
                 role,
-                _STOP_CRITIC_TOOL_USE_GUIDANCE,
+                tool_use,
                 "{persona_text}",
                 "{persona_instructions}",
                 _STOP_CRITIC_OUTPUT_FORMAT,
@@ -463,7 +515,7 @@ def build_stop_critic_system(provider: str = "claude", *, has_predictions: bool 
         raw = "\n\n".join(
             [
                 role,
-                _STOP_CRITIC_TOOL_USE_GUIDANCE,
+                tool_use,
                 "{persona_text}",
                 _STOP_CRITIC_PIPELINE_CONTEXT,
                 "{persona_instructions}",
@@ -480,7 +532,7 @@ STOP_CRITIC_USER = """\
 <context>
 <goal>{goal}</goal>
 <domain_knowledge>{domain_knowledge}</domain_knowledge>
-<notebook>{notebook_content}</notebook>
+{notebook_section}
 <analysis>{analysis_json}</analysis>
 <prediction_history>{prediction_history}</prediction_history>
 </context>
@@ -519,7 +571,8 @@ _STOP_REV_ROLE = """\
 <role>
 You are a scientific hypothesis and planning system. You have just proposed
 stopping an investigation, and your stop decision has been challenged in a
-debate. You must now revise your decision. You have web search available.{prediction_tool_note}
+debate. You must now revise your decision. You have web search
+available.{prediction_tool_note}{notebook_tool_note}
 </role>"""
 
 _STOP_REV_PIPELINE_CONTEXT = """\
@@ -571,9 +624,13 @@ Before responding:
 1. If mcp__predictions__read_predictions is available and you rely on a
    specific pred_id, prior outcome, or prediction chain, call it before
    finalizing the revision.
-2. If you cite standard methods or outside literature to justify
+2. The notebook in <context> is a Table of Contents only. Call
+   mcp__notebook__read_notebook to read the full body of any prior entry
+   when a concern from the debate references the original reasoning or
+   results in a way the title alone cannot settle.
+3. If you cite standard methods or outside literature to justify
    maintaining or withdrawing the stop, do one targeted web search batch.
-3. If neither condition applies, do not browse just to browse.
+4. If none of these conditions apply, do not browse just to browse.
 
 Limit to 1-2 targeted searches per response. More searches rarely
 improve plan quality and can introduce contradictory information.
@@ -619,7 +676,9 @@ Example (withdrawal):
 def build_stop_revision_system(provider: str = "claude", *, has_predictions: bool = True) -> str:
     """Assemble Stop Revision system prompt in provider-optimal order."""
     note = _PREDICTION_TOOL_NOTE if has_predictions else ""
-    rev_role = _STOP_REV_ROLE.format(prediction_tool_note=note)
+    rev_role = _STOP_REV_ROLE.format(
+        prediction_tool_note=note, notebook_tool_note=_NOTEBOOK_TOOL_NOTE
+    )
 
     if provider == "gpt":
         return "\n\n".join(
@@ -649,7 +708,7 @@ STOP_REVISION_USER = """\
 <context>
 <goal>{goal}</goal>
 <domain_knowledge>{domain_knowledge}</domain_knowledge>
-<notebook>{notebook_content}</notebook>
+<notebook_toc>{notebook_content}</notebook_toc>
 <analysis>{analysis_json}</analysis>
 <prediction_history>{prediction_history}</prediction_history>
 </context>

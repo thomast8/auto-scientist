@@ -656,10 +656,10 @@
         <!-- =============== AGENTS (middle band, y=280) =============== -->
         <!-- Analyst -->
         <g class="agent-group" data-agent="analyst"
-           data-tooltip="Analyst (observer)|Uses query() with Read + Glob tools. Examines results.txt and plot PNGs (multimodal), or raw data on iteration 0. max_turns: 30.
+           data-tooltip="Analyst (observer)|Uses query() with Read + Glob tools plus the mcp__notebook__read_notebook MCP tool. Examines results.txt and plot PNGs (multimodal), or raw data on iteration 0. max_turns: 30.
 
-Reads: results.txt, plots, lab notebook, domain knowledge
-Reads (iter 0): canonical data files, lab notebook, domain knowledge
+Reads: results.txt, plots, notebook TOC + on-demand entries (via MCP), domain knowledge
+Reads (iter 0): canonical data files, notebook TOC + on-demand entries (via MCP), domain knowledge
 Produces: analysis JSON (key_metrics, improvements, regressions, observations, prediction_outcomes, data_diagnostics)
 Also produces (iter 0): domain_knowledge, data_summary
 
@@ -676,9 +676,10 @@ Does NOT recommend changes or formulate hypotheses.">
 
         <!-- Scientist -->
         <g class="agent-group" data-agent="scientist"
-           data-tooltip="Scientist (planner)|Uses query() via Claude Code SDK. Has WebSearch tool for grounding hypotheses. max_turns: 10.
+           data-tooltip="Scientist (planner)|Uses query() via Claude Code SDK. Has WebSearch plus mcp__predictions__read_predictions and mcp__notebook__read_notebook MCP tools for on-demand drill-down. max_turns: 18.
 
-Reads (via prompt): analysis JSON, lab notebook, domain knowledge, prediction history, pending abductions, goal
+Reads (via prompt): analysis JSON, prediction tree compact summary, notebook TOC, domain knowledge, pending abductions, goal
+Reads (via MCP): full prediction detail and full notebook entry bodies on demand
 Produces: plan JSON (hypothesis, strategy, changes, expected_impact, should_stop, stop_reason, notebook_entry, testable_predictions, refutation_reasoning, deprioritized_abductions)
 
 Abductive protocol on refutations: for each refuted prediction, enumerate assumptions, identify the weakest, generate an alternative explanation naming specific measured or unmeasured entities in the system under study, and derive a testable consequence. Must describe mechanism (physical, chemical, biological, operational), not analysis-pipeline concerns.
@@ -696,18 +697,18 @@ Does NOT read or write Python code.">
 
         <!-- Debate (4 personas) -->
         <g class="agent-group" data-agent="debate"
-           data-tooltip="Debate (4 personas)|Parallel critiques via SDK (Anthropic/OpenAI) or direct API (OpenAI/Google). Critics have web search and prediction query tool (MCP, SDK mode only).
+           data-tooltip="Debate (4 personas)|Parallel critiques via SDK (Anthropic/OpenAI) or direct API (OpenAI/Google). SDK-mode critics have web search plus prediction (Trajectory Critic + Evidence Auditor) and notebook MCP tools.
 
 4 personas: Methodologist, Trajectory Critic, Falsification Expert, Evidence Auditor.
 Iteration 0: only Methodologist + Falsification Expert (others need history).
 Model assignment rotates across iterations so no model is always the same role.
 
 Both sides get identical context (symmetric):
-  plan JSON, analysis JSON, prediction history, lab notebook, domain knowledge, goal.
+  plan JSON, analysis JSON, prediction tree compact summary, notebook TOC, domain knowledge, goal.
 Neither side sees Python code.
 
-SDK mode critics can interactively query the prediction tree (stats, chains, specific predictions).
-Direct API mode falls back to prediction history as text in the prompt.
+SDK mode: compact prediction tree + notebook TOC inline, with mcp__predictions__read_predictions and mcp__notebook__read_notebook for on-demand detail.
+Direct API mode: full prediction history text and full notebook XML inline (no MCP tools available).
 
 Single-pass: each persona produces structured concerns independently.
 Produces: concern ledger (structured claims with severity, confidence, category).">
@@ -721,9 +722,10 @@ Produces: concern ledger (structured claims with severity, confidence, category)
 
         <!-- Revision -->
         <g class="agent-group" data-agent="revision"
-           data-tooltip="Scientist Revision|Uses query() via Claude Code SDK. Has WebSearch tool. max_turns: 10.
+           data-tooltip="Scientist Revision|Uses query() via Claude Code SDK. Has WebSearch plus mcp__predictions__read_predictions and mcp__notebook__read_notebook MCP tools. max_turns: 18.
 
-Reads: original plan, concern ledger, analysis JSON, lab notebook, domain knowledge, prediction history, goal
+Reads (via prompt): original plan, concern ledger, analysis JSON, prediction tree compact summary, notebook TOC, domain knowledge, goal
+Reads (via MCP): full prediction detail and full notebook entry bodies on demand
 Produces: revised plan JSON (same schema as initial plan) + notebook entry.
 
 Incorporates debate feedback. The Coder receives ONLY the revised plan, not the raw critique.">
@@ -767,9 +769,10 @@ Produces: results.txt (stdout), plots (PNGs), run_result.json (success/failure/t
 
         <!-- Report (Phase 2, after iteration loop) -->
         <g class="agent-group" data-agent="report"
-           data-tooltip="Report (Phase 2)|Generates comprehensive final report after iteration loop ends. Uses query() with Read + Glob tools. max_turns: 10.
+           data-tooltip="Report (Phase 2)|Generates comprehensive final report after iteration loop ends. Uses query() with Read + Glob tools and the mcp__notebook__read_notebook MCP tool. max_turns: 10.
 
-Reads: experiment state, lab notebook, all version artifacts (results, scripts, analyses)
+Reads (via prompt): experiment state, notebook TOC, all version artifacts (results, scripts, analyses)
+Reads (via MCP): full notebook entry bodies on demand
 Produces: report.md (markdown) covering journey, findings, recommendations.
 Resolves any remaining pending predictions before generating the report.">
           <rect x="1130" y="280" width="125" height="58" rx="10"
@@ -965,16 +968,18 @@ Supports tree-structured reasoning trajectories via follows_from links.">
 
         <!-- Lab Notebook -->
         <g class="artifact-node" data-artifact="notebook"
-           data-tooltip="lab notebook|Strategic journal written by the Scientist (plan + revision). Records hypothesis, reasoning, and dead ends. Not a copy of approach specs.
+           data-tooltip="lab notebook|Strategic journal written by the Scientist (plan + revision), Stop Gate, and Ingestor. Stored as lab_notebook.xml. Records hypothesis, reasoning, and dead ends. Not a copy of approach specs.
 
-Example:
+Agentic access: agents see only a compact one-line-per-entry Table of Contents in their prompt ([version source] title), and call mcp__notebook__read_notebook to fetch the full body of any entry on demand (queryable by versions, source, search, or last_n). API-mode critics that cannot call MCP tools fall back to the full inline XML.
+
+Example TOC line:
+[v03 scientist] Bi-exponential PaO2 decay
+
+Example entry body fetched via tool:
 ## v03 - Bi-exponential PaO2 decay
 Hypothesis: single-exponential is inadequate for holds > 300s.
-
 Strategy: structural. Replace single-exp with bi-exp for FL-type holds.
-
-Key insight from v02: FL#6 tau_washout=250 is at bound regardless of other parameter changes. This is a structural limitation, not a tuning problem.
-
+Key insight from v02: FL#6 tau_washout=250 is at bound regardless of other parameter changes.
 Result: 1/2 predictions confirmed. tau2 identifiability is a new concern.">
           <rect x="190" y="518" width="115" height="32" rx="6"
                 fill="rgba(78,143,212,0.06)" stroke="#4e8fd4" stroke-width="1" stroke-opacity="0.3" stroke-dasharray="4 3"/>
@@ -1827,7 +1832,11 @@ Never modifies original data. Logs assumptions to the lab notebook.">
     give the Scientist raw material for mechanism hypotheses.
     <br><br>
     <strong>Lab notebook</strong> is a strategic journal (hypothesis, reasoning, dead ends),
-    not a copy of approach specs or detailed results. That detail lives in results.txt.
+    not a copy of approach specs or detailed results. That detail lives in results.txt. Agents see
+    only a compact one-line-per-entry Table of Contents in their prompt and call
+    <code>mcp__notebook__read_notebook</code> to fetch full entry bodies on demand (queryable by
+    versions, source, search, or last_n). API-mode critics fall back to the full inline XML since
+    they cannot call MCP tools.
     <br><br>
     <strong>Web search</strong> is available to the Scientist (plan), Debate (both sides),
     and Scientist (revision). This grounds hypotheses and critiques in real science.

@@ -90,6 +90,14 @@ def get_deferred_descriptions() -> dict[str, str]:
 # ---------------------------------------------------------------------------
 
 
+MCP_SCRATCH_DIRNAME = ".mcp"
+"""Hidden subdirectory inside an experiment run dir where MCP scratch JSON
+files live. Hidden so the user-facing artifact directory (versions, plots,
+report.md, lab_notebook.xml) stays uncluttered. Each agent invocation
+overwrites the same filename inside this directory; content is deterministic
+for a given input snapshot, so concurrent critics do not race in practice."""
+
+
 def build_mcp_server_config(
     data_dicts: list[dict[str, Any]],
     server_script: str | Path,
@@ -99,14 +107,17 @@ def build_mcp_server_config(
 ) -> dict[str, Any]:
     """Serialize data and return an stdio MCP server config.
 
-    When *output_dir* is provided the JSON file is written there (stable,
-    self-contained experiment folder). Otherwise a temporary file is used
+    When *output_dir* is provided the JSON file is written to a hidden
+    ``.mcp/`` subdirectory inside it (stable path, survives resume, kept out
+    of the user-visible run-dir listing). Otherwise a temporary file is used
     (for tests).
 
     Returns a dict suitable for ``SDKOptions.mcp_servers`` values.
     """
     if output_dir is not None:
-        data_path = output_dir / filename
+        scratch_dir = output_dir / MCP_SCRATCH_DIRNAME
+        scratch_dir.mkdir(parents=True, exist_ok=True)
+        data_path = scratch_dir / filename
         data_path.write_text(json.dumps(data_dicts))
     else:
         with tempfile.NamedTemporaryFile(

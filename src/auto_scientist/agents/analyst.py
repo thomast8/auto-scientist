@@ -13,6 +13,12 @@ from dataclasses import replace
 from pathlib import Path
 from typing import Any
 
+from auto_scientist.agents.notebook_tool import (
+    NOTEBOOK_SPEC,
+    build_notebook_mcp_server,
+    format_notebook_toc,
+)
+from auto_scientist.notebook import parse_notebook_entries
 from auto_scientist.prompts.analyst import ANALYST_USER, build_analyst_system
 from auto_scientist.retry import QueryResult, agent_retry_loop
 from auto_scientist.schemas import AnalystOutput
@@ -116,7 +122,7 @@ async def run_analyst(
             domain_knowledge: str (optional, iteration 0 only)
             data_summary: str (optional, iteration 0 only)
     """
-    notebook_content = notebook_path.read_text() if notebook_path.exists() else "(no notebook)"
+    notebook_entries = parse_notebook_entries(notebook_path)
 
     # Build the data section depending on iteration 0 vs normal
     if data_dir is not None and (results_path is None or not results_path.exists()):
@@ -168,7 +174,7 @@ async def run_analyst(
     user_prompt = ANALYST_USER.format(
         domain_knowledge=domain_knowledge or "(no domain knowledge provided)",
         data_section=data_section,
-        notebook_content=notebook_content,
+        notebook_content=format_notebook_toc(notebook_entries),
     )
 
     json_instruction = (
@@ -185,6 +191,12 @@ async def run_analyst(
     # prompts when running as a sub-agent via the SDK.
     max_turns = 30
     allowed_tools = ["Read", "Glob"]
+    # Write the scratch file next to the notebook (the run directory),
+    # not `cwd` - on iteration 0 cwd is the read-only data directory.
+    mcp_servers: dict[str, Any] = {
+        "notebook": build_notebook_mcp_server(notebook_path, output_dir=notebook_path.parent),
+    }
+    allowed_tools.append(NOTEBOOK_SPEC.mcp_tool_name)
     prompt_provider = "gpt" if provider == "openai" else "claude"
     analyst_system = build_analyst_system(prompt_provider)
     budget = prepare_turn_budget(
@@ -199,6 +211,7 @@ async def run_analyst(
         cwd=cwd,
         model=model,
         extra_args={},
+        mcp_servers=mcp_servers,
         response_schema=AnalystOutput,
     )
 

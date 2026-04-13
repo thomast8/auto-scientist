@@ -8,7 +8,14 @@ Returns the report content as a string; the orchestrator handles file writing.
 
 import logging
 from pathlib import Path
+from typing import Any
 
+from auto_scientist.agents.notebook_tool import (
+    NOTEBOOK_SPEC,
+    build_notebook_mcp_server,
+    format_notebook_toc,
+)
+from auto_scientist.notebook import parse_notebook_entries
 from auto_scientist.prompts.report import REPORT_USER, build_report_system
 from auto_scientist.retry import QueryResult, agent_retry_loop
 from auto_scientist.retry import ValidationError as RetryValidationError
@@ -49,7 +56,7 @@ async def run_report(
     Returns:
         Report content as a markdown string.
     """
-    notebook_content = notebook_path.read_text() if notebook_path.exists() else "(no notebook)"
+    notebook_entries = parse_notebook_entries(notebook_path)
 
     abductions_section = ""
     if pending_abductions:
@@ -67,12 +74,15 @@ async def run_report(
         goal=state.goal,
         total_iterations=state.iteration,
         best_version=state.versions[-1].version if state.versions else "none",
-        notebook_content=notebook_content,
+        notebook_content=format_notebook_toc(notebook_entries),
         pending_abductions_section=abductions_section,
     )
 
     max_turns = 10
-    allowed_tools = ["Read", "Glob"]
+    allowed_tools = ["Read", "Glob", NOTEBOOK_SPEC.mcp_tool_name]
+    mcp_servers: dict[str, Any] = {
+        "notebook": build_notebook_mcp_server(notebook_path, output_dir=output_dir),
+    }
     prompt_provider = "gpt" if provider == "openai" else "claude"
     report_system = build_report_system(prompt_provider)
     budget = prepare_turn_budget(report_system, max_turns, allowed_tools, provider=provider)
@@ -85,6 +95,7 @@ async def run_report(
         cwd=output_dir,
         model=model,
         extra_args={},
+        mcp_servers=mcp_servers,
     )
 
     # Shared state between query and validate closures.
@@ -94,7 +105,7 @@ async def run_report(
         opts = options
         if resume_session_id is not None:
             retry_max_turns = 10
-            retry_allowed_tools = ["Read", "Glob"]
+            retry_allowed_tools = ["Read", "Glob", NOTEBOOK_SPEC.mcp_tool_name]
             retry_budget = prepare_turn_budget(report_system, retry_max_turns, retry_allowed_tools)
             opts = SDKOptions(
                 system_prompt=retry_budget.system_prompt,
@@ -105,6 +116,7 @@ async def run_report(
                 model=model,
                 resume=resume_session_id,
                 extra_args={"setting-sources": ""},
+                mcp_servers=mcp_servers,
             )
 
         report_parts: list[str] = []

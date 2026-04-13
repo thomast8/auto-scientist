@@ -33,6 +33,11 @@ from auto_scientist.agents.debate_models import (
     CriticOutput,
     DebateResult,
 )
+from auto_scientist.agents.notebook_tool import (
+    NOTEBOOK_SPEC,
+    build_notebook_mcp_server,
+    format_notebook_toc,
+)
 from auto_scientist.agents.prediction_tool import (
     PREDICTION_SPEC,
     build_prediction_mcp_server,
@@ -41,6 +46,7 @@ from auto_scientist.agents.prediction_tool import (
 from auto_scientist.model_config import AgentModelConfig, reasoning_to_cc_extra_args
 from auto_scientist.models.google_client import query_google
 from auto_scientist.models.openai_client import query_openai
+from auto_scientist.notebook import parse_notebook_entries, read_notebook
 from auto_scientist.prompts.critic import (
     CRITIC_USER,
     DEFAULT_CRITIC_INSTRUCTIONS,
@@ -72,12 +78,14 @@ CRITIC_BASE_TOOLS = ["WebSearch"]
 
 def _build_critic_tools_and_mcp(
     prediction_history_records: list[PredictionRecord] | None,
+    notebook_path: Path | None = None,
     output_dir: Path | None = None,
 ) -> tuple[list[str], dict[str, Any]]:
     """Build the tools list and MCP servers dict for a critic invocation.
 
-    Mirrors the scientist's pattern: base tools + optional prediction MCP.
-    MCP is only usable in SDK mode; direct API callers ignore mcp_servers.
+    Mirrors the scientist's pattern: base tools + optional prediction MCP +
+    notebook MCP. MCP is only usable in SDK mode; direct API callers ignore
+    mcp_servers and get inline content instead.
     """
     tools = list(CRITIC_BASE_TOOLS)
     mcp_servers: dict[str, Any] = {}
@@ -86,6 +94,9 @@ def _build_critic_tools_and_mcp(
             prediction_history_records, output_dir=output_dir
         )
         tools.append(PREDICTION_SPEC.mcp_tool_name)
+    if notebook_path is not None:
+        mcp_servers["notebook"] = build_notebook_mcp_server(notebook_path, output_dir=output_dir)
+        tools.append(NOTEBOOK_SPEC.mcp_tool_name)
     return tools, mcp_servers
 
 
@@ -316,7 +327,7 @@ async def _query_critic_structured(
 async def run_single_critic_debate(
     config: AgentModelConfig,
     plan: dict[str, Any],
-    notebook_content: str,
+    notebook_path: Path,
     domain_knowledge: str = "",
     message_buffer: list[str] | None = None,
     persona: dict[str, str] | None = None,
@@ -332,6 +343,10 @@ async def run_single_critic_debate(
     Returns a DebateResult with structured output plus raw transcript.
 
     Args:
+        notebook_path: Path to the run's lab_notebook.xml. The critic reads
+            it to build either a compact TOC (SDK mode, paired with the
+            mcp__notebook__read_notebook tool) or a full inline dump
+            (API mode, no MCP tool available).
         prediction_history: Pre-formatted text for prompt injection.
         prediction_history_records: Raw records for MCP server (SDK mode only).
         output_dir: Directory for MCP data files.
@@ -344,10 +359,23 @@ async def run_single_critic_debate(
     label = f"{config.provider}:{config.model}"
 
     has_predictions = persona_name in PREDICTION_PERSONAS
+    is_sdk = config.mode == "sdk"
+
+    # Notebook wiring: SDK-mode critics get the compact TOC + MCP tool,
+    # API-mode critics get the full XML inline (no tool to call). Only
+    # parse entries in SDK mode - API mode reads the file directly and
+    # would discard the parsed result.
+    if is_sdk:
+        notebook_entries = parse_notebook_entries(notebook_path)
+        notebook_content = format_notebook_toc(notebook_entries)
+    else:
+        notebook_content = read_notebook(notebook_path) or "(empty notebook)"
 
     if has_predictions:
         tools, mcp_servers = _build_critic_tools_and_mcp(
-            prediction_history_records, output_dir=output_dir
+            prediction_history_records,
+            notebook_path=notebook_path if is_sdk else None,
+            output_dir=output_dir,
         )
         effective_prediction_history = (
             format_compact_tree(prediction_history_records)
@@ -355,13 +383,17 @@ async def run_single_critic_debate(
             else prediction_history
         )
     else:
-        tools = list(CRITIC_BASE_TOOLS)
-        mcp_servers = {}
+        tools, mcp_servers = _build_critic_tools_and_mcp(
+            None,
+            notebook_path=notebook_path if is_sdk else None,
+            output_dir=output_dir,
+        )
         effective_prediction_history = ""
 
     # MCP tool references only make sense in SDK mode where the tool is wired.
     # API-mode critics get prediction history inline but no tool to call.
-    has_mcp_tool = has_predictions and config.mode == "sdk"
+    has_mcp_tool = has_predictions and is_sdk
+    has_notebook_tool = is_sdk
 
     critic_system, critic_user = _build_critic_prompt(
         plan,
@@ -374,6 +406,7 @@ async def run_single_critic_debate(
         goal=goal,
         has_predictions=has_predictions,
         has_mcp_tool=has_mcp_tool,
+        has_notebook_tool=has_notebook_tool,
         provider=config.provider,
         pending_abductions=pending_abductions,
     )
@@ -420,7 +453,7 @@ async def _staggered_debate(
     delay: float,
     config: AgentModelConfig,
     plan: dict[str, Any],
-    notebook_content: str,
+    notebook_path: Path,
     domain_knowledge: str = "",
     message_buffer: list[str] | None = None,
     persona: dict[str, str] | None = None,
@@ -437,7 +470,7 @@ async def _staggered_debate(
     return await run_single_critic_debate(
         config=config,
         plan=plan,
-        notebook_content=notebook_content,
+        notebook_path=notebook_path,
         domain_knowledge=domain_knowledge,
         message_buffer=message_buffer,
         persona=persona,
@@ -453,7 +486,7 @@ async def _staggered_debate(
 async def run_debate(
     critic_configs: list[AgentModelConfig],
     plan: dict[str, Any],
-    notebook_content: str,
+    notebook_path: Path,
     domain_knowledge: str = "",
     message_buffer: list[str] | None = None,
     message_buffers: dict[str, list[str]] | None = None,
@@ -475,7 +508,9 @@ async def run_debate(
     Args:
         critic_configs: Pool of critic model configs (round-robin assigned).
         plan: Scientist's plan dict.
-        notebook_content: Current lab notebook content.
+        notebook_path: Path to the run's lab_notebook.xml. Each critic reads
+            it directly so SDK-mode critics can build a compact TOC + MCP
+            tool and API-mode critics can fall back to inline XML.
         domain_knowledge: Domain-specific context.
         message_buffer: Legacy single shared buffer.
         message_buffers: Per-persona buffers keyed by persona name.
@@ -530,7 +565,7 @@ async def run_debate(
                 delay=delay,
                 config=config,
                 plan=plan,
-                notebook_content=notebook_content,
+                notebook_path=notebook_path,
                 domain_knowledge=domain_knowledge,
                 message_buffer=buf,
                 persona=persona,
@@ -578,6 +613,7 @@ def _build_critic_prompt(
     goal: str = "",
     has_predictions: bool = True,
     has_mcp_tool: bool = True,
+    has_notebook_tool: bool = True,
     provider: str = "anthropic",
     pending_abductions: str = "",
 ) -> tuple[str, str]:
@@ -592,6 +628,10 @@ def _build_critic_prompt(
     When has_mcp_tool is False (API mode), prediction history is included
     inline but tool references and "MUST call" instructions are omitted
     since no MCP tool is available.
+
+    When has_notebook_tool is True (SDK mode), the notebook section is a
+    compact Table of Contents plus mcp__notebook__read_notebook guidance.
+    When False (API mode), the full notebook XML is dumped inline.
 
     Returns:
         (system_prompt, user_prompt) tuple.
@@ -667,6 +707,35 @@ def _build_critic_prompt(
         pending_abductions_section = ""
         abduction_task_text = ""
 
+    # Notebook section: compact TOC + tool in SDK mode, full inline XML in API mode.
+    notebook_body = notebook_content or "(empty)"
+    if has_notebook_tool:
+        notebook_tool_name = NOTEBOOK_SPEC.mcp_tool_name
+        notebook_role_text = (
+            f", and a {notebook_tool_name} tool to read full notebook entries "
+            "when the Table of Contents title is not enough context"
+        )
+        notebook_evidence_text = "a lab notebook Table of Contents"
+        notebook_pipeline_text = (
+            "\nThe notebook in <context> is a Table of Contents only (version, "
+            f"source, title per entry). Call {notebook_tool_name} with "
+            "versions=[...], source=..., search=..., or last_n=... when you "
+            "need to read the full body of an entry before finalizing a "
+            "concern that references prior iteration reasoning."
+        )
+        notebook_tool_guidance = (
+            f"\n- Call {notebook_tool_name} whenever a concern depends on the "
+            "specific content of a prior notebook entry. Do not invent prior "
+            "reasoning from the TOC title alone."
+        )
+        notebook_section = f"<notebook_toc>{notebook_body}</notebook_toc>"
+    else:
+        notebook_role_text = ""
+        notebook_evidence_text = "the lab notebook"
+        notebook_pipeline_text = ""
+        notebook_tool_guidance = ""
+        notebook_section = f"<notebook>{notebook_body}</notebook>"
+
     prompt_provider = "gpt" if provider == "openai" else "claude"
     system = build_critic_system(prompt_provider).format(
         persona_text=persona_text,
@@ -676,12 +745,16 @@ def _build_critic_prompt(
         prediction_evidence_text=prediction_evidence_text,
         prediction_pipeline_text=prediction_pipeline_text,
         prediction_tool_guidance=prediction_tool_guidance,
+        notebook_role_text=notebook_role_text,
+        notebook_evidence_text=notebook_evidence_text,
+        notebook_pipeline_text=notebook_pipeline_text,
+        notebook_tool_guidance=notebook_tool_guidance,
     )
 
     user = CRITIC_USER.format(
         goal=goal or "(no goal specified)",
         domain_knowledge=domain_knowledge or "(none provided)",
-        notebook_content=notebook_content or "(empty)",
+        notebook_section=notebook_section,
         analysis_json=analysis_json or "(no analysis yet)",
         prediction_history_section=prediction_history_section,
         pending_abductions_section=pending_abductions_section,

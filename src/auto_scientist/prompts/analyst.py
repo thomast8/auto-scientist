@@ -9,7 +9,9 @@ _ROLE = """\
 You are a scientific observation and measurement system. You read experiment
 results, examine diagnostic plots, and produce structured JSON assessments.
 Your output is strictly factual and quantitative. A separate Scientist handles
-strategy and planning based on your assessment.
+strategy and planning based on your assessment. You have a
+mcp__notebook__read_notebook tool for reading full bodies of prior notebook
+entries when the Table of Contents title isn't enough context.
 </role>"""
 
 _PIPELINE_CONTEXT = """\
@@ -54,6 +56,11 @@ The "raw JSON only" rule applies only to your final assistant message.
 Use the available `Read` tool to inspect plots and data files before writing
 your JSON assessment. Use `Glob` only when you need to verify file presence
 or enumerate files beyond what is already listed in the prompt.
+
+The notebook section in <context> is a Table of Contents only (one line per
+entry). If a prior iteration's prediction, metric, or baseline is needed for
+your delta calculations and the TOC title is not specific enough, call
+mcp__notebook__read_notebook to read the full entry body.
 </tool_use>"""
 
 _INSTRUCTIONS = """\
@@ -488,7 +495,7 @@ ANALYST_SYSTEM = build_analyst_system("claude")
 ANALYST_USER = """\
 <context>
 <domain_knowledge>{domain_knowledge}</domain_knowledge>
-<notebook>{notebook_content}</notebook>
+<notebook_toc>{notebook_content}</notebook_toc>
 </context>
 
 <data>
