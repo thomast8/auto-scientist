@@ -263,11 +263,12 @@ async def run_single_stop_debate(
 
     is_sdk = config.mode == "sdk"
     notebook_path = Path(notebook_path)
-    notebook_entries = parse_notebook_entries(notebook_path)
     if is_sdk:
-        notebook_content = format_notebook_toc(notebook_entries)
+        notebook_entries = parse_notebook_entries(notebook_path)
+        notebook_section = f"<notebook_toc>{format_notebook_toc(notebook_entries)}</notebook_toc>"
     else:
-        notebook_content = read_notebook(notebook_path) or "(empty notebook)"
+        notebook_xml = read_notebook(notebook_path) or "(empty notebook)"
+        notebook_section = f"<notebook>{notebook_xml}</notebook>"
 
     tools, mcp_servers = _build_critic_tools_and_mcp(
         prediction_history_records,
@@ -278,7 +279,9 @@ async def run_single_stop_debate(
     prompt_provider = "gpt" if config.provider == "openai" else "claude"
     has_predictions = bool(prediction_history_records)
     critic_system = build_stop_critic_system(
-        prompt_provider, has_predictions=has_predictions
+        prompt_provider,
+        has_predictions=has_predictions,
+        has_notebook_tool=is_sdk,
     ).format(
         persona_text=persona_text,
         persona_instructions=persona_instructions or "",
@@ -293,7 +296,7 @@ async def run_single_stop_debate(
     critic_user = STOP_CRITIC_USER.format(
         goal=goal,
         domain_knowledge=domain_knowledge,
-        notebook_content=notebook_content,
+        notebook_section=notebook_section,
         analysis_json=analysis_json,
         prediction_history=effective_prediction_history,
         stop_reason=stop_reason,

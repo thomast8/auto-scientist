@@ -214,6 +214,32 @@ class TestBuildCriticPrompt:
         assert "You MUST call this tool at least once" not in user
         assert "specific pred_ids or prior outcomes" in user
 
+    def test_sdk_mode_uses_notebook_toc_tag_and_tool(self):
+        """SDK-mode critics must see <notebook_toc> and the read_notebook tool."""
+        system, user = _build_critic_prompt(
+            {"h": "p"},
+            "TOC content here",
+            "",
+            has_notebook_tool=True,
+        )
+        assert "<notebook_toc>" in user
+        assert "<notebook>" not in user.replace("<notebook_toc>", "")
+        assert "mcp__notebook__read_notebook" in system
+        assert "Table of Contents" in system
+
+    def test_api_mode_uses_notebook_tag_without_tool(self):
+        """API-mode critics must see <notebook> and NOT be told about the tool."""
+        system, user = _build_critic_prompt(
+            {"h": "p"},
+            "<lab_notebook><entry/></lab_notebook>",
+            "",
+            has_notebook_tool=False,
+        )
+        assert "<notebook>" in user
+        assert "<notebook_toc>" not in user
+        assert "mcp__notebook__read_notebook" not in system
+        assert "Table of Contents" not in system
+
 
 class TestRunDebate:
     @pytest.mark.asyncio
@@ -756,6 +782,22 @@ class TestBuildCriticToolsAndMcp:
         assert "WebSearch" in tools
         assert "predictions" in mcp_servers
         assert mcp_servers["predictions"]["type"] == "stdio"
+
+    def test_with_notebook_path_adds_notebook_mcp_tool(self, notebook_path):
+        from auto_scientist.agents.notebook_tool import NOTEBOOK_SPEC
+
+        tools, mcp_servers = _build_critic_tools_and_mcp(None, notebook_path=notebook_path)
+        assert NOTEBOOK_SPEC.mcp_tool_name in tools
+        assert "WebSearch" in tools
+        assert "notebook" in mcp_servers
+        assert mcp_servers["notebook"]["type"] == "stdio"
+
+    def test_without_notebook_path_skips_notebook_mcp(self):
+        from auto_scientist.agents.notebook_tool import NOTEBOOK_SPEC
+
+        tools, mcp_servers = _build_critic_tools_and_mcp(None, notebook_path=None)
+        assert NOTEBOOK_SPEC.mcp_tool_name not in tools
+        assert "notebook" not in mcp_servers
 
 
 class TestCriticMcpIntegration:

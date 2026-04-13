@@ -305,7 +305,7 @@ async def run_scientist_with_tool(
                 final_result = msg.result
                 if msg.usage:
                     print(f"\n  Usage: {msg.usage}")
-    except BaseException as exc:  # noqa: BLE001
+    except Exception as exc:
         logger.warning(f"SDK error: {type(exc).__name__}: {exc}")
 
     print(f"\n{'-' * 60}")

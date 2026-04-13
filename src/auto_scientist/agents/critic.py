@@ -362,9 +362,11 @@ async def run_single_critic_debate(
     is_sdk = config.mode == "sdk"
 
     # Notebook wiring: SDK-mode critics get the compact TOC + MCP tool,
-    # API-mode critics get the full XML inline (no tool to call).
-    notebook_entries = parse_notebook_entries(notebook_path)
+    # API-mode critics get the full XML inline (no tool to call). Only
+    # parse entries in SDK mode - API mode reads the file directly and
+    # would discard the parsed result.
     if is_sdk:
+        notebook_entries = parse_notebook_entries(notebook_path)
         notebook_content = format_notebook_toc(notebook_entries)
     else:
         notebook_content = read_notebook(notebook_path) or "(empty notebook)"

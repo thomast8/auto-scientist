@@ -224,6 +224,27 @@ class TestHandleReadNotebook:
         assert "Initial exploration" not in text
 
     @pytest.mark.asyncio
+    async def test_source_stop_revision(self, tmp_path: Path):
+        """Regression: stop_revision is a real source value the orchestrator writes."""
+        nb = tmp_path / NOTEBOOK_FILENAME
+        append_entry(nb, "v01 plan\n\nbody", version="v01", source="scientist")
+        append_entry(
+            nb,
+            "Stop withdrawn after debate\n\nrationale",
+            version="v02",
+            source="stop_revision",
+        )
+        entries = parse_notebook_entries(nb)
+
+        result = await _handle_read_notebook(entries, {"source": "stop_revision"})
+        text = result["content"][0]["text"]
+        assert "Stop withdrawn after debate" in text
+        assert "v01 plan" not in text
+
+        summary = await _handle_read_notebook(entries, {"summary": True})
+        assert "stop_revision: 1" in summary["content"][0]["text"]
+
+    @pytest.mark.asyncio
     async def test_search_hit(self, sample_entries):
         result = await _handle_read_notebook(sample_entries, {"search": "Falsification"})
         text = result["content"][0]["text"]

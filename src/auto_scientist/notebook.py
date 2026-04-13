@@ -5,10 +5,13 @@ Each entry has a version, source agent, title, and narrative content.
 The orchestrator owns the file structure; agents produce plain text content.
 """
 
+import logging
 import re
 from pathlib import Path
 from xml.etree import ElementTree as ET
 from xml.sax.saxutils import escape
+
+logger = logging.getLogger(__name__)
 
 NOTEBOOK_FILENAME = "lab_notebook.xml"
 
@@ -81,18 +84,35 @@ def parse_notebook_entries(notebook_path: Path) -> list[dict[str, str]]:
     Each returned dict has keys: ``version``, ``source``, ``title``, ``content``.
     Returns ``[]`` if the file is missing, empty, or malformed. Preserves the
     order in which entries appear in the file.
+
+    Missing-file is silent (the first iteration legitimately has no notebook
+    yet). Read errors and parse errors are logged at WARNING/ERROR so a
+    corrupted notebook is visible instead of silently downgrading every
+    subsequent agent prompt to "(no notebook entries yet)".
     """
     if not notebook_path.exists():
         return []
     try:
         text = notebook_path.read_text().strip()
-    except OSError:
+    except OSError as exc:
+        logger.warning(
+            f"Failed to read lab notebook at {notebook_path}: {exc}. "
+            "Falling back to empty entry list - downstream agents will plan "
+            "as if no prior notebook history existed."
+        )
         return []
     if not text:
         return []
     try:
         root = ET.fromstring(text)
-    except ET.ParseError:
+    except ET.ParseError as exc:
+        logger.error(
+            f"Lab notebook {notebook_path} is malformed XML: {exc}. "
+            "Falling back to empty entry list - this almost certainly "
+            "indicates a corrupted file from a partial write or crash, "
+            "and any prior reasoning history is now invisible to agents. "
+            "Investigate before continuing the run."
+        )
         return []
 
     entries: list[dict[str, str]] = []

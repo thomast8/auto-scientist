@@ -10,8 +10,10 @@ Usage (by the Claude Code CLI, not directly):
 
 NOTE: Query helpers (``_format_entry``, ``_query``, etc.) are intentionally
 duplicated from ``notebook_tool.py``. This module runs as an isolated
-subprocess and must not import framework code (Pydantic, persistence, etc.).
-Keep both files in sync when changing query semantics.
+subprocess and avoids importing the framework's heavy modules (notebook.py,
+state.py, Pydantic schemas) so its startup is fast and its dependency
+surface stays minimal. The light import of ``_mcp_base`` for the generic
+stdio runner is fine. Keep both files in sync when changing query semantics.
 """
 
 from __future__ import annotations
@@ -31,6 +33,9 @@ def _format_entry(entry: dict[str, Any]) -> str:
     return f"[{version} {source}] {title}\n{content}"
 
 
+_KNOWN_SOURCES = ("ingestor", "scientist", "revision", "stop_gate", "stop_revision")
+
+
 def _build_status(entries: list[dict[str, Any]]) -> str:
     """Build a counts-only status summary (no TOC, since TOC is inline in prompt)."""
     by_source: dict[str, int] = {}
@@ -39,12 +44,12 @@ def _build_status(entries: list[dict[str, Any]]) -> str:
         by_source[src] = by_source.get(src, 0) + 1
 
     lines = [f"Total: {len(entries)} notebook entries"]
-    for src in ["ingestor", "scientist", "revision", "stop_gate"]:
+    for src in _KNOWN_SOURCES:
         count = by_source.get(src, 0)
         if count:
             lines.append(f"  {src}: {count}")
     for src, count in sorted(by_source.items()):
-        if src not in {"ingestor", "scientist", "revision", "stop_gate"} and count:
+        if src not in _KNOWN_SOURCES and count:
             lines.append(f"  {src}: {count}")
     return "\n".join(lines)
 
@@ -186,7 +191,13 @@ if __name__ == "__main__":
                 },
                 "source": {
                     "type": "string",
-                    "enum": ["scientist", "stop_gate", "revision", "ingestor"],
+                    "enum": [
+                        "scientist",
+                        "revision",
+                        "stop_gate",
+                        "stop_revision",
+                        "ingestor",
+                    ],
                     "description": ("Return all entries from a specific source."),
                 },
                 "search": {

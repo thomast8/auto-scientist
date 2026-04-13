@@ -380,7 +380,7 @@ investigation. You have web search available to verify claims and look up
 relevant methods.{prediction_tool_note}{notebook_tool_note}
 </role>"""
 
-_STOP_CRITIC_TOOL_USE_GUIDANCE = """\
+_STOP_CRITIC_TOOL_USE_GUIDANCE_SDK = """\
 <tool_use>
 Tool calls are allowed before the final JSON response.
 The "raw JSON only" rule applies only to your final assistant message.
@@ -394,6 +394,29 @@ Before responding:
 - The notebook in <context> is a Table of Contents only. Call
   mcp__notebook__read_notebook to read the full body of any entry when
   judging whether a sub-question or depth concern is supported by what
+  was actually written down.
+- If the provided evidence already resolves the point, do not browse
+  unnecessarily.
+
+Limit to 1-2 targeted searches per response. More searches rarely
+improve critique quality and can introduce contradictory information.
+If you call a tool, reference its result in your output. If the result
+contradicts your draft reasoning, update your reasoning.
+</tool_use>"""
+
+_STOP_CRITIC_TOOL_USE_GUIDANCE_API = """\
+<tool_use>
+Tool calls are allowed before the final JSON response.
+The "raw JSON only" rule applies only to your final assistant message.
+
+Before responding:
+- Use targeted web search when you need literature or standard-method support
+  for a coverage or depth challenge.
+- If mcp__predictions__read_predictions is available and you need details
+  about a specific pred_id, outcome, or chain, call it rather than guessing
+  from the compact summary.
+- The notebook in <context> is the full lab notebook XML. Read it directly
+  when judging whether a sub-question or depth concern is supported by what
   was actually written down.
 - If the provided evidence already resolves the point, do not browse
   unnecessarily.
@@ -451,22 +474,37 @@ Example:
 </output_format>"""
 
 
-def build_stop_critic_system(provider: str = "claude", *, has_predictions: bool = True) -> str:
+def build_stop_critic_system(
+    provider: str = "claude",
+    *,
+    has_predictions: bool = True,
+    has_notebook_tool: bool = True,
+) -> str:
     """Assemble Stop Critic system prompt template in provider-optimal order.
 
     Returns a template with {persona_text}, {persona_instructions},
     {critic_output_schema} placeholders.
+
+    When *has_notebook_tool* is False (API-mode critics that cannot call
+    MCP tools), the notebook tool note is omitted from the role and the
+    tool-use guidance describes the inline XML payload instead of a TOC.
     """
-    note = _PREDICTION_TOOL_NOTE if has_predictions else ""
+    pred_note = _PREDICTION_TOOL_NOTE if has_predictions else ""
+    notebook_note = _NOTEBOOK_TOOL_NOTE if has_notebook_tool else ""
     role = _STOP_CRITIC_ROLE.format(
-        prediction_tool_note=note, notebook_tool_note=_NOTEBOOK_TOOL_NOTE
+        prediction_tool_note=pred_note, notebook_tool_note=notebook_note
+    )
+    tool_use = (
+        _STOP_CRITIC_TOOL_USE_GUIDANCE_SDK
+        if has_notebook_tool
+        else _STOP_CRITIC_TOOL_USE_GUIDANCE_API
     )
 
     if provider == "gpt":
         raw = "\n\n".join(
             [
                 role,
-                _STOP_CRITIC_TOOL_USE_GUIDANCE,
+                tool_use,
                 "{persona_text}",
                 "{persona_instructions}",
                 _STOP_CRITIC_OUTPUT_FORMAT,
@@ -477,7 +515,7 @@ def build_stop_critic_system(provider: str = "claude", *, has_predictions: bool 
         raw = "\n\n".join(
             [
                 role,
-                _STOP_CRITIC_TOOL_USE_GUIDANCE,
+                tool_use,
                 "{persona_text}",
                 _STOP_CRITIC_PIPELINE_CONTEXT,
                 "{persona_instructions}",
@@ -494,7 +532,7 @@ STOP_CRITIC_USER = """\
 <context>
 <goal>{goal}</goal>
 <domain_knowledge>{domain_knowledge}</domain_knowledge>
-<notebook>{notebook_content}</notebook>
+{notebook_section}
 <analysis>{analysis_json}</analysis>
 <prediction_history>{prediction_history}</prediction_history>
 </context>
