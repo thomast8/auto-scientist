@@ -1,22 +1,25 @@
-"""MCP tool for querying lab notebook entries on demand.
+"""Framework-side wrappers for the notebook MCP tool.
 
-Provides ``build_notebook_mcp_server()`` which creates an stdio MCP server
-config that the Claude Code CLI (or Codex) can connect to. The server reads
-notebook entries from a temporary JSON file and exposes a ``read_notebook``
-tool.
+This module owns the pieces that need real framework dependencies:
 
-Also provides ``_handle_read_notebook()`` for direct use in tests.
+* The ``MCPToolSpec`` (registered with ``_mcp_base`` so sdk_utils can
+  auto-discover the tool description).
+* The ``format_notebook_toc()`` formatter used at prompt-build time by
+  every agent that injects the compact Table of Contents.
+* The ``build_notebook_mcp_server()`` factory that parses
+  ``lab_notebook.xml`` and delegates to ``build_mcp_server_config`` for
+  the stdio handshake.
+* A thin ``_handle_read_notebook()`` shim that wraps the shared query
+  function in MCP content shape so unit tests can call it directly.
 
-NOTE: Query helpers (``_format_entry_detail``, ``_query`` etc.) are
-intentionally duplicated in ``_notebook_mcp_server.py``, which runs as an
-isolated subprocess and avoids importing the framework's heavy modules
-(notebook.py, state.py, Pydantic schemas). Keep both files in sync when
-changing query semantics.
+The actual query/format logic lives in :mod:`auto_scientist.agents.notebook_query`,
+a stdlib-only module that the subprocess script
+``_notebook_mcp_server.py`` also imports. There is no duplicated query
+code to keep in sync.
 """
 
 from __future__ import annotations
 
-import contextlib
 import logging
 from pathlib import Path
 from typing import Any
@@ -26,9 +29,22 @@ from auto_scientist.agents._mcp_base import (
     build_mcp_server_config,
     register_mcp_tool,
 )
+from auto_scientist.agents.notebook_query import normalize_args as _normalize_args
+from auto_scientist.agents.notebook_query import query as _query
 from auto_scientist.notebook import parse_notebook_entries
 
 logger = logging.getLogger(__name__)
+
+# Re-export so existing tests/scripts can keep importing _normalize_args
+# from notebook_tool.py.
+__all__ = [
+    "NOTEBOOK_SPEC",
+    "build_notebook_mcp_server",
+    "format_notebook_toc",
+    "_handle_read_notebook",
+    "_normalize_args",
+]
+
 
 # ---------------------------------------------------------------------------
 # Tool spec (registered so sdk_utils can auto-discover the description)
@@ -83,9 +99,12 @@ _READ_NOTEBOOK_SCHEMA: dict[str, Any] = {
         "search": {
             "type": "string",
             "description": (
-                "Case-insensitive substring search across entry titles and "
-                "content. Returns every entry whose title or body contains "
-                "the substring."
+                "Case-insensitive whitespace-tokenized search across entry "
+                "titles and content. The query is split on whitespace and "
+                "every resulting token must appear (as a substring) in the "
+                "title or body for the entry to match. Multi-word queries "
+                "are AND, not phrase: 'repeated cross validation' matches "
+                "an entry containing all three words in any order."
             ),
         },
         "last_n": {
@@ -97,41 +116,6 @@ _READ_NOTEBOOK_SCHEMA: dict[str, Any] = {
         },
     },
 }
-
-
-def _normalize_args(args: dict[str, Any]) -> dict[str, Any]:
-    """Coerce common LLM type mistakes into the canonical schema.
-
-    Fixes observed in production for the prediction tool (same patterns apply
-    here):
-      - ``versions: '["v01"]'`` (JSON string) instead of ``["v01"]``.
-      - ``versions: "v01"`` (bare string) instead of ``["v01"]``.
-      - ``last_n: "3"`` (string) instead of ``3``.
-    """
-    import json as _json
-
-    out = dict(args)
-
-    versions = out.get("versions")
-    if isinstance(versions, str):
-        try:
-            parsed = _json.loads(versions)
-            if isinstance(parsed, list):
-                out["versions"] = [str(x) for x in parsed]
-            else:
-                out["versions"] = [versions]
-        except (ValueError, _json.JSONDecodeError):
-            out["versions"] = [versions]
-    elif isinstance(versions, list):
-        out["versions"] = [str(x) for x in versions]
-
-    last_n = out.get("last_n")
-    if isinstance(last_n, str):
-        with contextlib.suppress(ValueError):
-            out["last_n"] = int(last_n)
-
-    return out
-
 
 NOTEBOOK_SPEC = MCPToolSpec(
     server_name="notebook",
@@ -174,44 +158,7 @@ def format_notebook_toc(entries: list[dict[str, str]] | None) -> str:
 
 
 # ---------------------------------------------------------------------------
-# Full-detail formatting (used by detail queries and _handle_read_notebook)
-# ---------------------------------------------------------------------------
-
-
-def _format_entry_detail(entry: dict[str, str]) -> str:
-    """Format a single notebook entry as full-detail text."""
-    version = entry.get("version", "")
-    source = entry.get("source", "")
-    title = entry.get("title") or "(untitled)"
-    content = entry.get("content") or "(no body)"
-    return f"[{version} {source}] {title}\n{content}"
-
-
-_KNOWN_SOURCES = ("ingestor", "scientist", "revision", "stop_gate", "stop_revision")
-
-
-def _build_status_response(entries: list[dict[str, str]]) -> dict[str, Any]:
-    """Build a counts-only status summary (no TOC, since TOC is inline in prompt)."""
-    by_source: dict[str, int] = {}
-    for entry in entries:
-        src = entry.get("source", "")
-        by_source[src] = by_source.get(src, 0) + 1
-
-    lines = [f"Total: {len(entries)} notebook entries"]
-    for src in _KNOWN_SOURCES:
-        count = by_source.get(src, 0)
-        if count:
-            lines.append(f"  {src}: {count}")
-    # Include any other source types not in the canonical list
-    for src, count in sorted(by_source.items()):
-        if src not in _KNOWN_SOURCES and count:
-            lines.append(f"  {src}: {count}")
-
-    return {"content": [{"type": "text", "text": "\n".join(lines)}]}
-
-
-# ---------------------------------------------------------------------------
-# Direct handler (for unit tests - same logic as the MCP server subprocess)
+# Direct handler (for unit tests). Wraps the shared query() in MCP shape.
 # ---------------------------------------------------------------------------
 
 
@@ -219,82 +166,15 @@ async def _handle_read_notebook(
     entries: list[dict[str, str]],
     args: dict[str, Any],
 ) -> dict[str, Any]:
-    """Core handler logic for the read_notebook tool."""
-    args = _normalize_args(args)
+    """Wrap :func:`notebook_query.query` in the MCP content envelope.
 
-    if not entries:
-        return {"content": [{"type": "text", "text": "No notebook entries yet."}]}
-
-    available_versions = sorted({e.get("version", "") for e in entries if e.get("version")})
-    available = ", ".join(available_versions)
-
-    if args.get("summary"):
-        return _build_status_response(entries)
-
-    versions = args.get("versions")
-    source_value = args.get("source")
-    search = args.get("search")
-    last_n = args.get("last_n")
-
-    if not versions and not source_value and not search and last_n is None:
-        return {
-            "content": [
-                {
-                    "type": "text",
-                    "text": (
-                        "Please specify a query: summary, versions, source, "
-                        f"search, or last_n. Available versions: {available}"
-                    ),
-                }
-            ]
-        }
-
-    selected: list[dict[str, str]] = []
-
-    if versions:
-        missing = [v for v in versions if not any(e.get("version") == v for e in entries)]
-        for v in versions:
-            for entry in entries:
-                if entry.get("version") == v:
-                    selected.append(entry)
-        if not selected:
-            return {
-                "content": [
-                    {
-                        "type": "text",
-                        "text": (
-                            f"Not found: {', '.join(versions)}. Available versions: {available}"
-                        ),
-                    }
-                ]
-            }
-        if missing:
-            missing_note = f"Note: versions not found: {', '.join(missing)}\n\n"
-            formatted = missing_note + "\n\n".join(_format_entry_detail(e) for e in selected)
-            return {"content": [{"type": "text", "text": formatted}]}
-
-    elif source_value:
-        selected = [e for e in entries if e.get("source") == source_value]
-
-    elif search:
-        needle = search.lower()
-        selected = [
-            e
-            for e in entries
-            if needle in (e.get("title") or "").lower()
-            or needle in (e.get("content") or "").lower()
-        ]
-
-    elif last_n is not None:
-        if last_n <= 0:
-            return {"content": [{"type": "text", "text": "last_n must be a positive integer."}]}
-        selected = entries[-last_n:]
-
-    if not selected:
-        return {"content": [{"type": "text", "text": "No entries match the query."}]}
-
-    formatted = "\n\n".join(_format_entry_detail(e) for e in selected)
-    return {"content": [{"type": "text", "text": formatted}]}
+    Used by ``tests/test_notebook_tool.py``. Production traffic goes through
+    the subprocess via ``_notebook_mcp_server.py``, which calls the same
+    underlying ``query()`` function but wraps results in TextContent via
+    ``_mcp_base.run_mcp_server_main``.
+    """
+    text = _query(entries, args)
+    return {"content": [{"type": "text", "text": text}]}
 
 
 # ---------------------------------------------------------------------------

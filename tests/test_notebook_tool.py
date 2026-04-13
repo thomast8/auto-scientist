@@ -263,6 +263,40 @@ class TestHandleReadNotebook:
         assert "no entries match" in text.lower()
 
     @pytest.mark.asyncio
+    async def test_search_multi_token_and_semantics(self, sample_entries):
+        """Multi-word queries require ALL tokens to appear (AND, not phrase)."""
+        # "Hardness" appears in v01 scientist title; "Cr" appears in the
+        # same entry's content. Both tokens must hit the same entry.
+        result = await _handle_read_notebook(sample_entries, {"search": "Hardness Cr"})
+        text = result["content"][0]["text"]
+        assert "Hardness correlation" in text
+        # An unrelated combination must NOT match
+        result = await _handle_read_notebook(sample_entries, {"search": "Hardness ingestor"})
+        text = result["content"][0]["text"]
+        assert "no entries match" in text.lower()
+
+    @pytest.mark.asyncio
+    async def test_search_token_order_irrelevant(self, sample_entries):
+        """Token order should not affect matching."""
+        result_a = await _handle_read_notebook(sample_entries, {"search": "Cr Hardness"})
+        result_b = await _handle_read_notebook(sample_entries, {"search": "Hardness Cr"})
+        assert result_a["content"][0]["text"] == result_b["content"][0]["text"]
+
+    @pytest.mark.asyncio
+    async def test_search_extra_whitespace_collapsed(self, sample_entries):
+        """Multiple spaces, leading/trailing whitespace are normalized away."""
+        result = await _handle_read_notebook(sample_entries, {"search": "   Hardness    Cr   "})
+        text = result["content"][0]["text"]
+        assert "Hardness correlation" in text
+
+    @pytest.mark.asyncio
+    async def test_search_empty_string_errors(self, sample_entries):
+        """Whitespace-only or empty query is rejected, not treated as match-all."""
+        result = await _handle_read_notebook(sample_entries, {"search": "   "})
+        text = result["content"][0]["text"]
+        assert "empty" in text.lower()
+
+    @pytest.mark.asyncio
     async def test_last_n(self, sample_entries):
         result = await _handle_read_notebook(sample_entries, {"last_n": 2})
         text = result["content"][0]["text"]

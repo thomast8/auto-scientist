@@ -8,155 +8,18 @@ entries from a JSON file passed as the first CLI argument and exposes a
 Usage (by the Claude Code CLI, not directly):
     python3 _notebook_mcp_server.py /path/to/notebook_entries.json
 
-NOTE: Query helpers (``_format_entry``, ``_query``, etc.) are intentionally
-duplicated from ``notebook_tool.py``. This module runs as an isolated
-subprocess and avoids importing the framework's heavy modules (notebook.py,
-state.py, Pydantic schemas) so its startup is fast and its dependency
-surface stays minimal. The light import of ``_mcp_base`` for the generic
-stdio runner is fine. Keep both files in sync when changing query semantics.
+The actual query logic lives in ``notebook_query`` (a stdlib-only module
+that the framework-side wrapper in ``notebook_tool.py`` also imports). This
+file is intentionally tiny: it only declares the MCPToolSpec and plumbs the
+shared ``query`` function into ``run_mcp_server_main``. There is no
+duplicated query/format logic to keep in sync.
 """
 
 from __future__ import annotations
 
-from typing import Any
-
-# ---------------------------------------------------------------------------
-# Notebook-specific formatting
-# ---------------------------------------------------------------------------
-
-
-def _format_entry(entry: dict[str, Any]) -> str:
-    version = entry.get("version", "")
-    source = entry.get("source", "")
-    title = entry.get("title") or "(untitled)"
-    content = entry.get("content") or "(no body)"
-    return f"[{version} {source}] {title}\n{content}"
-
-
-_KNOWN_SOURCES = ("ingestor", "scientist", "revision", "stop_gate", "stop_revision")
-
-
-def _build_status(entries: list[dict[str, Any]]) -> str:
-    """Build a counts-only status summary (no TOC, since TOC is inline in prompt)."""
-    by_source: dict[str, int] = {}
-    for entry in entries:
-        src = entry.get("source", "")
-        by_source[src] = by_source.get(src, 0) + 1
-
-    lines = [f"Total: {len(entries)} notebook entries"]
-    for src in _KNOWN_SOURCES:
-        count = by_source.get(src, 0)
-        if count:
-            lines.append(f"  {src}: {count}")
-    for src, count in sorted(by_source.items()):
-        if src not in _KNOWN_SOURCES and count:
-            lines.append(f"  {src}: {count}")
-    return "\n".join(lines)
-
-
-# ---------------------------------------------------------------------------
-# Query handler (the only notebook-specific logic)
-# ---------------------------------------------------------------------------
-
-
-def _normalize_args(args: dict[str, Any]) -> dict[str, Any]:
-    """Coerce common LLM type mistakes into the canonical schema.
-
-    Duplicated from notebook_tool.py to avoid importing framework code
-    in this standalone subprocess script.
-    """
-    import contextlib as _contextlib
-    import json as _json
-
-    out = dict(args)
-
-    versions = out.get("versions")
-    if isinstance(versions, str):
-        try:
-            parsed = _json.loads(versions)
-            if isinstance(parsed, list):
-                out["versions"] = [str(x) for x in parsed]
-            else:
-                out["versions"] = [versions]
-        except (ValueError, _json.JSONDecodeError):
-            out["versions"] = [versions]
-    elif isinstance(versions, list):
-        out["versions"] = [str(x) for x in versions]
-
-    last_n = out.get("last_n")
-    if isinstance(last_n, str):
-        with _contextlib.suppress(ValueError):
-            out["last_n"] = int(last_n)
-
-    return out
-
-
-def _query(entries: list[dict[str, Any]], args: dict[str, Any]) -> str:
-    args = _normalize_args(args)
-
-    if not entries:
-        return "No notebook entries yet."
-
-    available_versions = sorted({e.get("version", "") for e in entries if e.get("version")})
-    available = ", ".join(available_versions)
-
-    if args.get("summary"):
-        return _build_status(entries)
-
-    versions = args.get("versions")
-    source_value = args.get("source")
-    search = args.get("search")
-    last_n = args.get("last_n")
-
-    if not versions and not source_value and not search and last_n is None:
-        return (
-            "Please specify a query: summary, versions, source, search, "
-            f"or last_n. Available versions: {available}"
-        )
-
-    selected: list[dict] = []
-
-    if versions:
-        missing = [v for v in versions if not any(e.get("version") == v for e in entries)]
-        for v in versions:
-            for entry in entries:
-                if entry.get("version") == v:
-                    selected.append(entry)
-        if not selected:
-            return f"Not found: {', '.join(versions)}. Available versions: {available}"
-        if missing:
-            note = f"Note: versions not found: {', '.join(missing)}\n\n"
-            return note + "\n\n".join(_format_entry(e) for e in selected)
-
-    elif source_value:
-        selected = [e for e in entries if e.get("source") == source_value]
-
-    elif search:
-        needle = search.lower()
-        selected = [
-            e
-            for e in entries
-            if needle in (e.get("title") or "").lower()
-            or needle in (e.get("content") or "").lower()
-        ]
-
-    elif last_n is not None:
-        if last_n <= 0:
-            return "last_n must be a positive integer."
-        selected = entries[-last_n:]
-
-    if not selected:
-        return "No entries match the query."
-
-    return "\n\n".join(_format_entry(e) for e in selected)
-
-
-# ---------------------------------------------------------------------------
-# Entry point - all boilerplate handled by _mcp_base
-# ---------------------------------------------------------------------------
-
 if __name__ == "__main__":
     from auto_scientist.agents._mcp_base import MCPToolSpec, run_mcp_server_main
+    from auto_scientist.agents.notebook_query import query
 
     _SPEC = MCPToolSpec(
         server_name="notebook",
@@ -203,7 +66,11 @@ if __name__ == "__main__":
                 "search": {
                     "type": "string",
                     "description": (
-                        "Case-insensitive substring search across entry titles and content."
+                        "Case-insensitive whitespace-tokenized search "
+                        "across entry titles and content. The query is "
+                        "split on whitespace and every token must appear "
+                        "(as a substring) in the title or body. Multi-word "
+                        "queries are AND, not phrase."
                     ),
                 },
                 "last_n": {
@@ -219,4 +86,4 @@ if __name__ == "__main__":
         ),
     )
 
-    run_mcp_server_main("notebook", _SPEC, _query)
+    run_mcp_server_main("notebook", _SPEC, query)
