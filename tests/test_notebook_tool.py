@@ -361,7 +361,9 @@ class TestBuildNotebookMcpServer:
         out_dir.mkdir()
         server = build_notebook_mcp_server(sample_notebook, output_dir=out_dir)
         entries_path = server["args"][1]
-        assert entries_path == str(out_dir / "notebook_entries.json")
+        # Scratch JSON lives under a hidden .mcp/ subdir so the run dir
+        # stays uncluttered with reviewer-facing artifacts.
+        assert entries_path == str(out_dir / ".mcp" / "notebook_entries.json")
         data = json.loads(Path(entries_path).read_text())
         assert len(data) == 5
 

@@ -74,7 +74,8 @@ class TestBuildMcpServerConfig:
         assert config["type"] == "stdio"
         assert config["command"] == sys.executable
         assert str(script.resolve()) in config["args"][0]
-        assert str(tmp_path / "test.json") in config["args"][1]
+        # Scratch JSON lives under a hidden .mcp/ subdir.
+        assert str(tmp_path / ".mcp" / "test.json") in config["args"][1]
 
     def test_writes_data_to_output_dir(self, sample_data, tmp_path):
         script = tmp_path / "server.py"
@@ -82,7 +83,7 @@ class TestBuildMcpServerConfig:
 
         build_mcp_server_config(sample_data, script, output_dir=tmp_path, filename="test.json")
 
-        data_path = tmp_path / "test.json"
+        data_path = tmp_path / ".mcp" / "test.json"
         assert data_path.exists()
         loaded = json.loads(data_path.read_text())
         assert loaded == sample_data
