@@ -1730,7 +1730,10 @@ class TestRunDebateOrchestrator:
         assert call_kwargs["critic_configs"][0].model == "gpt-4o"
         assert call_kwargs["domain_knowledge"] == "test knowledge"
         assert '"rmse"' in call_kwargs["analysis_json"]
-        assert isinstance(call_kwargs["prediction_history"], str)
+        # Orchestrator no longer pre-formats a string; each critic picks
+        # compact-tree or full-detail from the raw records internally.
+        assert "prediction_history" not in call_kwargs
+        assert "prediction_history_records" in call_kwargs
         assert isinstance(call_kwargs["message_buffers"], dict)
 
     @pytest.mark.asyncio
