@@ -654,6 +654,7 @@ class CodexBackend:
             turn_overrides.output_schema = strict
 
         # --- Resume path: reuse existing client ---
+        is_resume_fallback = False
         if options.resume:
             if self._client is not None:
                 logger.debug(f"Resuming Codex thread {options.resume} on existing client")
@@ -663,10 +664,21 @@ class CodexBackend:
                 }
                 return self._client, chat_kwargs, self._sandbox_mode
 
-            logger.warning(
-                f"Codex resume requested (thread {options.resume}) but no live "
-                f"client exists; falling back to a fresh thread"
+            # The caller asked to continue a specific thread, but we no
+            # longer have a live client for it (usually because a prior
+            # turn raised and query() tore the client down). There is no
+            # way to resume from scratch, so we start a fresh thread and
+            # prior conversation context is lost. Log loudly and make this
+            # fallback thread VISIBLE in the Codex sidebar (ephemeral=False
+            # below) so the operator has an obvious signal that the
+            # correction loop silently restarted.
+            logger.error(
+                f"Codex resume requested (thread {options.resume}) but no "
+                f"live client exists; falling back to a FRESH thread. Prior "
+                f"conversation context is LOST. The fallback thread will be "
+                f"visible in the Codex sidebar as a debugging signal."
             )
+            is_resume_fallback = True
 
         # --- Fresh path: close any stale client, create new one ---
         await self.close()
@@ -710,12 +722,30 @@ class CodexBackend:
             )
             env["OPENAI_API_KEY"] = ""
 
-        # Build thread config
+        # Build thread config.
+        #
+        # ephemeral is a server-side property set once at thread/start and
+        # never re-specified on subsequent turns. The resume path above
+        # reuses the same live client and passes only thread_id into
+        # client.chat(), so corrections from the Coder's error loop
+        # continue on the same (ephemeral) thread without rebuilding this
+        # config.
+        #
+        # We default ephemeral=True to hide auto-scientist agent chatter
+        # from the Codex desktop app's history sidebar — a pipeline run
+        # fires dozens of agent calls and each one would otherwise show up
+        # as its own persistent thread. The one exception is the
+        # resume-fallback path: if the caller asked to continue a thread
+        # but the live client is gone, we have already lost prior context,
+        # and the fresh thread we're about to start is created as VISIBLE
+        # (ephemeral=False) so the operator has a sidebar signal that the
+        # correction loop silently restarted.
         thread_config = ThreadConfig(
             model=model,
             base_instructions=options.system_prompt,
             sandbox=sandbox_mode,  # type: ignore[arg-type]
             approval_policy=_CODEX_APPROVAL_POLICY,
+            ephemeral=not is_resume_fallback,
         )
         if options.cwd:
             thread_config.cwd = str(options.cwd)
