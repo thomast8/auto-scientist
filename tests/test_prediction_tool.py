@@ -10,6 +10,8 @@ from auto_scientist.agents.prediction_tool import (
     _handle_read_predictions,
     _normalize_args,
     build_prediction_mcp_server,
+    format_compact_tree,
+    format_full_detail,
 )
 from auto_scientist.state import PredictionRecord
 
@@ -321,3 +323,147 @@ class TestBuildPredictionMcpServer:
         data = json.loads(Path(predictions_path).read_text())
         assert len(data) == len(sample_history)
         assert data[0]["pred_id"] == "0.1"
+
+
+class TestFormatFullDetail:
+    """format_full_detail is the API-mode fallback formatter.
+
+    Critics and stop-gate critics running in direct-API mode cannot call
+    the read_predictions MCP tool, so they get the full-detail trajectory
+    rendering inline in their prompt. SDK-mode agents get format_compact_tree
+    plus the tool.
+    """
+
+    def test_none_returns_placeholder(self):
+        result = format_full_detail(None)
+        assert "no prediction history" in result
+
+    def test_empty_list_returns_placeholder(self):
+        result = format_full_detail([])
+        assert "no prediction history" in result
+
+    def test_empty_state_matches_compact_tree(self):
+        # Placeholder parity: API-mode and SDK-mode prompts must render the
+        # same empty-state string so agents don't see a protocol mismatch.
+        assert format_full_detail(None) == format_compact_tree(None)
+        assert format_full_detail([]) == format_compact_tree([])
+
+    def test_pending_prediction_shows_diagnostic_and_implications(self):
+        history = [
+            PredictionRecord(
+                pred_id="1.1",
+                iteration_prescribed=1,
+                prediction="noise is additive",
+                diagnostic="compute residual-x correlation",
+                if_confirmed="OLS is appropriate",
+                if_refuted="switch to WLS",
+            ),
+        ]
+        result = format_full_detail(history)
+        assert "[1.1]" in result
+        assert "PENDING" in result
+        assert "noise is additive" in result
+        assert "Diagnostic:" in result
+        assert "If confirmed:" in result
+        assert "If refuted:" in result
+
+    def test_confirmed_shows_evidence_and_implication(self):
+        history = [
+            PredictionRecord(
+                pred_id="1.1",
+                iteration_prescribed=1,
+                iteration_evaluated=1,
+                prediction="spline fits better locally",
+                diagnostic="compare regional RMSE",
+                if_confirmed="focus on local fit",
+                if_refuted="problem is elsewhere",
+                outcome="confirmed",
+                evidence="spline RMSE=0.31, polynomial RMSE=0.58",
+            ),
+        ]
+        result = format_full_detail(history)
+        assert "CONFIRMED" in result
+        assert "spline RMSE=0.31" in result
+        assert "focus on local fit" in result
+        # API-mode format is NOT the compact tree header
+        assert "== PREDICTION TREE" not in result
+
+    def test_refuted_shows_refuted_implication(self):
+        history = [
+            PredictionRecord(
+                pred_id="1.1",
+                iteration_prescribed=1,
+                iteration_evaluated=1,
+                prediction="Cr dominates corrosion",
+                diagnostic="CLR correlation",
+                if_confirmed="use Cr model",
+                if_refuted="look elsewhere",
+                outcome="refuted",
+                evidence="Ni r_s=0.613 dominates",
+            ),
+        ]
+        result = format_full_detail(history)
+        assert "REFUTED" in result
+        assert "look elsewhere" in result
+
+    def test_inconclusive_omits_implication(self):
+        history = [
+            PredictionRecord(
+                pred_id="1.1",
+                iteration_prescribed=1,
+                iteration_evaluated=1,
+                prediction="Mo effect is nonlinear",
+                diagnostic="ALE plots",
+                if_confirmed="report Mo shape",
+                if_refuted="Mo is linear",
+                outcome="inconclusive",
+                evidence="positive but sparse at high Mo",
+            ),
+        ]
+        result = format_full_detail(history)
+        assert "INCONCLUSIVE" in result
+        assert "positive but sparse" in result
+        # Neither implication applies for inconclusive
+        assert "report Mo shape" not in result
+        assert "Mo is linear" not in result
+
+    def test_trajectory_chain_indents_children(self, sample_history):
+        result = format_full_detail(sample_history)
+        # 1.1 follows from 0.2, so 1.1 should appear indented under 0.2
+        lines = result.split("\n")
+        idx_02 = next(i for i, line in enumerate(lines) if "[0.2]" in line)
+        idx_11 = next(i for i, line in enumerate(lines) if "[1.1]" in line)
+        assert idx_11 > idx_02
+        # Child is indented deeper than parent
+        parent_indent = len(lines[idx_02]) - len(lines[idx_02].lstrip())
+        child_indent = len(lines[idx_11]) - len(lines[idx_11].lstrip())
+        assert child_indent > parent_indent
+
+    def test_orphaned_follows_from_becomes_root(self):
+        history = [
+            PredictionRecord(
+                pred_id="2.1",
+                iteration_prescribed=2,
+                prediction="re-test after structural change",
+                diagnostic="profile again",
+                if_confirmed="now works",
+                if_refuted="still broken",
+                follows_from="nonexistent",
+            ),
+        ]
+        result = format_full_detail(history)
+        assert "[2.1]" in result
+        assert "re-test after structural change" in result
+
+    def test_falls_back_to_version_when_no_pred_id(self):
+        history = [
+            PredictionRecord(
+                iteration_prescribed=2,
+                prediction="old prediction",
+                diagnostic="d",
+                if_confirmed="ok",
+                if_refuted="bad",
+            ),
+        ]
+        result = format_full_detail(history)
+        assert "[v02]" in result

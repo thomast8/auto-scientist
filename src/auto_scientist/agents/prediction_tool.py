@@ -36,6 +36,7 @@ __all__ = [
     "PREDICTION_SPEC",
     "build_prediction_mcp_server",
     "format_compact_tree",
+    "format_full_detail",
     "_handle_read_predictions",
     "_normalize_args",
     "_build_prediction_forest",
@@ -217,6 +218,78 @@ def format_compact_tree(
         all_lines.extend(_render_compact(root, 0))
 
     return "\n".join(all_lines)
+
+
+# ---------------------------------------------------------------------------
+# Full-detail formatter (API-mode fallback)
+# ---------------------------------------------------------------------------
+#
+# Used by:
+#  * Scientist stop-gate completeness assessment (always runs via SDK but
+#    also exposed through scripts/compare_personas.py and
+#    scripts/validate_prediction_tool.py).
+#  * API-mode critics and stop-gate critics: these run via direct provider
+#    APIs and cannot call the read_predictions MCP tool, so they receive
+#    the full reasoning trajectory inline in their prompt instead of the
+#    compact tree.
+#
+# Must emit the same empty-state placeholder as format_compact_tree so
+# SDK-mode and API-mode prompts never diverge on the empty case.
+
+
+def format_full_detail(
+    prediction_history: list[PredictionRecord] | None,
+) -> str:
+    """Format prediction history as full-detail reasoning trajectories.
+
+    Renders each record with prediction text, diagnostic, conditional
+    implications, and evidence. Parent-child chains from follows_from are
+    shown via indentation. Used as the API-mode fallback when agents cannot
+    call the read_predictions MCP tool to expand compact-tree entries.
+    """
+    if not prediction_history:
+        return "(no prediction history yet)"
+
+    _by_id, children = _build_prediction_forest(prediction_history)
+    visited: set[str] = set()
+
+    def _render_record(rec: PredictionRecord, indent: int) -> list[str]:
+        # Guard against circular follows_from links
+        if rec.pred_id and rec.pred_id in visited:
+            return []
+        if rec.pred_id:
+            visited.add(rec.pred_id)
+
+        prefix = "  " * indent
+        tag = rec.pred_id or f"v{rec.iteration_prescribed:02d}"
+        status = rec.outcome.upper()
+        lines = []
+        if rec.outcome == "pending":
+            lines.append(f"{prefix}[{tag}] PENDING: {rec.prediction}")
+            lines.append(f"{prefix}  Diagnostic: {rec.diagnostic}")
+            lines.append(f"{prefix}  If confirmed: {rec.if_confirmed}")
+            lines.append(f"{prefix}  If refuted: {rec.if_refuted}")
+        else:
+            if rec.outcome == "confirmed":
+                implication = rec.if_confirmed
+            elif rec.outcome == "refuted":
+                implication = rec.if_refuted
+            else:
+                implication = None  # inconclusive: neither implication applies
+            lines.append(f"{prefix}[{tag}] {status}: {rec.prediction}")
+            lines.append(f"{prefix}  Evidence: {rec.evidence}")
+            if implication:
+                lines.append(f"{prefix}  -> {implication}")
+        for child in children.get(rec.pred_id, []):
+            lines.extend(_render_record(child, indent + 1))
+        return lines
+
+    trajectories = []
+    for root in children[None]:
+        trajectory_lines = _render_record(root, 1)
+        trajectories.append("\n".join(trajectory_lines))
+
+    return "\n\n".join(trajectories)
 
 
 # ---------------------------------------------------------------------------

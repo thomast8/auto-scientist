@@ -1,5 +1,6 @@
 """Tests for the stop gate agents: completeness assessment, stop debate, and stop revision."""
 
+import inspect
 import json
 from unittest.mock import AsyncMock, patch
 
@@ -9,6 +10,7 @@ from auto_scientist.agent_result import AgentResult
 from auto_scientist.agents.debate_models import CriticOutput, DebateResult
 from auto_scientist.model_config import AgentModelConfig
 from auto_scientist.sdk_utils import OutputValidationError
+from auto_scientist.state import PredictionRecord
 
 # ---------------------------------------------------------------------------
 # Helper builders
@@ -748,6 +750,184 @@ class TestRunSingleStopDebate:
             )
 
         assert result.persona == "Generic"
+
+    @pytest.mark.asyncio
+    async def test_sdk_mode_with_records_uses_compact_tree(self, valid_assessment, stop_notebook):
+        """SDK-mode stop critics render the compact tree inline, paired with MCP tool."""
+        from auto_scientist.agents.stop_gate import run_single_stop_debate
+
+        sdk_config = AgentModelConfig(provider="anthropic", model="claude-sonnet-4-6", mode="sdk")
+        records = [
+            PredictionRecord(
+                pred_id="1.0",
+                iteration_prescribed=1,
+                prediction="noise is additive",
+                diagnostic="check residuals",
+                if_confirmed="use OLS",
+                if_refuted="switch to WLS",
+            ),
+        ]
+        valid_result = AgentResult(
+            text=_pad(_valid_critic_json()), input_tokens=10, output_tokens=5
+        )
+
+        with patch(
+            QUERY_CRITIC_PATH, new_callable=AsyncMock, return_value=(valid_result, None)
+        ) as mock_qc:
+            await run_single_stop_debate(
+                config=sdk_config,
+                stop_reason="done",
+                completeness_assessment=valid_assessment,
+                notebook_path=stop_notebook,
+                prediction_history_records=records,
+            )
+
+        user_prompt = mock_qc.call_args[0][1]
+        assert "== PREDICTION TREE" in user_prompt
+        assert "noise is additive" in user_prompt
+
+    @pytest.mark.asyncio
+    async def test_api_mode_with_records_uses_full_detail(self, valid_assessment, stop_notebook):
+        """API-mode stop critics render the full-detail trajectory (no MCP tool available).
+
+        Stop-gate critics running via direct provider APIs cannot call
+        mcp__predictions__read_predictions, so the compact tree would leave
+        them with nothing to drill into. Full detail is the correct
+        fallback, mirroring the notebook TOC-vs-inline-XML split from
+        PR #28.
+        """
+        from auto_scientist.agents.stop_gate import run_single_stop_debate
+
+        api_config = AgentModelConfig(provider="openai", model="gpt-5.4", mode="api")
+        records = [
+            PredictionRecord(
+                pred_id="1.0",
+                iteration_prescribed=1,
+                iteration_evaluated=1,
+                prediction="polynomial fits well",
+                diagnostic="compare residuals",
+                if_confirmed="use polynomial",
+                if_refuted="try spline",
+                outcome="confirmed",
+                evidence="R^2 = 0.97",
+            ),
+        ]
+        valid_result = AgentResult(
+            text=_pad(_valid_critic_json()), input_tokens=10, output_tokens=5
+        )
+
+        with patch(
+            QUERY_CRITIC_PATH, new_callable=AsyncMock, return_value=(valid_result, None)
+        ) as mock_qc:
+            await run_single_stop_debate(
+                config=api_config,
+                stop_reason="done",
+                completeness_assessment=valid_assessment,
+                notebook_path=stop_notebook,
+                prediction_history_records=records,
+            )
+
+        user_prompt = mock_qc.call_args[0][1]
+        # Full-detail format: Evidence line and implication arrow
+        assert "polynomial fits well" in user_prompt
+        assert "Evidence:" in user_prompt
+        assert "R^2 = 0.97" in user_prompt
+        assert "use polynomial" in user_prompt
+        # API mode does NOT render the compact tree header
+        assert "== PREDICTION TREE" not in user_prompt
+
+    def test_signature_rejects_string_param(self):
+        """run_single_stop_debate no longer accepts a pre-rendered prediction_history string.
+
+        Callers pass list[PredictionRecord] only; the agent picks
+        compact-tree (SDK) or full-detail (API) internally.
+        """
+        from auto_scientist.agents.stop_gate import run_single_stop_debate
+
+        params = inspect.signature(run_single_stop_debate).parameters
+        assert "prediction_history" not in params
+        assert "prediction_history_records" in params
+
+    @pytest.mark.asyncio
+    async def test_empty_records_render_placeholder(self, valid_assessment, stop_notebook):
+        """Empty/None prediction_history_records must render the canonical placeholder.
+
+        Regression for a bug flagged by Codex: the old ternary emitted ""
+        when records were empty, which produced a blank
+        <prediction_history></prediction_history> block. The new code
+        unconditionally routes through format_compact_tree /
+        format_full_detail, which both return "(no prediction history yet)"
+        for None/[], preserving the sentinel that early-stop proposals
+        depend on.
+        """
+        from auto_scientist.agents.stop_gate import run_single_stop_debate
+
+        sdk_config = AgentModelConfig(provider="anthropic", model="claude-sonnet-4-6", mode="sdk")
+        valid_result = AgentResult(
+            text=_pad(_valid_critic_json()), input_tokens=10, output_tokens=5
+        )
+
+        with patch(
+            QUERY_CRITIC_PATH, new_callable=AsyncMock, return_value=(valid_result, None)
+        ) as mock_qc:
+            await run_single_stop_debate(
+                config=sdk_config,
+                stop_reason="done",
+                completeness_assessment=valid_assessment,
+                notebook_path=stop_notebook,
+                prediction_history_records=None,
+            )
+
+        user_prompt = mock_qc.call_args[0][1]
+        assert "(no prediction history yet)" in user_prompt
+
+    @pytest.mark.asyncio
+    async def test_api_mode_system_prompt_describes_full_detail(
+        self, valid_assessment, stop_notebook
+    ):
+        """API-mode stop critics must see pipeline context describing
+        full-detail inline evidence, NOT a compact summary, and the system
+        prompt must not mention mcp__predictions__read_predictions.
+
+        Regression for a bug flagged by Codex: the stop-critic system
+        prompt hardcoded compact-summary wording and tool references that
+        were invalid for direct-API critics after the plumbing refactor.
+        """
+        from auto_scientist.agents.stop_gate import run_single_stop_debate
+
+        api_config = AgentModelConfig(provider="openai", model="gpt-5.4", mode="api")
+        records = [
+            PredictionRecord(
+                pred_id="1.0",
+                iteration_prescribed=1,
+                iteration_evaluated=1,
+                prediction="polynomial fits well",
+                diagnostic="compare residuals",
+                if_confirmed="use polynomial",
+                if_refuted="try spline",
+                outcome="confirmed",
+                evidence="R^2 = 0.97",
+            ),
+        ]
+        valid_result = AgentResult(
+            text=_pad(_valid_critic_json()), input_tokens=10, output_tokens=5
+        )
+
+        with patch(
+            QUERY_CRITIC_PATH, new_callable=AsyncMock, return_value=(valid_result, None)
+        ) as mock_qc:
+            await run_single_stop_debate(
+                config=api_config,
+                stop_reason="done",
+                completeness_assessment=valid_assessment,
+                notebook_path=stop_notebook,
+                prediction_history_records=records,
+            )
+
+        system_prompt = mock_qc.call_args.kwargs["system_prompt"]
+        assert "mcp__predictions__read_predictions" not in system_prompt
+        assert "compact summary" not in system_prompt
+        assert "full prediction history is included inline" in system_prompt
 
 
 # ---------------------------------------------------------------------------

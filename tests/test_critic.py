@@ -1,5 +1,6 @@
 """Tests for the critic debate loop with personas and structured output."""
 
+import inspect
 import json
 from unittest.mock import AsyncMock, patch
 
@@ -588,14 +589,27 @@ class TestRunDebateWithContext:
 
     @pytest.mark.asyncio
     async def test_prediction_history_in_critic_prompt(self, plan, notebook_path):
-        """When prediction_history is provided, prediction persona's prompt includes it."""
+        """When prediction records are provided, prediction persona's prompt includes them."""
         critic = AgentModelConfig(provider="openai", model="gpt-4o", mode="api")
+        records = [
+            PredictionRecord(
+                pred_id="1.0",
+                iteration_prescribed=1,
+                iteration_evaluated=1,
+                prediction="polynomial fits well across x",
+                diagnostic="compare residuals",
+                if_confirmed="use polynomial",
+                if_refuted="try spline",
+                outcome="confirmed",
+                evidence="R^2 = 0.97",
+            ),
+        ]
         with patch(OPENAI_PATH, new_callable=AsyncMock, return_value=_CR()) as mock_openai:
             await run_single_critic_debate(
                 config=critic,
                 plan=plan,
                 notebook_path=notebook_path,
-                prediction_history="[1.0] CONFIRMED: polynomial fits well",
+                prediction_history_records=records,
                 persona={"name": "Evidence Auditor", "system_text": ""},
             )
 
@@ -899,7 +913,7 @@ class TestCriticMcpIntegration:
 
     @pytest.mark.asyncio
     async def test_sdk_with_records_uses_compact_tree_in_prompt(self, plan, notebook_path):
-        """SDK mode with records uses compact tree from records, not raw text."""
+        """SDK mode with records renders the compact tree inline."""
         critic = AgentModelConfig(provider="anthropic", model="claude-sonnet-4-6")
         records = [
             PredictionRecord(
@@ -917,32 +931,149 @@ class TestCriticMcpIntegration:
                 config=critic,
                 plan=plan,
                 notebook_path=notebook_path,
-                prediction_history="RAW TEXT FALLBACK",
                 prediction_history_records=records,
                 persona=self._PREDICTION_PERSONA,
             )
 
-        # The prompt should contain compact tree from records, not the raw text
         prompt = mock_sdk.call_args[0][0]
         assert "PREDICTION TREE" in prompt
         assert "noise is additive" in prompt
-        assert "RAW TEXT FALLBACK" not in prompt
 
     @pytest.mark.asyncio
-    async def test_api_mode_keeps_text_in_prompt(self, plan, notebook_path):
-        """API mode without MCP keeps the full prediction text in the prompt."""
+    async def test_api_mode_with_records_uses_full_detail(self, plan, notebook_path):
+        """API mode with records renders the full-detail trajectory (no MCP tool available).
+
+        The compact tree is only useful when the agent can call
+        read_predictions to expand entries. API-mode critics cannot, so they
+        get the full trajectory with diagnostics and implications inline.
+        """
         critic = AgentModelConfig(provider="openai", model="gpt-4o", mode="api")
+        records = [
+            PredictionRecord(
+                pred_id="1.0",
+                iteration_prescribed=1,
+                iteration_evaluated=1,
+                prediction="polynomial fits well",
+                diagnostic="compare residuals",
+                if_confirmed="use polynomial",
+                if_refuted="try spline",
+                outcome="confirmed",
+                evidence="R^2 = 0.97 across train/test",
+            ),
+        ]
         with patch(OPENAI_PATH, new_callable=AsyncMock, return_value=_CR()) as mock_openai:
             await run_single_critic_debate(
                 config=critic,
                 plan=plan,
                 notebook_path=notebook_path,
-                prediction_history="[1.0] CONFIRMED: polynomial fits well",
+                prediction_history_records=records,
                 persona=self._PREDICTION_PERSONA,
             )
 
         prompt = mock_openai.call_args[0][1]
+        # Full-detail format emits Evidence line and implication arrow
         assert "polynomial fits well" in prompt
+        assert "Evidence:" in prompt
+        assert "R^2 = 0.97" in prompt
+        assert "use polynomial" in prompt
+        # API mode does NOT get the compact tree header
+        assert "== PREDICTION TREE" not in prompt
+
+    @pytest.mark.asyncio
+    async def test_api_mode_prompt_describes_full_detail_not_compact(self, plan, notebook_path):
+        """API-mode critic prompt must describe the inline history as full
+        detail, not "compact summary" / "compact tree".
+
+        Regression for a bug flagged by Codex: the API branch of
+        _build_critic_prompt said "A compact summary of the prediction
+        history is included" and "The prediction tree is provided above",
+        priming direct-API models to treat inlined full detail as lossy
+        summary data.
+        """
+        critic = AgentModelConfig(provider="openai", model="gpt-4o", mode="api")
+        records = [
+            PredictionRecord(
+                pred_id="1.0",
+                iteration_prescribed=1,
+                iteration_evaluated=1,
+                prediction="noise is additive",
+                diagnostic="check residuals",
+                if_confirmed="use OLS",
+                if_refuted="switch to WLS",
+                outcome="confirmed",
+                evidence="residuals uncorrelated with x",
+            ),
+        ]
+        with patch(OPENAI_PATH, new_callable=AsyncMock, return_value=_CR()) as mock_openai:
+            await run_single_critic_debate(
+                config=critic,
+                plan=plan,
+                notebook_path=notebook_path,
+                prediction_history_records=records,
+                persona=self._PREDICTION_PERSONA,
+            )
+
+        prompt = mock_openai.call_args[0][1]
+        # Must NOT describe the payload as a compact summary / tree
+        assert "compact summary of the prediction history" not in prompt
+        assert "prediction tree is provided above" not in prompt
+        # Must describe it as full-detail inline evidence
+        assert "full prediction history is included inline" in prompt
+
+    @pytest.mark.asyncio
+    async def test_api_mode_does_not_build_prediction_mcp_server(self, plan, notebook_path):
+        """API-mode critics must not spawn a prediction MCP server.
+
+        Per Lane A's suggestion: API mode drops mcp_servers entirely in
+        _query_critic, so building an in-process stdio server for a tool
+        the critic cannot call is wasteful. The critic's
+        _build_critic_tools_and_mcp should receive None for records in API
+        mode, matching the notebook_path=None gating on the adjacent line.
+        """
+        critic = AgentModelConfig(provider="openai", model="gpt-4o", mode="api")
+        records = [
+            PredictionRecord(
+                pred_id="1.0",
+                iteration_prescribed=1,
+                iteration_evaluated=1,
+                prediction="polynomial fits well",
+                diagnostic="compare residuals",
+                if_confirmed="use polynomial",
+                if_refuted="try spline",
+                outcome="confirmed",
+                evidence="R^2 = 0.97",
+            ),
+        ]
+        with patch(OPENAI_PATH, new_callable=AsyncMock, return_value=_CR()) as mock_openai:
+            await run_single_critic_debate(
+                config=critic,
+                plan=plan,
+                notebook_path=notebook_path,
+                prediction_history_records=records,
+                persona=self._PREDICTION_PERSONA,
+            )
+
+        # Direct API path does not receive mcp_servers at all
+        assert "mcp_servers" not in mock_openai.call_args.kwargs
+
+
+class TestCriticSignatures:
+    """Debate entry points must not accept a pre-rendered prediction_history string.
+
+    Callers pass list[PredictionRecord] only; the agent picks compact-tree
+    (SDK) or full-detail (API) internally. Pre-formatting from the
+    orchestrator was dead weight left over from PR #19 and is removed here.
+    """
+
+    def test_run_debate_signature_rejects_string_param(self):
+        params = inspect.signature(run_debate).parameters
+        assert "prediction_history" not in params
+        assert "prediction_history_records" in params
+
+    def test_run_single_critic_debate_signature_rejects_string_param(self):
+        params = inspect.signature(run_single_critic_debate).parameters
+        assert "prediction_history" not in params
+        assert "prediction_history_records" in params
 
 
 class TestPersonaPredictionAccess:

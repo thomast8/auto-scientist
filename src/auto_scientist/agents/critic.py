@@ -42,6 +42,7 @@ from auto_scientist.agents.prediction_tool import (
     PREDICTION_SPEC,
     build_prediction_mcp_server,
     format_compact_tree,
+    format_full_detail,
 )
 from auto_scientist.model_config import AgentModelConfig, reasoning_to_cc_extra_args
 from auto_scientist.models.google_client import query_google
@@ -332,7 +333,6 @@ async def run_single_critic_debate(
     message_buffer: list[str] | None = None,
     persona: dict[str, str] | None = None,
     analysis_json: str = "",
-    prediction_history: str = "",
     goal: str = "",
     prediction_history_records: list[PredictionRecord] | None = None,
     output_dir: Path | None = None,
@@ -347,8 +347,12 @@ async def run_single_critic_debate(
             it to build either a compact TOC (SDK mode, paired with the
             mcp__notebook__read_notebook tool) or a full inline dump
             (API mode, no MCP tool available).
-        prediction_history: Pre-formatted text for prompt injection.
-        prediction_history_records: Raw records for MCP server (SDK mode only).
+        prediction_history_records: Raw PredictionRecord list. Rendered as
+            the compact tree in SDK mode (paired with the
+            mcp__predictions__read_predictions tool) and as the full-detail
+            trajectory in API mode (no tool available). See
+            :func:`auto_scientist.agents.prediction_tool.format_compact_tree`
+            and :func:`format_full_detail`.
         output_dir: Directory for MCP data files.
     """
     persona = persona or {"name": "Generic", "system_text": ""}
@@ -373,14 +377,21 @@ async def run_single_critic_debate(
 
     if has_predictions:
         tools, mcp_servers = _build_critic_tools_and_mcp(
-            prediction_history_records,
+            prediction_history_records if is_sdk else None,
             notebook_path=notebook_path if is_sdk else None,
             output_dir=output_dir,
         )
+        # SDK critics get compact tree + read_predictions MCP tool to drill
+        # into specific entries. API critics have no tool, so they get the
+        # full-detail trajectory inline (mirrors the notebook TOC-vs-XML
+        # split from PR #28). Both formatters return
+        # "(no prediction history yet)" for empty input, so we call them
+        # unconditionally to preserve the placeholder string (the prompt
+        # builder still has a belt-and-suspenders `or` fallback).
         effective_prediction_history = (
             format_compact_tree(prediction_history_records)
-            if prediction_history_records
-            else prediction_history
+            if is_sdk
+            else format_full_detail(prediction_history_records)
         )
     else:
         tools, mcp_servers = _build_critic_tools_and_mcp(
@@ -458,7 +469,6 @@ async def _staggered_debate(
     message_buffer: list[str] | None = None,
     persona: dict[str, str] | None = None,
     analysis_json: str = "",
-    prediction_history: str = "",
     goal: str = "",
     prediction_history_records: list[PredictionRecord] | None = None,
     output_dir: Path | None = None,
@@ -475,7 +485,6 @@ async def _staggered_debate(
         message_buffer=message_buffer,
         persona=persona,
         analysis_json=analysis_json,
-        prediction_history=prediction_history,
         goal=goal,
         prediction_history_records=prediction_history_records,
         output_dir=output_dir,
@@ -492,7 +501,6 @@ async def run_debate(
     message_buffers: dict[str, list[str]] | None = None,
     iteration: int = 0,
     analysis_json: str = "",
-    prediction_history: str = "",
     goal: str = "",
     prediction_history_records: list[PredictionRecord] | None = None,
     output_dir: Path | None = None,
@@ -516,9 +524,10 @@ async def run_debate(
         message_buffers: Per-persona buffers keyed by persona name.
         iteration: Current iteration number (for model rotation and persona filtering).
         analysis_json: Serialized analysis JSON from the Analyst.
-        prediction_history: Formatted prediction history string.
         goal: Investigation goal string passed through to prompt builders.
-        prediction_history_records: Raw PredictionRecord list for MCP server.
+        prediction_history_records: Raw PredictionRecord list. Each critic
+            picks compact-tree (SDK) or full-detail (API) rendering from
+            this list internally; no pre-rendered string needed.
         output_dir: Directory for MCP data files.
 
     Returns:
@@ -570,7 +579,6 @@ async def run_debate(
                 message_buffer=buf,
                 persona=persona,
                 analysis_json=analysis_json,
-                prediction_history=prediction_history,
                 goal=goal,
                 prediction_history_records=prediction_history_records,
                 output_dir=output_dir,
@@ -671,18 +679,25 @@ def _build_critic_prompt(
                 "is\ninsufficient, especially for specific pred_ids or prior outcomes."
             )
         else:
-            # API mode: prediction data is inline, no tool available
+            # API mode: full-detail prediction history is inlined below.
+            # The MCP tool is unavailable (direct API calls can't invoke it),
+            # so the prompt must describe the payload as full evidence, not
+            # a compact summary.
             prediction_role_text = ""
             prediction_tool_guidance = (
                 "- Use the inline prediction history when it is relevant to your critique;\n"
                 "  do not guess or invent prior outcomes."
             )
             prediction_pipeline_text = (
-                "\nA compact summary of the prediction history is included in the context below."
+                "\nThe full prediction history is included inline in the context below. "
+                "Each entry\nshows the prediction, diagnostic, conditional implications, "
+                "observed evidence,\nand parent-child reasoning links via indentation. No "
+                "tool call is needed to\nexpand entries."
             )
             prediction_task_text = (
-                "\nThe prediction tree is provided above. Use it to verify "
-                "prediction outcomes referenced in the plan."
+                "\nThe full prediction history is provided above with evidence and "
+                "implications.\nUse it directly to verify prediction outcomes referenced "
+                "in the plan."
             )
     else:
         prediction_role_text = ""

@@ -18,9 +18,9 @@ from auto_scientist.agents.notebook_tool import (
 )
 from auto_scientist.agents.prediction_tool import (
     PREDICTION_SPEC,
-    _build_prediction_forest,
     build_prediction_mcp_server,
     format_compact_tree,
+    format_full_detail,
 )
 from auto_scientist.model_config import ReasoningConfig, reasoning_to_cc_extra_args
 from auto_scientist.notebook import parse_notebook_entries
@@ -164,60 +164,10 @@ SCIENTIST_PLAN_SCHEMA = {
 _format_compact_tree = format_compact_tree
 
 
-def _format_predictions_for_prompt(
-    prediction_history: list[PredictionRecord] | None,
-) -> str:
-    """Format prediction history as full-detail reasoning trajectories.
-
-    Used by the stop gate assessment and compare_personas script.
-    Debate critics now use the compact tree + MCP tool instead.
-    Builds a forest from follows_from links and renders each tree as a
-    trajectory chain showing the reasoning flow across iterations.
-    """
-    if not prediction_history:
-        return "(no prediction history yet)"
-
-    _by_id, children = _build_prediction_forest(prediction_history)
-    visited: set[str] = set()
-
-    def _render_record(rec: PredictionRecord, indent: int) -> list[str]:
-        # Guard against circular follows_from links
-        if rec.pred_id and rec.pred_id in visited:
-            return []
-        if rec.pred_id:
-            visited.add(rec.pred_id)
-
-        prefix = "  " * indent
-        tag = rec.pred_id or f"v{rec.iteration_prescribed:02d}"
-        status = rec.outcome.upper()
-        lines = []
-        if rec.outcome == "pending":
-            lines.append(f"{prefix}[{tag}] PENDING: {rec.prediction}")
-            lines.append(f"{prefix}  Diagnostic: {rec.diagnostic}")
-            lines.append(f"{prefix}  If confirmed: {rec.if_confirmed}")
-            lines.append(f"{prefix}  If refuted: {rec.if_refuted}")
-        else:
-            if rec.outcome == "confirmed":
-                implication = rec.if_confirmed
-            elif rec.outcome == "refuted":
-                implication = rec.if_refuted
-            else:
-                implication = None  # inconclusive: neither implication applies
-            lines.append(f"{prefix}[{tag}] {status}: {rec.prediction}")
-            lines.append(f"{prefix}  Evidence: {rec.evidence}")
-            if implication:
-                lines.append(f"{prefix}  -> {implication}")
-        # Render children (keyed by parent's pred_id)
-        for child in children.get(rec.pred_id, []):
-            lines.extend(_render_record(child, indent + 1))
-        return lines
-
-    trajectories = []
-    for root in children[None]:
-        trajectory_lines = _render_record(root, 1)
-        trajectories.append("\n".join(trajectory_lines))
-
-    return "\n\n".join(trajectories)
+# Alias preserved so existing imports (test_scientist.py, scripts/compare_personas.py,
+# scripts/validate_prediction_tool.py) keep working. New code should import
+# format_full_detail from prediction_tool directly.
+_format_predictions_for_prompt = format_full_detail
 
 
 async def run_scientist(
