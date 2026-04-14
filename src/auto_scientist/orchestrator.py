@@ -1101,11 +1101,9 @@ class Orchestrator:
             from auto_scientist.agents.stop_gate import run_single_stop_debate
 
             analysis_json = json.dumps(analysis, indent=2) if analysis else ""
-            from auto_scientist.agents.scientist import _format_predictions_for_prompt
-
-            prediction_history_text = _format_predictions_for_prompt(
-                self.state.prediction_history,
-            )
+            # Stop critics pick compact-tree (SDK) or full-detail (API)
+            # rendering from prediction_history_records internally. No
+            # pre-rendered string needed.
             notebook_path = self.output_dir / NOTEBOOK_FILENAME
 
             self._live.update_status(phase="STOP_DEBATE")
@@ -1183,7 +1181,6 @@ class Orchestrator:
                         message_buffer=buf,
                         persona=persona,
                         analysis_json=analysis_json,
-                        prediction_history=prediction_history_text,
                         goal=self.state.goal,
                         prediction_history_records=self.state.prediction_history,
                         output_dir=self.output_dir,

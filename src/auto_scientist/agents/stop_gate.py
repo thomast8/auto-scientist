@@ -27,6 +27,7 @@ from auto_scientist.agents.prediction_tool import (
     PREDICTION_SPEC,
     build_prediction_mcp_server,
     format_compact_tree,
+    format_full_detail,
 )
 from auto_scientist.agents.scientist import SCIENTIST_PLAN_SCHEMA
 from auto_scientist.model_config import AgentModelConfig
@@ -56,15 +57,6 @@ logger = logging.getLogger(__name__)
 # ---------------------------------------------------------------------------
 # Completeness Assessment
 # ---------------------------------------------------------------------------
-
-
-def _format_predictions_for_assessment(
-    prediction_history: list[PredictionRecord] | None,
-) -> str:
-    """Format prediction history for the assessment prompt."""
-    from auto_scientist.agents.scientist import _format_predictions_for_prompt
-
-    return _format_predictions_for_prompt(prediction_history)
 
 
 async def run_completeness_assessment(
@@ -233,7 +225,6 @@ async def run_single_stop_debate(
     message_buffer: list[str] | None = None,
     persona: dict[str, str] | None = None,
     analysis_json: str = "",
-    prediction_history: str = "",
     goal: str = "",
     prediction_history_records: list[PredictionRecord] | None = None,
     output_dir: Path | None = None,
@@ -247,8 +238,10 @@ async def run_single_stop_debate(
         notebook_path: Path to the run's lab_notebook.xml. SDK-mode critics
             get a compact TOC + mcp__notebook__read_notebook tool; API-mode
             critics fall back to the full inline XML.
-        prediction_history: Pre-formatted text for prompt injection.
-        prediction_history_records: Raw records for MCP server (SDK mode only).
+        prediction_history_records: Raw PredictionRecord list. Rendered as
+            the compact tree in SDK mode (paired with the
+            mcp__predictions__read_predictions tool) and as the full-detail
+            trajectory in API mode (no tool available).
         output_dir: Directory for MCP data files.
     """
     from auto_scientist.agents.critic import _build_critic_tools_and_mcp
@@ -287,11 +280,17 @@ async def run_single_stop_debate(
         persona_instructions=persona_instructions or "",
         critic_output_schema=json.dumps(CRITIC_OUTPUT_SCHEMA, indent=2),
     )
-    effective_prediction_history = (
-        format_compact_tree(prediction_history_records)
-        if prediction_history_records
-        else prediction_history
-    )
+    # SDK critics get compact tree + read_predictions MCP tool to drill
+    # into entries. API critics have no tool, so they get the full-detail
+    # trajectory inline.
+    if prediction_history_records:
+        effective_prediction_history = (
+            format_compact_tree(prediction_history_records)
+            if is_sdk
+            else format_full_detail(prediction_history_records)
+        )
+    else:
+        effective_prediction_history = ""
 
     critic_user = STOP_CRITIC_USER.format(
         goal=goal,
