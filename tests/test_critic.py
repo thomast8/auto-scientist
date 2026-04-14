@@ -979,6 +979,83 @@ class TestCriticMcpIntegration:
         # API mode does NOT get the compact tree header
         assert "== PREDICTION TREE" not in prompt
 
+    @pytest.mark.asyncio
+    async def test_api_mode_prompt_describes_full_detail_not_compact(self, plan, notebook_path):
+        """API-mode critic prompt must describe the inline history as full
+        detail, not "compact summary" / "compact tree".
+
+        Regression for a bug flagged by Codex: the API branch of
+        _build_critic_prompt said "A compact summary of the prediction
+        history is included" and "The prediction tree is provided above",
+        priming direct-API models to treat inlined full detail as lossy
+        summary data.
+        """
+        critic = AgentModelConfig(provider="openai", model="gpt-4o", mode="api")
+        records = [
+            PredictionRecord(
+                pred_id="1.0",
+                iteration_prescribed=1,
+                iteration_evaluated=1,
+                prediction="noise is additive",
+                diagnostic="check residuals",
+                if_confirmed="use OLS",
+                if_refuted="switch to WLS",
+                outcome="confirmed",
+                evidence="residuals uncorrelated with x",
+            ),
+        ]
+        with patch(OPENAI_PATH, new_callable=AsyncMock, return_value=_CR()) as mock_openai:
+            await run_single_critic_debate(
+                config=critic,
+                plan=plan,
+                notebook_path=notebook_path,
+                prediction_history_records=records,
+                persona=self._PREDICTION_PERSONA,
+            )
+
+        prompt = mock_openai.call_args[0][1]
+        # Must NOT describe the payload as a compact summary / tree
+        assert "compact summary of the prediction history" not in prompt
+        assert "prediction tree is provided above" not in prompt
+        # Must describe it as full-detail inline evidence
+        assert "full prediction history is included inline" in prompt
+
+    @pytest.mark.asyncio
+    async def test_api_mode_does_not_build_prediction_mcp_server(self, plan, notebook_path):
+        """API-mode critics must not spawn a prediction MCP server.
+
+        Per Lane A's suggestion: API mode drops mcp_servers entirely in
+        _query_critic, so building an in-process stdio server for a tool
+        the critic cannot call is wasteful. The critic's
+        _build_critic_tools_and_mcp should receive None for records in API
+        mode, matching the notebook_path=None gating on the adjacent line.
+        """
+        critic = AgentModelConfig(provider="openai", model="gpt-4o", mode="api")
+        records = [
+            PredictionRecord(
+                pred_id="1.0",
+                iteration_prescribed=1,
+                iteration_evaluated=1,
+                prediction="polynomial fits well",
+                diagnostic="compare residuals",
+                if_confirmed="use polynomial",
+                if_refuted="try spline",
+                outcome="confirmed",
+                evidence="R^2 = 0.97",
+            ),
+        ]
+        with patch(OPENAI_PATH, new_callable=AsyncMock, return_value=_CR()) as mock_openai:
+            await run_single_critic_debate(
+                config=critic,
+                plan=plan,
+                notebook_path=notebook_path,
+                prediction_history_records=records,
+                persona=self._PREDICTION_PERSONA,
+            )
+
+        # Direct API path does not receive mcp_servers at all
+        assert "mcp_servers" not in mock_openai.call_args.kwargs
+
 
 class TestCriticSignatures:
     """Debate entry points must not accept a pre-rendered prediction_history string.

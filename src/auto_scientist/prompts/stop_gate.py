@@ -412,9 +412,9 @@ The "raw JSON only" rule applies only to your final assistant message.
 Before responding:
 - Use targeted web search when you need literature or standard-method support
   for a coverage or depth challenge.
-- If mcp__predictions__read_predictions is available and you need details
-  about a specific pred_id, outcome, or chain, call it rather than guessing
-  from the compact summary.
+- The prediction history in <context> is the full record: each entry
+  includes the prediction, diagnostic, conditional implications, evidence,
+  and parent-child reasoning links. Use it directly; no tool call needed.
 - The notebook in <context> is the full lab notebook XML. Read it directly
   when judging whether a sub-question or depth concern is supported by what
   was actually written down.
@@ -427,7 +427,7 @@ If you call a tool, reference its result in your output. If the result
 contradicts your draft reasoning, update your reasoning.
 </tool_use>"""
 
-_STOP_CRITIC_PIPELINE_CONTEXT = """\
+_STOP_CRITIC_PIPELINE_CONTEXT_SDK = """\
 <pipeline_context>
 The Scientist has proposed stopping this investigation. A completeness
 assessment has been performed, identifying which aspects of the goal have
@@ -446,6 +446,28 @@ A compact summary of the prediction history is included in the context below.
 When you need more detail on a specific prediction (full reasoning, chain of
 related predictions, or statistics by outcome/iteration), call the
 mcp__predictions__read_predictions tool rather than guessing from the summary.
+</pipeline_context>"""
+
+_STOP_CRITIC_PIPELINE_CONTEXT_API = """\
+<pipeline_context>
+The Scientist has proposed stopping this investigation. A completeness
+assessment has been performed, identifying which aspects of the goal have
+been thoroughly covered, which were addressed shallowly, and which were
+not explored at all.
+
+Your job is to challenge the stop decision based on the gaps identified.
+You are not critiquing an experiment plan; you are challenging a claim
+that the investigation is complete.
+
+You receive: the completeness assessment (structured gap report), the
+Scientist's stop_reason, the investigation goal, analysis data, prediction
+history, lab notebook, and domain knowledge.
+
+The full prediction history is included inline below: each entry shows the
+prediction, diagnostic used, conditional implications (if_confirmed /
+if_refuted), observed evidence, and parent-child reasoning links via
+indentation. Use it directly as your primary evidence base for judging
+coverage and depth; no tool call is needed to expand entries.
 </pipeline_context>"""
 
 _STOP_CRITIC_OUTPUT_FORMAT = """\
@@ -478,6 +500,7 @@ def build_stop_critic_system(
     provider: str = "claude",
     *,
     has_predictions: bool = True,
+    has_prediction_tool: bool = True,
     has_notebook_tool: bool = True,
 ) -> str:
     """Assemble Stop Critic system prompt template in provider-optimal order.
@@ -485,11 +508,21 @@ def build_stop_critic_system(
     Returns a template with {persona_text}, {persona_instructions},
     {critic_output_schema} placeholders.
 
-    When *has_notebook_tool* is False (API-mode critics that cannot call
-    MCP tools), the notebook tool note is omitted from the role and the
-    tool-use guidance describes the inline XML payload instead of a TOC.
+    Args:
+        has_predictions: Whether prediction history is provided at all.
+        has_prediction_tool: Whether the caller can invoke
+            mcp__predictions__read_predictions. SDK-mode critics get the
+            compact tree paired with this tool; API-mode critics get the
+            full-detail trajectory inline and cannot call the tool. When
+            False, all prediction-tool references are stripped from the
+            role, tool-use guidance, and pipeline context, and the
+            pipeline context describes inline full-detail evidence
+            instead of a compact summary.
+        has_notebook_tool: Whether the caller can invoke
+            mcp__notebook__read_notebook. Same SDK-vs-API split as
+            prediction_tool.
     """
-    pred_note = _PREDICTION_TOOL_NOTE if has_predictions else ""
+    pred_note = _PREDICTION_TOOL_NOTE if has_predictions and has_prediction_tool else ""
     notebook_note = _NOTEBOOK_TOOL_NOTE if has_notebook_tool else ""
     role = _STOP_CRITIC_ROLE.format(
         prediction_tool_note=pred_note, notebook_tool_note=notebook_note
@@ -498,6 +531,11 @@ def build_stop_critic_system(
         _STOP_CRITIC_TOOL_USE_GUIDANCE_SDK
         if has_notebook_tool
         else _STOP_CRITIC_TOOL_USE_GUIDANCE_API
+    )
+    pipeline_context = (
+        _STOP_CRITIC_PIPELINE_CONTEXT_SDK
+        if has_prediction_tool
+        else _STOP_CRITIC_PIPELINE_CONTEXT_API
     )
 
     if provider == "gpt":
@@ -508,7 +546,7 @@ def build_stop_critic_system(
                 "{persona_text}",
                 "{persona_instructions}",
                 _STOP_CRITIC_OUTPUT_FORMAT,
-                _STOP_CRITIC_PIPELINE_CONTEXT,
+                pipeline_context,
             ]
         )
     else:
@@ -517,7 +555,7 @@ def build_stop_critic_system(
                 role,
                 tool_use,
                 "{persona_text}",
-                _STOP_CRITIC_PIPELINE_CONTEXT,
+                pipeline_context,
                 "{persona_instructions}",
                 _STOP_CRITIC_OUTPUT_FORMAT,
             ]
@@ -525,7 +563,7 @@ def build_stop_critic_system(
     return raw.replace("{{", "{").replace("}}", "}")
 
 
-# Backward-compatible alias (assumes predictions available)
+# Backward-compatible alias (assumes predictions available + SDK tool access)
 STOP_CRITIC_SYSTEM_BASE = build_stop_critic_system("claude")
 
 STOP_CRITIC_USER = """\

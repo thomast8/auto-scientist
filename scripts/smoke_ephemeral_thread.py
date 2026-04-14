@@ -131,7 +131,7 @@ async def mode_control() -> int:
         await client.start()
 
         try:
-            # Bare ThreadConfig — ephemeral deliberately omitted.
+            # Bare ThreadConfig with ephemeral deliberately omitted.
             thread_config = ThreadConfig(
                 model=MODEL,
                 base_instructions=SYSTEM,
@@ -184,7 +184,7 @@ async def mode_resume() -> int:
 
     Proves both (a) the resumed turn continues on the same thread_id and
     (b) the model actually sees turn 1's context. A fresh thread cannot
-    produce the secret word — that is the real invariant a Coder error
+    produce the secret word, which is the real invariant a Coder error
     correction loop depends on.
     """
     backend = get_backend("openai")
@@ -224,7 +224,7 @@ async def mode_resume() -> int:
         print(
             f"[smoke:resume] FAIL: turn 2 did not recall the secret word "
             f"{SECRET_WORD!r}; got {text2!r}. The model did not see turn 1's "
-            f"context — resume is broken even though thread_id matched.",
+            f"context, so resume is broken even though thread_id matched.",
             file=sys.stderr,
         )
         return 1

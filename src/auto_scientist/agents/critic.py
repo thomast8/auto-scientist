@@ -377,22 +377,22 @@ async def run_single_critic_debate(
 
     if has_predictions:
         tools, mcp_servers = _build_critic_tools_and_mcp(
-            prediction_history_records,
+            prediction_history_records if is_sdk else None,
             notebook_path=notebook_path if is_sdk else None,
             output_dir=output_dir,
         )
         # SDK critics get compact tree + read_predictions MCP tool to drill
         # into specific entries. API critics have no tool, so they get the
         # full-detail trajectory inline (mirrors the notebook TOC-vs-XML
-        # split from PR #28).
-        if prediction_history_records:
-            effective_prediction_history = (
-                format_compact_tree(prediction_history_records)
-                if is_sdk
-                else format_full_detail(prediction_history_records)
-            )
-        else:
-            effective_prediction_history = ""
+        # split from PR #28). Both formatters return
+        # "(no prediction history yet)" for empty input, so we call them
+        # unconditionally to preserve the placeholder string (the prompt
+        # builder still has a belt-and-suspenders `or` fallback).
+        effective_prediction_history = (
+            format_compact_tree(prediction_history_records)
+            if is_sdk
+            else format_full_detail(prediction_history_records)
+        )
     else:
         tools, mcp_servers = _build_critic_tools_and_mcp(
             None,
@@ -679,18 +679,25 @@ def _build_critic_prompt(
                 "is\ninsufficient, especially for specific pred_ids or prior outcomes."
             )
         else:
-            # API mode: prediction data is inline, no tool available
+            # API mode: full-detail prediction history is inlined below.
+            # The MCP tool is unavailable (direct API calls can't invoke it),
+            # so the prompt must describe the payload as full evidence, not
+            # a compact summary.
             prediction_role_text = ""
             prediction_tool_guidance = (
                 "- Use the inline prediction history when it is relevant to your critique;\n"
                 "  do not guess or invent prior outcomes."
             )
             prediction_pipeline_text = (
-                "\nA compact summary of the prediction history is included in the context below."
+                "\nThe full prediction history is included inline in the context below. "
+                "Each entry\nshows the prediction, diagnostic, conditional implications, "
+                "observed evidence,\nand parent-child reasoning links via indentation. No "
+                "tool call is needed to\nexpand entries."
             )
             prediction_task_text = (
-                "\nThe prediction tree is provided above. Use it to verify "
-                "prediction outcomes referenced in the plan."
+                "\nThe full prediction history is provided above with evidence and "
+                "implications.\nUse it directly to verify prediction outcomes referenced "
+                "in the plan."
             )
     else:
         prediction_role_text = ""

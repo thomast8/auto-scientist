@@ -732,7 +732,7 @@ class CodexBackend:
         # config.
         #
         # We default ephemeral=True to hide auto-scientist agent chatter
-        # from the Codex desktop app's history sidebar — a pipeline run
+        # from the Codex desktop app's history sidebar. A pipeline run
         # fires dozens of agent calls and each one would otherwise show up
         # as its own persistent thread. The one exception is the
         # resume-fallback path: if the caller asked to continue a thread

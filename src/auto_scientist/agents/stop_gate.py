@@ -274,6 +274,7 @@ async def run_single_stop_debate(
     critic_system = build_stop_critic_system(
         prompt_provider,
         has_predictions=has_predictions,
+        has_prediction_tool=has_predictions and is_sdk,
         has_notebook_tool=is_sdk,
     ).format(
         persona_text=persona_text,
@@ -282,15 +283,15 @@ async def run_single_stop_debate(
     )
     # SDK critics get compact tree + read_predictions MCP tool to drill
     # into entries. API critics have no tool, so they get the full-detail
-    # trajectory inline.
-    if prediction_history_records:
-        effective_prediction_history = (
-            format_compact_tree(prediction_history_records)
-            if is_sdk
-            else format_full_detail(prediction_history_records)
-        )
-    else:
-        effective_prediction_history = ""
+    # trajectory inline. Both formatters return
+    # "(no prediction history yet)" for empty/None input, so we call them
+    # unconditionally to preserve the placeholder in the rendered
+    # <prediction_history> block rather than emitting a blank tag.
+    effective_prediction_history = (
+        format_compact_tree(prediction_history_records)
+        if is_sdk
+        else format_full_detail(prediction_history_records)
+    )
 
     critic_user = STOP_CRITIC_USER.format(
         goal=goal,
