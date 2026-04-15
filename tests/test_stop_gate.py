@@ -1191,6 +1191,7 @@ class TestStopGatePromptBuilders:
             notebook_content="nb",
             analysis_json="{}",
             prediction_history="ph",
+            dead_ends_section="",
             stop_reason="done",
             completeness_assessment="{}",
             concern_ledger="[]",
@@ -1203,3 +1204,70 @@ class TestStopGatePromptBuilders:
         assert "Example" not in user
         assert "Example (withdrawal):" in system
         assert "Untested nonlinear response forms" in system
+
+    def test_assessment_user_includes_dead_ends_when_present(self):
+        from auto_scientist.prompts.stop_gate import ASSESSMENT_USER
+
+        section = (
+            "<dead_ends>\n"
+            'sample\n[{"iteration":1,"description":"polynomial fit"}]\n'
+            "</dead_ends>\n"
+        )
+        prompt = ASSESSMENT_USER.format(
+            goal="g",
+            stop_reason="done",
+            domain_knowledge="dk",
+            prediction_history="ph",
+            pending_abductions_section="",
+            dead_ends_section=section,
+            notebook_content="nb",
+        )
+        assert "<dead_ends>" in prompt
+        assert "polynomial fit" in prompt
+
+    def test_stop_critic_user_includes_dead_ends_when_present(self):
+        from auto_scientist.prompts.stop_gate import STOP_CRITIC_USER
+
+        section = (
+            "<dead_ends>\n"
+            '[{"iteration":2,"description":"linear interpolation"}]\n'
+            "</dead_ends>\n"
+        )
+        prompt = STOP_CRITIC_USER.format(
+            goal="g",
+            domain_knowledge="dk",
+            notebook_section="<notebook>nb</notebook>",
+            analysis_json="{}",
+            prediction_history="ph",
+            dead_ends_section=section,
+            stop_reason="done",
+            completeness_assessment="{}",
+        )
+        assert "<dead_ends>" in prompt
+        assert "linear interpolation" in prompt
+        # Task block now mentions dead ends as a reason to challenge the stop.
+        assert "dead ends" in prompt
+
+    def test_stop_revision_user_includes_dead_ends_when_present(self):
+        from auto_scientist.prompts.stop_gate import STOP_REVISION_USER
+
+        section = (
+            "<dead_ends>\n"
+            '[{"iteration":2,"description":"saturating fit"}]\n'
+            "</dead_ends>\n"
+        )
+        prompt = STOP_REVISION_USER.format(
+            goal="g",
+            domain_knowledge="dk",
+            notebook_content="nb",
+            analysis_json="{}",
+            prediction_history="ph",
+            dead_ends_section=section,
+            stop_reason="done",
+            completeness_assessment="{}",
+            concern_ledger="[]",
+            version="v02",
+            plan_schema="{}",
+        )
+        assert "<dead_ends>" in prompt
+        assert "saturating fit" in prompt

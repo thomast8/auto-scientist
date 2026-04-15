@@ -19,6 +19,20 @@ class VersionEntry(BaseModel):
     failure_reason: Literal["timed_out", "crash", "no_script", "no_result"] | None = None
 
 
+class DeadEnd(BaseModel):
+    """A hypothesis or approach the Scientist has confirmed unfeasible.
+
+    Recorded by the Scientist when direct evidence in the analysis or
+    prediction history rules out a direction. Surfaced back to the
+    Scientist, Critics, Stop Gate, and Report on subsequent iterations as
+    negative constraints so the same direction is not re-proposed.
+    """
+
+    iteration: int  # iteration where this dead end was recorded
+    description: str  # one-line summary of the dead approach
+    evidence: str = ""  # what made it dead (e.g. "v03 R^2=0.41 vs >=0.7 target")
+
+
 class PredictionRecord(BaseModel):
     """A testable prediction and its outcome, persisted across iterations."""
 
@@ -43,7 +57,7 @@ class ExperimentState(BaseModel):
     phase: Literal["ingestion", "iteration", "report", "stopped"] = "ingestion"
     iteration: int = 0
     versions: list[VersionEntry] = Field(default_factory=list)
-    dead_ends: list[str] = Field(default_factory=list)
+    dead_ends: list[DeadEnd] = Field(default_factory=list)
     schedule: str | None = None
     consecutive_failures: int = 0
     data_path: str | None = None
@@ -67,6 +81,16 @@ class ExperimentState(BaseModel):
         if data.get("phase") == "discovery":
             data["phase"] = "iteration"
             data.setdefault("iteration", 0)
+        # Migrate legacy dead_ends: list[str] to list[DeadEnd]
+        legacy_dead_ends = data.get("dead_ends")
+        if isinstance(legacy_dead_ends, list) and legacy_dead_ends:
+            migrated: list[dict] = []
+            for entry in legacy_dead_ends:
+                if isinstance(entry, str):
+                    migrated.append({"iteration": -1, "description": entry, "evidence": ""})
+                elif isinstance(entry, dict):
+                    migrated.append(entry)
+            data["dead_ends"] = migrated
         return cls.model_validate(data)
 
     def record_version(self, entry: VersionEntry) -> None:

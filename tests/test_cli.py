@@ -111,12 +111,20 @@ class TestStatusCommand:
         assert "Dead ends" not in result.output
 
     def test_dead_ends_shown_when_present(self, tmp_path):
+        from auto_scientist.state import DeadEnd
+
         state = ExperimentState(
             domain="auto",
             goal="test",
             phase="iteration",
             iteration=2,
-            dead_ends=["Tried polynomial fit, R^2 < 0.5"],
+            dead_ends=[
+                DeadEnd(
+                    iteration=1,
+                    description="Tried polynomial fit",
+                    evidence="R^2 < 0.5",
+                )
+            ],
         )
         state.save(tmp_path / "state.json")
 

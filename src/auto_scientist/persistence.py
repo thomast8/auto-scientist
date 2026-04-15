@@ -17,7 +17,7 @@ from auto_scientist.iteration_manifest import (
     load_manifest,
 )
 from auto_scientist.runner import RunResult
-from auto_scientist.state import ExperimentState, PredictionRecord, VersionEntry
+from auto_scientist.state import DeadEnd, ExperimentState, PredictionRecord, VersionEntry
 
 logger = logging.getLogger(__name__)
 
@@ -634,6 +634,51 @@ def format_pending_abductions(state: ExperimentState) -> str:
     if not state.pending_abductions:
         return ""
     return json.dumps(state.pending_abductions, indent=2)
+
+
+def record_dead_ends(plan: dict[str, Any], state: ExperimentState) -> None:
+    """Append Scientist-declared dead ends to state, stamped with current iteration.
+
+    Silently skips entries that are missing a description. Each surviving
+    entry becomes a DeadEnd model on state.dead_ends so future iterations
+    of the Scientist, Critics, Stop Gate, and Report see it as a negative
+    constraint.
+    """
+    raw_entries = plan.get("dead_ends") or []
+    if not isinstance(raw_entries, list):
+        return
+    recorded: list[str] = []
+    for entry in raw_entries:
+        if not isinstance(entry, dict):
+            continue
+        desc = (entry.get("description") or "").strip()
+        if not desc:
+            continue
+        evidence = (entry.get("evidence") or "").strip()
+        state.dead_ends.append(
+            DeadEnd(iteration=state.iteration, description=desc, evidence=evidence)
+        )
+        recorded.append(desc)
+    if recorded:
+        logger.info(
+            f"Recorded {len(recorded)} dead end(s) at iteration {state.iteration}: "
+            f"{'; '.join(d[:60] for d in recorded)}"
+        )
+
+
+def format_dead_ends(state: ExperimentState) -> str:
+    """Format dead ends as JSON for injection into agent prompts.
+
+    Returns empty string if no dead ends have been recorded. The formatted
+    output is consumed by the Scientist (plan + revision), Critics, Stop
+    Gate, and Report so all four see the same negative-constraint list.
+    """
+    if not state.dead_ends:
+        return ""
+    return json.dumps(
+        [d.model_dump() for d in state.dead_ends],
+        indent=2,
+    )
 
 
 def build_concern_ledger(debate_results: list) -> list[dict[str, Any]]:

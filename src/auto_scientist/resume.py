@@ -626,7 +626,12 @@ def rewind_run(
     state.iteration = effective_iteration
     state.versions = state.versions[:effective_iteration]
     state.consecutive_failures = 0
-    state.dead_ends = []
+    # Trim dead ends to those recorded in iterations that survive the rewind.
+    # Legacy entries with iteration=-1 (migrated from list[str]) are retained
+    # since their original iteration is unknown.
+    state.dead_ends = [
+        d for d in state.dead_ends if d.iteration < effective_iteration or d.iteration == -1
+    ]
 
     # --- Prediction history trimming ---
     if from_agent and from_agent in _REPLANNING_AGENTS:

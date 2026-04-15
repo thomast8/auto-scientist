@@ -99,6 +99,13 @@ _INSTRUCTIONS = """\
    Limitations section as an explicit open thread: what alternative
    explanation was raised, why it was not tested, and what would be
    needed to resolve it.
+
+7. If dead_ends are present, document them in a 'Ruled Out' subsection
+   (or equivalent within Limitations / Findings). Each entry is a
+   direction the Scientist confirmed unfeasible during the investigation
+   with concrete refuting evidence. These are negative results, not
+   gaps - report them as part of what was learned, including the
+   evidence that ruled them out.
 </instructions>"""
 
 _SCOPE_BOUNDARY = """\
@@ -191,7 +198,7 @@ REPORT_USER = """\
 
 <data>
 <notebook_toc>{notebook_content}</notebook_toc>
-{pending_abductions_section}</data>
+{pending_abductions_section}{dead_ends_section}</data>
 
 <task>
 Output the complete final report as text. Do not write any files. Your text
