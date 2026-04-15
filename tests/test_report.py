@@ -439,3 +439,43 @@ class TestReportPromptBuilder:
 
         assert system.count("<recap>") == 2
         assert "You run once after the investigation ends." in system
+
+    def test_report_user_includes_dead_ends_when_present(self):
+        from auto_scientist.prompts.report import REPORT_USER
+
+        section = (
+            "<dead_ends>\n"
+            '[{"iteration":2,"description":"polynomial regression","evidence":"v02 r2=0.31"}]\n'
+            "</dead_ends>\n"
+        )
+        prompt = REPORT_USER.format(
+            domain="d",
+            goal="g",
+            total_iterations=3,
+            best_version="v02",
+            notebook_content="nb",
+            pending_abductions_section="",
+            dead_ends_section=section,
+        )
+        assert "<dead_ends>" in prompt
+        assert "polynomial regression" in prompt
+
+    def test_report_user_omits_dead_ends_when_empty(self):
+        from auto_scientist.prompts.report import REPORT_USER
+
+        prompt = REPORT_USER.format(
+            domain="d",
+            goal="g",
+            total_iterations=3,
+            best_version="v02",
+            notebook_content="nb",
+            pending_abductions_section="",
+            dead_ends_section="",
+        )
+        assert "<dead_ends>" not in prompt
+
+    def test_report_system_instructs_ruled_out_section(self):
+        from auto_scientist.prompts.report import build_report_system
+
+        system = build_report_system("claude")
+        assert "Ruled Out" in system or "dead_ends" in system

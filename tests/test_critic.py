@@ -174,6 +174,25 @@ class TestBuildCriticPrompt:
         _system, user = _build_critic_prompt({"h": "p"}, "", "")
         assert "(empty)" in user or "(none provided)" in user
 
+    def test_dead_ends_omitted_when_empty(self):
+        _system, user = _build_critic_prompt({"h": "p"}, "", "", dead_ends="")
+        assert "<dead_ends>" not in user
+        assert "re-tread" not in user
+
+    def test_dead_ends_injected_when_present(self):
+        dead_ends_blob = (
+            '[{"iteration": 2, '
+            '"description": "per-intersection regression with lag features", '
+            '"evidence": "v02 r2 stuck at 0.31"}]'
+        )
+        _system, user = _build_critic_prompt(
+            {"hypothesis": "p"}, "", "", dead_ends=dead_ends_blob
+        )
+        assert "<dead_ends>" in user
+        assert "per-intersection regression with lag features" in user
+        # Critic gets explicit instruction to flag plans that re-tread a dead end
+        assert "re-tread" in user
+
     def test_persona_injected_into_system(self):
         persona = "<persona>\nYou are the Methodologist.\n</persona>"
         system, _user = _build_critic_prompt({"h": "p"}, "", "", persona_text=persona)

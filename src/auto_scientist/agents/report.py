@@ -43,6 +43,7 @@ async def run_report(
     message_buffer: list[str] | None = None,
     provider: str = "anthropic",
     pending_abductions: str = "",
+    dead_ends: str = "",
 ) -> str:
     """Generate the final experiment report.
 
@@ -69,6 +70,18 @@ async def run_report(
             "</pending_abductions>\n"
         )
 
+    dead_ends_section = ""
+    if dead_ends:
+        dead_ends_section = (
+            "<dead_ends>\n"
+            "Directions the Scientist confirmed unfeasible during the "
+            "investigation, with the evidence that ruled them out. Surface "
+            "these in a 'Ruled Out' or equivalent section so readers know "
+            "what was tried and why it failed.\n\n"
+            f"{dead_ends}\n"
+            "</dead_ends>\n"
+        )
+
     user_prompt = REPORT_USER.format(
         domain=state.domain,
         goal=state.goal,
@@ -76,6 +89,7 @@ async def run_report(
         best_version=state.versions[-1].version if state.versions else "none",
         notebook_content=format_notebook_toc(notebook_entries),
         pending_abductions_section=abductions_section,
+        dead_ends_section=dead_ends_section,
     )
 
     max_turns = 10

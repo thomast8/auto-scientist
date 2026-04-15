@@ -3411,6 +3411,77 @@ class TestAbductionPersistence:
         assert '"0.1"' in result
 
 
+class TestDeadEndsPersistence:
+    """Tests for record_dead_ends and format_dead_ends helpers."""
+
+    def test_record_dead_ends_stamps_iteration(self, orchestrator):
+        from auto_scientist.persistence import record_dead_ends
+
+        orchestrator.state.iteration = 4
+        plan = {
+            "dead_ends": [
+                {"description": "polynomial fit", "evidence": "v02 R^2=0.31"},
+                {"description": "linear regression", "evidence": "v03 R^2=0.28"},
+            ],
+        }
+        record_dead_ends(plan, orchestrator.state)
+        assert len(orchestrator.state.dead_ends) == 2
+        assert orchestrator.state.dead_ends[0].iteration == 4
+        assert orchestrator.state.dead_ends[0].description == "polynomial fit"
+        assert orchestrator.state.dead_ends[0].evidence == "v02 R^2=0.31"
+        assert orchestrator.state.dead_ends[1].description == "linear regression"
+
+    def test_record_dead_ends_skips_empty_description(self, orchestrator):
+        from auto_scientist.persistence import record_dead_ends
+
+        plan = {
+            "dead_ends": [
+                {"description": "", "evidence": "x"},
+                {"description": "   ", "evidence": "y"},
+                {"description": "real one", "evidence": ""},
+            ],
+        }
+        record_dead_ends(plan, orchestrator.state)
+        assert len(orchestrator.state.dead_ends) == 1
+        assert orchestrator.state.dead_ends[0].description == "real one"
+
+    def test_record_dead_ends_skips_non_dict_entries(self, orchestrator):
+        from auto_scientist.persistence import record_dead_ends
+
+        plan = {"dead_ends": ["not a dict", None, 42]}
+        record_dead_ends(plan, orchestrator.state)
+        assert len(orchestrator.state.dead_ends) == 0
+
+    def test_record_dead_ends_noop_when_missing(self, orchestrator):
+        from auto_scientist.persistence import record_dead_ends
+
+        record_dead_ends({}, orchestrator.state)
+        assert len(orchestrator.state.dead_ends) == 0
+
+    def test_record_dead_ends_handles_non_list(self, orchestrator):
+        from auto_scientist.persistence import record_dead_ends
+
+        record_dead_ends({"dead_ends": "not a list"}, orchestrator.state)
+        assert len(orchestrator.state.dead_ends) == 0
+
+    def test_format_dead_ends_empty_returns_empty_string(self, orchestrator):
+        from auto_scientist.persistence import format_dead_ends
+
+        assert format_dead_ends(orchestrator.state) == ""
+
+    def test_format_dead_ends_returns_json(self, orchestrator):
+        from auto_scientist.persistence import format_dead_ends
+        from auto_scientist.state import DeadEnd
+
+        orchestrator.state.dead_ends = [
+            DeadEnd(iteration=2, description="ridge regression", evidence="v02 r2=0.31"),
+        ]
+        result = format_dead_ends(orchestrator.state)
+        assert '"description"' in result
+        assert "ridge regression" in result
+        assert '"iteration": 2' in result
+
+
 class TestSchemaValidation:
     """Tests for new Pydantic schema models."""
 

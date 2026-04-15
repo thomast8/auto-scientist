@@ -323,6 +323,13 @@ shift to cell-transmission simulation.",
       "if_refuted": "Queue dynamics depend on factors beyond topology; add signal timing",
       "follows_from": null
     }}
+  ],
+  "dead_ends": [
+    {{
+      "description": "Per-intersection regression with lag features",
+      "evidence": "v02 and v03 tuned lag windows; queue r2 stuck at 0.31 in both. \
+Treating intersections independently cannot capture cross-intersection congestion."
+    }}
   ]
 }}
 </output>
@@ -549,6 +556,13 @@ shift to cell-transmission simulation.",
       "if_refuted": "Queue dynamics depend on factors beyond topology; add signal timing",
       "follows_from": null
     }}
+  ],
+  "dead_ends": [
+    {{
+      "description": "Per-intersection regression with lag features",
+      "evidence": "v02 and v03 tuned lag windows; queue r2 stuck at 0.31 in both. \
+Treating intersections independently cannot capture cross-intersection congestion."
+    }}
   ]
 }}
 </output>
@@ -637,6 +651,12 @@ Produce a JSON object with these exact keys and types:
       "refuted_pred_id": str,
       "reason": str
     }}
+  ],
+  "dead_ends": [
+    {{
+      "description": str,
+      "evidence": str
+    }}
   ]
 }}
 
@@ -658,6 +678,14 @@ deprioritized_abductions: explicit decisions to not pursue testable
   consequences from prior refutation reasoning. refuted_pred_id references
   the original refuted prediction. Only populated when pending abductions
   exist and you choose not to test them; include a reason.
+dead_ends: directions confirmed unfeasible by direct refuting evidence in
+  the analysis or prediction history. Each entry has a one-line description
+  and the evidence that ruled it out. The orchestrator stamps the iteration.
+  Use sparingly: only when evidence rules out the approach. Do NOT use
+  dead_ends for low-priority ideas, ideas you might revisit, or hypotheses
+  you simply chose not to pursue. Empty list is the default and most
+  common case. Future iterations of you, the Critics, the Stop Gate, and
+  the Report will all see this list as a negative-constraint set.
 
 Fallback rules:
 - Exploration iteration (no analysis): testable_predictions may be empty
@@ -756,7 +784,7 @@ SCIENTIST_USER = """\
 <goal>{goal}</goal>
 <domain_knowledge>{domain_knowledge}</domain_knowledge>
 <prediction_history>{prediction_history}</prediction_history>
-{pending_abductions_section}<notebook_toc>{notebook_content}</notebook_toc>
+{pending_abductions_section}{dead_ends_section}<notebook_toc>{notebook_content}</notebook_toc>
 </context>
 
 <data>
@@ -768,18 +796,28 @@ SCIENTIST_USER = """\
 2. Review prediction history trajectories: which are active, what was
    confirmed or refuted, and whether any refuted predictions deserve
    re-examination under new conditions
-3. Formulate a clear hypothesis about what to change and why
-4. Create a detailed implementation plan with prioritized changes
-5. Define testable predictions that test your reasoning (link to prior
+3. Check <dead_ends> if present. Do not propose a hypothesis or change
+   that overlaps with a recorded dead end unless you have new evidence
+   that overturns it, in which case explicitly name which entry you are
+   reopening and why
+4. Formulate a clear hypothesis about what to change and why
+5. Create a detailed implementation plan with prioritized changes
+6. Define testable predictions that test your reasoning (link to prior
    predictions with follows_from to build trajectories)
-6. Write the notebook entry (title on first line, narrative below)
-7. Decide whether to stop or continue
+7. If the analysis or prediction history provides direct refuting
+   evidence for a direction, record it in dead_ends with a one-line
+   description and the evidence. Use sparingly - only for confirmed
+   unfeasible directions, never for low-priority ideas. The orchestrator
+   stamps the iteration; you provide description and evidence
+8. Write the notebook entry (title on first line, narrative below)
+9. Decide whether to stop or continue
 
 The new version is: {version}
 </task>
 
 <recap>
 One hypothesis, 1-2 tightly coupled changes per iteration.
+Respect <dead_ends>: do not re-propose ruled-out directions.
 Output raw JSON only. No markdown fencing.
 </recap>
 """
@@ -1103,7 +1141,7 @@ SCIENTIST_REVISION_USER = """\
 <goal>{goal}</goal>
 <domain_knowledge>{domain_knowledge}</domain_knowledge>
 <prediction_history>{prediction_history}</prediction_history>
-{pending_abductions_section}<notebook_toc>{notebook_content}</notebook_toc>
+{pending_abductions_section}{dead_ends_section}<notebook_toc>{notebook_content}</notebook_toc>
 </context>
 
 <data>
@@ -1117,11 +1155,17 @@ Produce a revised plan incorporating valid concerns from the ledger.
 Output a complete plan (all fields), not just changes. Preserve or
 update the testable_predictions from the original plan.
 
+If <dead_ends> is present, do not let the revision re-tread any
+recorded dead end. If the debate produced new direct refuting evidence
+for a direction, you may add a dead_ends entry in the revised plan.
+
 The new version is: {version}
 </task>
 
 <recap>
 Address the 1-2 highest-severity concerns. Reject low-confidence
-or out-of-lane concerns in the notebook entry. Output raw JSON only.
+or out-of-lane concerns in the notebook entry.
+Respect <dead_ends>: do not re-propose ruled-out directions.
+Output raw JSON only.
 </recap>
 """

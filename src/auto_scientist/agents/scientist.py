@@ -45,6 +45,27 @@ logger = logging.getLogger(__name__)
 SCIENTIST_BASE_TOOLS = ["WebSearch"]
 
 
+def _build_dead_ends_section(dead_ends: str) -> str:
+    """Wrap a formatted dead_ends JSON blob in the prompt section template.
+
+    Returns empty string if no dead ends are recorded. Used by both the
+    initial Scientist plan call and the post-debate revision call. The
+    Critics, Stop Gate, and Report use the same wrapper so the negative-
+    constraint set is presented identically across all four agents.
+    """
+    if not dead_ends:
+        return ""
+    return (
+        "<dead_ends>\n"
+        "Directions confirmed unfeasible by prior iterations. Do not\n"
+        "re-propose them. If new evidence in the analysis or prediction\n"
+        "history overturns one, you must explicitly state which entry\n"
+        "you are reopening and why.\n\n"
+        f"{dead_ends}\n"
+        "</dead_ends>\n"
+    )
+
+
 def _build_scientist_tools_and_mcp(
     prediction_history: list[PredictionRecord] | None,
     provider: str,
@@ -147,6 +168,23 @@ SCIENTIST_PLAN_SCHEMA = {
                 "required": ["refuted_pred_id", "reason"],
             },
         },
+        "dead_ends": {
+            "type": "array",
+            "description": (
+                "Directions confirmed unfeasible by direct refuting evidence "
+                "in the analysis or prediction history. The orchestrator "
+                "stamps the iteration. Use sparingly: only when evidence "
+                "rules out the approach, not for low-priority ideas."
+            ),
+            "items": {
+                "type": "object",
+                "properties": {
+                    "description": {"type": "string"},
+                    "evidence": {"type": "string"},
+                },
+                "required": ["description", "evidence"],
+            },
+        },
     },
     "required": [
         "hypothesis",
@@ -183,6 +221,7 @@ async def run_scientist(
     reasoning: ReasoningConfig | None = None,
     output_dir: Path | None = None,
     pending_abductions: str = "",
+    dead_ends: str = "",
 ) -> dict[str, Any]:
     """Formulate hypothesis and plan based on analysis.
 
@@ -230,6 +269,7 @@ async def run_scientist(
         notebook_content=format_notebook_toc(notebook_entries),
         prediction_history=format_compact_tree(prediction_history),
         pending_abductions_section=abductions_section,
+        dead_ends_section=_build_dead_ends_section(dead_ends),
         version=version,
     )
 
@@ -305,6 +345,7 @@ async def run_scientist_revision(
     reasoning: ReasoningConfig | None = None,
     output_dir: Path | None = None,
     pending_abductions: str = "",
+    dead_ends: str = "",
 ) -> dict[str, Any]:
     """Revise the plan after a critic debate.
 
@@ -349,6 +390,7 @@ async def run_scientist_revision(
         concern_ledger=ledger_text,
         prediction_history=format_compact_tree(prediction_history),
         pending_abductions_section=abductions_section,
+        dead_ends_section=_build_dead_ends_section(dead_ends),
         version=version,
     )
 

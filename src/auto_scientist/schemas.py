@@ -115,6 +115,18 @@ class DeprioritizedAbduction(BaseModel):
     reason: str
 
 
+class DeadEndProposal(BaseModel):
+    """A direction the Scientist marks as confirmed unfeasible.
+
+    The orchestrator stamps the iteration when persisting to ExperimentState.
+    """
+
+    model_config = ConfigDict(extra="ignore")
+
+    description: str
+    evidence: str = ""
+
+
 class ScientistPlanOutput(BaseModel):
     """Validated output from the Scientist agent (plan and revision)."""
 
@@ -130,6 +142,7 @@ class ScientistPlanOutput(BaseModel):
     testable_predictions: list[HypothesisPrediction] = Field(default_factory=list)
     refutation_reasoning: list[RefutationReasoning] = Field(default_factory=list)
     deprioritized_abductions: list[DeprioritizedAbduction] = Field(default_factory=list)
+    dead_ends: list[DeadEndProposal] = Field(default_factory=list)
 
 
 class SubQuestionAssessment(BaseModel):

@@ -847,6 +847,77 @@ class TestFormatCompactTree:
         assert len(pred_lines) == 2
 
 
+class TestDeadEndsInScientistPrompts:
+    """Verify <dead_ends> is injected into the Scientist plan + revision prompts."""
+
+    def test_scientist_user_omits_dead_ends_when_empty(self):
+        from auto_scientist.prompts.scientist import SCIENTIST_USER
+
+        prompt = SCIENTIST_USER.format(
+            goal="g",
+            domain_knowledge="dk",
+            prediction_history="ph",
+            pending_abductions_section="",
+            dead_ends_section="",
+            notebook_content="nb",
+            analysis_json="{}",
+            version="v01",
+        )
+        # The task block still references <dead_ends> as an instruction, but the
+        # section wrapper text from _build_dead_ends_section must not appear.
+        assert "Directions confirmed unfeasible by prior iterations" not in prompt
+
+    def test_scientist_user_includes_dead_ends_when_present(self):
+        from auto_scientist.agents.scientist import _build_dead_ends_section
+        from auto_scientist.prompts.scientist import SCIENTIST_USER
+
+        section = _build_dead_ends_section(
+            '[{"iteration": 1, "description": "polynomial fit", "evidence": "r2=0.31"}]'
+        )
+        assert section  # builder returned non-empty
+        prompt = SCIENTIST_USER.format(
+            goal="g",
+            domain_knowledge="dk",
+            prediction_history="ph",
+            pending_abductions_section="",
+            dead_ends_section=section,
+            notebook_content="nb",
+            analysis_json="{}",
+            version="v01",
+        )
+        assert "<dead_ends>" in prompt
+        assert "polynomial fit" in prompt
+        # The task block now references the dead-ends check.
+        assert "Check <dead_ends>" in prompt
+
+    def test_scientist_revision_user_includes_dead_ends_when_present(self):
+        from auto_scientist.agents.scientist import _build_dead_ends_section
+        from auto_scientist.prompts.scientist import SCIENTIST_REVISION_USER
+
+        section = _build_dead_ends_section(
+            '[{"iteration": 1, "description": "ridge regression", "evidence": "v01"}]'
+        )
+        prompt = SCIENTIST_REVISION_USER.format(
+            goal="g",
+            domain_knowledge="dk",
+            prediction_history="ph",
+            pending_abductions_section="",
+            dead_ends_section=section,
+            notebook_content="nb",
+            analysis_json="{}",
+            original_plan="{}",
+            concern_ledger="[]",
+            version="v01",
+        )
+        assert "<dead_ends>" in prompt
+        assert "ridge regression" in prompt
+
+    def test_dead_ends_section_builder_empty_input_returns_empty(self):
+        from auto_scientist.agents.scientist import _build_dead_ends_section
+
+        assert _build_dead_ends_section("") == ""
+
+
 class TestGoalInPrompts:
     """Verify that the goal placeholder is present and populated in prompts."""
 
@@ -858,6 +929,7 @@ class TestGoalInPrompts:
             domain_knowledge="dk",
             prediction_history="ph",
             pending_abductions_section="",
+            dead_ends_section="",
             notebook_content="nb",
             analysis_json="{}",
             version="v01",
@@ -873,6 +945,7 @@ class TestGoalInPrompts:
             domain_knowledge="dk",
             prediction_history="ph",
             pending_abductions_section="",
+            dead_ends_section="",
             notebook_content="nb",
             analysis_json="{}",
             original_plan="{}",

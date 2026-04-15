@@ -204,11 +204,43 @@ class TestExperimentStateExtended:
         assert len(state.versions) == 5
 
     def test_dead_ends_persistence(self, tmp_path):
-        state = ExperimentState(domain="test", goal="g", dead_ends=["v01", "v03"])
+        from auto_scientist.state import DeadEnd
+
+        state = ExperimentState(
+            domain="test",
+            goal="g",
+            dead_ends=[
+                DeadEnd(iteration=1, description="approach A", evidence="v01 R^2=0.31"),
+                DeadEnd(iteration=3, description="approach B", evidence=""),
+            ],
+        )
         path = tmp_path / "state.json"
         state.save(path)
         loaded = ExperimentState.load(path)
-        assert loaded.dead_ends == ["v01", "v03"]
+        assert len(loaded.dead_ends) == 2
+        assert loaded.dead_ends[0].iteration == 1
+        assert loaded.dead_ends[0].description == "approach A"
+        assert loaded.dead_ends[0].evidence == "v01 R^2=0.31"
+        assert loaded.dead_ends[1].iteration == 3
+        assert loaded.dead_ends[1].evidence == ""
+
+    def test_dead_ends_legacy_string_migration(self, tmp_path):
+        """Loading state with the old list[str] format upgrades to list[DeadEnd]."""
+        path = tmp_path / "state.json"
+        data = {
+            "domain": "test",
+            "goal": "g",
+            "phase": "iteration",
+            "iteration": 5,
+            "dead_ends": ["polynomial fit failed", "linear regression unstable"],
+        }
+        path.write_text(json.dumps(data))
+        loaded = ExperimentState.load(path)
+        assert len(loaded.dead_ends) == 2
+        assert loaded.dead_ends[0].iteration == -1
+        assert loaded.dead_ends[0].description == "polynomial fit failed"
+        assert loaded.dead_ends[0].evidence == ""
+        assert loaded.dead_ends[1].description == "linear regression unstable"
 
 
 class TestDiscoveryPhaseMigration:

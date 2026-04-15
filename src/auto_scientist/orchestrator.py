@@ -19,6 +19,7 @@ from auto_scientist.persistence import (
     apply_prediction_updates,
     build_concern_ledger,
     evaluate,
+    format_dead_ends,
     format_pending_abductions,
     get_pending_carryforward_predictions,
     load_analyst_from_disk,
@@ -27,6 +28,7 @@ from auto_scientist.persistence import (
     persist_artifact,
     persist_buffer,
     read_run_result,
+    record_dead_ends,
     resolve_addressed_abductions,
     resolve_prediction_outcomes,
     restore_iterations_from_manifest,
@@ -613,6 +615,10 @@ class Orchestrator:
                 # plan already addresses (via follows_from or deprioritization).
                 store_refutation_reasoning(final_plan, self.state)
                 resolve_addressed_abductions(final_plan, self.state)
+                # Record any directions the Scientist marked as confirmed
+                # unfeasible so future iterations (and the Critics, Stop Gate,
+                # and Report) see them as negative constraints.
+                record_dead_ends(final_plan, self.state)
 
             # Persist the final plan (post-debate revision if applicable).
             # NOTE: this must happen BEFORE carry-forward injection below,
@@ -980,6 +986,7 @@ class Orchestrator:
                     reasoning=cfg.reasoning,
                     output_dir=self.output_dir,
                     pending_abductions=format_pending_abductions(self.state),
+                    dead_ends=format_dead_ends(self.state),
                 )
 
             plan: dict[str, Any] = await with_summaries(
@@ -1064,6 +1071,7 @@ class Orchestrator:
                     provider=cfg.provider,
                     output_dir=self.output_dir,
                     pending_abductions=format_pending_abductions(self.state),
+                    dead_ends=format_dead_ends(self.state),
                 )
 
             assessment: dict[str, Any] = await with_summaries(
@@ -1184,6 +1192,7 @@ class Orchestrator:
                         goal=self.state.goal,
                         prediction_history_records=self.state.prediction_history,
                         output_dir=self.output_dir,
+                        dead_ends=format_dead_ends(self.state),
                     )
 
                 try:
@@ -1293,6 +1302,7 @@ class Orchestrator:
                     goal=self.state.goal,
                     provider=revision_cfg.provider,
                     output_dir=self.output_dir,
+                    dead_ends=format_dead_ends(self.state),
                 )
 
             revised: dict[str, Any] = await with_summaries(
@@ -1335,6 +1345,9 @@ class Orchestrator:
             # path falls through to normal debate which handles predictions)
             if revised.get("should_stop"):
                 apply_prediction_updates(revised, self.state)
+                # Final dead ends recorded on the upheld path so the Report
+                # agent sees any directions ruled out during the stop debate.
+                record_dead_ends(revised, self.state)
 
             collapse_panel(
                 revision_panel,
@@ -1404,6 +1417,7 @@ class Orchestrator:
                     prediction_history_records=self.state.prediction_history,
                     output_dir=self.output_dir,
                     pending_abductions=format_pending_abductions(self.state),
+                    dead_ends=format_dead_ends(self.state),
                 )
             else:
                 critiques = await run_debate(
@@ -1418,6 +1432,7 @@ class Orchestrator:
                     prediction_history_records=self.state.prediction_history,
                     output_dir=self.output_dir,
                     pending_abductions=format_pending_abductions(self.state),
+                    dead_ends=format_dead_ends(self.state),
                 )
             self._live.log(f"DEBATE: received {len(critiques)} critique(s)")
             return critiques
@@ -1442,6 +1457,7 @@ class Orchestrator:
         prediction_history_records: list | None = None,
         output_dir: Path | None = None,
         pending_abductions: str = "",
+        dead_ends: str = "",
     ) -> list:
         """Run per-persona debates in parallel, each with its own summarizer and panel."""
         import asyncio
@@ -1545,6 +1561,7 @@ class Orchestrator:
                     prediction_history_records=prediction_history_records,
                     output_dir=output_dir,
                     pending_abductions=pending_abductions,
+                    dead_ends=dead_ends,
                 )
 
             try:
@@ -1648,6 +1665,7 @@ class Orchestrator:
                     reasoning=cfg.reasoning,
                     output_dir=self.output_dir,
                     pending_abductions=format_pending_abductions(self.state),
+                    dead_ends=format_dead_ends(self.state),
                 )
 
             revised: dict[str, Any] = await with_summaries(
@@ -1736,6 +1754,7 @@ class Orchestrator:
                     provider=cfg.provider,
                     reasoning=cfg.reasoning,
                     pending_abductions=format_pending_abductions(self.state),
+                    dead_ends=format_dead_ends(self.state),
                 )
 
             revised: dict[str, Any] = await with_summaries(
@@ -1948,6 +1967,7 @@ class Orchestrator:
                     message_buffer=buf,
                     provider=cfg.provider,
                     pending_abductions=format_pending_abductions(self.state),
+                    dead_ends=format_dead_ends(self.state),
                 )
 
             report_content = await with_summaries(
