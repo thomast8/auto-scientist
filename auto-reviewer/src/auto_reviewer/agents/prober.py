@@ -23,8 +23,6 @@ from auto_core.sdk_utils import (
 )
 
 from auto_reviewer.prompts.prober import (
-    CODER_HAS_PREVIOUS,
-    CODER_NO_PREVIOUS,
     PROBER_USER,
     build_prober_system,
 )
@@ -83,30 +81,6 @@ def _check_runtime_success(version_dir: Path) -> tuple[bool, str]:
     return False, "No runtime artifacts found; the script was not run by the coder agent"
 
 
-def _validate_syntax(script_path: Path) -> tuple[bool, str]:
-    """Run py_compile on a script to check for syntax errors."""
-    import subprocess
-    import sys
-
-    result = subprocess.run(
-        [sys.executable, "-m", "py_compile", str(script_path)],
-        capture_output=True,
-        text=True,
-    )
-    return result.returncode == 0, result.stderr
-
-
-def _validate_deps(script_path: Path) -> tuple[bool, str]:
-    """Check that every third-party import is covered by PEP 723 deps.
-
-    ensure_deps is science-specific (checks matplotlib / numpy / pandas /
-    openpyxl for experiment scripts). Review probes manage their own deps
-    via pytest fixtures and the target repo's installed environment, so
-    this is a no-op for now.
-    """
-    return True, ""
-
-
 async def run_prober(
     plan: dict[str, Any],
     previous_script: Path,
@@ -137,16 +111,7 @@ async def run_prober(
     """
     version_dir = output_dir / version
     version_dir.mkdir(parents=True, exist_ok=True)
-    new_script_path = version_dir / "experiment.py"
-
-    # Build the previous script section based on whether one exists
-    has_previous = previous_script.exists() and previous_script.name != "null"
-    if has_previous:
-        previous_script_section = CODER_HAS_PREVIOUS.format(
-            previous_script_path=str(previous_script),
-        )
-    else:
-        previous_script_section = CODER_NO_PREVIOUS
+    new_script_path = version_dir / "run_result.json"
 
     # Codex seatbelt sandbox: uv panics (SCDynamicStore access denied).
     # Replace uv run with python3; keep ensure_deps prefix (it's copied
@@ -163,27 +128,11 @@ async def run_prober(
     if provider == "openai":
         system_prompt += CODEX_SANDBOX_ADDENDUM
 
-    # Build data files section so coder doesn't need to discover files
-    if data_files_listing:
-        data_files_section = (
-            f"\n<data_files>\n"
-            f"Files in the data directory ({data_path}):\n"
-            f"{data_files_listing}\n"
-            f"</data_files>"
-        )
-    else:
-        data_files_section = ""
-
     user_prompt = PROBER_USER.format(
-        domain_knowledge=domain_knowledge or "(no domain knowledge provided)",
-        plan_json=json.dumps(plan, indent=2),
-        previous_script_section=previous_script_section,
-        new_script_path=str(new_script_path),
+        workspace_path=str(output_dir),
         version_dir=str(version_dir),
-        version=version,
-        run_timeout_minutes=run_timeout_minutes,
-        run_command=run_command,
-        data_files_section=data_files_section,
+        plan_path=str(version_dir / "plan.json"),
+        config_path=str(output_dir / "domain_config.json"),
     )
 
     max_turns = 50
@@ -219,31 +168,18 @@ async def run_prober(
         if not new_script_path.exists():
             raise ValidationError(
                 "<validation_error>\n"
-                f"You did not create the script at {new_script_path}. "
-                "Please write the experiment script to that exact path.\n"
-                "</validation_error>"
-            )
-        valid, syntax_error = _validate_syntax(new_script_path)
-        if not valid:
-            raise ValidationError(
-                "<validation_error>\n"
-                f"The script at {new_script_path} has a syntax error:\n{syntax_error}\n"
-                "Please fix the syntax error and rewrite the script.\n"
+                f"You did not write run_result.json at {new_script_path}. "
+                "After running the probe, write run_result.json to that exact path.\n"
                 "</validation_error>"
             )
 
-        # Validate: third-party imports must be declared in PEP 723 deps
-        deps_ok, deps_error = _validate_deps(new_script_path)
-        if not deps_ok:
-            raise ValidationError(f"<validation_error>\n{deps_error}\n</validation_error>")
-
-        # Validate: script ran successfully at runtime
         runtime_ok, runtime_error = _check_runtime_success(new_script_path.parent)
         if not runtime_ok:
             raise ValidationError(
                 "<runtime_error>\n"
-                f"The script at {new_script_path} failed at runtime:\n{runtime_error}\n"
-                "The script already exists on disk. Read it, fix the bug, and re-run it.\n"
+                f"The probe reported failure in {new_script_path}:\n{runtime_error}\n"
+                "Review the probe output, fix the issue, re-run the probe, "
+                "and rewrite run_result.json.\n"
                 "</runtime_error>"
             )
 
@@ -254,14 +190,13 @@ async def run_prober(
             raise error
         if new_script_path.exists():
             return new_script_path
-        raise FileNotFoundError(
-            f"Coder agent did not create the expected script at {new_script_path}"
-        )
+        raise FileNotFoundError(f"Prober agent did not write run_result.json at {new_script_path}")
 
-    return await agent_retry_loop(
+    result: Path = await agent_retry_loop(
         query_fn=_query,
         validate_fn=_validate,
         prompt=user_prompt,
-        agent_name="Coder",
+        agent_name="Prober",
         on_exhausted=_on_exhausted,
     )
+    return result

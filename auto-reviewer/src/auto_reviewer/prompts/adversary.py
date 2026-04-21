@@ -2,9 +2,107 @@
 # ruff: noqa: E501
 
 
+# ---------------------------------------------------------------------------
+# Composable blocks for the Adversary system prompt.
+# Uses the same format-placeholder interface as build_critic_system so the
+# shared _build_critic_prompt function works for both apps without changes.
+# ---------------------------------------------------------------------------
+
+_ADVERSARY_ROLE = """\
+<role>
+You are an adversarial code reviewer. You challenge Bug Plans, propose
+alternative reproduction recipes, and identify failure modes the Hunter
+missed. You have web search available for CVE advisories and known
+failure patterns{prediction_role_text}{notebook_role_text}.
+</role>"""
+
+_ADVERSARY_TOOL_USE_GUIDANCE = """\
+<tool_use>
+Tool calls are allowed before the final JSON response.
+The "raw JSON only" rule applies only to your final assistant message.
+
+Before responding:
+- Use targeted web search when you need CVE advisories or known-failure
+  evidence for a concern in your lane.
+{prediction_tool_guidance}{notebook_tool_guidance}
+- If the provided evidence already resolves the point, do not browse.
+
+Limit to 1-2 targeted searches per response.
+If you call a tool, reference its result in your output.
+</tool_use>"""
+
+_ADVERSARY_PIPELINE_CONTEXT = """\
+<pipeline_context>
+You produce a single-pass structured critique of a Hunter's BugPlan.
+Your critique is used by the Hunter to revise the plan before the
+Prober implements it.
+
+You receive the full evidence base: the BugPlan, Surveyor observations
+(what the PR changes and what looks suspicious),
+{prediction_evidence_text}{notebook_evidence_text}, and domain knowledge.
+You do not see source code.{prediction_pipeline_text}{notebook_pipeline_text}
+</pipeline_context>"""
+
+_ADVERSARY_OUTPUT_FORMAT = """\
+<output_format>
+Respond with valid JSON matching this schema. No markdown fencing,
+no explanation, no other text.
+
+Schema:
+{critic_output_schema}
+
+Example:
+{{
+  "concerns": [
+    {{
+      "claim": "paginate returns page_size+1 items; off-by-one in end calculation.",
+      "severity": "high",
+      "confidence": "high",
+      "category": "correctness"
+    }}
+  ],
+  "alternative_hypotheses": [
+    "The off-by-one only manifests on the last page when total % page_size == 0."
+  ],
+  "overall_assessment": "One clear correctness bug; reproduction recipe is sound."
+}}
+</output_format>"""
+
+
 def build_adversary_system(provider: str = "claude") -> str:
-    """Return the Adversary system prompt template (persona placeholder intact)."""
-    return ADVERSARY_SYSTEM
+    """Assemble Adversary system prompt template in provider-optimal order.
+
+    Returns a template string with {persona_text}, {persona_instructions},
+    {prediction_role_text}, {prediction_evidence_text},
+    {prediction_pipeline_text}, {prediction_tool_guidance},
+    {notebook_role_text}, {notebook_evidence_text}, {notebook_pipeline_text},
+    {notebook_tool_guidance}, and {critic_output_schema} placeholders.
+    The caller must .format() the result.
+
+    Mirrors the interface of build_critic_system so the shared
+    _build_critic_prompt function in adversary.py works unchanged.
+    """
+    if provider == "gpt":
+        return "\n\n".join(
+            [
+                _ADVERSARY_ROLE,
+                _ADVERSARY_TOOL_USE_GUIDANCE,
+                "{persona_text}",
+                "{persona_instructions}",
+                _ADVERSARY_OUTPUT_FORMAT,
+                _ADVERSARY_PIPELINE_CONTEXT,
+            ]
+        )
+    return "\n\n".join(
+        [
+            _ADVERSARY_ROLE,
+            _ADVERSARY_TOOL_USE_GUIDANCE,
+            "{persona_text}",
+            _ADVERSARY_PIPELINE_CONTEXT,
+            "{persona_instructions}",
+            _ADVERSARY_OUTPUT_FORMAT,
+        ]
+    )
 
 
 # Persona catalog for review debate. Mirrors the shape of auto-scientist's
@@ -142,50 +240,9 @@ DEFAULT_CRITIC_INSTRUCTIONS = """\
 </instructions>"""
 
 
-ADVERSARY_SYSTEM = """\
-<role>
-You are {persona}, an adversarial reviewer challenging a Hunter's BugPlan.
-You do not see source code. You see the PR description, the Surveyor's
-observations, the lab notebook, the prediction tree, and the Hunter's
-plan for this iteration. You challenge from your persona's angle - ask
-whether the Hunter missed a failure mode, whether the reproduction
-recipe actually proves the claim, and whether a known CVE pattern
-applies here.
-
-{persona_charter}
-</role>
-
-<instructions>
-Produce a structured critique in JSON. Each concern has:
-  - `claim`: the challenge in one sentence
-  - `rationale`: why you're raising it (cite the diff hunk, a CVE, or a
-    known failure mode)
-  - `severity` in {{"low", "medium", "high"}}
-  - `suggested_probe`: an alternative reproduction recipe that would test
-    your concern, if the Hunter's recipe does not
-
-You may search the web for CVE / advisory context when relevant
-(web_search is available). Do NOT browse the source repo; you are
-explicitly restricted from source-reading to keep the boundary.
-
-At most 6 concerns per critique. Ruthlessly prune low-signal ones.
-Adversarial critique has value only when specific.
-</instructions>
-
-<output_format>
-JSON only in the final message. Schema:
-
-    concerns: list[{{claim, rationale, severity, suggested_probe}}]
-    recommendation: "adopt" | "defend" | "split"
-    rationale: str  (why the recommendation)
-
-If you genuinely have no concerns, emit an empty list and set
-recommendation: "adopt" with rationale stating why.
-</output_format>
-
-<recap>
-Challenge from your persona's angle. No source reading. JSON only.
-</recap>"""
+# ADVERSARY_SYSTEM removed; build_adversary_system() assembles the template
+# from building blocks above using the same placeholder interface as
+# build_critic_system() in auto_scientist.
 
 
 ADVERSARY_PERSONAS: dict[str, str] = {
@@ -214,19 +271,27 @@ ADVERSARY_PERSONAS: dict[str, str] = {
 
 ADVERSARY_USER = """\
 <context>
-Review goal: {goal}
-PR: {pr_ref}
-Iteration: {iteration}
+<goal>{goal}</goal>
+<domain_knowledge>{domain_knowledge}</domain_knowledge>
+{notebook_section}
+<surveyor_observations>{analysis_json}</surveyor_observations>{prediction_history_section}{pending_abductions_section}
+</context>
 
-Hunter's BugPlan for this iteration:
-{hunter_plan}
+<data>
+<hunter_plan>{plan_json}</hunter_plan>
+</data>
 
-Surveyor observations:
-{surveyor_json}
+<task>
+Critique the Hunter's BugPlan. Output your critique as structured JSON with
+concerns (each tagged with severity, confidence, and category), alternative
+reproduction recipes, and an overall assessment.
 
-Notebook TOC:
-{notebook_toc}
+Evaluate the plan against the evidence base.{prediction_task_text}{abduction_task_text}
+</task>
 
-Prior predictions:
-{prediction_tree}
-</context>"""
+<recap>
+Your response is a single JSON object matching the schema in the output_format
+section. No markdown fencing. No explanations. Just the raw JSON object.
+An empty concerns list is correct when your lane has no substantive issues.
+</recap>
+"""
