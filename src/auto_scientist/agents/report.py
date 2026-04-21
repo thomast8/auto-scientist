@@ -10,24 +10,25 @@ import logging
 from pathlib import Path
 from typing import Any
 
-from auto_scientist.agents.notebook_tool import (
+from auto_core.agents.notebook_tool import (
     NOTEBOOK_SPEC,
     build_notebook_mcp_server,
     format_notebook_toc,
 )
-from auto_scientist.notebook import parse_notebook_entries
-from auto_scientist.prompts.report import REPORT_USER, build_report_system
-from auto_scientist.retry import QueryResult, agent_retry_loop
-from auto_scientist.retry import ValidationError as RetryValidationError
-from auto_scientist.sdk_backend import SDKOptions, get_backend
-from auto_scientist.sdk_utils import (
+from auto_core.notebook import parse_notebook_entries
+from auto_core.retry import QueryResult, agent_retry_loop
+from auto_core.retry import ValidationError as RetryValidationError
+from auto_core.sdk_backend import SDKOptions, get_backend
+from auto_core.sdk_utils import (
     append_block_to_buffer,
     collect_text_from_query,
     prepare_turn_budget,
     safe_query,
     validate_report_structure,
 )
-from auto_scientist.state import ExperimentState
+from auto_core.state import ExperimentState
+
+from auto_scientist.prompts.report import REPORT_USER, build_report_system
 
 logger = logging.getLogger(__name__)
 

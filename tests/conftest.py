@@ -14,7 +14,7 @@ def _block_summarizer_api(monkeypatch):
     async def _fake_query(*args, **kwargs):
         return "mocked summary"
 
-    monkeypatch.setattr("auto_scientist.summarizer._query_summary", _fake_query)
+    monkeypatch.setattr("auto_core.summarizer._query_summary", _fake_query)
 
 
 # claude_code_sdk may not be installed in CI/test environments.

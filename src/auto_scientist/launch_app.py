@@ -8,6 +8,8 @@ The calling CLI code then constructs the Orchestrator and PipelineApp.
 from pathlib import Path
 from typing import Literal, cast
 
+from auto_core.model_config import AgentModelConfig
+from auto_core.preferences import default_theme, save_theme
 from textual import on
 from textual.app import App, ComposeResult
 from textual.containers import Horizontal, Vertical, VerticalScroll
@@ -25,8 +27,6 @@ from textual.widgets import (
 )
 
 from auto_scientist.experiment_config import ExperimentConfig, ExperimentModelsConfig
-from auto_scientist.model_config import AgentModelConfig
-from auto_scientist.preferences import default_theme, save_theme
 
 PRESET_OPTIONS = [
     ("turbo", "turbo"),
@@ -652,7 +652,7 @@ class LaunchApp(App[ExperimentConfig | None]):
 
     def _apply_model_defaults(self, cfg: ExperimentConfig) -> None:
         """Populate only the model/reasoning fields from the resolved preset."""
-        from auto_scientist.model_config import ModelConfig
+        from auto_core.model_config import ModelConfig
 
         mc = ModelConfig.from_experiment_config(cfg)
 
@@ -708,7 +708,7 @@ class LaunchApp(App[ExperimentConfig | None]):
         config doesn't specify one, so domain selection respects the user's
         provider choice.
         """
-        from auto_scientist.model_config import ModelConfig
+        from auto_core.model_config import ModelConfig
 
         self._applying_config = True
         try:
@@ -944,8 +944,8 @@ class LaunchApp(App[ExperimentConfig | None]):
         """Run provider auth, CLI login, model name, and reasoning validation."""
         import shutil
 
-        from auto_scientist.model_config import ModelConfig
-        from auto_scientist.validation import (
+        from auto_core.model_config import ModelConfig
+        from auto_core.validation import (
             check_claude_cli_auth,
             check_codex_cli_auth,
             check_provider_auth,

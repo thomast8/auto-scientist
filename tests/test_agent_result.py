@@ -1,6 +1,6 @@
 """Tests for AgentResult dataclass."""
 
-from auto_scientist.agent_result import AgentResult
+from auto_core.agent_result import AgentResult
 
 
 class TestAgentResult:

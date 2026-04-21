@@ -3,8 +3,7 @@
 import logging
 
 import pytest
-
-from auto_scientist.model_config import (
+from auto_core.model_config import (
     AgentModelConfig,
     ModelConfig,
     ReasoningConfig,
@@ -19,7 +18,7 @@ class TestReasoningConfig:
         assert rc.budget is None
 
     def test_legacy_default_migrates_to_off(self, caplog):
-        with caplog.at_level(logging.WARNING, logger="auto_scientist.model_config"):
+        with caplog.at_level(logging.WARNING, logger="auto_core.model_config"):
             rc = ReasoningConfig(level="default")
         assert rc.level == "off"
         assert any("deprecated" in r.message for r in caplog.records)

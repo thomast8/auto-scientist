@@ -158,8 +158,8 @@ class TestLaunchAppTheme:
         prefs_path.write_text(json.dumps({"theme": "atom-one-light"}))
 
         with (
-            patch("auto_scientist.preferences.PREFS_PATH", prefs_path),
-            patch("auto_scientist.preferences.system_is_dark", return_value=False),
+            patch("auto_core.preferences.PREFS_PATH", prefs_path),
+            patch("auto_core.preferences.system_is_dark", return_value=False),
         ):
             app = LaunchApp()
             async with app.run_test() as pilot:
@@ -169,7 +169,7 @@ class TestLaunchAppTheme:
     async def test_theme_changes_are_persisted(self, tmp_path):
         prefs_path = tmp_path / "preferences.json"
 
-        with patch("auto_scientist.preferences.PREFS_PATH", prefs_path):
+        with patch("auto_core.preferences.PREFS_PATH", prefs_path):
             app = LaunchApp()
             async with app.run_test() as pilot:
                 await pilot.pause()

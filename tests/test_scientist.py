@@ -4,6 +4,8 @@ import json
 from unittest.mock import MagicMock, patch
 
 import pytest
+from auto_core.sdk_utils import OutputValidationError
+from auto_core.state import PredictionRecord
 from claude_code_sdk import AssistantMessage, ResultMessage, TextBlock
 
 from auto_scientist.agents.scientist import (
@@ -12,8 +14,6 @@ from auto_scientist.agents.scientist import (
     run_scientist,
     run_scientist_revision,
 )
-from auto_scientist.sdk_utils import OutputValidationError
-from auto_scientist.state import PredictionRecord
 
 SAMPLE_LEDGER = [
     {
@@ -51,7 +51,7 @@ SAMPLE_PLAN = {
 
 class TestRunScientist:
     @pytest.mark.asyncio
-    @patch("auto_scientist.sdk_backend.claude_query")
+    @patch("auto_core.sdk_backend.claude_query")
     async def test_returns_parsed_plan(self, mock_query, tmp_path):
         from claude_code_sdk import ResultMessage
 
@@ -76,7 +76,7 @@ class TestRunScientist:
         assert result["strategy"] == "incremental"
 
     @pytest.mark.asyncio
-    @patch("auto_scientist.sdk_backend.claude_query")
+    @patch("auto_core.sdk_backend.claude_query")
     async def test_missing_notebook_uses_fallback(self, mock_query, tmp_path):
         from claude_code_sdk import ResultMessage
 
@@ -98,7 +98,7 @@ class TestRunScientist:
         assert result["hypothesis"] == "test hypothesis"
 
     @pytest.mark.asyncio
-    @patch("auto_scientist.sdk_backend.claude_query")
+    @patch("auto_core.sdk_backend.claude_query")
     async def test_empty_output_raises(self, mock_query, tmp_path):
         from claude_code_sdk import ResultMessage
 
@@ -120,7 +120,7 @@ class TestRunScientist:
             )
 
     @pytest.mark.asyncio
-    @patch("auto_scientist.sdk_backend.claude_query")
+    @patch("auto_core.sdk_backend.claude_query")
     async def test_has_web_search_and_toolsearch_without_predictions(self, mock_query, tmp_path):
         """Scientist without prediction history should have WebSearch + ToolSearch."""
         from claude_code_sdk import ResultMessage
@@ -144,12 +144,11 @@ class TestRunScientist:
         assert "ToolSearch" in tools
 
     @pytest.mark.asyncio
-    @patch("auto_scientist.sdk_backend.claude_query")
+    @patch("auto_core.sdk_backend.claude_query")
     async def test_has_mcp_tool_with_predictions(self, mock_query, tmp_path):
         """Scientist with prediction history should include the MCP tool."""
+        from auto_core.state import PredictionRecord
         from claude_code_sdk import ResultMessage
-
-        from auto_scientist.state import PredictionRecord
 
         result_msg = MagicMock(spec=ResultMessage)
         result_msg.result = json.dumps(SAMPLE_PLAN)
@@ -187,7 +186,7 @@ class TestRunScientist:
 
 class TestRunScientistMessageBuffer:
     @pytest.mark.asyncio
-    @patch("auto_scientist.sdk_backend.claude_query")
+    @patch("auto_core.sdk_backend.claude_query")
     async def test_populates_message_buffer(self, mock_query, tmp_path):
         from claude_code_sdk import ResultMessage
 
@@ -219,7 +218,7 @@ class TestRunScientistMessageBuffer:
         assert "Planning hypothesis..." in buf[0]
 
     @pytest.mark.asyncio
-    @patch("auto_scientist.sdk_backend.claude_query")
+    @patch("auto_core.sdk_backend.claude_query")
     async def test_revision_populates_message_buffer(self, mock_query, tmp_path):
         from claude_code_sdk import ResultMessage
 
@@ -257,7 +256,7 @@ class TestRunScientistExploration:
     """Empty analysis + no criteria -> exploration plan."""
 
     @pytest.mark.asyncio
-    @patch("auto_scientist.sdk_backend.claude_query")
+    @patch("auto_core.sdk_backend.claude_query")
     async def test_exploration_plan(self, mock_query, tmp_path):
         exploration_plan = {
             "hypothesis": "Data exploration to establish baselines and identify patterns",
@@ -297,7 +296,7 @@ class TestRunScientistExploration:
 
 class TestRunScientistRevision:
     @pytest.mark.asyncio
-    @patch("auto_scientist.sdk_backend.claude_query")
+    @patch("auto_core.sdk_backend.claude_query")
     async def test_returns_revised_plan(self, mock_query, tmp_path):
         from claude_code_sdk import ResultMessage
 
@@ -336,7 +335,7 @@ class TestRunScientistRevision:
         assert result["hypothesis"] == "test hypothesis"
 
     @pytest.mark.asyncio
-    @patch("auto_scientist.sdk_backend.claude_query")
+    @patch("auto_core.sdk_backend.claude_query")
     async def test_empty_output_raises(self, mock_query, tmp_path):
         from claude_code_sdk import ResultMessage
 
@@ -360,7 +359,7 @@ class TestRunScientistRevision:
             )
 
     @pytest.mark.asyncio
-    @patch("auto_scientist.sdk_backend.claude_query")
+    @patch("auto_core.sdk_backend.claude_query")
     async def test_fallback_to_assistant_text(self, mock_query, tmp_path):
         from claude_code_sdk import ResultMessage
 
@@ -392,7 +391,7 @@ class TestRunScientistRevision:
 
 class TestRunScientistAssistantFallback:
     @pytest.mark.asyncio
-    @patch("auto_scientist.sdk_backend.claude_query")
+    @patch("auto_core.sdk_backend.claude_query")
     async def test_run_scientist_fallback_to_assistant_text(self, mock_query, tmp_path):
         from claude_code_sdk import ResultMessage
 
@@ -420,7 +419,7 @@ class TestRunScientistAssistantFallback:
         assert result["hypothesis"] == "test hypothesis"
 
     @pytest.mark.asyncio
-    @patch("auto_scientist.sdk_backend.claude_query")
+    @patch("auto_core.sdk_backend.claude_query")
     async def test_run_scientist_markdown_fenced_response(self, mock_query, tmp_path):
         from claude_code_sdk import ResultMessage
 
@@ -453,7 +452,7 @@ class TestScientistRetry:
     """Tests for the retry-on-validation-failure behavior."""
 
     @pytest.mark.asyncio
-    @patch("auto_scientist.sdk_backend.claude_query")
+    @patch("auto_core.sdk_backend.claude_query")
     async def test_retry_on_invalid_json(self, mock_query, tmp_path):
         call_count = 0
 
@@ -479,7 +478,7 @@ class TestScientistRetry:
         assert call_count == 2
 
     @pytest.mark.asyncio
-    @patch("auto_scientist.sdk_backend.claude_query")
+    @patch("auto_core.sdk_backend.claude_query")
     async def test_exhausts_retries_raises(self, mock_query, tmp_path):
         async def fake_query(**kwargs):
             msg = MagicMock(spec=ResultMessage)
@@ -497,7 +496,7 @@ class TestScientistRetry:
             )
 
     @pytest.mark.asyncio
-    @patch("auto_scientist.sdk_backend.claude_query")
+    @patch("auto_core.sdk_backend.claude_query")
     async def test_revision_retry(self, mock_query, tmp_path):
         call_count = 0
 

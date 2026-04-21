@@ -5,10 +5,8 @@ import logging
 from unittest.mock import MagicMock, patch
 
 import pytest
-
-from auto_scientist.schemas import AnalystOutput, ScientistPlanOutput
-from auto_scientist.sdk_backend import SDKMessage, SDKOptions, _tolerant_parse_message
-from auto_scientist.sdk_utils import (
+from auto_core.sdk_backend import SDKMessage, SDKOptions, _tolerant_parse_message
+from auto_core.sdk_utils import (
     OutputValidationError,
     TurnBudgetConfig,
     append_block_to_buffer,
@@ -18,6 +16,8 @@ from auto_scientist.sdk_utils import (
     validate_json_output,
     validate_report_structure,
 )
+
+from auto_scientist.schemas import AnalystOutput, ScientistPlanOutput
 
 
 class TestAppendBlockToBuffer:
@@ -96,7 +96,7 @@ class TestTolerantParseMessage:
     def test_known_type_passes_through(self):
         msg = MagicMock()
         with patch(
-            "auto_scientist.sdk_backend._original_parse_message",
+            "auto_core.sdk_backend._original_parse_message",
             return_value=msg,
         ):
             result = _tolerant_parse_message({"type": "assistant"})
@@ -106,7 +106,7 @@ class TestTolerantParseMessage:
         from claude_code_sdk._errors import MessageParseError
 
         with patch(
-            "auto_scientist.sdk_backend._original_parse_message",
+            "auto_core.sdk_backend._original_parse_message",
             side_effect=MessageParseError("Unknown message type: rate_limit_event"),
         ):
             result = _tolerant_parse_message({"type": "rate_limit_event"})
@@ -117,7 +117,7 @@ class TestTolerantParseMessage:
 
         with (
             patch(
-                "auto_scientist.sdk_backend._original_parse_message",
+                "auto_core.sdk_backend._original_parse_message",
                 side_effect=MessageParseError("Malformed JSON payload"),
             ),
             pytest.raises(MessageParseError, match="Malformed JSON payload"),
@@ -129,10 +129,10 @@ class TestTolerantParseMessage:
 
         with (
             patch(
-                "auto_scientist.sdk_backend._original_parse_message",
+                "auto_core.sdk_backend._original_parse_message",
                 side_effect=MessageParseError("Unknown message type: foo_event"),
             ),
-            caplog.at_level(logging.DEBUG, logger="auto_scientist.sdk_backend"),
+            caplog.at_level(logging.DEBUG, logger="auto_core.sdk_backend"),
         ):
             _tolerant_parse_message({"type": "foo_event"})
 
@@ -410,7 +410,7 @@ class TestCollectTextFromQuery:
 
         opts = SDKOptions(system_prompt="", allowed_tools=[], max_turns=5)
         buffer: list[str] = []
-        with patch("auto_scientist.sdk_utils.append_block_to_buffer") as mock_append:
+        with patch("auto_core.sdk_utils.append_block_to_buffer") as mock_append:
             await collect_text_from_query("prompt", opts, FakeBackend(), message_buffer=buffer)
             mock_append.assert_called_once_with(text_block, buffer)
 
@@ -606,6 +606,6 @@ class TestPrepareTurnBudget:
             budget.max_turns = 99  # type: ignore[misc]
 
     def test_old_function_removed(self):
-        import auto_scientist.sdk_utils as mod
+        import auto_core.sdk_utils as mod
 
         assert not hasattr(mod, "with_turn_budget")

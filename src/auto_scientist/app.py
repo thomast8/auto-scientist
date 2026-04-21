@@ -18,6 +18,14 @@ from collections.abc import Callable
 from functools import partial
 from pathlib import Path
 
+from auto_core.pipeline_live import PipelineLive
+from auto_core.preferences import load_theme, save_theme
+from auto_core.widgets import (
+    AgentPanel,
+    IterationContainer,
+    MetricsBar,
+    _format_elapsed,
+)
 from rich.console import RenderableType
 from rich.text import Text
 from textual.app import App, ComposeResult
@@ -36,15 +44,6 @@ from textual.widgets import (
     Static,
 )
 from textual.worker import Worker, WorkerState
-
-from auto_scientist.pipeline_live import PipelineLive
-from auto_scientist.preferences import load_theme, save_theme
-from auto_scientist.widgets import (
-    AgentPanel,
-    IterationContainer,
-    MetricsBar,
-    _format_elapsed,
-)
 
 logger = logging.getLogger(__name__)
 

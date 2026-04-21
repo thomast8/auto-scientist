@@ -3,8 +3,7 @@
 import json
 
 import pytest
-
-from auto_scientist.iteration_manifest import (
+from auto_core.iteration_manifest import (
     IterationRecord,
     PanelRecord,
     append_record,

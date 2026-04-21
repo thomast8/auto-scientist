@@ -10,20 +10,20 @@ import json
 import logging
 from pathlib import Path
 
-from pydantic import ValidationError
-
-from auto_scientist.config import DomainConfig
-from auto_scientist.notebook import NOTEBOOK_FILENAME
-from auto_scientist.prompts.ingestor import INGESTOR_USER, build_ingestor_system
-from auto_scientist.retry import QueryResult, agent_retry_loop
-from auto_scientist.retry import ValidationError as RetryValidationError
-from auto_scientist.sdk_backend import CODEX_SANDBOX_ADDENDUM, SDKOptions, get_backend
-from auto_scientist.sdk_utils import (
+from auto_core.notebook import NOTEBOOK_FILENAME
+from auto_core.retry import QueryResult, agent_retry_loop
+from auto_core.retry import ValidationError as RetryValidationError
+from auto_core.sdk_backend import CODEX_SANDBOX_ADDENDUM, SDKOptions, get_backend
+from auto_core.sdk_utils import (
     append_block_to_buffer,
     collect_text_from_query,
     prepare_turn_budget,
     safe_query,
 )
+from pydantic import ValidationError
+
+from auto_scientist.config import DomainConfig
+from auto_scientist.prompts.ingestor import INGESTOR_USER, build_ingestor_system
 
 logger = logging.getLogger(__name__)
 

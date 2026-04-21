@@ -11,27 +11,35 @@ from dataclasses import replace
 from pathlib import Path
 from typing import Any
 
-from pydantic import BaseModel
-
-from auto_scientist.agents.debate_models import (
+from auto_core.agents.debate_models import (
     CRITIC_OUTPUT_SCHEMA,
     CriticOutput,
     DebateResult,
 )
-from auto_scientist.agents.notebook_tool import (
+from auto_core.agents.notebook_tool import (
     NOTEBOOK_SPEC,
     build_notebook_mcp_server,
     format_notebook_toc,
 )
-from auto_scientist.agents.prediction_tool import (
+from auto_core.agents.prediction_tool import (
     PREDICTION_SPEC,
     build_prediction_mcp_server,
     format_compact_tree,
     format_full_detail,
 )
+from auto_core.model_config import AgentModelConfig
+from auto_core.notebook import parse_notebook_entries, read_notebook
+from auto_core.retry import QueryResult, agent_retry_loop
+from auto_core.sdk_backend import SDKBackend, SDKOptions, create_backend, get_backend
+from auto_core.sdk_utils import (
+    collect_text_from_query,
+    prepare_turn_budget,
+    validate_json_output,
+)
+from auto_core.state import PredictionRecord
+from pydantic import BaseModel
+
 from auto_scientist.agents.scientist import SCIENTIST_PLAN_SCHEMA
-from auto_scientist.model_config import AgentModelConfig
-from auto_scientist.notebook import parse_notebook_entries, read_notebook
 from auto_scientist.prompts.stop_gate import (
     ASSESSMENT_SCHEMA,
     ASSESSMENT_USER,
@@ -41,15 +49,7 @@ from auto_scientist.prompts.stop_gate import (
     build_stop_critic_system,
     build_stop_revision_system,
 )
-from auto_scientist.retry import QueryResult, agent_retry_loop
 from auto_scientist.schemas import CompletenessAssessmentOutput, ScientistPlanOutput
-from auto_scientist.sdk_backend import SDKBackend, SDKOptions, create_backend, get_backend
-from auto_scientist.sdk_utils import (
-    collect_text_from_query,
-    prepare_turn_budget,
-    validate_json_output,
-)
-from auto_scientist.state import PredictionRecord
 
 logger = logging.getLogger(__name__)
 

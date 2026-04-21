@@ -5,15 +5,14 @@ import sys
 from pathlib import Path
 
 import pytest
-
-from auto_scientist.agents.prediction_tool import (
+from auto_core.agents.prediction_tool import (
     _handle_read_predictions,
     _normalize_args,
     build_prediction_mcp_server,
     format_compact_tree,
     format_full_detail,
 )
-from auto_scientist.state import PredictionRecord
+from auto_core.state import PredictionRecord
 
 
 @pytest.fixture

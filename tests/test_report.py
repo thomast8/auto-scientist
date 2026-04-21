@@ -4,10 +4,10 @@ import asyncio
 from unittest.mock import MagicMock, patch
 
 import pytest
+from auto_core.sdk_backend import SDKMessage
+from auto_core.state import ExperimentState
 
 from auto_scientist.agents.report import run_report
-from auto_scientist.sdk_backend import SDKMessage
-from auto_scientist.state import ExperimentState
 
 
 def _text_block(text: str) -> MagicMock:
@@ -116,7 +116,7 @@ class TestRunReport:
         mock_query.side_effect = fake_query
 
         state = ExperimentState(domain="spo2", goal="predict oxygen levels", iteration=10)
-        from auto_scientist.state import VersionEntry
+        from auto_core.state import VersionEntry
 
         state.versions.append(VersionEntry(version="v07", iteration=7, script_path="/tmp/s.py"))
         notebook_path = tmp_path / "lab_notebook.xml"

@@ -3,12 +3,12 @@
 from unittest.mock import MagicMock, patch
 
 import yaml
+from auto_core.model_config import ModelConfig
+from auto_core.state import ExperimentState
 from click.testing import CliRunner
 
 from auto_scientist.cli import _detect_retry_agent, _next_output_dir, _resolve_source, cli
 from auto_scientist.experiment_config import ExperimentConfig
-from auto_scientist.model_config import ModelConfig
-from auto_scientist.state import ExperimentState
 
 
 class TestStatusCommand:
@@ -82,7 +82,7 @@ class TestStatusCommand:
 
     def test_run_status_summary(self, tmp_path):
         """Shows completed/failed counts from version entries."""
-        from auto_scientist.state import VersionEntry
+        from auto_core.state import VersionEntry
 
         state = ExperimentState(domain="auto", goal="test", phase="iteration", iteration=3)
         state.versions = [
@@ -668,7 +668,7 @@ class TestResumeCommand:
     @patch("auto_scientist.cli.Orchestrator")
     def test_resume_retries_failed_iteration_in_place(self, mock_orch, mock_app_cls, tmp_path):
         """Naked resume of a stopped run with a failed last version should retry from coder."""
-        from auto_scientist.state import VersionEntry
+        from auto_core.state import VersionEntry
 
         state = ExperimentState(
             domain="auto",
@@ -720,7 +720,7 @@ class TestResumeCommand:
     @patch("auto_scientist.cli.Orchestrator")
     def test_resume_retries_from_earliest_missing_agent(self, mock_orch, mock_app_cls, tmp_path):
         """When only analyst completed, retry should resume from scientist."""
-        from auto_scientist.state import VersionEntry
+        from auto_core.state import VersionEntry
 
         state = ExperimentState(
             domain="auto",
@@ -797,7 +797,7 @@ class TestResumeCommand:
         self, mock_orch, mock_app_cls, tmp_path
     ):
         """Mid-iteration crash on iteration 2 must not touch v00/v01."""
-        from auto_scientist.state import VersionEntry
+        from auto_core.state import VersionEntry
 
         state = ExperimentState(
             domain="auto",
@@ -871,7 +871,7 @@ class TestResumeCommand:
         analysis.json (or a fresh post-ingest state). The orchestrator
         should pick up at state.iteration with no rewind banner.
         """
-        from auto_scientist.state import VersionEntry
+        from auto_core.state import VersionEntry
 
         state = ExperimentState(
             domain="auto",
@@ -911,7 +911,7 @@ class TestResumeCommand:
 
     def test_resume_completed_run_still_blocked(self, tmp_path):
         """Naked resume of a run that completed normally should still require --fork."""
-        from auto_scientist.state import VersionEntry
+        from auto_core.state import VersionEntry
 
         state = ExperimentState(
             domain="auto",

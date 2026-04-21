@@ -4,16 +4,8 @@ import json
 from unittest.mock import patch
 
 import pytest
-from textual.app import App, ComposeResult
-from textual.widgets import Collapsible, RichLog
-
-from auto_scientist.app import (
-    AgentDetailScreen,
-    PipelineApp,
-    QuitConfirmScreen,
-)
-from auto_scientist.pipeline_live import PipelineLive
-from auto_scientist.widgets import (
+from auto_core.pipeline_live import PipelineLive
+from auto_core.widgets import (
     AGENT_STYLES,
     PHASE_STYLES,
     AgentPanel,
@@ -21,6 +13,14 @@ from auto_scientist.widgets import (
     IterationToggle,
     MetricsBar,
     _format_elapsed,
+)
+from textual.app import App, ComposeResult
+from textual.widgets import Collapsible, RichLog
+
+from auto_scientist.app import (
+    AgentDetailScreen,
+    PipelineApp,
+    QuitConfirmScreen,
 )
 
 # ---------------------------------------------------------------------------
@@ -902,7 +902,7 @@ class TestOrchestratorFlags:
     def test_flags_default_false(self):
         from unittest.mock import MagicMock
 
-        from auto_scientist.orchestrator import Orchestrator
+        from auto_core.orchestrator import Orchestrator
 
         state = MagicMock()
         state.phase = "ingestion"
@@ -1078,8 +1078,8 @@ class TestThemeCycling:
                 pass
 
         with (
-            patch("auto_scientist.preferences.PREFS_PATH", prefs_path),
-            patch("auto_scientist.preferences.system_is_dark", return_value=False),
+            patch("auto_core.preferences.PREFS_PATH", prefs_path),
+            patch("auto_core.preferences.system_is_dark", return_value=False),
         ):
             app = PipelineApp(FakeOrch())
             async with app.run_test() as pilot:

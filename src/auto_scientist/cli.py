@@ -9,15 +9,15 @@ from pathlib import Path
 from typing import Any, Literal, cast
 
 import click
+from auto_core.model_config import ModelConfig
+from auto_core.orchestrator import Orchestrator
+from auto_core.state import ExperimentState
+from auto_core.widgets import console
 from dotenv import load_dotenv
 
 from auto_scientist.app import PipelineApp
 from auto_scientist.experiment_config import ExperimentConfig
 from auto_scientist.launch_app import LaunchApp
-from auto_scientist.model_config import ModelConfig
-from auto_scientist.orchestrator import Orchestrator
-from auto_scientist.state import ExperimentState
-from auto_scientist.widgets import console
 
 load_dotenv()
 
@@ -185,7 +185,7 @@ def _detect_retry_agent(version_dir: Path) -> str | None:
     artifacts are present on disk, so that earlier agents are skipped
     on retry.  Returns None when no artifacts exist (full restart).
     """
-    from auto_scientist.resume import _AGENT_ARTIFACTS, AGENT_ORDER
+    from auto_core.resume import _AGENT_ARTIFACTS, AGENT_ORDER
 
     last_completed = None
     for agent in AGENT_ORDER:
@@ -241,7 +241,7 @@ def _resolve_model_config(
     preset_name = preset or "default"
     if provider and provider != "anthropic":
         variant = f"{preset_name}-{provider}"
-        from auto_scientist.model_config import BUILTIN_PRESETS
+        from auto_core.model_config import BUILTIN_PRESETS
 
         if variant in BUILTIN_PRESETS:
             preset_name = variant
@@ -604,7 +604,7 @@ def resume(
     """
     import shutil
 
-    from auto_scientist.resume import rewind_run
+    from auto_core.resume import rewind_run
 
     # Validate flag combinations
     if from_iteration is not None and not fork:
@@ -810,7 +810,7 @@ def status(source: str):
     import json
     import re
 
-    from auto_scientist.resume import _AGENT_ARTIFACTS, STOP_GATE_AGENTS
+    from auto_core.resume import _AGENT_ARTIFACTS, STOP_GATE_AGENTS
 
     run_dir, loaded_state = _resolve_source(source)
 
@@ -930,8 +930,9 @@ def show(source: str):
 
       auto-scientist show --from experiments/runs/my-run
     """
+    from auto_core.iteration_manifest import MANIFEST_FILENAME, load_manifest
+
     from auto_scientist.app import ShowApp
-    from auto_scientist.iteration_manifest import MANIFEST_FILENAME, load_manifest
 
     run_dir, _ = _resolve_source(source)
     records = load_manifest(run_dir / MANIFEST_FILENAME)

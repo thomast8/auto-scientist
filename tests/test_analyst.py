@@ -4,16 +4,16 @@ import json
 from unittest.mock import MagicMock, patch
 
 import pytest
+from auto_core.sdk_utils import OutputValidationError
 
 from auto_scientist.agents.analyst import run_analyst
-from auto_scientist.sdk_utils import OutputValidationError
 
 
 class TestRunAnalyst:
     """Tests for the agent runner, mocking the claude_code_sdk query."""
 
     @pytest.mark.asyncio
-    @patch("auto_scientist.sdk_backend.claude_query")
+    @patch("auto_core.sdk_backend.claude_query")
     async def test_returns_parsed_json(self, mock_query, tmp_path):
         analysis = {
             "key_metrics": [{"name": "rmse", "value": 0.5}],
@@ -46,7 +46,7 @@ class TestRunAnalyst:
         assert result["key_metrics"] == [{"name": "rmse", "value": 0.5}]
 
     @pytest.mark.asyncio
-    @patch("auto_scientist.sdk_backend.claude_query")
+    @patch("auto_core.sdk_backend.claude_query")
     async def test_handles_markdown_fenced_json(self, mock_query, tmp_path):
         analysis = {
             "key_metrics": [],
@@ -78,7 +78,7 @@ class TestRunAnalyst:
         assert isinstance(result, dict)
 
     @pytest.mark.asyncio
-    @patch("auto_scientist.sdk_backend.claude_query")
+    @patch("auto_core.sdk_backend.claude_query")
     async def test_raises_on_empty_output(self, mock_query, tmp_path):
         from claude_code_sdk import ResultMessage
 
@@ -102,7 +102,7 @@ class TestRunAnalyst:
             )
 
     @pytest.mark.asyncio
-    @patch("auto_scientist.sdk_backend.claude_query")
+    @patch("auto_core.sdk_backend.claude_query")
     async def test_accepts_data_dir_param(self, mock_query, tmp_path):
         """run_analyst should accept a data_dir parameter."""
         analysis = {
@@ -138,7 +138,7 @@ class TestRunAnalyst:
         assert result["domain_knowledge"] == "Environmental sensor data"
 
     @pytest.mark.asyncio
-    @patch("auto_scientist.sdk_backend.claude_query")
+    @patch("auto_core.sdk_backend.claude_query")
     async def test_data_dir_in_prompt(self, mock_query, tmp_path):
         """When data_dir is provided, it should appear in the prompt."""
         analysis = {
@@ -175,7 +175,7 @@ class TestRunAnalyst:
         assert str(data_dir) in captured_prompt["prompt"]
 
     @pytest.mark.asyncio
-    @patch("auto_scientist.sdk_backend.claude_query")
+    @patch("auto_core.sdk_backend.claude_query")
     async def test_iteration0_output_shape(self, mock_query, tmp_path):
         """Iteration 0 output: success_score null, optional domain_knowledge/data_summary."""
         analysis = {
@@ -212,7 +212,7 @@ class TestRunAnalyst:
         assert "200 rows" in result["data_summary"]
 
     @pytest.mark.asyncio
-    @patch("auto_scientist.sdk_backend.claude_query")
+    @patch("auto_core.sdk_backend.claude_query")
     async def test_missing_results_file_uses_fallback(self, mock_query, tmp_path):
         analysis = {
             "key_metrics": [],
@@ -242,7 +242,7 @@ class TestRunAnalyst:
         assert "success_score" not in result
 
     @pytest.mark.asyncio
-    @patch("auto_scientist.sdk_backend.claude_query")
+    @patch("auto_core.sdk_backend.claude_query")
     async def test_populates_message_buffer(self, mock_query, tmp_path):
         analysis = {
             "key_metrics": [],
@@ -282,7 +282,7 @@ class TestRunAnalyst:
         assert "Analyzing the data..." in buf[0]
 
     @pytest.mark.asyncio
-    @patch("auto_scientist.sdk_backend.claude_query")
+    @patch("auto_core.sdk_backend.claude_query")
     async def test_fallback_to_assistant_text(self, mock_query, tmp_path):
         analysis = {
             "key_metrics": [],
@@ -319,7 +319,7 @@ class TestRunAnalyst:
         assert "success_score" not in result
 
     @pytest.mark.asyncio
-    @patch("auto_scientist.sdk_backend.claude_query")
+    @patch("auto_core.sdk_backend.claude_query")
     async def test_iteration0_uses_data_dir(self, mock_query, tmp_path):
         analysis = {
             "key_metrics": [],
@@ -355,7 +355,7 @@ class TestRunAnalyst:
         assert "<data_directory>" in captured_prompt["prompt"]
 
     @pytest.mark.asyncio
-    @patch("auto_scientist.sdk_backend.claude_query")
+    @patch("auto_core.sdk_backend.claude_query")
     async def test_options_configuration(self, mock_query, tmp_path):
         from claude_code_sdk import ResultMessage
 
@@ -400,7 +400,7 @@ class TestAnalystRetry:
     """Tests for the retry-on-validation-failure behavior."""
 
     @pytest.mark.asyncio
-    @patch("auto_scientist.sdk_backend.claude_query")
+    @patch("auto_core.sdk_backend.claude_query")
     async def test_retry_on_invalid_json_then_succeed(self, mock_query, tmp_path):
         """First attempt returns invalid JSON, second returns valid."""
         valid_analysis = {
@@ -439,7 +439,7 @@ class TestAnalystRetry:
         assert call_count == 2
 
     @pytest.mark.asyncio
-    @patch("auto_scientist.sdk_backend.claude_query")
+    @patch("auto_core.sdk_backend.claude_query")
     async def test_retry_on_schema_violation_then_succeed(self, mock_query, tmp_path):
         """First attempt returns JSON missing required fields, second is valid."""
         valid_analysis = {
@@ -477,7 +477,7 @@ class TestAnalystRetry:
         assert call_count == 2
 
     @pytest.mark.asyncio
-    @patch("auto_scientist.sdk_backend.claude_query")
+    @patch("auto_core.sdk_backend.claude_query")
     async def test_exhausts_retries_raises(self, mock_query, tmp_path):
         """All attempts return invalid output; raises OutputValidationError."""
         from claude_code_sdk import ResultMessage
@@ -501,7 +501,7 @@ class TestAnalystRetry:
             )
 
     @pytest.mark.asyncio
-    @patch("auto_scientist.sdk_backend.claude_query")
+    @patch("auto_core.sdk_backend.claude_query")
     async def test_correction_hint_in_retry_prompt(self, mock_query, tmp_path):
         """On retry, the prompt should include a validation_error correction hint."""
         valid_analysis = {
@@ -543,7 +543,7 @@ class TestTimeoutContext:
     """Tests for timeout_context parameter in run_analyst."""
 
     @pytest.mark.asyncio
-    @patch("auto_scientist.sdk_backend.claude_query")
+    @patch("auto_core.sdk_backend.claude_query")
     async def test_timeout_context_prepends_to_prompt(self, mock_query, tmp_path):
         """When timeout_context is provided, the prompt should contain timeout info."""
         analysis = {
@@ -583,7 +583,7 @@ class TestTimeoutContext:
         assert "Test heavy computation" in captured_prompt["prompt"]
 
     @pytest.mark.asyncio
-    @patch("auto_scientist.sdk_backend.claude_query")
+    @patch("auto_core.sdk_backend.claude_query")
     async def test_timeout_context_with_partial_results(self, mock_query, tmp_path):
         """When timeout_context is provided with existing results file, indicate partial."""
         analysis = {
@@ -623,7 +623,7 @@ class TestTimeoutContext:
         assert "Partial results available: yes" in captured_prompt["prompt"]
 
     @pytest.mark.asyncio
-    @patch("auto_scientist.sdk_backend.claude_query")
+    @patch("auto_core.sdk_backend.claude_query")
     async def test_no_timeout_context_omits_block(self, mock_query, tmp_path):
         """Without timeout_context, prompt should not contain timeout info."""
         analysis = {

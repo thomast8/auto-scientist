@@ -14,18 +14,19 @@ from dataclasses import replace
 from pathlib import Path
 from typing import Any
 
+from auto_core.retry import QueryResult, ValidationError, agent_retry_loop
+from auto_core.sdk_backend import CODEX_SANDBOX_ADDENDUM, SDKOptions, get_backend
+from auto_core.sdk_utils import (
+    append_block_to_buffer,
+    collect_text_from_query,
+    prepare_turn_budget,
+)
+
 from auto_scientist.prompts.coder import (
     CODER_HAS_PREVIOUS,
     CODER_NO_PREVIOUS,
     CODER_USER,
     build_coder_system,
-)
-from auto_scientist.retry import QueryResult, ValidationError, agent_retry_loop
-from auto_scientist.sdk_backend import CODEX_SANDBOX_ADDENDUM, SDKOptions, get_backend
-from auto_scientist.sdk_utils import (
-    append_block_to_buffer,
-    collect_text_from_query,
-    prepare_turn_budget,
 )
 
 logger = logging.getLogger(__name__)

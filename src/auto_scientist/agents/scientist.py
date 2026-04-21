@@ -11,34 +11,35 @@ from dataclasses import replace
 from pathlib import Path
 from typing import Any
 
-from auto_scientist.agents.notebook_tool import (
+from auto_core.agents.notebook_tool import (
     NOTEBOOK_SPEC,
     build_notebook_mcp_server,
     format_notebook_toc,
 )
-from auto_scientist.agents.prediction_tool import (
+from auto_core.agents.prediction_tool import (
     PREDICTION_SPEC,
     build_prediction_mcp_server,
     format_compact_tree,
     format_full_detail,
 )
-from auto_scientist.model_config import ReasoningConfig, reasoning_to_cc_extra_args
-from auto_scientist.notebook import parse_notebook_entries
+from auto_core.model_config import ReasoningConfig, reasoning_to_cc_extra_args
+from auto_core.notebook import parse_notebook_entries
+from auto_core.retry import QueryResult, agent_retry_loop
+from auto_core.sdk_backend import SDKOptions, get_backend
+from auto_core.sdk_utils import (
+    collect_text_from_query,
+    prepare_turn_budget,
+    validate_json_output,
+)
+from auto_core.state import PredictionRecord
+
 from auto_scientist.prompts.scientist import (
     SCIENTIST_REVISION_USER,
     SCIENTIST_USER,
     build_revision_system,
     build_scientist_system,
 )
-from auto_scientist.retry import QueryResult, agent_retry_loop
 from auto_scientist.schemas import ScientistPlanOutput
-from auto_scientist.sdk_backend import SDKOptions, get_backend
-from auto_scientist.sdk_utils import (
-    collect_text_from_query,
-    prepare_turn_budget,
-    validate_json_output,
-)
-from auto_scientist.state import PredictionRecord
 
 logger = logging.getLogger(__name__)
 

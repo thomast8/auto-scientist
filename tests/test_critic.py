@@ -5,19 +5,19 @@ import json
 from unittest.mock import AsyncMock, patch
 
 import pytest
+from auto_core.agent_result import AgentResult
+from auto_core.agents.debate_models import CriticOutput, DebateResult
+from auto_core.agents.prediction_tool import PREDICTION_SPEC
+from auto_core.model_config import AgentModelConfig, ReasoningConfig
+from auto_core.state import PredictionRecord
 
-from auto_scientist.agent_result import AgentResult
 from auto_scientist.agents.critic import (
     _build_critic_prompt,
     _build_critic_tools_and_mcp,
     run_debate,
     run_single_critic_debate,
 )
-from auto_scientist.agents.debate_models import CriticOutput, DebateResult
-from auto_scientist.agents.prediction_tool import PREDICTION_SPEC
-from auto_scientist.model_config import AgentModelConfig, ReasoningConfig
 from auto_scientist.prompts.critic import PREDICTION_PERSONAS
-from auto_scientist.state import PredictionRecord
 
 # Mock paths for direct API calls (OpenAI/Google) and SDK (Anthropic)
 OPENAI_PATH = "auto_scientist.agents.critic.query_openai"
@@ -798,7 +798,7 @@ class TestBuildCriticToolsAndMcp:
         assert mcp_servers["predictions"]["type"] == "stdio"
 
     def test_with_notebook_path_adds_notebook_mcp_tool(self, notebook_path):
-        from auto_scientist.agents.notebook_tool import NOTEBOOK_SPEC
+        from auto_core.agents.notebook_tool import NOTEBOOK_SPEC
 
         tools, mcp_servers = _build_critic_tools_and_mcp(None, notebook_path=notebook_path)
         assert NOTEBOOK_SPEC.mcp_tool_name in tools
@@ -807,7 +807,7 @@ class TestBuildCriticToolsAndMcp:
         assert mcp_servers["notebook"]["type"] == "stdio"
 
     def test_without_notebook_path_skips_notebook_mcp(self):
-        from auto_scientist.agents.notebook_tool import NOTEBOOK_SPEC
+        from auto_core.agents.notebook_tool import NOTEBOOK_SPEC
 
         tools, mcp_servers = _build_critic_tools_and_mcp(None, notebook_path=None)
         assert NOTEBOOK_SPEC.mcp_tool_name not in tools
