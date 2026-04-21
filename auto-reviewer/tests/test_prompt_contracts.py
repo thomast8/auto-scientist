@@ -15,6 +15,7 @@ import pytest
 from auto_reviewer.agents import findings, hunter, surveyor
 from auto_reviewer.prompts.adversary import build_adversary_system
 from auto_reviewer.prompts.hunter import HUNTER_SYSTEM
+from auto_reviewer.prompts.prober import PROBER_SYSTEM
 from auto_reviewer.prompts.surveyor import SURVEYOR_SYSTEM, build_surveyor_system
 
 
@@ -79,6 +80,31 @@ class TestAdversaryScopeBoundary:
         # into "the Surveyor should have flagged X" concerns.
         system = build_adversary_system(provider)
         assert "Surveyor's lane, not ours" in system
+
+
+class TestProberResultsArtifacts:
+    """The Prober must emit `results.txt` so auto-core's Analyst gate passes.
+
+    The shared orchestrator keys the next iteration's Surveyor on
+    `version_entry.results_path`, which `evaluate()` only sets when a
+    `results.txt` lives next to the version's run_result.json. Without
+    the redirect, a clean reviewer iteration 1 crashes iteration 2 with
+    "ANALYZE: skipped (no results file)".
+    """
+
+    def test_pytest_invocation_redirects_stdout_to_results_txt(self) -> None:
+        # PROBER_SYSTEM is a .format() template; pred_id is escaped as {{pred_id}}.
+        assert (
+            "uv run pytest probes/probe_{{pred_id}}.py -x -s "
+            "> results.txt 2>stderr.txt; echo $? > exitcode.txt"
+        ) in PROBER_SYSTEM
+
+    def test_recap_mentions_results_artifact(self) -> None:
+        # Guards against future edits that trim the recap and drop the
+        # reminder about the three runtime-artifact files.
+        assert "results.txt" in PROBER_SYSTEM.split("<recap>")[-1]
+        assert "stderr.txt" in PROBER_SYSTEM.split("<recap>")[-1]
+        assert "exitcode.txt" in PROBER_SYSTEM.split("<recap>")[-1]
 
 
 class TestReviewerAgentNameLabels:

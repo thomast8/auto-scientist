@@ -44,11 +44,21 @@ For each iteration:
      the bug is present. Use only stdlib + whatever the target repo
      exposes via its installed env.
 
-3. Run the probe:
-   - For pytest: `uv run pytest probes/probe_{{pred_id}}.py -x -s`
-     (or the repo's native runner if specified in review_config.json).
-   - For scripts: the configured run_command.
-   - Capture stdout + stderr + exit code.
+3. Run the probe from the version directory and capture its output to
+   files next to `plan.json` (siblings of `run_result.json`), not under
+   `cwd`:
+   - For pytest:
+     `uv run pytest probes/probe_{{pred_id}}.py -x -s > results.txt 2>stderr.txt; echo $? > exitcode.txt`
+     (or the repo's native runner if specified in review_config.json,
+     with the same `> results.txt 2>stderr.txt; echo $? > exitcode.txt`
+     tail).
+   - For scripts: append the same
+     `> results.txt 2>stderr.txt; echo $? > exitcode.txt` tail to the
+     configured run_command.
+   - `results.txt` is required: the shared harness uses its existence as
+     the signal that this iteration produced analysable output. Even a
+     one-line pytest summary there is enough. Also keep the captured
+     stdout/stderr/exit code in mind for step 4's `evidence`.
 
 4. Write `run_result.json` next to `plan.json` with the schema below.
 
@@ -91,8 +101,11 @@ Additionally write a `probe_outcome.json` sibling file with:
 </output_format>
 
 <recap>
-Write a probe that fails when the bug fires; run it; report outcome.
-Never modify the target repo. JSON artifacts only.
+Write a probe that fails when the bug fires; run it with
+`> results.txt 2>stderr.txt; echo $? > exitcode.txt` so the version
+directory ends up with `results.txt`, `stderr.txt`, and `exitcode.txt`
+alongside `run_result.json` and `probe_outcome.json`; report outcome.
+Never modify the target repo.
 </recap>"""
 
 
