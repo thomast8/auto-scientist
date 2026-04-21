@@ -25,8 +25,8 @@ from auto_core.widgets import (
 )
 
 if TYPE_CHECKING:
+    from auto_core.desktop_notifier import DesktopNotifier
     from auto_scientist.app import PipelineApp
-    from auto_scientist.desktop_notifier import DesktopNotifier
 
 logger = logging.getLogger(__name__)
 

@@ -22,3 +22,12 @@ packages = ["src/auto_reviewer"]
 
 [tool.uv.sources]
 auto-core = { workspace = true }
+
+[tool.pytest.ini_options]
+asyncio_mode = "auto"
+testpaths = ["tests"]
+# Running `pytest` from the repo root picks up auto-scientist's tests via
+# the root pyproject. To run the reviewer suite:
+#   uv run pytest auto-reviewer/tests/
+# (or cd into auto-reviewer/ first). Sharing a process with auto-scientist
+# tests is unsupported - the registries are mutually exclusive globals.

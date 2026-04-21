@@ -133,7 +133,7 @@ class Orchestrator:
 
         # Attach desktop notifier if the user enabled it. Safe no-op otherwise.
         if self.notify_level != "off":
-            from auto_scientist.desktop_notifier import DesktopNotifier
+            from auto_core.desktop_notifier import DesktopNotifier
 
             self._live.attach_notifier(
                 DesktopNotifier(
@@ -356,7 +356,9 @@ class Orchestrator:
 
     async def _run_ingestion(self) -> Path | None:
         """Phase 0: Canonicalize raw data into experiments/data/."""
-        from auto_scientist.agents.ingestor import run_ingestor
+        from auto_core.agent_dispatch import get_agent_fn
+
+        run_ingestor = get_agent_fn("ingestor")
 
         # On resume, use raw_data_path (original); on fresh run, use data_path
         source_path = Path(self.state.raw_data_path) if self.state.raw_data_path else self.data_path
@@ -810,7 +812,9 @@ class Orchestrator:
 
     async def _run_analyst_initial(self) -> dict[str, Any] | None:
         """Iteration 0: analyze raw canonical data instead of experiment results."""
-        from auto_scientist.agents.analyst import run_analyst
+        from auto_core.agent_dispatch import get_agent_fn
+
+        run_analyst = get_agent_fn("analyst")
 
         notebook_path = self.output_dir / NOTEBOOK_FILENAME
         domain_knowledge = self.state.domain_knowledge
@@ -860,7 +864,9 @@ class Orchestrator:
 
     async def _run_analyst(self) -> dict[str, Any] | None:
         """Invoke the Analyst agent on latest results + plots."""
-        from auto_scientist.agents.analyst import run_analyst
+        from auto_core.agent_dispatch import get_agent_fn
+
+        run_analyst = get_agent_fn("analyst")
 
         if not self.state.versions:
             # Iteration 0: analyze raw data instead of experiment results
@@ -947,7 +953,9 @@ class Orchestrator:
 
     async def _run_scientist_plan(self, analysis: dict | None) -> dict[str, Any] | None:
         """Invoke the Scientist agent to formulate a plan."""
-        from auto_scientist.agents.scientist import run_scientist
+        from auto_core.agent_dispatch import get_agent_fn
+
+        run_scientist = get_agent_fn("scientist")
 
         version = f"v{self.state.iteration:02d}"
         notebook_path = self.output_dir / NOTEBOOK_FILENAME
@@ -1029,11 +1037,10 @@ class Orchestrator:
         Returns None if the gate encounters an error (stop is NOT upheld;
         investigation continues as a safety measure).
         """
-        from auto_scientist.agents.stop_gate import (
-            run_completeness_assessment,
-            run_scientist_stop_revision,
-        )
-        from auto_scientist.prompts.stop_gate import STOP_PERSONAS
+        from auto_core.agent_dispatch import STOP_PERSONAS, get_agent_fn
+
+        run_completeness_assessment = get_agent_fn("completeness_assessment")
+        run_scientist_stop_revision = get_agent_fn("scientist_stop_revision")
 
         stop_reason = plan.get("stop_reason", "unknown")
         version = f"v{self.state.iteration:02d}"
@@ -1098,7 +1105,9 @@ class Orchestrator:
             import asyncio
             import contextlib
 
-            from auto_scientist.agents.stop_gate import run_single_stop_debate
+            from auto_core.agent_dispatch import get_agent_fn
+
+            run_single_stop_debate = get_agent_fn("single_stop_debate")
 
             analysis_json = json.dumps(analysis, indent=2) if analysis else ""
             # Stop critics pick compact-tree (SDK) or full-detail (API)
@@ -1368,7 +1377,9 @@ class Orchestrator:
             self._live.log("DEBATE: skipped (no critics configured or no plan)")
             return None
 
-        from auto_scientist.agents.critic import run_debate
+        from auto_core.agent_dispatch import get_agent_fn
+
+        run_debate = get_agent_fn("debate")
 
         notebook_path = self.output_dir / NOTEBOOK_FILENAME
         domain_knowledge = self.state.domain_knowledge
@@ -1381,10 +1392,12 @@ class Orchestrator:
         self._live.update_status(phase="DEBATE")
 
         # Per-persona buffers (run_debate keys buffers by persona name)
-        from auto_scientist.prompts.critic import ITERATION_0_PERSONAS, PERSONAS
+        from auto_core.agent_dispatch import DEBATE_PERSONAS, ITERATION_0_PERSONAS
 
         active_personas = [
-            p for p in PERSONAS if self.state.iteration > 0 or p["name"] in ITERATION_0_PERSONAS
+            p
+            for p in DEBATE_PERSONAS
+            if self.state.iteration > 0 or p["name"] in ITERATION_0_PERSONAS
         ]
 
         buffers: dict[str, list[str]] = {}
@@ -1447,16 +1460,22 @@ class Orchestrator:
         import asyncio
         import contextlib
 
-        from auto_core.agents.debate_models import DebateResult
-        from auto_scientist.agents.critic import run_single_critic_debate
-        from auto_scientist.prompts.critic import (
+        from auto_core import agent_dispatch
+        from auto_core.agent_dispatch import (
+            DEBATE_PERSONAS,
             ITERATION_0_PERSONAS,
-            PERSONAS,
-            get_model_index_for_debate,
+            get_agent_fn,
         )
+        from auto_core.agents.debate_models import DebateResult
+
+        get_model_index_for_debate = agent_dispatch.GET_MODEL_INDEX_FOR_DEBATE
+
+        run_single_critic_debate = get_agent_fn("single_critic_debate")
 
         active_personas = [
-            p for p in PERSONAS if self.state.iteration > 0 or p["name"] in ITERATION_0_PERSONAS
+            p
+            for p in DEBATE_PERSONAS
+            if self.state.iteration > 0 or p["name"] in ITERATION_0_PERSONAS
         ]
 
         summary_model = self._summary_model
@@ -1610,7 +1629,9 @@ class Orchestrator:
             self._live.log("REVISE: skipped (no plan or no debate)")
             return None
 
-        from auto_scientist.agents.scientist import run_scientist_revision
+        from auto_core.agent_dispatch import get_agent_fn
+
+        run_scientist_revision = get_agent_fn("scientist_revision")
 
         version = f"v{self.state.iteration:02d}"
         notebook_path = self.output_dir / NOTEBOOK_FILENAME
@@ -1688,7 +1709,9 @@ class Orchestrator:
         concern_ledger from debate.json (raw debate_results are serialized
         dicts, not DebateResult objects, so build_concern_ledger won't work).
         """
-        from auto_scientist.agents.scientist import run_scientist_revision
+        from auto_core.agent_dispatch import get_agent_fn
+
+        run_scientist_revision = get_agent_fn("scientist_revision")
 
         debate_path = version_dir / "debate.json"
         if not debate_path.exists():
@@ -1779,7 +1802,9 @@ class Orchestrator:
 
     async def _run_coder(self, plan: dict | None) -> Path | None:
         """Invoke the Coder agent to implement the plan."""
-        from auto_scientist.agents.coder import run_coder
+        from auto_core.agent_dispatch import get_agent_fn
+
+        run_coder = get_agent_fn("coder")
 
         if plan is None:
             self._live.log("IMPLEMENT: skipped (no plan)")
@@ -1925,7 +1950,9 @@ class Orchestrator:
 
     async def _run_report(self) -> bool:
         """Phase 2: Generate final summary report."""
-        from auto_scientist.agents.report import run_report
+        from auto_core.agent_dispatch import get_agent_fn
+
+        run_report = get_agent_fn("report")
 
         notebook_path = self.output_dir / NOTEBOOK_FILENAME
 

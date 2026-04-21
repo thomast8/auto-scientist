@@ -259,7 +259,7 @@ def read_run_result(version_dir: Path) -> RunResult:
 
     from pydantic import ValidationError
 
-    from auto_scientist.schemas import CoderRunResult
+    from auto_core.schemas import CoderRunResult
 
     try:
         raw = json.loads(run_result_path.read_text())

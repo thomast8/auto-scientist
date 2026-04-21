@@ -22,8 +22,9 @@ its own process).
 
 from __future__ import annotations
 
-from collections.abc import Mapping
+from collections.abc import Callable, Mapping
 from dataclasses import dataclass, field
+from typing import Any
 
 
 @dataclass(frozen=True)
@@ -49,6 +50,32 @@ class RoleRegistry:
     # ModelConfig field names valid for `.resolve()`. Replaces the hardcoded
     # `_AGENT_FIELDS` ClassVar in auto_core.model_config.ModelConfig.
     agent_fields: frozenset[str] = field(default_factory=frozenset)
+
+    # Agent dispatch table. Keys are canonical agent identifiers the
+    # orchestrator looks up: ingestor, analyst, scientist, scientist_revision,
+    # coder, report, debate, single_critic_debate, completeness_assessment,
+    # scientist_stop_revision, single_stop_debate. Each value is the async
+    # function that implements that role for this app.
+    agent_fns: Mapping[str, Callable[..., Any]] = field(default_factory=dict)
+
+    # Adversary debate catalog. Each entry has at least {"name", "system_text"}
+    # and optionally {"instructions"}.
+    debate_personas: list[dict[str, str]] = field(default_factory=list)
+
+    # Personas active only from iteration 1+ (skipped on iter 0).
+    iteration_0_personas: frozenset[str] = field(default_factory=frozenset)
+
+    # Personas that receive the prediction tree + MCP prediction tool.
+    prediction_personas: frozenset[str] = field(default_factory=frozenset)
+
+    # Default critic instructions block appended to non-specialized personas.
+    default_critic_instructions: str = ""
+
+    # Stop-gate debate persona catalog.
+    stop_personas: list[dict[str, str]] = field(default_factory=list)
+
+    # Model-index rotation fn for debate: (persona_index, iteration, num_models) -> index.
+    get_model_index_for_debate: Callable[[int, int, int], int] | None = None
 
 
 def install(registry: RoleRegistry) -> None:
@@ -88,3 +115,16 @@ def install(registry: RoleRegistry) -> None:
         pass
 
     model_config.install_agent_fields(registry.agent_fields)
+
+    # Populate the agent dispatch table the orchestrator reads.
+    from auto_core import agent_dispatch
+
+    agent_dispatch.AGENT_FNS.clear()
+    agent_dispatch.AGENT_FNS.update(dict(registry.agent_fns))
+    agent_dispatch.DEBATE_PERSONAS[:] = list(registry.debate_personas)
+    agent_dispatch.ITERATION_0_PERSONAS = frozenset(registry.iteration_0_personas)
+    agent_dispatch.PREDICTION_PERSONAS = frozenset(registry.prediction_personas)
+    agent_dispatch.DEFAULT_CRITIC_INSTRUCTIONS = registry.default_critic_instructions
+    agent_dispatch.STOP_PERSONAS[:] = list(registry.stop_personas)
+    if registry.get_model_index_for_debate is not None:
+        agent_dispatch.GET_MODEL_INDEX_FOR_DEBATE = registry.get_model_index_for_debate

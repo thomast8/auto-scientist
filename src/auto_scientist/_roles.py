@@ -6,6 +6,9 @@ lookup tables with the scientist-flavored content that used to be hardcoded
 in `widgets.py`, `summarizer.py`, and `resume.py`.
 """
 
+from collections.abc import Callable
+from typing import Any
+
 from auto_core.roles import RoleRegistry, install
 
 AGENT_STYLES: dict[str, str] = {
@@ -141,8 +144,51 @@ AGENT_FIELDS: frozenset[str] = frozenset(
 )
 
 
+def _build_agent_fns() -> dict[str, Callable[..., Any]]:
+    """Import + return the science agent entry functions.
+
+    Deferred to function scope so `import auto_scientist` doesn't pay the
+    cost of loading every agent module when only a subset of the package
+    is actually used (e.g. tests importing just `auto_scientist.schemas`).
+    """
+    from auto_scientist.agents.analyst import run_analyst
+    from auto_scientist.agents.coder import run_coder
+    from auto_scientist.agents.critic import run_debate, run_single_critic_debate
+    from auto_scientist.agents.ingestor import run_ingestor
+    from auto_scientist.agents.report import run_report
+    from auto_scientist.agents.scientist import run_scientist, run_scientist_revision
+    from auto_scientist.agents.stop_gate import (
+        run_completeness_assessment,
+        run_scientist_stop_revision,
+        run_single_stop_debate,
+    )
+
+    return {
+        "ingestor": run_ingestor,
+        "analyst": run_analyst,
+        "scientist": run_scientist,
+        "scientist_revision": run_scientist_revision,
+        "coder": run_coder,
+        "report": run_report,
+        "debate": run_debate,
+        "single_critic_debate": run_single_critic_debate,
+        "completeness_assessment": run_completeness_assessment,
+        "scientist_stop_revision": run_scientist_stop_revision,
+        "single_stop_debate": run_single_stop_debate,
+    }
+
+
 def build_registry() -> RoleRegistry:
     """Return the auto-scientist RoleRegistry."""
+    from auto_scientist.prompts.critic import (
+        DEFAULT_CRITIC_INSTRUCTIONS,
+        ITERATION_0_PERSONAS,
+        PERSONAS,
+        PREDICTION_PERSONAS,
+        get_model_index_for_debate,
+    )
+    from auto_scientist.prompts.stop_gate import STOP_PERSONAS
+
     return RoleRegistry(
         agent_styles=AGENT_STYLES,
         agent_descriptions=AGENT_DESCRIPTIONS,
@@ -152,6 +198,13 @@ def build_registry() -> RoleRegistry:
         buffer_prefixes=BUFFER_PREFIXES,
         notebook_sources=NOTEBOOK_SOURCES,
         agent_fields=AGENT_FIELDS,
+        agent_fns=_build_agent_fns(),
+        debate_personas=PERSONAS,
+        iteration_0_personas=ITERATION_0_PERSONAS,
+        prediction_personas=PREDICTION_PERSONAS,
+        default_critic_instructions=DEFAULT_CRITIC_INSTRUCTIONS,
+        stop_personas=STOP_PERSONAS,
+        get_model_index_for_debate=get_model_index_for_debate,
     )
 
 

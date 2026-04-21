@@ -12,6 +12,9 @@ config from the "analyst" slot, Hunter from "scientist", Prober from
 Assessor from "assessor".
 """
 
+from collections.abc import Callable
+from typing import Any
+
 from auto_core.roles import RoleRegistry, install
 
 AGENT_STYLES: dict[str, str] = {
@@ -166,8 +169,52 @@ AGENT_FIELDS: frozenset[str] = frozenset(
 )
 
 
+def _build_agent_fns() -> dict[str, Callable[..., Any]]:
+    """Import + return the reviewer's agent entry functions.
+
+    Each review-flavored agent module exports a function under its
+    scientist-canonical name (`run_analyst` for Surveyor, `run_scientist`
+    for Hunter, etc.) so the shared orchestrator dispatch table uses the
+    same keys regardless of app.
+    """
+    from auto_reviewer.agents.adversary import run_debate, run_single_critic_debate
+    from auto_reviewer.agents.findings import run_report
+    from auto_reviewer.agents.hunter import run_scientist, run_scientist_revision
+    from auto_reviewer.agents.intake import run_ingestor
+    from auto_reviewer.agents.prober import run_coder
+    from auto_reviewer.agents.stop_gate import (
+        run_completeness_assessment,
+        run_scientist_stop_revision,
+        run_single_stop_debate,
+    )
+    from auto_reviewer.agents.surveyor import run_analyst
+
+    return {
+        "ingestor": run_ingestor,
+        "analyst": run_analyst,
+        "scientist": run_scientist,
+        "scientist_revision": run_scientist_revision,
+        "coder": run_coder,
+        "report": run_report,
+        "debate": run_debate,
+        "single_critic_debate": run_single_critic_debate,
+        "completeness_assessment": run_completeness_assessment,
+        "scientist_stop_revision": run_scientist_stop_revision,
+        "single_stop_debate": run_single_stop_debate,
+    }
+
+
 def build_registry() -> RoleRegistry:
     """Return the auto-reviewer RoleRegistry."""
+    from auto_reviewer.prompts.adversary import (
+        DEFAULT_CRITIC_INSTRUCTIONS,
+        ITERATION_0_PERSONAS,
+        PERSONAS,
+        PREDICTION_PERSONAS,
+        get_model_index_for_debate,
+    )
+    from auto_reviewer.prompts.stop_gate import STOP_PERSONAS
+
     return RoleRegistry(
         agent_styles=AGENT_STYLES,
         agent_descriptions=AGENT_DESCRIPTIONS,
@@ -177,6 +224,13 @@ def build_registry() -> RoleRegistry:
         buffer_prefixes=BUFFER_PREFIXES,
         notebook_sources=NOTEBOOK_SOURCES,
         agent_fields=AGENT_FIELDS,
+        agent_fns=_build_agent_fns(),
+        debate_personas=PERSONAS,
+        iteration_0_personas=ITERATION_0_PERSONAS,
+        prediction_personas=PREDICTION_PERSONAS,
+        default_critic_instructions=DEFAULT_CRITIC_INSTRUCTIONS,
+        stop_personas=STOP_PERSONAS,
+        get_model_index_for_debate=get_model_index_for_debate,
     )
 
 
