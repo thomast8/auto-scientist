@@ -25,8 +25,8 @@ from auto_core.widgets import (
 )
 
 if TYPE_CHECKING:
+    from auto_core.app import PipelineApp
     from auto_core.desktop_notifier import DesktopNotifier
-    from auto_scientist.app import PipelineApp
 
 logger = logging.getLogger(__name__)
 
@@ -117,7 +117,7 @@ class PipelineLive:
 
         if self._file_console is not None:
             self._file_console.print(
-                f"[{panel.panel_name}] {panel_data.get('done_summary', '')} "
+                f"[{panel.display_panel_name}] {panel_data.get('done_summary', '')} "
                 f"(restored from previous run)"
             )
 
@@ -135,12 +135,12 @@ class PipelineLive:
             )
         if self._file_console is not None:
             self._file_console.print(
-                f"[{panel.panel_name}] {panel.done_summary} ({panel._build_footer()})"
+                f"[{panel.display_panel_name}] {panel.done_summary} ({panel._build_footer()})"
             )
         if self._notifier is not None:
             total_tokens = panel.input_tokens + panel.output_tokens + panel.thinking_tokens
             self._notifier.agent_done(
-                panel.panel_name,
+                panel.display_panel_name,
                 _format_elapsed(panel.elapsed),
                 panel.done_summary,
                 num_turns=panel.num_turns,
@@ -428,7 +428,7 @@ async def generate_iteration_summary(live: PipelineLive, summary_model: str | No
     if container is None:
         return ""
     summaries = [
-        (p.panel_name, p.done_summary)
+        (p.display_panel_name, p.done_summary)
         for p in getattr(container, "_panels", [])
         if p.done and p.done_summary
     ]

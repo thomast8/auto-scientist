@@ -13,19 +13,24 @@ Commands:
 
 from __future__ import annotations
 
-import asyncio
 import json
 import logging
 import sys
 from pathlib import Path
 
 import click
+from auto_core.app import PipelineApp
 from auto_core.model_config import ModelConfig
 from auto_core.orchestrator import Orchestrator
 from auto_core.resume import RewindResult
 from auto_core.state import RunState
+from dotenv import load_dotenv
 
 from auto_reviewer.config import ReviewConfig
+
+# Pick up API keys from the repo's .env before any agent tries to talk to
+# an LLM provider. Mirrors auto_scientist.cli.
+load_dotenv()
 
 logger = logging.getLogger("auto_reviewer")
 
@@ -115,16 +120,23 @@ def review(
         pr_ref=pr_ref,
         base_ref=base_ref,
     )
-    config_path = workspace / "review_config.json"
+    # The shared orchestrator looks for `domain_config.json` after intake.
+    # Seed it at that name so the post-intake reload finds it; the core is
+    # app-agnostic and the filename is an implementation detail.
+    config_path = workspace / "domain_config.json"
     config_path.write_text(review_config.model_dump_json(indent=2))
 
-    # Initial RunState: the intake phase will update data_path / raw_data_path.
+    # Initial RunState: the intake phase will refine data_path to point at a
+    # canonicalized review workspace. We seed it with the target repo so the
+    # shared validator (which checks data_path exists before ingestion) has
+    # something real to check.
     state = RunState(
         domain=pr_ref,
         goal=goal,
         phase="ingestion",
         max_iterations=max_iterations,
         config_path=str(config_path),
+        data_path=str(repo_abs),
     )
 
     model_config = ModelConfig.builtin_preset(preset)
@@ -155,7 +167,7 @@ def review(
 
     orchestrator = Orchestrator(
         state=state,
-        data_path=None,  # intake will pull the PR and set workspace paths
+        data_path=repo_abs,  # target repo is the canonicalizer's input
         output_dir=workspace,
         max_iterations=max_iterations,
         model_config=model_config,
@@ -164,7 +176,7 @@ def review(
     orchestrator.config = review_config  # pre-seed so intake doesn't overwrite
 
     try:
-        asyncio.run(orchestrator.run())
+        PipelineApp(orchestrator).run()
     except KeyboardInterrupt:
         click.echo(
             "Interrupted. State is persisted at state.json; use `auto-reviewer resume` to continue."
@@ -237,7 +249,7 @@ def resume(run_dir: str, from_iteration: int | None) -> None:
     )
 
     try:
-        asyncio.run(orchestrator.run())
+        PipelineApp(orchestrator).run()
     except KeyboardInterrupt:
         click.echo("Interrupted again. Re-run `auto-reviewer resume` to continue.")
         sys.exit(130)

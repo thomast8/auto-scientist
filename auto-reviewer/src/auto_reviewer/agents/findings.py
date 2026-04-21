@@ -36,7 +36,7 @@ logger = logging.getLogger(__name__)
 MIN_REPORT_LENGTH = 100
 
 
-async def run_report(
+async def run_findings(
     state: ExperimentState,
     notebook_path: Path,
     output_dir: Path,

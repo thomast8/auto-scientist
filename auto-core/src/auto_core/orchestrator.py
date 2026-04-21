@@ -12,6 +12,7 @@ from rich.rule import Rule
 from rich.table import Table
 from rich.text import Text
 
+from auto_core import widgets
 from auto_core.config import RunConfig
 from auto_core.model_config import AgentModelConfig, ModelConfig
 from auto_core.notebook import NOTEBOOK_FILENAME, append_entry, read_notebook
@@ -358,7 +359,7 @@ class Orchestrator:
         """Phase 0: Canonicalize raw data into experiments/data/."""
         from auto_core.agent_dispatch import get_agent_fn
 
-        run_ingestor = get_agent_fn("ingestor")
+        run_ingestor = get_agent_fn("canonicalizer")
 
         # On resume, use raw_data_path (original); on fresh run, use data_path
         source_path = Path(self.state.raw_data_path) if self.state.raw_data_path else self.data_path
@@ -764,13 +765,7 @@ class Orchestrator:
         table.add_row("Goal", goal_preview)
         table.add_row("", "")  # spacer
 
-        # Agent models
-        agent_map = [
-            ("Ingestor", "ingestor"),
-            ("Analyst", "analyst"),
-            ("Scientist", "scientist"),
-        ]
-        for display_name, field_name in agent_map:
+        for display_name, field_name in widgets.BANNER_AGENTS_BEFORE_CRITICS:
             cfg = mc.resolve(field_name)
             style = AGENT_STYLES.get(display_name, "")
             table.add_row(
@@ -778,8 +773,9 @@ class Orchestrator:
                 Text(f"{self._display_model(cfg)}  [{cfg.reasoning.level}]", style=style),
             )
 
+        critic_label = widgets.BANNER_CRITIC_LABEL
         for i, critic in enumerate(mc.critics):
-            label = f"Critic {i + 1}" if len(mc.critics) > 1 else "Critic"
+            label = f"{critic_label} {i + 1}" if len(mc.critics) > 1 else critic_label
             table.add_row(
                 Text(label, style="yellow"),
                 Text(
@@ -788,8 +784,7 @@ class Orchestrator:
                 ),
             )
 
-        # Coder + Report go after critics
-        for display_name, field_name in [("Coder", "coder"), ("Report", "report")]:
+        for display_name, field_name in widgets.BANNER_AGENTS_AFTER_CRITICS:
             cfg = mc.resolve(field_name)
             style = AGENT_STYLES.get(display_name, "")
             table.add_row(
@@ -804,7 +799,7 @@ class Orchestrator:
                 Text(f"{s.provider}:{self._display_model(s)}  [{s.reasoning.level}]", style="dim"),
             )
 
-        return Panel(table, title="Auto-Scientist", title_align="left", border_style="bold")
+        return Panel(table, title=widgets.APP_LABEL, title_align="left", border_style="bold")
 
     def _notebook_content(self) -> str:
         """Return notebook content."""
@@ -814,7 +809,7 @@ class Orchestrator:
         """Iteration 0: analyze raw canonical data instead of experiment results."""
         from auto_core.agent_dispatch import get_agent_fn
 
-        run_analyst = get_agent_fn("analyst")
+        run_analyst = get_agent_fn("observer")
 
         notebook_path = self.output_dir / NOTEBOOK_FILENAME
         domain_knowledge = self.state.domain_knowledge
@@ -866,7 +861,7 @@ class Orchestrator:
         """Invoke the Analyst agent on latest results + plots."""
         from auto_core.agent_dispatch import get_agent_fn
 
-        run_analyst = get_agent_fn("analyst")
+        run_analyst = get_agent_fn("observer")
 
         if not self.state.versions:
             # Iteration 0: analyze raw data instead of experiment results
@@ -955,7 +950,7 @@ class Orchestrator:
         """Invoke the Scientist agent to formulate a plan."""
         from auto_core.agent_dispatch import get_agent_fn
 
-        run_scientist = get_agent_fn("scientist")
+        run_scientist = get_agent_fn("planner")
 
         version = f"v{self.state.iteration:02d}"
         notebook_path = self.output_dir / NOTEBOOK_FILENAME
@@ -1039,8 +1034,8 @@ class Orchestrator:
         """
         from auto_core.agent_dispatch import STOP_PERSONAS, get_agent_fn
 
-        run_completeness_assessment = get_agent_fn("completeness_assessment")
-        run_scientist_stop_revision = get_agent_fn("scientist_stop_revision")
+        run_completeness_assessment = get_agent_fn("assessor")
+        run_scientist_stop_revision = get_agent_fn("stop_reviser")
 
         stop_reason = plan.get("stop_reason", "unknown")
         version = f"v{self.state.iteration:02d}"
@@ -1107,7 +1102,7 @@ class Orchestrator:
 
             from auto_core.agent_dispatch import get_agent_fn
 
-            run_single_stop_debate = get_agent_fn("single_stop_debate")
+            run_single_stop_debate = get_agent_fn("stop_adversary")
 
             analysis_json = json.dumps(analysis, indent=2) if analysis else ""
             # Stop critics pick compact-tree (SDK) or full-detail (API)
@@ -1379,7 +1374,7 @@ class Orchestrator:
 
         from auto_core.agent_dispatch import get_agent_fn
 
-        run_debate = get_agent_fn("debate")
+        run_debate = get_agent_fn("adversary")
 
         notebook_path = self.output_dir / NOTEBOOK_FILENAME
         domain_knowledge = self.state.domain_knowledge
@@ -1470,7 +1465,7 @@ class Orchestrator:
 
         get_model_index_for_debate = agent_dispatch.GET_MODEL_INDEX_FOR_DEBATE
 
-        run_single_critic_debate = get_agent_fn("single_critic_debate")
+        run_single_critic_debate = get_agent_fn("single_adversary")
 
         active_personas = [
             p
@@ -1631,7 +1626,7 @@ class Orchestrator:
 
         from auto_core.agent_dispatch import get_agent_fn
 
-        run_scientist_revision = get_agent_fn("scientist_revision")
+        run_scientist_revision = get_agent_fn("reviser")
 
         version = f"v{self.state.iteration:02d}"
         notebook_path = self.output_dir / NOTEBOOK_FILENAME
@@ -1711,7 +1706,7 @@ class Orchestrator:
         """
         from auto_core.agent_dispatch import get_agent_fn
 
-        run_scientist_revision = get_agent_fn("scientist_revision")
+        run_scientist_revision = get_agent_fn("reviser")
 
         debate_path = version_dir / "debate.json"
         if not debate_path.exists():
@@ -1804,7 +1799,7 @@ class Orchestrator:
         """Invoke the Coder agent to implement the plan."""
         from auto_core.agent_dispatch import get_agent_fn
 
-        run_coder = get_agent_fn("coder")
+        run_coder = get_agent_fn("implementer")
 
         if plan is None:
             self._live.log("IMPLEMENT: skipped (no plan)")
@@ -1952,7 +1947,7 @@ class Orchestrator:
         """Phase 2: Generate final summary report."""
         from auto_core.agent_dispatch import get_agent_fn
 
-        run_report = get_agent_fn("report")
+        run_report = get_agent_fn("reporter")
 
         notebook_path = self.output_dir / NOTEBOOK_FILENAME
 

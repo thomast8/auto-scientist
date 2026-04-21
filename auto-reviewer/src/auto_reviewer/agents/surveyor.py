@@ -26,11 +26,24 @@ from auto_core.sdk_utils import (
     prepare_turn_budget,
     validate_json_output,
 )
+from auto_core.state import RunState
 
 from auto_reviewer.prompts.surveyor import SURVEYOR_USER, build_surveyor_system
 from auto_reviewer.schemas import SurveyorOutput
 
 logger = logging.getLogger(__name__)
+
+
+def _format_prediction_tree(state: RunState | None) -> str:
+    """One-line-per-prediction summary of prior suspected bugs for the prompt."""
+    if state is None or not state.prediction_history:
+        return "(none yet)"
+    lines = []
+    for rec in state.prediction_history:
+        label = rec.summary.strip() or rec.prediction.strip()[:80]
+        lines.append(f"- {rec.pred_id}: {label} -> {rec.outcome}")
+    return "\n".join(lines)
+
 
 # JSON schema for structured output (injected into the prompt for LLM guidance)
 SURVEYOR_SCHEMA = {
@@ -90,7 +103,7 @@ SURVEYOR_SCHEMA = {
 }
 
 
-async def run_analyst(
+async def run_surveyor(
     results_path: Path | None,
     plot_paths: list[Path],
     notebook_path: Path,
@@ -101,82 +114,58 @@ async def run_analyst(
     provider: str = "anthropic",
     timeout_context: dict | None = None,
 ) -> dict[str, Any]:
-    """Analyze experiment results and produce structured observation.
+    """Survey the PR diff + probe results and produce structured observations.
+
+    Shares its signature with `auto_scientist.agents.analyst.run_analyst`
+    because both are dispatched through `auto_core.agent_dispatch` under the
+    "observer" role. The reviewer ignores `results_path`, `plot_paths`,
+    `data_dir`, `domain_knowledge`, and `timeout_context`: its context comes
+    from the review workspace (diff.patch, touched_files/, probe_results/)
+    and the persisted RunState.
 
     Args:
-        results_path: Path to the results text file (None on iteration 0).
-        plot_paths: Paths to output plot PNGs (read as images).
-        notebook_path: Path to the lab notebook.
-        domain_knowledge: Domain-specific context injected into the prompt.
-        data_dir: Path to canonical data directory (set on iteration 0).
+        notebook_path: Path to the review notebook; its parent is the review
+            workspace root where state.json and intake artifacts live.
         model: Model override.
         message_buffer: Optional buffer for streaming messages.
-        timeout_context: If provided, indicates the previous script timed out.
-            Keys: timeout_minutes (int), hypothesis (str).
+        provider: LLM provider name ("anthropic", "openai", etc.).
 
     Returns:
-        Structured dict with keys:
-            key_metrics: list[{name: str, value: float}]
-            improvements: list[str]
-            regressions: list[str]
-            observations: list[str]
-            domain_knowledge: str (optional, iteration 0 only)
-            data_summary: str (optional, iteration 0 only)
+        Dict shaped like `SurveyorOutput` (suspicions, touched_symbols,
+        observations, prediction_outcomes, repo_knowledge, diff_summary).
     """
     notebook_entries = parse_notebook_entries(notebook_path)
 
-    # Build the data section depending on iteration 0 vs normal
-    if data_dir is not None and (results_path is None or not results_path.exists()):
-        abs_data_dir = Path(data_dir).resolve()
-        # Pre-compute file listing so the analyst doesn't need to Glob
-        file_listing = "\n".join(
-            f"- {f.name}" for f in sorted(abs_data_dir.iterdir()) if f.is_file()
-        )
-        data_section = (
-            f"<data_directory>{abs_data_dir}</data_directory>\n"
-            f"<data_files>\n{file_listing}\n</data_files>\n"
-            "Use the Read tool to examine each data file listed above. "
-            "Describe the structure of each file factually."
-        )
-        cwd = abs_data_dir
-    else:
-        results_content = (
-            results_path.read_text()
-            if results_path and results_path.exists()
-            else "(no results file)"
-        )
-        plot_list = (
-            "\n".join(f"- {p}" for p in plot_paths) if plot_paths else "(no plots available)"
-        )
-        data_section = (
-            f"<results>{results_content}</results>\n"
-            "<plots>\n"
-            "Use the Read tool to examine each of these plot files. For each\n"
-            "plot, describe what you see: trends, patterns, deviations,\n"
-            "outliers. Extract any numeric values visible in the plots.\n"
-            f"{plot_list}\n"
-            "</plots>"
-        )
-        cwd = results_path.parent if results_path else notebook_path.parent
+    # The review workspace holds diff.patch, touched_files/, probe_results/,
+    # and state.json. Intake writes the first three on ingestion; the
+    # orchestrator persists state.json after each phase transition.
+    workspace_path = notebook_path.parent.resolve()
+    state_snapshot: RunState | None = None
+    state_path = workspace_path / "state.json"
+    if state_path.exists():
+        try:
+            state_snapshot = RunState.load(state_path)
+        except Exception as e:
+            logger.warning(f"Surveyor: failed to load {state_path}: {e}")
 
-    # Prepend timeout context when the previous script timed out
-    if timeout_context:
-        has_partial = results_path is not None and results_path.exists()
-        timeout_block = (
-            "<timeout_info>\n"
-            "IMPORTANT: The previous experiment script TIMED OUT after "
-            f"{timeout_context['timeout_minutes']} minutes.\n"
-            f"Hypothesis being tested: {timeout_context.get('hypothesis', '(unknown)')}\n"
-            f"Partial results available: {'yes' if has_partial else 'no'}\n"
-            "</timeout_info>\n\n"
-        )
-        data_section = timeout_block + data_section
+    goal = state_snapshot.goal if state_snapshot else ""
+    pr_ref = state_snapshot.domain if state_snapshot else ""
+    iteration = state_snapshot.iteration if state_snapshot else 0
+    prediction_tree = _format_prediction_tree(state_snapshot)
 
     user_prompt = SURVEYOR_USER.format(
-        domain_knowledge=domain_knowledge or "(no domain knowledge provided)",
-        data_section=data_section,
-        notebook_content=format_notebook_toc(notebook_entries),
+        goal=goal or "(no goal set)",
+        pr_ref=pr_ref or "(unknown)",
+        iteration=iteration,
+        workspace_path=workspace_path,
+        diff_path=workspace_path / "diff.patch",
+        touched_files_dir=workspace_path / "touched_files",
+        probe_results_dir=workspace_path / "probe_results",
+        notebook_toc=format_notebook_toc(notebook_entries),
+        prediction_tree=prediction_tree,
     )
+
+    cwd = workspace_path
 
     json_instruction = (
         "\n\n## Output Format\n"

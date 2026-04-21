@@ -170,37 +170,37 @@ AGENT_FIELDS: frozenset[str] = frozenset(
 
 
 def _build_agent_fns() -> dict[str, Callable[..., Any]]:
-    """Import + return the reviewer's agent entry functions.
+    """Return the reviewer's agent entry functions, keyed by generic role.
 
-    Each review-flavored agent module exports a function under its
-    scientist-canonical name (`run_analyst` for Surveyor, `run_scientist`
-    for Hunter, etc.) so the shared orchestrator dispatch table uses the
-    same keys regardless of app.
+    `canonicalizer` resolves to a deterministic Python function
+    (`run_intake`) - PR canonicalization is shell commands, not LLM work.
+    The rest are LLM-driven agents mirroring auto-scientist's structural
+    machinery with reviewer-flavored prompts + schemas.
     """
     from auto_reviewer.agents.adversary import run_debate, run_single_critic_debate
-    from auto_reviewer.agents.findings import run_report
-    from auto_reviewer.agents.hunter import run_scientist, run_scientist_revision
-    from auto_reviewer.agents.intake import run_ingestor
-    from auto_reviewer.agents.prober import run_coder
+    from auto_reviewer.agents.findings import run_findings
+    from auto_reviewer.agents.hunter import run_hunter, run_hunter_revision
+    from auto_reviewer.agents.intake import run_intake
+    from auto_reviewer.agents.prober import run_prober
     from auto_reviewer.agents.stop_gate import (
         run_completeness_assessment,
         run_scientist_stop_revision,
         run_single_stop_debate,
     )
-    from auto_reviewer.agents.surveyor import run_analyst
+    from auto_reviewer.agents.surveyor import run_surveyor
 
     return {
-        "ingestor": run_ingestor,
-        "analyst": run_analyst,
-        "scientist": run_scientist,
-        "scientist_revision": run_scientist_revision,
-        "coder": run_coder,
-        "report": run_report,
-        "debate": run_debate,
-        "single_critic_debate": run_single_critic_debate,
-        "completeness_assessment": run_completeness_assessment,
-        "scientist_stop_revision": run_scientist_stop_revision,
-        "single_stop_debate": run_single_stop_debate,
+        "canonicalizer": run_intake,
+        "observer": run_surveyor,
+        "planner": run_hunter,
+        "reviser": run_hunter_revision,
+        "implementer": run_prober,
+        "reporter": run_findings,
+        "adversary": run_debate,
+        "single_adversary": run_single_critic_debate,
+        "assessor": run_completeness_assessment,
+        "stop_reviser": run_scientist_stop_revision,
+        "stop_adversary": run_single_stop_debate,
     }
 
 
@@ -231,6 +231,26 @@ def build_registry() -> RoleRegistry:
         default_critic_instructions=DEFAULT_CRITIC_INSTRUCTIONS,
         stop_personas=STOP_PERSONAS,
         get_model_index_for_debate=get_model_index_for_debate,
+        app_label="Auto-Reviewer",
+        banner_agents_before_critics=[
+            ("Intake", "ingestor"),
+            ("Surveyor", "analyst"),
+            ("Hunter", "scientist"),
+        ],
+        banner_agents_after_critics=[
+            ("Prober", "coder"),
+            ("Findings", "report"),
+        ],
+        banner_critic_label="Adversary",
+        panel_display_names={
+            "Ingestor": "Intake",
+            "Analyst": "Surveyor",
+            "Scientist": "Hunter",
+            "Coder": "Prober",
+            "Report": "Findings",
+            "Critic": "Adversary",
+            "Revision": "Hunter Revision",
+        },
     )
 
 

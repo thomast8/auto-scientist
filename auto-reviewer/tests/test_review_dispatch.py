@@ -33,26 +33,26 @@ from auto_reviewer.state import ReviewState
 class TestRegistryContents:
     """AGENT_FNS should point at auto_reviewer.agents.* modules, not scientist."""
 
-    def test_analyst_bound_to_surveyor(self):
-        assert AGENT_FNS["analyst"].__module__ == "auto_reviewer.agents.surveyor"
+    def test_observer_bound_to_surveyor(self):
+        assert AGENT_FNS["observer"].__module__ == "auto_reviewer.agents.surveyor"
 
-    def test_scientist_bound_to_hunter(self):
-        assert AGENT_FNS["scientist"].__module__ == "auto_reviewer.agents.hunter"
+    def test_planner_bound_to_hunter(self):
+        assert AGENT_FNS["planner"].__module__ == "auto_reviewer.agents.hunter"
 
-    def test_coder_bound_to_prober(self):
-        assert AGENT_FNS["coder"].__module__ == "auto_reviewer.agents.prober"
+    def test_implementer_bound_to_prober(self):
+        assert AGENT_FNS["implementer"].__module__ == "auto_reviewer.agents.prober"
 
-    def test_ingestor_bound_to_intake(self):
-        assert AGENT_FNS["ingestor"].__module__ == "auto_reviewer.agents.intake"
+    def test_canonicalizer_bound_to_intake(self):
+        assert AGENT_FNS["canonicalizer"].__module__ == "auto_reviewer.agents.intake"
 
-    def test_report_bound_to_findings(self):
-        assert AGENT_FNS["report"].__module__ == "auto_reviewer.agents.findings"
+    def test_reporter_bound_to_findings(self):
+        assert AGENT_FNS["reporter"].__module__ == "auto_reviewer.agents.findings"
 
-    def test_debate_bound_to_adversary(self):
-        assert AGENT_FNS["debate"].__module__ == "auto_reviewer.agents.adversary"
+    def test_adversary_bound_to_adversary_module(self):
+        assert AGENT_FNS["adversary"].__module__ == "auto_reviewer.agents.adversary"
 
     def test_stop_gate_bound_to_reviewer_stop_gate(self):
-        for key in ("completeness_assessment", "scientist_stop_revision", "single_stop_debate"):
+        for key in ("assessor", "stop_reviser", "stop_adversary"):
             assert AGENT_FNS[key].__module__ == "auto_reviewer.agents.stop_gate"
 
     def test_review_personas_registered(self):
@@ -76,7 +76,7 @@ class TestOrchestratorDispatchToReviewerAgents:
     entry functions; assert the reviewer modules are the ones invoked."""
 
     @pytest.mark.asyncio
-    @patch("auto_reviewer.agents.intake.run_ingestor", new_callable=AsyncMock)
+    @patch("auto_reviewer.agents.intake.run_intake", new_callable=AsyncMock)
     async def test_run_ingestion_calls_intake(self, mock_intake, tmp_path: Path):
         canonical = tmp_path / "review_workspace" / "canonical"
         canonical.mkdir(parents=True)
@@ -103,13 +103,13 @@ class TestOrchestratorDispatchToReviewerAgents:
         # The scientist's ingestor must NOT have been touched. Importing
         # auto_scientist would clobber the registry, so we verify the
         # reviewer module is still the one registered.
-        assert AGENT_FNS["ingestor"].__module__ == "auto_reviewer.agents.intake"
+        assert AGENT_FNS["canonicalizer"].__module__ == "auto_reviewer.agents.intake"
 
     @pytest.mark.asyncio
     @patch(
-        "auto_reviewer.agents.intake.run_ingestor",
+        "auto_reviewer.agents.intake.run_intake",
         new_callable=AsyncMock,
-        side_effect=RuntimeError("intake LLM error"),
+        side_effect=RuntimeError("intake boom"),
     )
     async def test_intake_error_propagates(self, _mock, tmp_path: Path):
         raw = tmp_path / "raw.patch"
@@ -126,11 +126,11 @@ class TestOrchestratorDispatchToReviewerAgents:
             data_path=raw,
             output_dir=tmp_path / "review_workspace",
         )
-        with pytest.raises(RuntimeError, match="intake LLM error"):
+        with pytest.raises(RuntimeError, match="intake boom"):
             await orchestrator._run_ingestion()
 
     @pytest.mark.asyncio
-    @patch("auto_reviewer.agents.surveyor.run_analyst", new_callable=AsyncMock)
+    @patch("auto_reviewer.agents.surveyor.run_surveyor", new_callable=AsyncMock)
     async def test_run_analyst_initial_calls_surveyor(self, mock_surveyor, tmp_path: Path):
         mock_surveyor.return_value = {
             "suspicions": [],
@@ -163,13 +163,13 @@ class TestOrchestratorDispatchToReviewerAgents:
 
     @pytest.mark.asyncio
     async def test_hunter_dispatch_selects_review_module(self):
-        """Smoke check: calling get_agent_fn('scientist') at dispatch time
+        """Smoke check: calling get_agent_fn('planner') at dispatch time
         returns a dispatcher that routes to auto_reviewer.agents.hunter."""
-        fn = get_agent_fn("scientist")
+        fn = get_agent_fn("planner")
         # The dispatcher re-resolves via sys.modules, so unittest.mock.patch
         # on the hunter module still intercepts at call time.
         with patch(
-            "auto_reviewer.agents.hunter.run_scientist",
+            "auto_reviewer.agents.hunter.run_hunter",
             new_callable=AsyncMock,
             return_value={"ok": True},
         ) as mock_hunter:

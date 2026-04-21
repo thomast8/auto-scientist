@@ -77,6 +77,34 @@ class RoleRegistry:
     # Model-index rotation fn for debate: (persona_index, iteration, num_models) -> index.
     get_model_index_for_debate: Callable[[int, int, int], int] | None = None
 
+    # Startup-banner customization. The TUI banner (title + per-agent model
+    # rows) is rendered by `auto_core.orchestrator._build_startup_banner`,
+    # which reads from `auto_core.widgets` at call time. Defaults carry
+    # scientist-flavored labels so auto-scientist works without setting
+    # anything explicit here.
+    app_label: str = "Auto-Scientist"
+    banner_agents_before_critics: list[tuple[str, str]] = field(
+        default_factory=lambda: [
+            ("Ingestor", "ingestor"),
+            ("Analyst", "analyst"),
+            ("Scientist", "scientist"),
+        ]
+    )
+    banner_agents_after_critics: list[tuple[str, str]] = field(
+        default_factory=lambda: [
+            ("Coder", "coder"),
+            ("Report", "report"),
+        ]
+    )
+    banner_critic_label: str = "Critic"
+
+    # Per-panel rename map. Canonical panel name -> app-specific display name
+    # (e.g. "Analyst" -> "Surveyor"). Also works for "Prefix/Detail" shapes:
+    # "Critic" mapped to "Adversary" rewrites "Critic/Security" to
+    # "Adversary/Security". Default is identity. The canonical name is kept
+    # for persistence / state files.
+    panel_display_names: Mapping[str, str] = field(default_factory=dict)
+
 
 def install(registry: RoleRegistry) -> None:
     """Populate the core machinery's module-level lookup tables.
@@ -92,6 +120,13 @@ def install(registry: RoleRegistry) -> None:
     widgets.AGENT_DESCRIPTIONS.update(dict(registry.agent_descriptions))
     widgets.PHASE_STYLES.clear()
     widgets.PHASE_STYLES.update(dict(registry.phase_styles))
+
+    widgets.APP_LABEL = registry.app_label
+    widgets.BANNER_AGENTS_BEFORE_CRITICS = list(registry.banner_agents_before_critics)
+    widgets.BANNER_AGENTS_AFTER_CRITICS = list(registry.banner_agents_after_critics)
+    widgets.BANNER_CRITIC_LABEL = registry.banner_critic_label
+    widgets.PANEL_DISPLAY_NAMES.clear()
+    widgets.PANEL_DISPLAY_NAMES.update(dict(registry.panel_display_names))
 
     summarizer.SUMMARY_PROMPTS.clear()
     summarizer.SUMMARY_PROMPTS.update(dict(registry.summary_prompts))
@@ -120,7 +155,12 @@ def install(registry: RoleRegistry) -> None:
     from auto_core import agent_dispatch
 
     agent_dispatch.AGENT_FNS.clear()
-    agent_dispatch.AGENT_FNS.update(dict(registry.agent_fns))
+    # Auto-migrate legacy scientist-canonical keys (ingestor / analyst /
+    # scientist / etc.) to their generic-role equivalents so the orchestrator
+    # only has to know the new vocabulary.
+    for key, fn in registry.agent_fns.items():
+        canonical = agent_dispatch.LEGACY_KEY_MAP.get(key, key)
+        agent_dispatch.AGENT_FNS[canonical] = fn
     agent_dispatch.DEBATE_PERSONAS[:] = list(registry.debate_personas)
     agent_dispatch.ITERATION_0_PERSONAS = frozenset(registry.iteration_0_personas)
     agent_dispatch.PREDICTION_PERSONAS = frozenset(registry.prediction_personas)

@@ -164,17 +164,17 @@ def _build_agent_fns() -> dict[str, Callable[..., Any]]:
     )
 
     return {
-        "ingestor": run_ingestor,
-        "analyst": run_analyst,
-        "scientist": run_scientist,
-        "scientist_revision": run_scientist_revision,
-        "coder": run_coder,
-        "report": run_report,
-        "debate": run_debate,
-        "single_critic_debate": run_single_critic_debate,
-        "completeness_assessment": run_completeness_assessment,
-        "scientist_stop_revision": run_scientist_stop_revision,
-        "single_stop_debate": run_single_stop_debate,
+        "canonicalizer": run_ingestor,
+        "observer": run_analyst,
+        "planner": run_scientist,
+        "reviser": run_scientist_revision,
+        "implementer": run_coder,
+        "reporter": run_report,
+        "adversary": run_debate,
+        "single_adversary": run_single_critic_debate,
+        "assessor": run_completeness_assessment,
+        "stop_reviser": run_scientist_stop_revision,
+        "stop_adversary": run_single_stop_debate,
     }
 
 
@@ -205,6 +205,17 @@ def build_registry() -> RoleRegistry:
         default_critic_instructions=DEFAULT_CRITIC_INSTRUCTIONS,
         stop_personas=STOP_PERSONAS,
         get_model_index_for_debate=get_model_index_for_debate,
+        app_label="Auto-Scientist",
+        banner_agents_before_critics=[
+            ("Ingestor", "ingestor"),
+            ("Analyst", "analyst"),
+            ("Scientist", "scientist"),
+        ],
+        banner_agents_after_critics=[
+            ("Coder", "coder"),
+            ("Report", "report"),
+        ],
+        banner_critic_label="Critic",
     )
 
 

@@ -49,6 +49,38 @@ AGENT_DESCRIPTIONS: dict[str, str] = {}
 # Populated by `auto_core.roles.install(...)`.
 PHASE_STYLES: dict[str, str] = {}
 
+# Startup banner metadata. Populated by `auto_core.roles.install(...)`.
+# Defaults carry scientist-flavored labels so headless use of widgets works
+# before any app has bootstrapped a RoleRegistry.
+APP_LABEL: str = "Auto-Scientist"
+BANNER_AGENTS_BEFORE_CRITICS: list[tuple[str, str]] = [
+    ("Ingestor", "ingestor"),
+    ("Analyst", "analyst"),
+    ("Scientist", "scientist"),
+]
+BANNER_AGENTS_AFTER_CRITICS: list[tuple[str, str]] = [
+    ("Coder", "coder"),
+    ("Report", "report"),
+]
+BANNER_CRITIC_LABEL: str = "Critic"
+
+# Canonical panel name -> app-specific display name. AgentPanel passes
+# canonical strings ("Analyst", "Scientist", "Critic/Security"); the UI
+# renders whatever lives here. Empty = identity. Populated by
+# `auto_core.roles.install(...)`.
+PANEL_DISPLAY_NAMES: dict[str, str] = {}
+
+
+def resolve_panel_display_name(canonical: str) -> str:
+    """Map a canonical panel name to the app-specific display name.
+
+    Handles "Prefix/Detail" shapes (e.g. "Critic/Security") by remapping
+    only the prefix so the detail (persona name, etc.) is preserved.
+    """
+    root, sep, rest = canonical.partition("/")
+    mapped = PANEL_DISPLAY_NAMES.get(root, root)
+    return f"{mapped}{sep}{rest}" if sep else mapped
+
 
 def _format_elapsed(seconds: float) -> str:
     """Format seconds into a human-readable duration like '4m 32s'."""
@@ -126,6 +158,10 @@ class AgentPanel(Widget):
     ) -> None:
         super().__init__()
         self._panel_name = name
+        # Cache the app-specific display name at construction. Resolved via
+        # the installed role registry (Analyst -> Surveyor for auto-reviewer,
+        # Critic/Security -> Adversary/Security, etc).
+        self._display_panel_name = resolve_panel_display_name(name)
         self.model = model
         self.panel_style = style
         self._is_restored = restored
@@ -158,7 +194,7 @@ class AgentPanel(Widget):
         self._dot_count = 0
         self._apply_border_color()
         restored_suffix = " (restored)" if self._is_restored else ""
-        self.border_title = f"{self._panel_name} ({self.model}){restored_suffix}"
+        self.border_title = f"{self._display_panel_name} ({self.model}){restored_suffix}"
         self.border_subtitle = self._build_footer()
 
     # Rich markup color names that need translation for Textual CSS styles.color
@@ -232,7 +268,17 @@ class AgentPanel(Widget):
 
     @property
     def panel_name(self) -> str:
+        """Canonical name used for persistence, buffers, lookups.
+
+        UI surfaces should use `display_panel_name` so per-app renames
+        (Analyst -> Surveyor, Critic -> Adversary) show through.
+        """
         return self._panel_name
+
+    @property
+    def display_panel_name(self) -> str:
+        """App-specific display name resolved via the installed role registry."""
+        return self._display_panel_name
 
     @property
     def lines(self) -> list[str]:

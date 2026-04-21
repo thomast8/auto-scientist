@@ -107,7 +107,7 @@ def _validate_deps(script_path: Path) -> tuple[bool, str]:
     return True, ""
 
 
-async def run_coder(
+async def run_prober(
     plan: dict[str, Any],
     previous_script: Path,
     output_dir: Path,

@@ -139,22 +139,31 @@ prediction gets a refutation_reasoning entry. JSON only.
 
 HUNTER_USER = """\
 <context>
-Review goal: {goal}
-PR: {pr_ref}
-Iteration: {iteration}
+<review_goal>{goal}</review_goal>
+<repo_knowledge>{domain_knowledge}</repo_knowledge>
+<version>{version}</version>
 
-Surveyor output:
-{surveyor_json}
+<surveyor_output>
+{analysis_json}
+</surveyor_output>
 
-Repository knowledge (stable facts):
-{repo_knowledge}
+<notebook_toc>
+{notebook_content}
+</notebook_toc>
 
-Notebook TOC (use mcp__notebook__read_notebook to expand):
-{notebook_toc}
+<prediction_history>
+{prediction_history}
+</prediction_history>
 
-Prior predictions (use mcp__predictions__read_predictions to expand):
-{prediction_tree}
-</context>"""
+{pending_abductions_section}
+</context>
+
+<task>
+Emit a BugPlan for this iteration as JSON per your system prompt's
+schema. Never read source code; the Surveyor output is your only window
+into what the PR changed. On refuted prior predictions, emit
+`refutation_reasoning[]` entries abducing alternative mechanisms.
+</task>"""
 
 
 HUNTER_REVISION_SYSTEM = """\
@@ -189,19 +198,35 @@ revised plan, not a patch.
 
 HUNTER_REVISION_USER = """\
 <context>
-Review goal: {goal}
-PR: {pr_ref}
-Iteration: {iteration}
+<review_goal>{goal}</review_goal>
+<repo_knowledge>{domain_knowledge}</repo_knowledge>
+<version>{version}</version>
 
-Original BugPlan:
+<original_bugplan>
 {original_plan}
+</original_bugplan>
 
-Concern ledger (adversary critiques):
+<concern_ledger>
 {concern_ledger}
+</concern_ledger>
 
-Surveyor output:
-{surveyor_json}
+<surveyor_output>
+{analysis_json}
+</surveyor_output>
 
-Notebook TOC:
-{notebook_toc}
-</context>"""
+<notebook_toc>
+{notebook_content}
+</notebook_toc>
+
+<prediction_history>
+{prediction_history}
+</prediction_history>
+
+{pending_abductions_section}
+</context>
+
+<task>
+Emit the revised BugPlan (same schema as the initial plan - not a diff).
+For each adversary concern either incorporate it or state your defense
+in notebook_entry. Silent capitulation is a failure mode.
+</task>"""

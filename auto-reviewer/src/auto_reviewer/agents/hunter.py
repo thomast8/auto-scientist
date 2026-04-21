@@ -171,7 +171,7 @@ _format_compact_tree = format_compact_tree
 _format_predictions_for_prompt = format_full_detail
 
 
-async def run_scientist(
+async def run_hunter(
     analysis: dict[str, Any],
     notebook_path: Path,
     version: str,
@@ -291,7 +291,7 @@ async def run_scientist(
     )
 
 
-async def run_scientist_revision(
+async def run_hunter_revision(
     original_plan: dict[str, Any],
     concern_ledger: list[dict[str, Any]],
     analysis: dict[str, Any],
