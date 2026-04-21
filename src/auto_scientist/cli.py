@@ -9,13 +9,13 @@ from pathlib import Path
 from typing import Any, Literal, cast
 
 import click
+from auto_core.app import PipelineApp
 from auto_core.model_config import ModelConfig
 from auto_core.orchestrator import Orchestrator
 from auto_core.state import ExperimentState
 from auto_core.widgets import console
 from dotenv import load_dotenv
 
-from auto_scientist.app import PipelineApp
 from auto_scientist.experiment_config import ExperimentConfig
 from auto_scientist.launch_app import LaunchApp
 
@@ -206,7 +206,8 @@ def _detect_retry_agent(version_dir: Path) -> str | None:
     if last_completed is not None:
         idx = AGENT_ORDER.index(last_completed)
         if idx + 1 < len(AGENT_ORDER):
-            return AGENT_ORDER[idx + 1]
+            next_agent: str = AGENT_ORDER[idx + 1]
+            return next_agent
     return None
 
 
@@ -930,9 +931,8 @@ def show(source: str):
 
       auto-scientist show --from experiments/runs/my-run
     """
+    from auto_core.app import ShowApp
     from auto_core.iteration_manifest import MANIFEST_FILENAME, load_manifest
-
-    from auto_scientist.app import ShowApp
 
     run_dir, _ = _resolve_source(source)
     records = load_manifest(run_dir / MANIFEST_FILENAME)

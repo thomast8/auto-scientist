@@ -6,6 +6,8 @@ from unittest.mock import MagicMock
 
 import pytest
 
+import auto_scientist  # noqa: F401  -- import-time install of scientist registry
+
 
 @pytest.fixture(autouse=True)
 def _block_summarizer_api(monkeypatch):

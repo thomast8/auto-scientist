@@ -4,6 +4,11 @@ import json
 from unittest.mock import patch
 
 import pytest
+from auto_core.app import (
+    AgentDetailScreen,
+    PipelineApp,
+    QuitConfirmScreen,
+)
 from auto_core.pipeline_live import PipelineLive
 from auto_core.widgets import (
     AGENT_STYLES,
@@ -16,12 +21,6 @@ from auto_core.widgets import (
 )
 from textual.app import App, ComposeResult
 from textual.widgets import Collapsible, RichLog
-
-from auto_scientist.app import (
-    AgentDetailScreen,
-    PipelineApp,
-    QuitConfirmScreen,
-)
 
 # ---------------------------------------------------------------------------
 # Minimal test apps for widget-level testing
