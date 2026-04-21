@@ -9,7 +9,7 @@ import json
 import logging
 from dataclasses import replace
 from pathlib import Path
-from typing import Any
+from typing import Any, cast
 
 from auto_core.agents.notebook_tool import (
     NOTEBOOK_SPEC,
@@ -276,18 +276,24 @@ async def run_hunter(
     async def _query(prompt: str, resume_session_id: str | None) -> QueryResult:
         opts = replace(options, resume=resume_session_id) if resume_session_id else options
         raw, usage, session_id = await collect_text_from_query(
-            prompt, opts, backend, message_buffer, agent_name="Scientist"
+            prompt, opts, backend, message_buffer, agent_name="Hunter"
         )
         return QueryResult(raw_output=raw, session_id=session_id, usage=usage)
 
     def _validate(result: QueryResult) -> dict[str, Any]:
-        return validate_json_output(result.raw_output, HunterPlanOutput, "Scientist")
+        return cast(
+            dict[str, Any],
+            validate_json_output(result.raw_output, HunterPlanOutput, "Hunter"),
+        )
 
-    return await agent_retry_loop(
-        query_fn=_query,
-        validate_fn=_validate,
-        prompt=user_prompt,
-        agent_name="Scientist",
+    return cast(
+        dict[str, Any],
+        await agent_retry_loop(
+            query_fn=_query,
+            validate_fn=_validate,
+            prompt=user_prompt,
+            agent_name="Hunter",
+        ),
     )
 
 
@@ -397,16 +403,22 @@ async def run_hunter_revision(
     async def _query(prompt: str, resume_session_id: str | None) -> QueryResult:
         opts = replace(options, resume=resume_session_id) if resume_session_id else options
         raw, usage, session_id = await collect_text_from_query(
-            prompt, opts, backend, message_buffer, agent_name="Scientist revision"
+            prompt, opts, backend, message_buffer, agent_name="Hunter revision"
         )
         return QueryResult(raw_output=raw, session_id=session_id, usage=usage)
 
     def _validate(result: QueryResult) -> dict[str, Any]:
-        return validate_json_output(result.raw_output, HunterPlanOutput, "Scientist revision")
+        return cast(
+            dict[str, Any],
+            validate_json_output(result.raw_output, HunterPlanOutput, "Hunter revision"),
+        )
 
-    return await agent_retry_loop(
-        query_fn=_query,
-        validate_fn=_validate,
-        prompt=user_prompt,
-        agent_name="Scientist revision",
+    return cast(
+        dict[str, Any],
+        await agent_retry_loop(
+            query_fn=_query,
+            validate_fn=_validate,
+            prompt=user_prompt,
+            agent_name="Hunter revision",
+        ),
     )

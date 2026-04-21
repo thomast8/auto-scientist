@@ -8,7 +8,7 @@ Returns the report content as a string; the orchestrator handles file writing.
 
 import logging
 from pathlib import Path
-from typing import Any
+from typing import Any, cast
 
 from auto_core.agents.notebook_tool import (
     NOTEBOOK_SPEC,
@@ -162,7 +162,7 @@ async def run_findings(
                 f"Please regenerate the report with all 10 required sections.\n"
                 f"</validation_error>"
             )
-        return text
+        return cast(str, text)
 
     def _on_exhausted(result: QueryResult | None, error: Exception) -> str:
         if result is None:
@@ -184,10 +184,13 @@ async def run_findings(
 
         return full_text
 
-    return await agent_retry_loop(
-        query_fn=_query,
-        validate_fn=_validate,
-        prompt=user_prompt,
-        agent_name="Report",
-        on_exhausted=_on_exhausted,
+    return cast(
+        str,
+        await agent_retry_loop(
+            query_fn=_query,
+            validate_fn=_validate,
+            prompt=user_prompt,
+            agent_name="Findings",
+            on_exhausted=_on_exhausted,
+        ),
     )

@@ -11,7 +11,7 @@ import json
 import logging
 from dataclasses import replace
 from pathlib import Path
-from typing import Any
+from typing import Any, cast
 
 from auto_core.agents.notebook_tool import (
     NOTEBOOK_SPEC,
@@ -208,16 +208,22 @@ async def run_surveyor(
     async def _query(prompt: str, resume_session_id: str | None) -> QueryResult:
         opts = replace(options, resume=resume_session_id) if resume_session_id else options
         raw, usage, session_id = await collect_text_from_query(
-            prompt, opts, backend, message_buffer, agent_name="Analyst"
+            prompt, opts, backend, message_buffer, agent_name="Surveyor"
         )
         return QueryResult(raw_output=raw, session_id=session_id, usage=usage)
 
     def _validate(result: QueryResult) -> dict[str, Any]:
-        return validate_json_output(result.raw_output, SurveyorOutput, "Analyst")
+        return cast(
+            dict[str, Any],
+            validate_json_output(result.raw_output, SurveyorOutput, "Surveyor"),
+        )
 
-    return await agent_retry_loop(
-        query_fn=_query,
-        validate_fn=_validate,
-        prompt=user_prompt,
-        agent_name="Analyst",
+    return cast(
+        dict[str, Any],
+        await agent_retry_loop(
+            query_fn=_query,
+            validate_fn=_validate,
+            prompt=user_prompt,
+            agent_name="Surveyor",
+        ),
     )

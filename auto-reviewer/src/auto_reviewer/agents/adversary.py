@@ -22,7 +22,7 @@ import logging
 import random
 from contextlib import nullcontext
 from pathlib import Path
-from typing import Any
+from typing import Any, cast
 
 from auto_core.agent_result import AgentResult
 from auto_core.agents.debate_models import (
@@ -310,13 +310,16 @@ async def _query_critic_structured(
         )
         return fallback, agent_result
 
-    return await agent_retry_loop(
-        query_fn=_query,
-        validate_fn=_validate,
-        prompt=prompt,
-        agent_name=label,
-        retryable_errors=_RETRYABLE_ERRORS,
-        on_exhausted=_on_exhausted,
+    return cast(
+        tuple[CriticOutput, AgentResult],
+        await agent_retry_loop(
+            query_fn=_query,
+            validate_fn=_validate,
+            prompt=prompt,
+            agent_name=label,
+            retryable_errors=_RETRYABLE_ERRORS,
+            on_exhausted=_on_exhausted,
+        ),
     )
 
 

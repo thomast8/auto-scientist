@@ -38,12 +38,19 @@ class TouchedSymbol(BaseModel):
 
 
 class Suspicion(BaseModel):
-    """A surface-level smell surfaced by the Surveyor on iteration 0."""
+    """A diff-level pattern the Surveyor surfaces on iteration 0.
+
+    `summary` describes the pattern as an observation ("A and B touch
+    shared state on the same path"), never as a bug claim ("there is a
+    race in A and B") - the Hunter hypothesizes and the Prober confirms.
+    `severity` is notability: how much the pattern warrants a probe,
+    independent of whether it turns out to be a bug.
+    """
 
     model_config = ConfigDict(extra="ignore")
 
     summary: str
-    evidence: str  # diff hunk / call-site pattern that triggered the suspicion
+    evidence: str  # diff hunk / call-site pattern that triggered the observation
     severity: Literal["low", "medium", "high"] = "medium"
 
 

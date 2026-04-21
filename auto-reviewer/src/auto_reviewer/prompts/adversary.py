@@ -55,18 +55,53 @@ Example:
 {{
   "concerns": [
     {{
-      "claim": "paginate returns page_size+1 items; off-by-one in end calculation.",
-      "severity": "high",
+      "claim": "The plan's probe tests only mid-page slicing; the last-page edge case (total % page_size == 0) and page_size=0 are not covered by the proposed reproduction recipe.",
+      "severity": "medium",
       "confidence": "high",
-      "category": "correctness"
+      "category": "reproduction_coverage"
     }}
   ],
   "alternative_hypotheses": [
-    "The off-by-one only manifests on the last page when total % page_size == 0."
+    "Even if the end-index expression is sound, callers may rely on the sliced result never being empty when start < total; the plan does not probe that invariant."
   ],
-  "overall_assessment": "One clear correctness bug; reproduction recipe is sound."
+  "overall_assessment": "Reproduction recipe hits the core expression but misses boundary conditions that would distinguish a genuine contract violation from a partial fix."
 }}
 </output_format>"""
+
+
+_ADVERSARY_SCOPE_BOUNDARY = """\
+<scope_boundary>
+Your job is strictly plan-level critique. Challenge the Hunter's BugPlan
+at the level of reproduction design and hypothesis completeness.
+
+Stay within these boundaries:
+- Challenge the hypothesis, the reproduction recipe, and the expected
+  impact
+- Propose alternative reproduction recipes or failure modes the Hunter
+  missed, each tied to a concrete input / schedule / condition
+- Evaluate whether the probe covers boundary conditions and edge cases
+- Name the caller patterns, input shapes, or schedules the plan does
+  not probe
+
+Leave these for other agents:
+- Writing the probe code (Prober's domain)
+- Asserting the bug is present (Prober confirms via probe outcome)
+- Revising the plan (Hunter does this after debate)
+
+In-scope critique:
+- "The probe tests uniform access, but the race would only fire under
+  a Zipf-ian hot-key distribution"
+- "The plan assumes `parse_json` receives only valid JSON; the diff
+  enables a caller that passes user-supplied strings"
+- "Reproduction recipe hits only the mid-page case; the last-page edge
+  case (total % page_size == 0) and page_size=0 are not covered"
+
+Out-of-scope suggestions:
+- "Change line 42 to `with self._lock:`" (code-level, Prober's domain)
+- "The bug is an off-by-one" (Prober's verdict, via probe outcome)
+- "Revise the plan to also test X" (Hunter's decision after debate)
+- "The Surveyor should have flagged X" (Surveyor's lane, not ours)
+</scope_boundary>"""
 
 
 def build_adversary_system(provider: str = "claude") -> str:
@@ -91,6 +126,7 @@ def build_adversary_system(provider: str = "claude") -> str:
                 "{persona_instructions}",
                 _ADVERSARY_OUTPUT_FORMAT,
                 _ADVERSARY_PIPELINE_CONTEXT,
+                _ADVERSARY_SCOPE_BOUNDARY,
             ]
         )
     return "\n\n".join(
@@ -100,6 +136,7 @@ def build_adversary_system(provider: str = "claude") -> str:
             "{persona_text}",
             _ADVERSARY_PIPELINE_CONTEXT,
             "{persona_instructions}",
+            _ADVERSARY_SCOPE_BOUNDARY,
             _ADVERSARY_OUTPUT_FORMAT,
         ]
     )
