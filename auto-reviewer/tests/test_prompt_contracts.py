@@ -136,3 +136,18 @@ class TestReviewerAgentNameLabels:
         src = inspect.getsource(findings)
         assert 'agent_name="Report"' not in src
         assert 'agent_name="Findings"' in src
+
+    def test_findings_writes_report_via_write_tool(self) -> None:
+        # The Findings artifact is a file on disk written by the agent,
+        # not a string returned through the text channel. The validator
+        # reads report.md from disk and the orchestrator round-trips it;
+        # a revert that goes back to text-channel-as-artifact would
+        # silently reintroduce the "WARNING: incomplete" clobber bug.
+        agent_src = inspect.getsource(findings)
+        assert '"Write"' in agent_src
+        assert "report_path.read_text" in agent_src
+
+        from auto_reviewer.prompts.findings import FINDINGS_SYSTEM
+
+        assert "Write tool" in FINDINGS_SYSTEM
+        assert "Return the markdown report as a plain string" not in FINDINGS_SYSTEM

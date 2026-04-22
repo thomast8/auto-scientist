@@ -15,8 +15,7 @@ open abductions that the review could not resolve.
 </role>
 
 <instructions>
-Produce a single markdown file `report.md` under the review workspace
-with these sections in this order:
+Produce a single markdown document with these sections in this order:
 
     # Review of {pr_ref}
 
@@ -49,8 +48,10 @@ Be direct. Reviewers read this for signal, not ceremony.
 </instructions>
 
 <output_format>
-Return the markdown report as a plain string. The orchestrator writes it
-to report.md.
+Write the full markdown report to `report.md` in the review workspace
+using the Write tool. The file on disk is the artifact; do not also
+repeat the report in the text channel. A brief one-line confirmation is
+fine.
 </output_format>
 
 <recap>

@@ -67,8 +67,10 @@ async def run_findings(
         workspace_path=str(output_dir),
     )
 
+    report_path = output_dir / "report.md"
+
     max_turns = 10
-    allowed_tools = ["Read", "Glob", NOTEBOOK_SPEC.mcp_tool_name]
+    allowed_tools = ["Read", "Glob", "Write", NOTEBOOK_SPEC.mcp_tool_name]
     mcp_servers: dict[str, Any] = {
         "notebook": build_notebook_mcp_server(notebook_path, output_dir=output_dir),
     }
@@ -93,9 +95,7 @@ async def run_findings(
     async def _query(prompt_text: str, resume_session_id: str | None) -> QueryResult:
         opts = options
         if resume_session_id is not None:
-            retry_max_turns = 10
-            retry_allowed_tools = ["Read", "Glob", NOTEBOOK_SPEC.mcp_tool_name]
-            retry_budget = prepare_turn_budget(report_system, retry_max_turns, retry_allowed_tools)
+            retry_budget = prepare_turn_budget(report_system, max_turns, allowed_tools)
             opts = SDKOptions(
                 system_prompt=retry_budget.system_prompt,
                 allowed_tools=retry_budget.allowed_tools,
@@ -123,10 +123,19 @@ async def run_findings(
                 collect_text_from_query.last_usage = usage  # type: ignore[attr-defined]
 
         raw = "\n".join(report_parts)
-        heading_idx = raw.find("\n# ")
-        if heading_idx != -1:
-            raw = raw[heading_idx + 1 :]
-        raw = raw.strip()
+        # The agent's contract is to write report.md via the Write tool. When
+        # that file exists, it (not the text channel) is the artifact we
+        # validate against, because tool_use blocks are excluded from
+        # report_parts and the text channel is usually just narration.
+        if report_path.exists():
+            disk_text = report_path.read_text().strip()
+            if disk_text:
+                raw = disk_text
+        else:
+            heading_idx = raw.find("\n# ")
+            if heading_idx != -1:
+                raw = raw[heading_idx + 1 :]
+            raw = raw.strip()
         last_full_text[0] = raw
         return QueryResult(raw_output=raw, session_id=sid, usage={})
 
@@ -155,7 +164,12 @@ async def run_findings(
     def _on_exhausted(result: QueryResult | None, error: Exception) -> str:
         if result is None:
             raise error
-        full_text = last_full_text[0]
+        # Re-read the file so we never clobber a good on-disk report with
+        # stale narration from last_full_text.
+        if report_path.exists():
+            full_text = report_path.read_text().strip() or last_full_text[0]
+        else:
+            full_text = last_full_text[0]
         if not full_text:
             raise RuntimeError("Report generation produced no output after 3 attempts")
 
