@@ -1,15 +1,12 @@
 """CLI entry point: run, resume, status commands."""
 
-import atexit
 import logging
-import os
-import signal
-from contextlib import suppress
 from pathlib import Path
-from typing import Any, Literal, cast
+from typing import Literal, cast
 
 import click
 from auto_core.app import PipelineApp
+from auto_core.cli_cleanup import install_child_cleanup_handlers
 from auto_core.model_config import ModelConfig
 from auto_core.orchestrator import Orchestrator
 from auto_core.state import ExperimentState
@@ -42,79 +39,9 @@ class _ChildWatcherFilter(logging.Filter):
 logging.getLogger("asyncio").addFilter(_ChildWatcherFilter())
 
 
-# ---------------------------------------------------------------------------
-# Process cleanup: kill SDK subprocesses on unexpected exit
-# ---------------------------------------------------------------------------
-# When auto-scientist is killed by SIGHUP (terminal closed) or SIGTERM,
-# Python's default handler terminates immediately with no cleanup.  This
-# orphans SDK subprocesses (claude CLI, codex app-server) that may be
-# executing experiment scripts at 100 % CPU.
-#
-# Fix: install signal handlers that kill the process group before exiting
-# and an atexit handler as a safety net for crashes / normal exit.
-# ---------------------------------------------------------------------------
-
-_cleanup_done = False
-
-
-def _kill_child_processes() -> None:
-    """Terminate direct child processes via ``pgrep -P``.
-
-    Targets only our children, so it is safe to call from both signal
-    handlers and atexit without killing sibling processes like git or
-    pre-commit hooks that share our process group.
-
-    Idempotent: repeated calls are no-ops after the first.
-    """
-    global _cleanup_done  # noqa: PLW0603 - intentional module-level flag
-    if _cleanup_done:
-        return
-    _cleanup_done = True
-
-    import subprocess as _sp
-
-    # Prevent recursive delivery while we broadcast
-    signal.signal(signal.SIGTERM, signal.SIG_IGN)
-    signal.signal(signal.SIGHUP, signal.SIG_IGN)
-
-    pid = os.getpid()
-    try:
-        result = _sp.run(
-            ["pgrep", "-P", str(pid)],
-            capture_output=True,
-            text=True,
-            timeout=2,
-        )
-        for line in result.stdout.strip().splitlines():
-            with suppress(ProcessLookupError, PermissionError, ValueError, OSError):
-                os.kill(int(line.strip()), signal.SIGTERM)
-    except Exception:  # noqa: BLE001 - best-effort cleanup
-        pass
-
-
-def _fatal_signal_handler(signum: int, _frame: Any) -> None:
-    """Handle SIGHUP / SIGTERM by killing children and exiting."""
-    _kill_child_processes()
-    # os._exit avoids Python shutdown machinery that can hang
-    # during signal handling.  atexit handlers are intentionally
-    # skipped since we already cleaned up above.
-    os._exit(128 + signum)
-
-
-def _install_cleanup_handlers() -> None:
-    """Register signal and atexit handlers for child-process cleanup.
-
-    Must be called from the main thread before any SDK subprocesses are
-    spawned.
-    """
-    signal.signal(signal.SIGHUP, _fatal_signal_handler)
-    signal.signal(signal.SIGTERM, _fatal_signal_handler)
-    atexit.register(_kill_child_processes)
-
-
 def _run_orchestrator(orchestrator: Orchestrator) -> None:
     """Run the orchestrator with user-friendly error handling."""
-    _install_cleanup_handlers()
+    install_child_cleanup_handlers()
     try:
         app = PipelineApp(orchestrator)
         app.run()

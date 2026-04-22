@@ -27,6 +27,7 @@ from pathlib import Path
 
 import click
 from auto_core.app import PipelineApp
+from auto_core.cli_cleanup import install_child_cleanup_handlers
 from auto_core.model_config import ModelConfig
 from auto_core.orchestrator import Orchestrator
 from auto_core.resume import RewindResult
@@ -38,6 +39,16 @@ from dotenv import load_dotenv
 load_dotenv()
 
 logger = logging.getLogger("auto_reviewer")
+
+
+def _run_orchestrator(orchestrator: Orchestrator, interrupted_message: str) -> None:
+    """Run the orchestrator with reviewer-specific interruption handling."""
+    install_child_cleanup_handlers()
+    try:
+        PipelineApp(orchestrator).run()
+    except KeyboardInterrupt:
+        click.echo(interrupted_message)
+        sys.exit(130)
 
 
 def _slug(text: str, max_len: int = 60) -> str:
@@ -171,14 +182,10 @@ def review(
         interactive=interactive,
         verbose=verbose,
     )
-
-    try:
-        PipelineApp(orchestrator).run()
-    except KeyboardInterrupt:
-        click.echo(
-            "Interrupted. State is persisted at state.json; use `auto-reviewer resume` to continue."
-        )
-        sys.exit(130)
+    _run_orchestrator(
+        orchestrator,
+        "Interrupted. State is persisted at state.json; use `auto-reviewer resume` to continue.",
+    )
 
 
 @cli.command()
@@ -244,12 +251,10 @@ def resume(run_dir: str, from_iteration: int | None) -> None:
         model_config=model_config,
         restored_panels=rewound.restored_panels,
     )
-
-    try:
-        PipelineApp(orchestrator).run()
-    except KeyboardInterrupt:
-        click.echo("Interrupted again. Re-run `auto-reviewer resume` to continue.")
-        sys.exit(130)
+    _run_orchestrator(
+        orchestrator,
+        "Interrupted again. Re-run `auto-reviewer resume` to continue.",
+    )
 
 
 if __name__ == "__main__":

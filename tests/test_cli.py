@@ -7,7 +7,13 @@ from auto_core.model_config import ModelConfig
 from auto_core.state import ExperimentState
 from click.testing import CliRunner
 
-from auto_scientist.cli import _detect_retry_agent, _next_output_dir, _resolve_source, cli
+from auto_scientist.cli import (
+    _detect_retry_agent,
+    _next_output_dir,
+    _resolve_source,
+    _run_orchestrator,
+    cli,
+)
 from auto_scientist.experiment_config import ExperimentConfig
 
 
@@ -307,6 +313,19 @@ class TestRunCommand:
         runner = CliRunner()
         result = runner.invoke(cli, ["run", "--data", str(data_file)])
         assert result.exit_code != 0
+
+
+class TestRunOrchestratorCleanup:
+    @patch("auto_scientist.cli.install_child_cleanup_handlers")
+    @patch("auto_scientist.cli.PipelineApp")
+    def test_installs_shared_cleanup_handlers(self, mock_app_cls, mock_install):
+        orchestrator = MagicMock()
+
+        _run_orchestrator(orchestrator)
+
+        mock_install.assert_called_once()
+        mock_app_cls.assert_called_once_with(orchestrator)
+        mock_app_cls.return_value.run.assert_called_once()
 
 
 class TestRunCommandPresets:
