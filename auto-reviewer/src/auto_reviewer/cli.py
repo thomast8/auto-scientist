@@ -5,8 +5,13 @@ reviewer registry is installed on package import (see
 `auto_reviewer/__init__.py`), so by the time CLI commands run the core
 runtime already knows the reviewer's styles, prompts, and agent fields.
 
+The `review` command takes a single natural-language prompt. The Intake
+agent parses the prompt, locates (or clones) the target repository,
+resolves base/head refs, and writes a populated ReviewConfig before the
+downstream pipeline runs.
+
 Commands:
-    auto-reviewer review --pr <ref> --repo-path <path> --goal "<text>"
+    auto-reviewer review "<prompt>"
     auto-reviewer resume <run_dir>
     auto-reviewer status <run_dir>
 """
@@ -15,7 +20,9 @@ from __future__ import annotations
 
 import json
 import logging
+import re
 import sys
+from datetime import datetime
 from pathlib import Path
 
 import click
@@ -26,8 +33,6 @@ from auto_core.resume import RewindResult
 from auto_core.state import RunState
 from dotenv import load_dotenv
 
-from auto_reviewer.config import ReviewConfig
-
 # Pick up API keys from the repo's .env before any agent tries to talk to
 # an LLM provider. Mirrors auto_scientist.cli.
 load_dotenv()
@@ -35,16 +40,23 @@ load_dotenv()
 logger = logging.getLogger("auto_reviewer")
 
 
-def _default_workspace(pr_ref: str) -> Path:
-    """Compute a default review workspace directory for a given PR ref."""
-    slug = pr_ref.replace("/", "_").replace("#", "_").replace(" ", "_").strip("_")
+def _slug(text: str, max_len: int = 60) -> str:
+    """Filesystem-safe slug derived from free-form text."""
+    cleaned = re.sub(r"[^A-Za-z0-9._-]+", "_", text.strip())
+    cleaned = cleaned.strip("_")
+    return (cleaned[:max_len] or "review").rstrip("_")
+
+
+def _default_workspace() -> Path:
+    """Timestamp-named workspace directory under ./review_workspace."""
     base = Path.cwd() / "review_workspace"
     base.mkdir(exist_ok=True)
-    candidate = base / slug
+    stamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+    candidate = base / f"review_{stamp}"
     i = 1
     while candidate.exists():
         i += 1
-        candidate = base / f"{slug}.{i:02d}"
+        candidate = base / f"review_{stamp}.{i:02d}"
     return candidate
 
 
@@ -54,25 +66,19 @@ def cli() -> None:
 
 
 @cli.command()
-@click.option("--pr", "pr_ref", required=True, help="PR ref (e.g. owner/repo#123 or branch name).")
+@click.argument("prompt")
 @click.option(
-    "--repo-path",
-    "repo_path",
+    "--cwd",
+    "cwd_opt",
     type=click.Path(exists=True, file_okay=False),
-    required=True,
-    help="Filesystem path to the repository being reviewed.",
+    default=None,
+    help="Starting directory the intake agent uses to locate the repo. Defaults to cwd.",
 )
-@click.option(
-    "--goal",
-    default="Find correctness bugs introduced or exposed by the PR.",
-    help="Review goal in natural language.",
-)
-@click.option("--base-ref", default=None, help="Base ref the PR targets (e.g. main).")
 @click.option(
     "--output-dir",
     type=click.Path(),
     default=None,
-    help="Review workspace directory. Defaults to ./review_workspace/<pr_slug>.",
+    help="Review workspace directory. Defaults to ./review_workspace/review_<timestamp>.",
 )
 @click.option(
     "--max-iterations",
@@ -93,55 +99,46 @@ def cli() -> None:
         "'openai:gpt-4o,google:gemini-2.5-pro'. Empty string disables debate."
     ),
 )
+@click.option(
+    "--interactive",
+    is_flag=True,
+    help="Allow the intake agent to ask clarifying questions (AskUserQuestion).",
+)
 @click.option("-v", "--verbose", is_flag=True)
 def review(
-    pr_ref: str,
-    repo_path: str,
-    goal: str,
-    base_ref: str | None,
+    prompt: str,
+    cwd_opt: str | None,
     output_dir: str | None,
     max_iterations: int,
     preset: str,
     critics: str | None,
+    interactive: bool,
     verbose: bool,
 ) -> None:
-    """Review a pull request end-to-end."""
-    repo_abs = Path(repo_path).resolve()
-    workspace = Path(output_dir).resolve() if output_dir else _default_workspace(pr_ref)
+    """Review a pull request end-to-end.
+
+    The PROMPT is a natural-language description pointing at the code to
+    review - a GitHub PR URL, an owner/repo#N reference, a branch name,
+    or simply "my current branch". The intake agent resolves the pointer.
+    """
+    cwd = Path(cwd_opt).resolve() if cwd_opt else Path.cwd()
+    workspace = Path(output_dir).resolve() if output_dir else _default_workspace()
     workspace.mkdir(parents=True, exist_ok=True)
 
-    # Build ReviewConfig and persist it; the intake agent will refine it
-    # once it has pulled the PR diff.
-    review_config = ReviewConfig(
-        name=pr_ref.replace("/", "_").replace("#", "_"),
-        description=f"PR review of {pr_ref} against {repo_abs}",
-        run_command="uv run pytest -x -s {script_path}",
-        repo_path=str(repo_abs),
-        pr_ref=pr_ref,
-        base_ref=base_ref,
-    )
-    # The shared orchestrator looks for `domain_config.json` after intake.
-    # Seed it at that name so the post-intake reload finds it; the core is
-    # app-agnostic and the filename is an implementation detail.
-    config_path = workspace / "domain_config.json"
-    config_path.write_text(review_config.model_dump_json(indent=2))
-
-    # Initial RunState: the intake phase will refine data_path to point at a
-    # canonicalized review workspace. We seed it with the target repo so the
-    # shared validator (which checks data_path exists before ingestion) has
-    # something real to check.
+    # Initial RunState. The intake agent will refine `data_path` to point at
+    # the canonical data directory once it has populated it. Seeding with
+    # cwd gives `validate_prerequisites` a real directory to check.
     state = RunState(
-        domain=pr_ref,
-        goal=goal,
+        domain=_slug(prompt),
+        goal=prompt,
         phase="ingestion",
         max_iterations=max_iterations,
-        config_path=str(config_path),
-        data_path=str(repo_abs),
+        config_path=str(workspace / "domain_config.json"),
+        data_path=str(cwd),
     )
 
     model_config = ModelConfig.builtin_preset(preset)
     if critics is not None:
-        # Override critics list from the flag. Empty string means no debate.
         if not critics.strip():
             model_config.critics = []
         else:
@@ -167,13 +164,13 @@ def review(
 
     orchestrator = Orchestrator(
         state=state,
-        data_path=repo_abs,  # target repo is the canonicalizer's input
+        data_path=cwd,
         output_dir=workspace,
         max_iterations=max_iterations,
         model_config=model_config,
+        interactive=interactive,
         verbose=verbose,
     )
-    orchestrator.config = review_config  # pre-seed so intake doesn't overwrite
 
     try:
         PipelineApp(orchestrator).run()

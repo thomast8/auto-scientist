@@ -106,6 +106,34 @@ class TestOrchestratorDispatchToReviewerAgents:
         assert AGENT_FNS["canonicalizer"].__module__ == "auto_reviewer.agents.intake"
 
     @pytest.mark.asyncio
+    @patch("auto_reviewer.agents.intake.run_intake", new_callable=AsyncMock)
+    async def test_intake_receives_prompt_as_goal(self, mock_intake, tmp_path: Path):
+        """The user's natural-language prompt must flow through state.goal
+        into run_intake's `goal` kwarg. The intake agent is the sole
+        interpreter of the pointer now that the CLI no longer pre-seeds
+        repo_path / pr_ref."""
+        canonical = tmp_path / "review_workspace" / "canonical"
+        canonical.mkdir(parents=True)
+        mock_intake.return_value = canonical
+
+        prompt_text = "review PR #42 on owner/repo against main"
+        state = ReviewState(
+            domain="review_pr_42_on_owner_repo",
+            goal=prompt_text,
+            phase="ingestion",
+            data_path=str(tmp_path),
+        )
+        orchestrator = Orchestrator(
+            state=state,
+            data_path=tmp_path,
+            output_dir=tmp_path / "review_workspace",
+        )
+        await orchestrator._run_ingestion()
+
+        mock_intake.assert_called_once()
+        assert mock_intake.call_args.kwargs["goal"] == prompt_text
+
+    @pytest.mark.asyncio
     @patch(
         "auto_reviewer.agents.intake.run_intake",
         new_callable=AsyncMock,

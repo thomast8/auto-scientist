@@ -1,28 +1,37 @@
-"""Deterministic PR canonicalization for auto-reviewer.
+"""Intake agent: LLM-driven PR canonicalization.
 
-Unlike auto-scientist's Ingestor, which needs an LLM to canonicalize
-heterogeneous data (CSV / Excel / PDFs with ad-hoc schemas), a PR's "raw
-data" is entirely machine-readable: `git diff base..head` + a bit of
-metadata. An LLM agent with a 30-turn budget + retry loop is pure
-overhead.
+Where auto-scientist's Ingestor canonicalizes heterogeneous data (CSV /
+Excel / PDFs), the reviewer's Intake canonicalizes a natural-language
+review prompt. The prompt may point at a PR by URL, `owner/repo#N`, a
+bare branch name, or "the current branch"; the intake agent parses the
+pointer, locates (or clones) the repo, resolves base/head refs, computes
+the diff, snapshots the touched files, and writes a populated
+`ReviewConfig`.
 
-`run_intake` is a plain async function wrapping subprocess calls to `git`
-(and `gh` when available). It has the same signature as auto-scientist's
-`run_ingestor` so the shared orchestrator dispatches to it unchanged.
+Signature matches `auto_scientist.agents.ingestor.run_ingestor` so the
+shared `auto_core.Orchestrator._run_ingestion` dispatch works unchanged.
 """
 
 from __future__ import annotations
 
-import asyncio
 import json
 import logging
-import shutil
-import subprocess
 from pathlib import Path
 
-from auto_core.notebook import NOTEBOOK_FILENAME, append_entry
+from auto_core.notebook import NOTEBOOK_FILENAME
+from auto_core.retry import QueryResult, agent_retry_loop
+from auto_core.retry import ValidationError as RetryValidationError
+from auto_core.sdk_backend import CODEX_SANDBOX_ADDENDUM, SDKOptions, get_backend
+from auto_core.sdk_utils import (
+    append_block_to_buffer,
+    collect_text_from_query,
+    prepare_turn_budget,
+    safe_query,
+)
+from pydantic import ValidationError
 
 from auto_reviewer.config import ReviewConfig
+from auto_reviewer.prompts.intake import INTAKE_USER, build_intake_system
 
 logger = logging.getLogger(__name__)
 
@@ -37,239 +46,236 @@ async def run_intake(
     message_buffer: list[str] | None = None,
     provider: str = "anthropic",
 ) -> Path:
-    """Canonicalize a PR into a review workspace.
+    """Parse the review prompt and canonicalize a PR into a review workspace.
 
-    Signature mirrors `auto_scientist.agents.ingestor.run_ingestor` so the
-    auto_core orchestrator's generic dispatch works unchanged. `model`,
-    `provider`, and `interactive` are accepted and ignored - this
-    canonicalizer does no LLM work.
-
-    Expected state:
-        * `config_path` points at a partially-filled ReviewConfig JSON that
-          already carries `repo_path`, `pr_ref`, and `base_ref` (the CLI
-          writes this before the orchestrator starts).
-        * `raw_data_path` is the target repo root (filesystem path).
-        * `output_dir` is the review workspace root; we write canonical
-          artifacts to `{output_dir}/data/`.
-
-    Writes:
-        {output_dir}/data/diff.patch
-        {output_dir}/data/pr_metadata.json
-        {output_dir}/data/touched_files/<flattened-path>   (verbatim at head)
-        {output_dir}/{config_path basename}                (refined config)
-        {output_dir}/{lab notebook}                        (intake entry)
+    Args:
+        raw_data_path: Best-effort starting directory (typically the user's
+            cwd). The agent uses this as the first candidate when locating
+            the repository described by `goal`.
+        output_dir: Review workspace root. Canonical artifacts land under
+            `{output_dir}/data/`.
+        goal: The user's natural-language review prompt. May contain a PR
+            URL, owner/repo#N, a branch name, or a reference to "my
+            current branch".
+        interactive: If True, the agent has `AskUserQuestion` available to
+            clarify ambiguous pointers (e.g. which repo to clone).
+        config_path: Where the agent must write the refined ReviewConfig.
+            The orchestrator reads this after intake to populate
+            `self.config`.
 
     Returns:
-        Path to the canonical data directory.
+        Path to the canonical data directory (`output_dir/data/`).
     """
-    # Keep the expensive-ish work off the event loop in case it grows.
-    return await asyncio.to_thread(
-        _canonicalize,
-        raw_data_path=raw_data_path,
-        output_dir=output_dir,
-        goal=goal,
-        config_path=config_path,
-        message_buffer=message_buffer,
-    )
-
-
-def _canonicalize(
-    *,
-    raw_data_path: Path,
-    output_dir: Path,
-    goal: str,
-    config_path: Path | None,
-    message_buffer: list[str] | None,
-) -> Path:
     data_dir = output_dir / "data"
     data_dir.mkdir(parents=True, exist_ok=True)
-
-    # Load the seed ReviewConfig the CLI wrote. Without it we cannot know
-    # which PR ref the caller meant.
-    if config_path is None or not config_path.exists():
-        raise FileNotFoundError(
-            f"Review config not found at {config_path}. "
-            "The auto-reviewer CLI writes this before calling intake; "
-            "if you invoked the orchestrator directly, seed it yourself."
-        )
-    seed = json.loads(config_path.read_text())
-    pr_ref = seed.get("pr_ref")
-    base_ref = seed.get("base_ref") or "main"
-    repo_path = Path(seed.get("repo_path", raw_data_path))
-
-    if not pr_ref:
-        raise ValueError(f"Review config at {config_path} is missing pr_ref.")
-
-    _emit(message_buffer, f"Canonicalizing PR {pr_ref} against {base_ref}...")
-
-    pr_metadata = _load_pr_metadata(repo_path, pr_ref, base_ref)
-    diff_text = _load_diff(repo_path, pr_ref, base_ref, pr_metadata)
-    changed_files = _load_changed_files(repo_path, pr_ref, base_ref)
-
-    (data_dir / "diff.patch").write_text(diff_text)
-    (data_dir / "pr_metadata.json").write_text(json.dumps(pr_metadata, indent=2))
-
-    touched_dir = data_dir / "touched_files"
-    touched_dir.mkdir(exist_ok=True)
-    head_ref = pr_metadata.get("headRefName") or pr_ref
-    for rel in changed_files:
-        _capture_file_at_head(repo_path, rel, head_ref, touched_dir)
-
-    # Refine the review config with `head_ref` (if we learned it) and write
-    # it back with `{script_path}` placeholder preserved in run_command.
-    config = ReviewConfig.model_validate(
-        {
-            **seed,
-            "head_ref": pr_metadata.get("headRefName") or seed.get("head_ref") or pr_ref,
-            "run_command": seed.get("run_command") or "uv run pytest {script_path}",
-        }
-    )
-    config_path.write_text(config.model_dump_json(indent=2))
-
-    # One-line notebook entry describing scope and the PR title.
     notebook_path = output_dir / NOTEBOOK_FILENAME
-    title = pr_metadata.get("title") or pr_ref
-    n_files = len(changed_files)
-    diff_lines = diff_text.count("\n")
-    append_entry(
-        notebook_path,
-        content=(
-            f"## Intake\n"
-            f"- PR: {pr_ref} (title: {title})\n"
-            f"- Base: {base_ref}, head: {config.head_ref}\n"
-            f"- Files changed: {n_files}\n"
-            f"- Diff lines: {diff_lines}\n"
-            f"- Goal: {goal}\n"
-        ),
-        version="intake",
-        source="intake",
+
+    tools = ["Bash", "Read", "Write", "Glob", "Grep"]
+    if interactive:
+        tools.append("AskUserQuestion")
+
+    mode = "interactive" if interactive else "autonomous"
+
+    max_turns = 30
+    prompt_provider = "gpt" if provider == "openai" else "claude"
+    system_prompt = build_intake_system(prompt_provider)
+    if provider == "openai":
+        system_prompt += CODEX_SANDBOX_ADDENDUM
+    budget = prepare_turn_budget(system_prompt, max_turns, tools, provider=provider)
+    backend = get_backend(provider)
+    options = SDKOptions(
+        system_prompt=budget.system_prompt,
+        allowed_tools=budget.allowed_tools,
+        max_turns=budget.max_turns,
+        permission_mode="acceptEdits",
+        cwd=output_dir,
+        model=model,
+        extra_args={},
     )
 
-    _emit(
-        message_buffer,
-        f"Intake done. {n_files} touched files, {diff_lines} diff lines -> {data_dir}",
+    config_path_str = str(config_path) if config_path else "(not requested)"
+
+    prompt = INTAKE_USER.format(
+        prompt=goal,
+        cwd=str(raw_data_path.resolve()),
+        data_dir=str(data_dir),
+        notebook_path=str(notebook_path),
+        config_path=config_path_str,
+        mode=mode,
     )
-    return data_dir
 
+    current_options = [options]
 
-def _emit(buffer: list[str] | None, msg: str) -> None:
-    """Log + append to the TUI buffer when one is supplied."""
-    logger.info(msg)
-    if buffer is not None:
-        buffer.append(msg)
+    async def _query(prompt_text: str, resume_session_id: str | None) -> QueryResult:
+        if resume_session_id is not None:
+            clarification_max_turns = 10
+            retry_budget = prepare_turn_budget(
+                system_prompt, clarification_max_turns, tools, provider=provider
+            )
+            current_options[0] = SDKOptions(
+                system_prompt=retry_budget.system_prompt,
+                allowed_tools=retry_budget.allowed_tools,
+                max_turns=retry_budget.max_turns,
+                permission_mode="acceptEdits",
+                cwd=output_dir,
+                model=model,
+                resume=resume_session_id,
+                extra_args={},
+            )
+        else:
+            current_options[0] = options
+        sid: str | None = None
+        async for msg in safe_query(
+            prompt=prompt_text, options=current_options[0], backend=backend
+        ):
+            if msg.type == "result":
+                sid = msg.session_id
+                usage = msg.usage
+                collect_text_from_query.last_usage = usage  # type: ignore[attr-defined]
+            elif msg.type == "assistant":
+                for block in msg.content_blocks:
+                    if message_buffer is not None:
+                        append_block_to_buffer(block, message_buffer)
+                    elif hasattr(block, "text") and not hasattr(block, "name"):
+                        print(f"  [intake] {block.text[:200]}")
+        return QueryResult(raw_output="", session_id=sid, usage={})
 
+    def _validate(result: QueryResult) -> Path:
+        diff_path = data_dir / "diff.patch"
+        if not diff_path.exists() or diff_path.stat().st_size == 0:
+            raise RetryValidationError(
+                "<validation_error>\n"
+                f"No diff.patch was produced at {diff_path} (or it is empty). "
+                "Run `gh pr diff <ref>` or `git diff <base>...<head>` and write "
+                "the output to that path.\n"
+                "</validation_error>"
+            )
 
-def _gh_available() -> bool:
-    return shutil.which("gh") is not None
-
-
-def _load_pr_metadata(repo_path: Path, pr_ref: str, base_ref: str) -> dict:
-    """Best-effort metadata pull.
-
-    Tries `gh pr view <pr_ref> --json ...` first. Falls back to git log
-    when gh is unavailable or the ref isn't a real PR on GitHub.
-    """
-    if _gh_available():
+        metadata_path = data_dir / "pr_metadata.json"
+        if not metadata_path.exists():
+            raise RetryValidationError(
+                "<validation_error>\n"
+                f"No pr_metadata.json was produced at {metadata_path}. "
+                "Write the flattened PR metadata (title, body, author, url, "
+                "baseRefName, headRefName) to that path.\n"
+                "</validation_error>"
+            )
         try:
-            out = subprocess.run(
-                [
-                    "gh",
-                    "pr",
-                    "view",
-                    pr_ref,
-                    "--json",
-                    "title,body,url,author,baseRefName,headRefName",
-                ],
-                cwd=repo_path,
-                capture_output=True,
-                text=True,
-                check=True,
-                timeout=20,
+            metadata = json.loads(metadata_path.read_text())
+        except json.JSONDecodeError as e:
+            raise RetryValidationError(
+                "<validation_error>\n"
+                f"pr_metadata.json at {metadata_path} is not valid JSON: {e}\n"
+                "</validation_error>"
+            ) from e
+        missing = [k for k in ("title", "baseRefName", "headRefName") if not metadata.get(k)]
+        if missing:
+            raise RetryValidationError(
+                "<validation_error>\n"
+                f"pr_metadata.json is missing required keys: {missing}. "
+                "At minimum it must carry title, baseRefName, and headRefName.\n"
+                "</validation_error>"
             )
-            meta: dict = json.loads(out.stdout)
-            # gh returns author as {login, name}; flatten.
-            if isinstance(meta.get("author"), dict):
-                meta["author"] = meta["author"].get("login") or meta["author"].get("name")
-            return meta
-        except (subprocess.SubprocessError, subprocess.TimeoutExpired, json.JSONDecodeError):
-            logger.debug("gh pr view failed for %s; falling back to git", pr_ref, exc_info=True)
 
-    # Fallback: synthesize metadata from the tip commit on the PR branch.
-    title = _git(repo_path, ["log", "-1", "--pretty=%s", pr_ref])
-    body = _git(repo_path, ["log", "-1", "--pretty=%b", pr_ref])
-    author = _git(repo_path, ["log", "-1", "--pretty=%an", pr_ref])
-    return {
-        "title": title,
-        "body": body,
-        "author": author,
-        "url": None,
-        "baseRefName": base_ref,
-        "headRefName": pr_ref,
-    }
+        touched_dir = data_dir / "touched_files"
+        if not touched_dir.exists() or not any(touched_dir.iterdir()):
+            raise RetryValidationError(
+                "<validation_error>\n"
+                f"touched_files/ is missing or empty at {touched_dir}. "
+                "Snapshot each changed file at the head ref (use "
+                "`git show <head>:<path>`) and write it with `/` replaced by "
+                "`__` in the filename. Deleted files get a `.DELETED` "
+                "tombstone.\n"
+                "</validation_error>"
+            )
+
+        if config_path is not None:
+            if not config_path.exists():
+                raise RetryValidationError(
+                    "<validation_error>\n"
+                    f"No ReviewConfig was written to {config_path}. "
+                    "You must create this file.\n"
+                    "</validation_error>"
+                )
+            try:
+                raw_config = json.loads(config_path.read_text())
+                cfg = ReviewConfig.model_validate(raw_config)
+            except (ValidationError, json.JSONDecodeError) as e:
+                raise RetryValidationError(
+                    "<validation_error>\n"
+                    f"ReviewConfig at {config_path} is invalid: {e}\n"
+                    "Required fields: name, repo_path, pr_ref, base_ref, "
+                    "head_ref, and run_command must contain the literal "
+                    '"{script_path}" placeholder.\n'
+                    "</validation_error>"
+                ) from e
+            if not cfg.repo_path or not Path(cfg.repo_path).exists():
+                raise RetryValidationError(
+                    "<validation_error>\n"
+                    f"ReviewConfig.repo_path ({cfg.repo_path!r}) is not set "
+                    "or does not exist. It must be an absolute path to the "
+                    "local clone of the repository under review.\n"
+                    "</validation_error>"
+                )
+            if not cfg.pr_ref:
+                raise RetryValidationError(
+                    "<validation_error>\n"
+                    "ReviewConfig.pr_ref is missing. Set it to the PR "
+                    "identifier you resolved (URL, owner/repo#N, or branch "
+                    "name).\n"
+                    "</validation_error>"
+                )
+            if "{{script_path}}" in cfg.run_command:
+                raise RetryValidationError(
+                    "<validation_error>\n"
+                    f"ReviewConfig.run_command has doubled braces: "
+                    f"{cfg.run_command!r}. Use single braces: "
+                    '"uv run pytest -x -s {script_path}". The Prober '
+                    "substitutes `{script_path}` at runtime.\n"
+                    "</validation_error>"
+                )
+
+        return data_dir
+
+    def _on_exhausted(result: QueryResult | None, error: Exception) -> Path:
+        if isinstance(error, RetryValidationError):
+            msg = str(error)
+            if "diff.patch" in msg:
+                raise FileNotFoundError(
+                    f"Intake did not produce a non-empty diff.patch in {data_dir}"
+                ) from error
+            if "ReviewConfig" in msg:
+                raise RuntimeError(
+                    f"Intake config validation failed after 3 attempts: {error}"
+                ) from error
+        raise error
+
+    result: Path = await agent_retry_loop(
+        query_fn=_query,
+        validate_fn=_validate,
+        prompt=prompt,
+        agent_name="Intake",
+        on_exhausted=_on_exhausted,
+    )
+    _reconcile_touched_files(result / "touched_files")
+    return result
 
 
-def _load_diff(
-    repo_path: Path,
-    pr_ref: str,
-    base_ref: str,
-    pr_metadata: dict,
-) -> str:
-    """Prefer `gh pr diff`; fall back to `git diff`.
+def _reconcile_touched_files(touched_dir: Path) -> None:
+    """Drop spurious `.DELETED` tombstones written alongside a real snapshot.
 
-    Used ref pair comes from pr_metadata when gh provided one, else the
-    caller-supplied (base_ref, pr_ref).
+    The LLM sometimes writes both a head-ref snapshot and a tombstone for
+    every changed path (treating the two cases as conjunctive instead of
+    exclusive). A tombstone is only meaningful when there is no snapshot
+    for the same base name; otherwise it misleads the Surveyor.
     """
-    if _gh_available() and pr_metadata.get("url"):
-        try:
-            out = subprocess.run(
-                ["gh", "pr", "diff", pr_ref],
-                cwd=repo_path,
-                capture_output=True,
-                text=True,
-                check=True,
-                timeout=30,
-            )
-            return out.stdout
-        except (subprocess.SubprocessError, subprocess.TimeoutExpired):
-            logger.debug(
-                "gh pr diff failed for %s; falling back to git diff", pr_ref, exc_info=True
-            )
-
-    return _git(repo_path, ["diff", f"{base_ref}...{pr_ref}"])
-
-
-def _load_changed_files(repo_path: Path, pr_ref: str, base_ref: str) -> list[str]:
-    output = _git(repo_path, ["diff", "--name-only", f"{base_ref}...{pr_ref}"])
-    return [line for line in output.splitlines() if line.strip()]
-
-
-def _capture_file_at_head(
-    repo_path: Path,
-    rel: str,
-    head_ref: str,
-    touched_dir: Path,
-) -> None:
-    """Copy the head-ref version of `rel` under touched_dir, flattening its path."""
-    try:
-        content = _git(repo_path, ["show", f"{head_ref}:{rel}"])
-    except subprocess.CalledProcessError:
-        # Deleted in the PR - write a tombstone so the Surveyor sees it.
-        (touched_dir / (rel.replace("/", "__") + ".DELETED")).write_text(
-            f"(file deleted at {head_ref})\n"
-        )
+    if not touched_dir.exists():
         return
-    flat = rel.replace("/", "__")
-    (touched_dir / flat).write_text(content)
-
-
-def _git(repo_path: Path, args: list[str]) -> str:
-    """Run a git subcommand and return stdout, raising on non-zero."""
-    result = subprocess.run(
-        ["git", *args],
-        cwd=repo_path,
-        capture_output=True,
-        text=True,
-        check=True,
-        timeout=30,
-    )
-    return result.stdout
+    snapshots = {p.name for p in touched_dir.iterdir() if not p.name.endswith(".DELETED")}
+    for path in touched_dir.iterdir():
+        if not path.name.endswith(".DELETED"):
+            continue
+        base = path.name.removesuffix(".DELETED")
+        if base in snapshots:
+            path.unlink()
+            logger.debug("Removed spurious tombstone for %s", base)
