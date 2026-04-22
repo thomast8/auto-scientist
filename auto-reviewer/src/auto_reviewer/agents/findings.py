@@ -28,6 +28,7 @@ from auto_core.sdk_utils import (
 )
 from auto_core.state import ExperimentState
 
+from auto_reviewer.agents.surveyor import _format_prediction_tree
 from auto_reviewer.prompts.findings import FINDINGS_USER, build_findings_system
 
 logger = logging.getLogger(__name__)
@@ -59,24 +60,11 @@ async def run_findings(
     """
     notebook_entries = parse_notebook_entries(notebook_path)
 
-    abductions_section = ""
-    if pending_abductions:
-        abductions_section = (
-            "<pending_abductions>\n"
-            "Unaddressed alternative explanations raised during the "
-            "investigation. Document each as an open thread in the "
-            "Limitations section.\n\n"
-            f"{pending_abductions}\n"
-            "</pending_abductions>\n"
-        )
-
     user_prompt = FINDINGS_USER.format(
-        domain=state.domain,
-        goal=state.goal,
-        total_iterations=state.iteration,
-        best_version=state.versions[-1].version if state.versions else "none",
-        notebook_content=format_notebook_toc(notebook_entries),
-        pending_abductions_section=abductions_section,
+        state_json=state.model_dump_json(indent=2),
+        notebook_toc=format_notebook_toc(notebook_entries),
+        prediction_tree=_format_prediction_tree(state),
+        workspace_path=str(output_dir),
     )
 
     max_turns = 10
