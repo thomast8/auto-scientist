@@ -146,16 +146,18 @@ async def run_completeness_assessment(
         return QueryResult(raw_output=raw, session_id=sid, usage=usage)
 
     def _validate(result: QueryResult) -> dict[str, Any]:
-        return validate_json_output(
+        output: dict[str, Any] = validate_json_output(
             result.raw_output, CompletenessAssessmentOutput, "Completeness Assessment"
         )
+        return output
 
-    return await agent_retry_loop(
+    validated: dict[str, Any] = await agent_retry_loop(
         query_fn=_query,
         validate_fn=_validate,
         prompt=user_prompt,
         agent_name="Completeness Assessment",
     )
+    return validated
 
 
 # ---------------------------------------------------------------------------
@@ -206,14 +208,16 @@ async def _query_stop_agent(
 
     def _validate(result: QueryResult) -> tuple[Any, Any]:
         parsed = validate_json_output(result.raw_output, output_model, label)
-        return output_model.model_validate(parsed), last_agent_result[0]
+        pair: tuple[Any, Any] = (output_model.model_validate(parsed), last_agent_result[0])
+        return pair
 
-    return await agent_retry_loop(
+    validated: tuple[Any, Any] = await agent_retry_loop(
         query_fn=_query,
         validate_fn=_validate,
         prompt=user_prompt,
         agent_name=label,
     )
+    return validated
 
 
 async def run_single_stop_debate(
@@ -421,11 +425,15 @@ async def run_scientist_stop_revision(
         return QueryResult(raw_output=raw, session_id=sid, usage=usage)
 
     def _validate(result: QueryResult) -> dict[str, Any]:
-        return validate_json_output(result.raw_output, HunterPlanOutput, "Stop Revision")
+        output: dict[str, Any] = validate_json_output(
+            result.raw_output, HunterPlanOutput, "Stop Revision"
+        )
+        return output
 
-    return await agent_retry_loop(
+    validated: dict[str, Any] = await agent_retry_loop(
         query_fn=_query,
         validate_fn=_validate,
         prompt=user_prompt,
         agent_name="Stop Revision",
     )
+    return validated
