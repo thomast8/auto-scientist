@@ -3,15 +3,14 @@
 import json
 
 import pytest
-
-from auto_scientist.preferences import load_preferences, save_preferences
+from auto_core.preferences import load_preferences, save_preferences
 
 
 @pytest.fixture()
 def prefs_path(tmp_path, monkeypatch):
     """Redirect PREFS_PATH to a temp directory."""
     path = tmp_path / "config" / "auto-scientist" / "preferences.json"
-    monkeypatch.setattr("auto_scientist.preferences.PREFS_PATH", path)
+    monkeypatch.setattr("auto_core.preferences.PREFS_PATH", path)
     return path
 
 

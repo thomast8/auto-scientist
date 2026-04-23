@@ -7,8 +7,7 @@ from pathlib import Path
 from unittest.mock import MagicMock
 
 import pytest
-
-from auto_scientist.desktop_notifier import DesktopNotifier
+from auto_core.desktop_notifier import DesktopNotifier
 
 # ---------------------------------------------------------------------------
 # Helpers
@@ -20,7 +19,7 @@ def fake_alerter(monkeypatch: pytest.MonkeyPatch) -> str:
     """Pretend `alerter` is installed at a known path."""
     path = "/opt/homebrew/bin/alerter"
     monkeypatch.setattr(
-        "auto_scientist.desktop_notifier.shutil.which",
+        "auto_core.desktop_notifier.shutil.which",
         lambda name: path if name == "alerter" else None,
     )
     return path
@@ -31,7 +30,7 @@ def mock_popen(monkeypatch: pytest.MonkeyPatch) -> MagicMock:
     """Capture all subprocess.Popen calls."""
     mock = MagicMock(name="Popen")
     monkeypatch.setattr(
-        "auto_scientist.desktop_notifier.subprocess.Popen",
+        "auto_core.desktop_notifier.subprocess.Popen",
         mock,
     )
     return mock
@@ -101,7 +100,7 @@ def test_unknown_level_treated_as_off(mock_popen: MagicMock, fake_alerter: str) 
 
 def test_missing_alerter_is_noop(mock_popen: MagicMock, monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(
-        "auto_scientist.desktop_notifier.shutil.which",
+        "auto_core.desktop_notifier.shutil.which",
         lambda _name: None,
     )
     n = DesktopNotifier(level="agent", run_name="test")
@@ -121,7 +120,7 @@ def test_missing_alerter_not_probed_when_off(
         calls.append(name)
         return None
 
-    monkeypatch.setattr("auto_scientist.desktop_notifier.shutil.which", _which)
+    monkeypatch.setattr("auto_core.desktop_notifier.shutil.which", _which)
     DesktopNotifier(level="off", run_name="test")
     assert calls == []
 
@@ -208,7 +207,7 @@ def test_popen_oserror_is_swallowed(monkeypatch: pytest.MonkeyPatch, fake_alerte
         raise OSError("exec failed")
 
     monkeypatch.setattr(
-        "auto_scientist.desktop_notifier.subprocess.Popen",
+        "auto_core.desktop_notifier.subprocess.Popen",
         _boom,
     )
     n = DesktopNotifier(level="run", run_name="r")
@@ -339,7 +338,7 @@ def test_no_icon_flag_when_both_missing(
     """Pretend the bundled default does not exist."""
     fake_default = tmp_path / "nope.png"
     monkeypatch.setattr(
-        "auto_scientist.desktop_notifier._DEFAULT_ICON",
+        "auto_core.desktop_notifier._DEFAULT_ICON",
         fake_default,
     )
     n = DesktopNotifier(level="run", run_name="r")

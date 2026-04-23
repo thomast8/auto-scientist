@@ -1,0 +1,25 @@
+{
+  "fixture": "leaky-config-merge",
+  "language": "python",
+  "difficulty": "hard",
+  "planted_bug": {
+    "description": "apply_env_overrides replaces the entire nested dict instead of updating one key, silently wiping sibling keys. Docstring explicitly promises sibling preservation; a caller (src/database.py) reads three sibling keys and breaks.",
+    "file": "src/config.py",
+    "symbol": "apply_env_overrides",
+    "invariant_violated": "sibling keys survive the override"
+  },
+  "calibration": {
+    "confirmed_count": 1,
+    "phantom_budget": 0,
+    "confirmed_must_mention": ["sibling", "nested", "override", "preserve"],
+    "refuted_or_ungrounded_acceptable": [
+      "in-place mutation test (the added test passes; not a bug)",
+      "variable coercion edge cases (off-path)"
+    ]
+  },
+  "notes": [
+    "Weak models tend to either (a) flag the `config[top] = {sub: value}` line as a phantom HIGH-priority bug without naming a caller, or (b) observe that the existing tests pass and refute.",
+    "Strong models notice the docstring's 'sibling preservation' clause (Design Intent lane), trace to src/database.py reading three sibling keys (Caller-impact gate), and write a probe with a multi-key nested config that fails cleanly on the buggy branch.",
+    "The existing test_nested_override_single_key passes on both branches because the config only has one sibling - sibling wipe is indistinguishable from in-place update at that width."
+  ]
+}

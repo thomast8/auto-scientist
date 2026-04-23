@@ -3,8 +3,7 @@
 from __future__ import annotations
 
 import pytest
-
-from auto_scientist.retry import (
+from auto_core.retry import (
     QueryResult,
     ValidationError,
     agent_retry_loop,

@@ -10,20 +10,21 @@ import json
 import logging
 from pathlib import Path
 
-from pydantic import ValidationError
-
-from auto_scientist.config import DomainConfig
-from auto_scientist.notebook import NOTEBOOK_FILENAME
-from auto_scientist.prompts.ingestor import INGESTOR_USER, build_ingestor_system
-from auto_scientist.retry import QueryResult, agent_retry_loop
-from auto_scientist.retry import ValidationError as RetryValidationError
-from auto_scientist.sdk_backend import CODEX_SANDBOX_ADDENDUM, SDKOptions, get_backend
-from auto_scientist.sdk_utils import (
+from auto_core.notebook import NOTEBOOK_FILENAME
+from auto_core.retry import QueryResult, agent_retry_loop
+from auto_core.retry import ValidationError as RetryValidationError
+from auto_core.sdk_backend import CODEX_SANDBOX_ADDENDUM, SDKOptions, get_backend
+from auto_core.sdk_utils import (
     append_block_to_buffer,
     collect_text_from_query,
     prepare_turn_budget,
+    resolve_prompt_provider,
     safe_query,
 )
+from pydantic import ValidationError
+
+from auto_scientist.config import DomainConfig
+from auto_scientist.prompts.ingestor import INGESTOR_USER, build_ingestor_system
 
 logger = logging.getLogger(__name__)
 
@@ -55,13 +56,25 @@ async def run_ingestor(
     notebook_path = output_dir / NOTEBOOK_FILENAME
 
     tools = ["Bash", "Read", "Write", "Glob", "Grep"]
-    if interactive:
+    # `AskUserQuestion` is a Claude Code CLI built-in; the Codex backend
+    # exposes no equivalent. If interactive mode was requested on a
+    # non-Claude backend, fall back to autonomous with a clear warning
+    # rather than silently advertising a tool the model cannot call.
+    effective_interactive = interactive and provider == "anthropic"
+    if interactive and not effective_interactive:
+        logger.warning(
+            "Ingestor --interactive is only supported with provider='anthropic' "
+            "(Claude Code supplies AskUserQuestion). Falling back to autonomous "
+            "mode for provider=%r.",
+            provider,
+        )
+    if effective_interactive:
         tools.append("AskUserQuestion")
 
-    mode = "interactive" if interactive else "autonomous"
+    mode = "interactive" if effective_interactive else "autonomous"
 
     max_turns = 30
-    prompt_provider = "gpt" if provider == "openai" else "claude"
+    prompt_provider = resolve_prompt_provider(provider)
     system_prompt = build_ingestor_system(prompt_provider)
     if provider == "openai":
         system_prompt += CODEX_SANDBOX_ADDENDUM

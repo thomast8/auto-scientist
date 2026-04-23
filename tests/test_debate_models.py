@@ -1,18 +1,17 @@
 """Tests for the structured debate Pydantic models."""
 
 import pytest
-from pydantic import ValidationError
-
-from auto_scientist.agents.debate_models import (
+from auto_core.agents.debate_models import (
     ConcernLedgerEntry,
     CriticOutput,
     DebateResult,
 )
+from pydantic import ValidationError
 
 
 class TestConcern:
     def test_valid_concern(self):
-        from auto_scientist.agents.debate_models import Concern
+        from auto_core.agents.debate_models import Concern
 
         c = Concern(
             claim="Mixed-unit soil moisture",
@@ -24,26 +23,26 @@ class TestConcern:
         assert c.severity == "high"
 
     def test_invalid_severity_raises(self):
-        from auto_scientist.agents.debate_models import Concern
+        from auto_core.agents.debate_models import Concern
 
         with pytest.raises(ValidationError):
             Concern(claim="x", severity="critical", confidence="high", category="methodology")
 
     def test_invalid_confidence_raises(self):
-        from auto_scientist.agents.debate_models import Concern
+        from auto_core.agents.debate_models import Concern
 
         with pytest.raises(ValidationError):
             Concern(claim="x", severity="high", confidence="very_high", category="methodology")
 
     def test_invalid_category_raises(self):
-        from auto_scientist.agents.debate_models import Concern
+        from auto_core.agents.debate_models import Concern
 
         with pytest.raises(ValidationError):
             Concern(claim="x", severity="high", confidence="high", category="invalid")
 
     def test_new_categories_accepted(self):
         """New persona categories: trajectory, falsification, consistency."""
-        from auto_scientist.agents.debate_models import Concern
+        from auto_core.agents.debate_models import Concern
 
         for cat in ("trajectory", "falsification", "consistency"):
             c = Concern(claim="x", severity="high", confidence="high", category=cat)
@@ -51,14 +50,14 @@ class TestConcern:
 
     def test_old_categories_rejected(self):
         """Old persona categories novelty/feasibility are no longer valid."""
-        from auto_scientist.agents.debate_models import Concern
+        from auto_core.agents.debate_models import Concern
 
         for cat in ("novelty", "feasibility"):
             with pytest.raises(ValidationError):
                 Concern(claim="x", severity="high", confidence="high", category=cat)
 
     def test_extra_fields_tolerated(self):
-        from auto_scientist.agents.debate_models import Concern
+        from auto_core.agents.debate_models import Concern
 
         c = Concern(
             claim="x",

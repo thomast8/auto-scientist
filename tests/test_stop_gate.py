@@ -5,12 +5,11 @@ import json
 from unittest.mock import AsyncMock, patch
 
 import pytest
-
-from auto_scientist.agent_result import AgentResult
-from auto_scientist.agents.debate_models import CriticOutput, DebateResult
-from auto_scientist.model_config import AgentModelConfig
-from auto_scientist.sdk_utils import OutputValidationError
-from auto_scientist.state import PredictionRecord
+from auto_core.agent_result import AgentResult
+from auto_core.agents.debate_models import CriticOutput, DebateResult
+from auto_core.model_config import AgentModelConfig
+from auto_core.sdk_utils import OutputValidationError
+from auto_core.state import PredictionRecord
 
 # ---------------------------------------------------------------------------
 # Helper builders
@@ -132,7 +131,7 @@ def stop_notebook(tmp_path):
     TOC / MCP wiring. Use append_entry so the file is actual XML and the
     new notebook tool is exercised end-to-end.
     """
-    from auto_scientist.notebook import NOTEBOOK_FILENAME, append_entry
+    from auto_core.notebook import NOTEBOOK_FILENAME, append_entry
 
     nb = tmp_path / NOTEBOOK_FILENAME
     append_entry(nb, "Iteration 1\n\nResult: R²=0.85", version="v01", source="scientist")

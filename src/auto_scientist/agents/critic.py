@@ -24,30 +24,39 @@ from contextlib import nullcontext
 from pathlib import Path
 from typing import Any
 
-from pydantic import BaseModel
-
-from auto_scientist.agent_result import AgentResult
-from auto_scientist.agents.debate_models import (
+from auto_core.agent_result import AgentResult
+from auto_core.agents.debate_models import (
     CRITIC_OUTPUT_SCHEMA,
     Concern,
     CriticOutput,
     DebateResult,
 )
-from auto_scientist.agents.notebook_tool import (
+from auto_core.agents.notebook_tool import (
     NOTEBOOK_SPEC,
     build_notebook_mcp_server,
     format_notebook_toc,
 )
-from auto_scientist.agents.prediction_tool import (
+from auto_core.agents.prediction_tool import (
     PREDICTION_SPEC,
     build_prediction_mcp_server,
     format_compact_tree,
     format_full_detail,
 )
-from auto_scientist.model_config import AgentModelConfig, reasoning_to_cc_extra_args
-from auto_scientist.models.google_client import query_google
-from auto_scientist.models.openai_client import query_openai
-from auto_scientist.notebook import parse_notebook_entries, read_notebook
+from auto_core.model_config import AgentModelConfig, reasoning_to_cc_extra_args
+from auto_core.models.google_client import query_google
+from auto_core.models.openai_client import query_openai
+from auto_core.notebook import parse_notebook_entries, read_notebook
+from auto_core.retry import QueryResult, agent_retry_loop
+from auto_core.sdk_backend import SDKBackend, SDKOptions, create_backend, get_backend
+from auto_core.sdk_utils import (
+    collect_text_from_query,
+    prepare_turn_budget,
+    resolve_prompt_provider,
+    validate_json_output,
+)
+from auto_core.state import PredictionRecord
+from pydantic import BaseModel
+
 from auto_scientist.prompts.critic import (
     CRITIC_USER,
     DEFAULT_CRITIC_INSTRUCTIONS,
@@ -57,14 +66,6 @@ from auto_scientist.prompts.critic import (
     build_critic_system,
     get_model_index_for_debate,
 )
-from auto_scientist.retry import QueryResult, agent_retry_loop
-from auto_scientist.sdk_backend import SDKBackend, SDKOptions, create_backend, get_backend
-from auto_scientist.sdk_utils import (
-    collect_text_from_query,
-    prepare_turn_budget,
-    validate_json_output,
-)
-from auto_scientist.state import PredictionRecord
 
 logger = logging.getLogger(__name__)
 
@@ -351,7 +352,7 @@ async def run_single_critic_debate(
             the compact tree in SDK mode (paired with the
             mcp__predictions__read_predictions tool) and as the full-detail
             trajectory in API mode (no tool available). See
-            :func:`auto_scientist.agents.prediction_tool.format_compact_tree`
+            :func:`auto_core.agents.prediction_tool.format_compact_tree`
             and :func:`format_full_detail`.
         output_dir: Directory for MCP data files.
     """
@@ -751,7 +752,7 @@ def _build_critic_prompt(
         notebook_tool_guidance = ""
         notebook_section = f"<notebook>{notebook_body}</notebook>"
 
-    prompt_provider = "gpt" if provider == "openai" else "claude"
+    prompt_provider = resolve_prompt_provider(provider)
     system = build_critic_system(prompt_provider).format(
         persona_text=persona_text,
         persona_instructions=effective_instructions,

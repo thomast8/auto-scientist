@@ -1,24 +1,26 @@
-"""Domain configuration schema."""
+"""Domain configuration schema for auto-scientist.
+
+Extends `auto_core.config.RunConfig` with scientific `data_paths`. Other
+operational fields (run_command, run_cwd, run_timeout_minutes, version_prefix,
+protected_paths) live in the base class.
+"""
 
 import logging
 
-from pydantic import BaseModel, Field, field_validator
+from auto_core.config import RunConfig
+from pydantic import field_validator
 
 logger = logging.getLogger(__name__)
 
 
-class DomainConfig(BaseModel):
+class DomainConfig(RunConfig):
     """Operational configuration for a specific scientific domain.
 
-    Contains only runtime/infrastructure settings. Scientific concerns
-    (domain_knowledge, prediction_history) live in ExperimentState.
+    Scientific concerns (`domain_knowledge`, `prediction_history`) live in
+    `ExperimentState`; this carries only runtime / infrastructure settings.
     """
 
-    name: str
-    description: str
     data_paths: list[str]
-    run_command: str = "uv run {script_path}"
-    run_cwd: str = "."
 
     @field_validator("data_paths", mode="before")
     @classmethod
@@ -30,14 +32,3 @@ class DomainConfig(BaseModel):
             )
             return list(v.values())
         return v
-
-    @field_validator("run_command")
-    @classmethod
-    def run_command_must_contain_placeholder(cls, v: str) -> str:
-        if "{script_path}" not in v:
-            raise ValueError(f"run_command must contain '{{script_path}}' placeholder, got: {v}")
-        return v
-
-    run_timeout_minutes: int = 120
-    version_prefix: str = "v"
-    protected_paths: list[str] = Field(default_factory=list)

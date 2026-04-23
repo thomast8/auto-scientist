@@ -1,0 +1,39 @@
+[project]
+name = "auto-reviewer"
+version = "0.1.0"
+description = "Autonomous bug-hunting PR reviewer - sibling of auto-scientist running on the shared auto_core runtime."
+readme = "README.md"
+requires-python = ">=3.12"
+dependencies = [
+    "auto-core",
+    "click",
+    "pydantic>=2.0",
+]
+
+[project.scripts]
+auto-reviewer = "auto_reviewer.cli:cli"
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/auto_reviewer"]
+
+[tool.uv.sources]
+auto-core = { workspace = true }
+
+[tool.pytest.ini_options]
+asyncio_mode = "auto"
+testpaths = ["tests"]
+timeout = 60
+timeout_method = "signal"
+norecursedirs = ["fixtures"]
+markers = [
+    "live: test spawns a real Claude CLI; skipped unless LIVE_CLAUDE=1 is set",
+]
+# Running `pytest` from the repo root picks up auto-scientist's tests via
+# the root pyproject. To run the reviewer suite:
+#   uv run pytest auto-reviewer/tests/
+# (or cd into auto-reviewer/ first). Sharing a process with auto-scientist
+# tests is unsupported - the registries are mutually exclusive globals.

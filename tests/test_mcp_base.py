@@ -5,8 +5,7 @@ import sys
 from pathlib import Path
 
 import pytest
-
-from auto_scientist.agents._mcp_base import (
+from auto_core.agents._mcp_base import (
     _MCP_TOOL_REGISTRY,
     MCPToolSpec,
     build_mcp_server_config,
@@ -56,7 +55,7 @@ class TestRegistry:
     def test_prediction_spec_auto_registered(self):
         """The prediction tool spec should be registered at import time."""
         # Importing prediction_tool triggers register_mcp_tool
-        import auto_scientist.agents.prediction_tool  # noqa: F401
+        import auto_core.agents.prediction_tool  # noqa: F401
 
         descriptions = get_deferred_descriptions()
         assert "mcp__predictions__read_predictions" in descriptions

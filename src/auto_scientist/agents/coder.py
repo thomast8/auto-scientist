@@ -14,18 +14,20 @@ from dataclasses import replace
 from pathlib import Path
 from typing import Any
 
+from auto_core.retry import QueryResult, ValidationError, agent_retry_loop
+from auto_core.sdk_backend import CODEX_SANDBOX_ADDENDUM, SDKOptions, get_backend
+from auto_core.sdk_utils import (
+    append_block_to_buffer,
+    collect_text_from_query,
+    prepare_turn_budget,
+    resolve_prompt_provider,
+)
+
 from auto_scientist.prompts.coder import (
     CODER_HAS_PREVIOUS,
     CODER_NO_PREVIOUS,
     CODER_USER,
     build_coder_system,
-)
-from auto_scientist.retry import QueryResult, ValidationError, agent_retry_loop
-from auto_scientist.sdk_backend import CODEX_SANDBOX_ADDENDUM, SDKOptions, get_backend
-from auto_scientist.sdk_utils import (
-    append_block_to_buffer,
-    collect_text_from_query,
-    prepare_turn_budget,
 )
 
 logger = logging.getLogger(__name__)
@@ -97,7 +99,7 @@ def _validate_syntax(script_path: Path) -> tuple[bool, str]:
 
 def _validate_deps(script_path: Path) -> tuple[bool, str]:
     """Check that every third-party import is covered by PEP 723 deps."""
-    from auto_scientist.ensure_deps import validate_deps
+    from auto_core.ensure_deps import validate_deps
 
     return validate_deps(script_path)
 
@@ -144,12 +146,14 @@ async def run_coder(
         previous_script_section = CODER_NO_PREVIOUS
 
     # Codex seatbelt sandbox: uv panics (SCDynamicStore access denied).
-    # Replace uv run with python3; keep ensure_deps prefix (it's copied
-    # as a local script by the orchestrator).
-    if provider == "openai" and "uv run" in run_command:
-        run_command = run_command.replace("uv run", "python3", 1)
+    # Rewrite `uv run ...` to a python3 invocation; the ensure_deps prefix
+    # added by the orchestrator is already Codex-aware (python3 <copy>).
+    if provider == "openai":
+        from auto_core.sdk_backend import rewrite_uv_run_for_codex
 
-    prompt_provider = "gpt" if provider == "openai" else "claude"
+        run_command = rewrite_uv_run_for_codex(run_command)
+
+    prompt_provider = resolve_prompt_provider(provider)
     system_prompt = build_coder_system(prompt_provider).format(
         data_path=data_path or "(not specified)",
         run_timeout_minutes=run_timeout_minutes,

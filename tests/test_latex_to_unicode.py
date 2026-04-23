@@ -1,6 +1,6 @@
 """Tests for the LaTeX-to-Unicode converter."""
 
-from auto_scientist.latex_to_unicode import latex_to_unicode
+from auto_core.latex_to_unicode import latex_to_unicode
 
 
 class TestPassthrough:

@@ -3,17 +3,16 @@
 import json
 
 import pytest
-
-from auto_scientist.iteration_manifest import (
+from auto_core.iteration_manifest import (
     MANIFEST_FILENAME,
     IterationRecord,
     PanelRecord,
     load_manifest,
     save_manifest,
 )
-from auto_scientist.notebook import NOTEBOOK_FILENAME
-from auto_scientist.resume import RewindResult, rewind_run
-from auto_scientist.state import ExperimentState, PredictionRecord, VersionEntry
+from auto_core.notebook import NOTEBOOK_FILENAME
+from auto_core.resume import RewindResult, rewind_run
+from auto_core.state import ExperimentState, PredictionRecord, VersionEntry
 
 
 @pytest.fixture

@@ -1,23 +1,20 @@
 """CLI entry point: run, resume, status commands."""
 
-import atexit
 import logging
-import os
-import signal
-from contextlib import suppress
 from pathlib import Path
-from typing import Any, Literal, cast
+from typing import Literal, cast
 
 import click
+from auto_core.app import PipelineApp
+from auto_core.cli_cleanup import install_child_cleanup_handlers
+from auto_core.model_config import ModelConfig
+from auto_core.orchestrator import Orchestrator
+from auto_core.state import ExperimentState
+from auto_core.widgets import console
 from dotenv import load_dotenv
 
-from auto_scientist.app import PipelineApp
 from auto_scientist.experiment_config import ExperimentConfig
 from auto_scientist.launch_app import LaunchApp
-from auto_scientist.model_config import ModelConfig
-from auto_scientist.orchestrator import Orchestrator
-from auto_scientist.state import ExperimentState
-from auto_scientist.widgets import console
 
 load_dotenv()
 
@@ -42,79 +39,9 @@ class _ChildWatcherFilter(logging.Filter):
 logging.getLogger("asyncio").addFilter(_ChildWatcherFilter())
 
 
-# ---------------------------------------------------------------------------
-# Process cleanup: kill SDK subprocesses on unexpected exit
-# ---------------------------------------------------------------------------
-# When auto-scientist is killed by SIGHUP (terminal closed) or SIGTERM,
-# Python's default handler terminates immediately with no cleanup.  This
-# orphans SDK subprocesses (claude CLI, codex app-server) that may be
-# executing experiment scripts at 100 % CPU.
-#
-# Fix: install signal handlers that kill the process group before exiting
-# and an atexit handler as a safety net for crashes / normal exit.
-# ---------------------------------------------------------------------------
-
-_cleanup_done = False
-
-
-def _kill_child_processes() -> None:
-    """Terminate direct child processes via ``pgrep -P``.
-
-    Targets only our children, so it is safe to call from both signal
-    handlers and atexit without killing sibling processes like git or
-    pre-commit hooks that share our process group.
-
-    Idempotent: repeated calls are no-ops after the first.
-    """
-    global _cleanup_done  # noqa: PLW0603 - intentional module-level flag
-    if _cleanup_done:
-        return
-    _cleanup_done = True
-
-    import subprocess as _sp
-
-    # Prevent recursive delivery while we broadcast
-    signal.signal(signal.SIGTERM, signal.SIG_IGN)
-    signal.signal(signal.SIGHUP, signal.SIG_IGN)
-
-    pid = os.getpid()
-    try:
-        result = _sp.run(
-            ["pgrep", "-P", str(pid)],
-            capture_output=True,
-            text=True,
-            timeout=2,
-        )
-        for line in result.stdout.strip().splitlines():
-            with suppress(ProcessLookupError, PermissionError, ValueError, OSError):
-                os.kill(int(line.strip()), signal.SIGTERM)
-    except Exception:  # noqa: BLE001 - best-effort cleanup
-        pass
-
-
-def _fatal_signal_handler(signum: int, _frame: Any) -> None:
-    """Handle SIGHUP / SIGTERM by killing children and exiting."""
-    _kill_child_processes()
-    # os._exit avoids Python shutdown machinery that can hang
-    # during signal handling.  atexit handlers are intentionally
-    # skipped since we already cleaned up above.
-    os._exit(128 + signum)
-
-
-def _install_cleanup_handlers() -> None:
-    """Register signal and atexit handlers for child-process cleanup.
-
-    Must be called from the main thread before any SDK subprocesses are
-    spawned.
-    """
-    signal.signal(signal.SIGHUP, _fatal_signal_handler)
-    signal.signal(signal.SIGTERM, _fatal_signal_handler)
-    atexit.register(_kill_child_processes)
-
-
 def _run_orchestrator(orchestrator: Orchestrator) -> None:
     """Run the orchestrator with user-friendly error handling."""
-    _install_cleanup_handlers()
+    install_child_cleanup_handlers()
     try:
         app = PipelineApp(orchestrator)
         app.run()
@@ -185,7 +112,7 @@ def _detect_retry_agent(version_dir: Path) -> str | None:
     artifacts are present on disk, so that earlier agents are skipped
     on retry.  Returns None when no artifacts exist (full restart).
     """
-    from auto_scientist.resume import _AGENT_ARTIFACTS, AGENT_ORDER
+    from auto_core.resume import _AGENT_ARTIFACTS, AGENT_ORDER
 
     last_completed = None
     for agent in AGENT_ORDER:
@@ -206,7 +133,8 @@ def _detect_retry_agent(version_dir: Path) -> str | None:
     if last_completed is not None:
         idx = AGENT_ORDER.index(last_completed)
         if idx + 1 < len(AGENT_ORDER):
-            return AGENT_ORDER[idx + 1]
+            next_agent: str = AGENT_ORDER[idx + 1]
+            return next_agent
     return None
 
 
@@ -241,7 +169,7 @@ def _resolve_model_config(
     preset_name = preset or "default"
     if provider and provider != "anthropic":
         variant = f"{preset_name}-{provider}"
-        from auto_scientist.model_config import BUILTIN_PRESETS
+        from auto_core.model_config import BUILTIN_PRESETS
 
         if variant in BUILTIN_PRESETS:
             preset_name = variant
@@ -604,7 +532,7 @@ def resume(
     """
     import shutil
 
-    from auto_scientist.resume import rewind_run
+    from auto_core.resume import rewind_run
 
     # Validate flag combinations
     if from_iteration is not None and not fork:
@@ -810,7 +738,7 @@ def status(source: str):
     import json
     import re
 
-    from auto_scientist.resume import _AGENT_ARTIFACTS, STOP_GATE_AGENTS
+    from auto_core.resume import _AGENT_ARTIFACTS, STOP_GATE_AGENTS
 
     run_dir, loaded_state = _resolve_source(source)
 
@@ -930,8 +858,8 @@ def show(source: str):
 
       auto-scientist show --from experiments/runs/my-run
     """
-    from auto_scientist.app import ShowApp
-    from auto_scientist.iteration_manifest import MANIFEST_FILENAME, load_manifest
+    from auto_core.app import ShowApp
+    from auto_core.iteration_manifest import MANIFEST_FILENAME, load_manifest
 
     run_dir, _ = _resolve_source(source)
     records = load_manifest(run_dir / MANIFEST_FILENAME)

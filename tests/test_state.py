@@ -3,8 +3,7 @@
 import json
 
 import pytest
-
-from auto_scientist.state import ExperimentState, PredictionRecord, VersionEntry
+from auto_core.state import ExperimentState, PredictionRecord, VersionEntry
 
 
 @pytest.fixture

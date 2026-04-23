@@ -4,8 +4,7 @@ from datetime import datetime, time
 from unittest.mock import AsyncMock, patch
 
 import pytest
-
-from auto_scientist.scheduler import (
+from auto_core.scheduler import (
     is_within_window,
     parse_schedule,
     seconds_until_window,
@@ -92,7 +91,9 @@ class TestSecondsUntilWindow:
         now = datetime(2026, 1, 1, 10, 30)
         assert is_within_window(now, time(10, 30), time(10, 31))
         assert not is_within_window(
-            datetime(2026, 1, 1, 10, 32), time(10, 30), time(10, 31),
+            datetime(2026, 1, 1, 10, 32),
+            time(10, 30),
+            time(10, 31),
         )
 
 
@@ -102,16 +103,16 @@ class TestWaitForWindow:
         await wait_for_window(None)
 
     @pytest.mark.asyncio
-    @patch("auto_scientist.scheduler.asyncio.sleep", new_callable=AsyncMock)
-    @patch("auto_scientist.scheduler.datetime")
+    @patch("auto_core.scheduler.asyncio.sleep", new_callable=AsyncMock)
+    @patch("auto_core.scheduler.datetime")
     async def test_inside_window_no_sleep(self, mock_dt, mock_sleep):
         mock_dt.now.return_value = datetime(2026, 1, 1, 23, 0)
         await wait_for_window("22:00-06:00")
         mock_sleep.assert_not_called()
 
     @pytest.mark.asyncio
-    @patch("auto_scientist.scheduler.asyncio.sleep", new_callable=AsyncMock)
-    @patch("auto_scientist.scheduler.datetime")
+    @patch("auto_core.scheduler.asyncio.sleep", new_callable=AsyncMock)
+    @patch("auto_core.scheduler.datetime")
     async def test_outside_window_sleeps(self, mock_dt, mock_sleep):
         mock_dt.now.return_value = datetime(2026, 1, 1, 14, 0)
         await wait_for_window("22:00-06:00")

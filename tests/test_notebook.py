@@ -1,6 +1,6 @@
 """Tests for the notebook XML utility module."""
 
-from auto_scientist.notebook import (
+from auto_core.notebook import (
     NOTEBOOK_FILENAME,
     append_entry,
     format_entry,

@@ -4,11 +4,9 @@ from pathlib import Path
 from unittest.mock import AsyncMock, patch
 
 import pytest
-
-from auto_scientist.config import DomainConfig
-from auto_scientist.model_config import AgentModelConfig, ModelConfig, ReasoningConfig
-from auto_scientist.orchestrator import Orchestrator
-from auto_scientist.persistence import (
+from auto_core.model_config import AgentModelConfig, ModelConfig, ReasoningConfig
+from auto_core.orchestrator import Orchestrator
+from auto_core.persistence import (
     apply_prediction_updates,
     build_concern_ledger,
     evaluate,
@@ -20,9 +18,11 @@ from auto_scientist.persistence import (
     resolve_prediction_outcomes,
     store_refutation_reasoning,
 )
-from auto_scientist.runner import RunResult
-from auto_scientist.state import ExperimentState, VersionEntry
-from auto_scientist.validation import validate_prerequisites
+from auto_core.runner import RunResult
+from auto_core.state import ExperimentState, VersionEntry
+from auto_core.validation import validate_prerequisites
+
+from auto_scientist.config import DomainConfig
 
 
 @pytest.fixture
@@ -89,11 +89,11 @@ class TestValidatePrerequisites:
     def _skip_model_validation(self, monkeypatch):
         """Skip model name and reasoning API validation in prerequisite tests."""
         monkeypatch.setattr(
-            "auto_scientist.validation.validate_model_names",
+            "auto_core.validation.validate_model_names",
             lambda mc: [],
         )
         monkeypatch.setattr(
-            "auto_scientist.validation.validate_reasoning_configs",
+            "auto_core.validation.validate_reasoning_configs",
             lambda mc: [],
         )
 
@@ -132,21 +132,21 @@ class TestValidatePrerequisites:
     def test_passes_when_everything_present(self, tmp_path, monkeypatch):
         data = tmp_path / "data.csv"
         data.write_text("x")
-        monkeypatch.setattr("auto_scientist.validation.check_provider_auth", self._mock_auth_ok)
+        monkeypatch.setattr("auto_core.validation.check_provider_auth", self._mock_auth_ok)
         monkeypatch.setattr("shutil.which", lambda name: "/usr/bin/claude")
         o = self._make_orchestrator(tmp_path, data_path=data)
         # should not raise
         validate_prerequisites(o.state, o.data_path, o.output_dir, o.model_config, o.config)
 
     def test_missing_data_path(self, tmp_path, monkeypatch):
-        monkeypatch.setattr("auto_scientist.validation.check_provider_auth", self._mock_auth_ok)
+        monkeypatch.setattr("auto_core.validation.check_provider_auth", self._mock_auth_ok)
         monkeypatch.setattr("shutil.which", lambda name: "/usr/bin/claude")
         o = self._make_orchestrator(tmp_path)
         with pytest.raises(RuntimeError, match="Data path does not exist"):
             validate_prerequisites(o.state, o.data_path, o.output_dir, o.model_config, o.config)
 
     def test_none_data_path(self, tmp_path, monkeypatch):
-        monkeypatch.setattr("auto_scientist.validation.check_provider_auth", self._mock_auth_ok)
+        monkeypatch.setattr("auto_core.validation.check_provider_auth", self._mock_auth_ok)
         monkeypatch.setattr("shutil.which", lambda name: "/usr/bin/claude")
         o = self._make_orchestrator(tmp_path, data_path=None)
         # data_path=None is only a problem during ingestion
@@ -155,7 +155,7 @@ class TestValidatePrerequisites:
             validate_prerequisites(o.state, o.data_path, o.output_dir, o.model_config, o.config)
 
     def test_data_path_not_checked_after_ingestion(self, tmp_path, monkeypatch):
-        monkeypatch.setattr("auto_scientist.validation.check_provider_auth", self._mock_auth_ok)
+        monkeypatch.setattr("auto_core.validation.check_provider_auth", self._mock_auth_ok)
         monkeypatch.setattr("shutil.which", lambda name: "/usr/bin/claude")
         state = ExperimentState(domain="t", goal="g", phase="iteration")
         o = self._make_orchestrator(tmp_path, state=state, data_path=None)
@@ -163,28 +163,61 @@ class TestValidatePrerequisites:
         validate_prerequisites(o.state, o.data_path, o.output_dir, o.model_config, o.config)
 
     def test_missing_anthropic_auth_api_mode(self, tmp_path, monkeypatch):
-        """API-mode agents still need API key validation."""
+        """API-mode agents still need API key validation.
+
+        Uses a critic in mode='api' (API-capable slot). Per the tightened
+        ``sdk_only_agents`` list, the scientist slot can no longer use
+        mode='api' - the scientist / hunter implementations have no
+        API-mode dispatch.
+        """
         data = tmp_path / "data.csv"
         data.write_text("x")
         monkeypatch.setattr(
-            "auto_scientist.validation.check_provider_auth",
+            "auto_core.validation.check_provider_auth",
             self._mock_auth_fail("anthropic"),
         )
         monkeypatch.setattr("shutil.which", lambda name: "/usr/bin/claude")
+        mc = ModelConfig(
+            defaults=AgentModelConfig(model="claude-sonnet-4-6"),
+            critics=[
+                AgentModelConfig(
+                    provider="anthropic",
+                    model="claude-sonnet-4-6",
+                    mode="api",
+                )
+            ],
+        )
+        o = self._make_orchestrator(tmp_path, data_path=data, mc=mc)
+        with pytest.raises(RuntimeError, match="Anthropic SDK authentication failed"):
+            validate_prerequisites(o.state, o.data_path, o.output_dir, o.model_config, o.config)
+
+    def test_scientist_mode_api_rejected(self, tmp_path, monkeypatch):
+        """Scientist slot cannot use mode='api'; dispatch is SDK-only."""
+        data = tmp_path / "data.csv"
+        data.write_text("x")
+        monkeypatch.setattr("shutil.which", lambda name: "/usr/bin/claude")
+        monkeypatch.setattr(
+            "auto_core.validation.check_provider_auth",
+            lambda provider: None,
+        )
+        monkeypatch.setattr(
+            "auto_core.validation.check_claude_cli_auth",
+            lambda claude_bin: None,
+        )
         mc = ModelConfig(
             defaults=AgentModelConfig(model="claude-sonnet-4-6"),
             scientist=AgentModelConfig(model="claude-sonnet-4-6", mode="api"),
             critics=[],
         )
         o = self._make_orchestrator(tmp_path, data_path=data, mc=mc)
-        with pytest.raises(RuntimeError, match="Anthropic SDK authentication failed"):
+        with pytest.raises(RuntimeError, match="scientist uses mode='api'"):
             validate_prerequisites(o.state, o.data_path, o.output_dir, o.model_config, o.config)
 
     def test_missing_openai_auth_when_summarizer_set(self, tmp_path, monkeypatch):
         data = tmp_path / "data.csv"
         data.write_text("x")
         monkeypatch.setattr(
-            "auto_scientist.validation.check_provider_auth",
+            "auto_core.validation.check_provider_auth",
             self._mock_auth_fail("openai"),
         )
         monkeypatch.setattr("shutil.which", lambda name: "/usr/bin/claude")
@@ -202,7 +235,7 @@ class TestValidatePrerequisites:
         data = tmp_path / "data.csv"
         data.write_text("x")
         monkeypatch.setattr(
-            "auto_scientist.validation.check_provider_auth",
+            "auto_core.validation.check_provider_auth",
             self._mock_auth_fail("google"),
         )
         monkeypatch.setattr("shutil.which", lambda name: "/usr/bin/claude")
@@ -216,7 +249,7 @@ class TestValidatePrerequisites:
 
     def test_multiple_errors_reported_at_once(self, tmp_path, monkeypatch):
         monkeypatch.setattr(
-            "auto_scientist.validation.check_provider_auth",
+            "auto_core.validation.check_provider_auth",
             self._mock_auth_fail("openai"),
         )
         monkeypatch.setattr("shutil.which", lambda name: None)
@@ -231,7 +264,7 @@ class TestValidatePrerequisites:
     def test_missing_claude_cli(self, tmp_path, monkeypatch):
         data = tmp_path / "data.csv"
         data.write_text("x")
-        monkeypatch.setattr("auto_scientist.validation.check_provider_auth", self._mock_auth_ok)
+        monkeypatch.setattr("auto_core.validation.check_provider_auth", self._mock_auth_ok)
         monkeypatch.setattr("shutil.which", lambda name: None)
         o = self._make_orchestrator(tmp_path, data_path=data)
         with pytest.raises(RuntimeError, match="Claude Code CLI not found"):
@@ -241,7 +274,7 @@ class TestValidatePrerequisites:
         """SDK agents cannot use Google provider (no Google coding CLI)."""
         data = tmp_path / "data.csv"
         data.write_text("x")
-        monkeypatch.setattr("auto_scientist.validation.check_provider_auth", self._mock_auth_ok)
+        monkeypatch.setattr("auto_core.validation.check_provider_auth", self._mock_auth_ok)
         monkeypatch.setattr("shutil.which", lambda name: "/usr/bin/claude")
         mc = ModelConfig(
             defaults=AgentModelConfig(provider="google", model="gemini-3.1-flash-lite-preview"),
@@ -255,7 +288,7 @@ class TestValidatePrerequisites:
         """Critics can use non-Anthropic models in API mode."""
         data = tmp_path / "data.csv"
         data.write_text("x")
-        monkeypatch.setattr("auto_scientist.validation.check_provider_auth", self._mock_auth_ok)
+        monkeypatch.setattr("auto_core.validation.check_provider_auth", self._mock_auth_ok)
         monkeypatch.setattr("shutil.which", lambda name: "/usr/bin/claude")
         mc = ModelConfig(
             defaults=AgentModelConfig(model="claude-sonnet-4-6"),
@@ -269,7 +302,7 @@ class TestValidatePrerequisites:
         """OpenAI SDK agents need the Codex CLI on PATH."""
         data = tmp_path / "data.csv"
         data.write_text("x")
-        monkeypatch.setattr("auto_scientist.validation.check_provider_auth", self._mock_auth_ok)
+        monkeypatch.setattr("auto_core.validation.check_provider_auth", self._mock_auth_ok)
         monkeypatch.setattr(
             "shutil.which", lambda name: "/usr/bin/claude" if name == "claude" else None
         )
@@ -287,10 +320,10 @@ class TestValidateModelNames:
 
     def test_invalid_model_returns_error(self, monkeypatch):
         monkeypatch.setattr(
-            "auto_scientist.validation.check_model_exists",
+            "auto_core.validation.check_model_exists",
             lambda provider, model: "not found" if model == "bad-model" else None,
         )
-        from auto_scientist.validation import validate_model_names
+        from auto_core.validation import validate_model_names
 
         mc = ModelConfig(
             defaults=AgentModelConfig(model="bad-model"),
@@ -303,10 +336,10 @@ class TestValidateModelNames:
 
     def test_valid_models_return_no_errors(self, monkeypatch):
         monkeypatch.setattr(
-            "auto_scientist.validation.check_model_exists",
+            "auto_core.validation.check_model_exists",
             lambda provider, model: None,
         )
-        from auto_scientist.validation import validate_model_names
+        from auto_core.validation import validate_model_names
 
         mc = ModelConfig(
             defaults=AgentModelConfig(model="claude-sonnet-4-6"),
@@ -324,8 +357,8 @@ class TestValidateModelNames:
             call_count += 1
             return None
 
-        monkeypatch.setattr("auto_scientist.validation.check_model_exists", mock_check)
-        from auto_scientist.validation import validate_model_names
+        monkeypatch.setattr("auto_core.validation.check_model_exists", mock_check)
+        from auto_core.validation import validate_model_names
 
         mc = ModelConfig(
             defaults=AgentModelConfig(model="claude-sonnet-4-6"),
@@ -340,7 +373,7 @@ class TestValidateReasoningConfigs:
     """Test reasoning config validation against provider constraints."""
 
     def test_valid_anthropic_reasoning_returns_no_errors(self):
-        from auto_scientist.validation import validate_reasoning_configs
+        from auto_core.validation import validate_reasoning_configs
 
         mc = ModelConfig(
             defaults=AgentModelConfig(
@@ -352,7 +385,7 @@ class TestValidateReasoningConfigs:
         assert errors == []
 
     def test_valid_openai_reasoning_returns_no_errors(self):
-        from auto_scientist.validation import validate_reasoning_configs
+        from auto_core.validation import validate_reasoning_configs
 
         mc = ModelConfig(
             defaults=AgentModelConfig(model="claude-sonnet-4-6"),
@@ -366,7 +399,7 @@ class TestValidateReasoningConfigs:
         assert errors == []
 
     def test_valid_google_3x_reasoning_returns_no_errors(self):
-        from auto_scientist.validation import validate_reasoning_configs
+        from auto_core.validation import validate_reasoning_configs
 
         mc = ModelConfig(
             defaults=AgentModelConfig(model="claude-sonnet-4-6"),
@@ -383,7 +416,7 @@ class TestValidateReasoningConfigs:
 
     def test_google_3x_medium_only_flash(self):
         """MEDIUM thinkingLevel is only valid for Gemini 3 Flash models."""
-        from auto_scientist.validation import validate_reasoning_configs
+        from auto_core.validation import validate_reasoning_configs
 
         mc = ModelConfig(
             defaults=AgentModelConfig(model="claude-sonnet-4-6"),
@@ -402,7 +435,7 @@ class TestValidateReasoningConfigs:
 
     def test_google_3x_minimal_only_flash(self):
         """MINIMAL thinkingLevel is only valid for Gemini 3 Flash models."""
-        from auto_scientist.validation import validate_reasoning_configs
+        from auto_core.validation import validate_reasoning_configs
 
         mc = ModelConfig(
             defaults=AgentModelConfig(model="claude-sonnet-4-6"),
@@ -418,7 +451,7 @@ class TestValidateReasoningConfigs:
         assert errors == []
 
     def test_off_skips_validation(self):
-        from auto_scientist.validation import validate_reasoning_configs
+        from auto_core.validation import validate_reasoning_configs
 
         mc = ModelConfig(
             defaults=AgentModelConfig(
@@ -434,7 +467,7 @@ class TestValidateReasoningConfigs:
         assert errors == []
 
     def test_all_builtin_presets_pass_validation(self):
-        from auto_scientist.validation import validate_reasoning_configs
+        from auto_core.validation import validate_reasoning_configs
 
         for preset_name in ["default", "fast", "high", "max"]:
             mc = ModelConfig.builtin_preset(preset_name)
@@ -442,7 +475,7 @@ class TestValidateReasoningConfigs:
             assert errors == [], f"Preset '{preset_name}' has reasoning errors: {errors}"
 
     def test_anthropic_budget_too_low_returns_error(self):
-        from auto_scientist.validation import validate_reasoning_configs
+        from auto_core.validation import validate_reasoning_configs
 
         mc = ModelConfig(
             defaults=AgentModelConfig(model="claude-sonnet-4-6"),
@@ -457,7 +490,7 @@ class TestValidateReasoningConfigs:
         assert "below" in errors[0]
 
     def test_anthropic_budget_too_high_returns_error(self):
-        from auto_scientist.validation import validate_reasoning_configs
+        from auto_core.validation import validate_reasoning_configs
 
         mc = ModelConfig(
             defaults=AgentModelConfig(model="claude-sonnet-4-6"),
@@ -606,7 +639,7 @@ class TestPhaseTransitions:
         o.config = DomainConfig(name="t", description="d", data_paths=[])
 
         with (
-            patch("auto_scientist.orchestrator.validate_prerequisites"),
+            patch("auto_core.orchestrator.validate_prerequisites"),
             patch.object(o, "_run_report", new_callable=AsyncMock, return_value=True),
         ):
             await o.run()
@@ -636,7 +669,7 @@ class TestPhaseTransitions:
         config_path.write_text('{"name":"t","description":"d","data_paths":[]}')
 
         with (
-            patch("auto_scientist.orchestrator.validate_prerequisites"),
+            patch("auto_core.orchestrator.validate_prerequisites"),
             patch.object(o, "_run_ingestion", new_callable=AsyncMock, return_value=canonical),
             patch.object(o, "_run_report", new_callable=AsyncMock, return_value=True),
         ):
@@ -662,7 +695,7 @@ class TestPhaseTransitions:
         o.config = DomainConfig(name="t", description="d", data_paths=[])
 
         with (
-            patch("auto_scientist.orchestrator.validate_prerequisites"),
+            patch("auto_core.orchestrator.validate_prerequisites"),
             patch.object(
                 o, "_run_report", new_callable=AsyncMock, return_value=True
             ) as mock_report,
@@ -690,7 +723,7 @@ class TestPhaseTransitions:
         o.config = DomainConfig(name="t", description="d", data_paths=[])
 
         with (
-            patch("auto_scientist.orchestrator.validate_prerequisites"),
+            patch("auto_core.orchestrator.validate_prerequisites"),
             patch.object(
                 o, "_run_report", new_callable=AsyncMock, return_value=True
             ) as mock_report,
@@ -729,7 +762,7 @@ class TestPhaseTransitions:
         o.config = DomainConfig(name="t", description="d", data_paths=[])
 
         with (
-            patch("auto_scientist.orchestrator.validate_prerequisites"),
+            patch("auto_core.orchestrator.validate_prerequisites"),
             patch.object(o, "_run_iteration_body", new_callable=AsyncMock) as mock_iter,
             patch.object(o, "_run_report", new_callable=AsyncMock, return_value=True),
         ):
@@ -771,7 +804,7 @@ class TestPhaseTransitions:
         o.config = DomainConfig(name="t", description="d", data_paths=[])
 
         with (
-            patch("auto_scientist.orchestrator.validate_prerequisites"),
+            patch("auto_core.orchestrator.validate_prerequisites"),
             patch.object(o, "_run_iteration_body", new_callable=AsyncMock) as mock_iter,
         ):
             await o.run()
@@ -843,7 +876,7 @@ class TestIteration0:
             patch.object(
                 orchestrator, "_run_coder", new_callable=AsyncMock, return_value=script_path
             ),
-            patch("auto_scientist.orchestrator.read_run_result", return_value=run_result),
+            patch("auto_core.orchestrator.read_run_result", return_value=run_result),
         ):
             await orchestrator._run_iteration_body()
 
@@ -894,7 +927,7 @@ class TestIteration0:
                 return_value=script_path,
             ),
             patch(
-                "auto_scientist.orchestrator.read_run_result",
+                "auto_core.orchestrator.read_run_result",
                 return_value=run_result,
             ),
         ):
@@ -1059,7 +1092,7 @@ class TestRunIteration:
                 return_value=script_path,
             ),
             patch(
-                "auto_scientist.orchestrator.read_run_result",
+                "auto_core.orchestrator.read_run_result",
                 return_value=run_result,
             ),
         ):
@@ -1097,7 +1130,7 @@ class TestRunIteration:
             patch.object(
                 orchestrator, "_run_coder", new_callable=AsyncMock, return_value=script_path
             ),
-            patch("auto_scientist.orchestrator.read_run_result", return_value=run_result),
+            patch("auto_core.orchestrator.read_run_result", return_value=run_result),
         ):
             await orchestrator._run_iteration_body()
 
@@ -1240,7 +1273,7 @@ class TestRunIteration:
             patch.object(
                 orchestrator, "_run_coder", new_callable=AsyncMock, return_value=script_path
             ),
-            patch("auto_scientist.orchestrator.read_run_result", return_value=run_result),
+            patch("auto_core.orchestrator.read_run_result", return_value=run_result),
         ):
             await orchestrator._run_iteration_body()
 
@@ -1282,7 +1315,7 @@ class TestRunIteration:
             patch.object(
                 orchestrator, "_run_coder", new_callable=AsyncMock, return_value=script_path
             ),
-            patch("auto_scientist.orchestrator.read_run_result", return_value=run_result),
+            patch("auto_core.orchestrator.read_run_result", return_value=run_result),
         ):
             await orchestrator._run_iteration_body()
 
@@ -1353,7 +1386,7 @@ class TestRunIteration:
             patch.object(
                 orchestrator, "_run_coder", new_callable=AsyncMock, return_value=script_path
             ),
-            patch("auto_scientist.orchestrator.read_run_result", return_value=run_result),
+            patch("auto_core.orchestrator.read_run_result", return_value=run_result),
         ):
             await orchestrator._run_iteration_body()
 
@@ -1739,7 +1772,7 @@ class TestRunDebateOrchestrator:
     @pytest.mark.asyncio
     async def test_calls_run_single_critic_debate_with_summaries(self, orchestrator, tmp_path):
         """When summarizer is enabled, each persona gets its own summarizer."""
-        from auto_scientist.agents.debate_models import (
+        from auto_core.agents.debate_models import (
             CriticOutput,
             DebateResult,
         )
@@ -1767,7 +1800,7 @@ class TestRunDebateOrchestrator:
                 return_value=debate_result,
             ) as mock_single,
             patch(
-                "auto_scientist.summarizer._query_summary",
+                "auto_core.summarizer._query_summary",
                 new_callable=AsyncMock,
                 return_value="Summarizing...",
             ),
@@ -1793,7 +1826,7 @@ class TestRunScientistRevisionOrchestrator:
 
     @pytest.mark.asyncio
     async def test_returns_revised_plan(self, orchestrator, tmp_path):
-        from auto_scientist.agents.debate_models import (
+        from auto_core.agents.debate_models import (
             Concern,
             CriticOutput,
             DebateResult,
@@ -1837,7 +1870,7 @@ class TestRunScientistRevisionOrchestrator:
 
     @pytest.mark.asyncio
     async def test_error_returns_none(self, orchestrator, tmp_path):
-        from auto_scientist.agents.debate_models import (
+        from auto_core.agents.debate_models import (
             CriticOutput,
             DebateResult,
         )
@@ -1874,7 +1907,7 @@ class TestBuildConcernLedger:
         model="openai:gpt-4o",
         concerns=None,
     ):
-        from auto_scientist.agents.debate_models import (
+        from auto_core.agents.debate_models import (
             Concern,
             CriticOutput,
             DebateResult,
@@ -1931,7 +1964,7 @@ class TestBuildConcernLedger:
         assert ledger == []
 
     def test_multiple_concerns(self):
-        from auto_scientist.agents.debate_models import Concern
+        from auto_core.agents.debate_models import Concern
 
         concerns = [
             Concern(
@@ -2048,7 +2081,7 @@ class TestRunCoderOrchestrator:
         # Orchestrator resolves exe to absolute path and prepends ensure_deps
         run_cmd = captured_kwargs["run_command"]
         assert run_cmd.endswith("/usr/bin/python {script_path}")
-        assert "auto_scientist.ensure_deps {script_path} &&" in run_cmd
+        assert "auto_core.ensure_deps {script_path} &&" in run_cmd
 
     @pytest.mark.asyncio
     async def test_run_config_defaults_without_config(self, orchestrator, tmp_path):
@@ -2075,7 +2108,7 @@ class TestRunCoderOrchestrator:
         # Orchestrator resolves exe to absolute path and prepends ensure_deps
         run_cmd = captured_kwargs["run_command"]
         assert run_cmd.endswith("/usr/local/bin/uv run {script_path}")
-        assert "auto_scientist.ensure_deps {script_path} &&" in run_cmd
+        assert "auto_core.ensure_deps {script_path} &&" in run_cmd
 
     @pytest.mark.asyncio
     async def test_run_command_warns_when_exe_not_found(self, orchestrator, tmp_path):
@@ -2101,7 +2134,7 @@ class TestRunCoderOrchestrator:
         # Falls through with original command (unresolved) but still has ensure_deps
         run_cmd = captured_kwargs["run_command"]
         assert run_cmd.endswith("uv run {script_path}")
-        assert "auto_scientist.ensure_deps {script_path} &&" in run_cmd
+        assert "auto_core.ensure_deps {script_path} &&" in run_cmd
 
 
 class TestReadRunResult:
@@ -2349,7 +2382,7 @@ class TestRunFullOrchestration:
         o.config = DomainConfig(name="t", description="d", data_paths=[])
 
         with (
-            patch("auto_scientist.orchestrator.validate_prerequisites"),
+            patch("auto_core.orchestrator.validate_prerequisites"),
             patch.object(o, "_run_report", new_callable=AsyncMock, return_value=True),
         ):
             await o.run()
@@ -2386,14 +2419,14 @@ class TestRunFullOrchestration:
         run_result = RunResult(success=True, stdout="ok", return_code=0)
 
         with (
-            patch("auto_scientist.orchestrator.validate_prerequisites"),
-            patch("auto_scientist.orchestrator.wait_for_window", new_callable=AsyncMock),
+            patch("auto_core.orchestrator.validate_prerequisites"),
+            patch("auto_core.orchestrator.wait_for_window", new_callable=AsyncMock),
             patch.object(o, "_run_analyst", new_callable=AsyncMock, return_value={}),
             patch.object(o, "_run_scientist_plan", new_callable=AsyncMock, return_value=plan),
             patch.object(o, "_run_debate", new_callable=AsyncMock, return_value=None),
             patch.object(o, "_run_scientist_revision", new_callable=AsyncMock, return_value=None),
             patch.object(o, "_run_coder", new_callable=AsyncMock, return_value=script_path),
-            patch("auto_scientist.orchestrator.read_run_result", return_value=run_result),
+            patch("auto_core.orchestrator.read_run_result", return_value=run_result),
             patch.object(o, "_run_report", new_callable=AsyncMock, return_value=True),
         ):
             await o.run()
@@ -2430,7 +2463,7 @@ class TestRunIngestionFull:
         config_path.write_text('{"name":"mydom","description":"test","data_paths":["clean.csv"]}')
 
         with (
-            patch("auto_scientist.orchestrator.validate_prerequisites"),
+            patch("auto_core.orchestrator.validate_prerequisites"),
             patch(
                 "auto_scientist.agents.ingestor.run_ingestor",
                 new_callable=AsyncMock,
@@ -2469,7 +2502,7 @@ class TestRunIngestionFull:
         (canonical / "data.csv").write_text("a,b\n1,2\n")
 
         with (
-            patch("auto_scientist.orchestrator.validate_prerequisites"),
+            patch("auto_core.orchestrator.validate_prerequisites"),
             patch(
                 "auto_scientist.agents.ingestor.run_ingestor",
                 new_callable=AsyncMock,
@@ -2526,16 +2559,14 @@ class TestSummaryIntegration:
         run_result = RunResult(success=True, stdout="ok", return_code=0)
 
         with (
-            patch("auto_scientist.orchestrator.validate_prerequisites"),
-            patch("auto_scientist.orchestrator.wait_for_window", new_callable=AsyncMock),
+            patch("auto_core.orchestrator.validate_prerequisites"),
+            patch("auto_core.orchestrator.wait_for_window", new_callable=AsyncMock),
             patch.object(o, "_run_analyst", new_callable=AsyncMock, return_value={}),
             patch.object(o, "_run_scientist_plan", new_callable=AsyncMock, return_value=plan),
             patch.object(o, "_run_coder", new_callable=AsyncMock, return_value=script_path),
-            patch("auto_scientist.orchestrator.read_run_result", return_value=run_result),
+            patch("auto_core.orchestrator.read_run_result", return_value=run_result),
             patch.object(o, "_run_report", new_callable=AsyncMock, return_value=True),
-            patch(
-                "auto_scientist.orchestrator.run_with_summaries", new_callable=AsyncMock
-            ) as mock_rws,
+            patch("auto_core.orchestrator.run_with_summaries", new_callable=AsyncMock) as mock_rws,
         ):
             await o.run()
 
@@ -2571,8 +2602,8 @@ class TestSummaryIntegration:
             return await coro_fn(message_buffer)
 
         with (
-            patch("auto_scientist.orchestrator.validate_prerequisites"),
-            patch("auto_scientist.orchestrator.wait_for_window", new_callable=AsyncMock),
+            patch("auto_core.orchestrator.validate_prerequisites"),
+            patch("auto_core.orchestrator.wait_for_window", new_callable=AsyncMock),
             patch(
                 "auto_scientist.agents.analyst.run_analyst", new_callable=AsyncMock, return_value={}
             ),
@@ -2588,9 +2619,9 @@ class TestSummaryIntegration:
                 new_callable=AsyncMock,
                 return_value=script_path,
             ),
-            patch("auto_scientist.orchestrator.read_run_result", return_value=run_result),
+            patch("auto_core.orchestrator.read_run_result", return_value=run_result),
             patch.object(o, "_run_report", new_callable=AsyncMock, return_value=True),
-            patch("auto_scientist.orchestrator.with_summaries", new_callable=AsyncMock) as mock_ws,
+            patch("auto_core.orchestrator.with_summaries", new_callable=AsyncMock) as mock_ws,
         ):
             # Make with_summaries pass through to the actual coroutine
             mock_ws.side_effect = ws_passthrough
@@ -2633,9 +2664,9 @@ class TestSummaryIntegration:
             patch.object(
                 orchestrator, "_run_coder", new_callable=AsyncMock, return_value=script_path
             ),
-            patch("auto_scientist.orchestrator.read_run_result", return_value=run_result),
+            patch("auto_core.orchestrator.read_run_result", return_value=run_result),
             patch(
-                "auto_scientist.orchestrator.summarize_results",
+                "auto_core.orchestrator.summarize_results",
                 new_callable=AsyncMock,
                 return_value="Good results",
             ) as mock_sr,
@@ -2681,9 +2712,9 @@ class TestSummaryIntegration:
                 new_callable=AsyncMock,
                 return_value=script_path,
             ),
-            patch("auto_scientist.orchestrator.read_run_result", return_value=run_result),
+            patch("auto_core.orchestrator.read_run_result", return_value=run_result),
             patch(
-                "auto_scientist.orchestrator.with_summaries",
+                "auto_core.orchestrator.with_summaries",
                 new_callable=AsyncMock,
                 side_effect=ws_passthrough,
             ),
@@ -2742,7 +2773,7 @@ class TestLoadFinalPlanDedup:
     """Regression: resuming from coder must not duplicate predictions already in state."""
 
     def test_no_duplicate_predictions_on_resume(self, orchestrator, tmp_path):
-        from auto_scientist.state import PredictionRecord
+        from auto_core.state import PredictionRecord
 
         orchestrator.state.iteration = 1
         # Simulate state restored by rewind_run: predictions already present
@@ -2786,7 +2817,7 @@ class TestLoadFinalPlanDedup:
         }
         (version_dir / "plan.json").write_text(json.dumps(plan))
 
-        from auto_scientist.persistence import load_final_plan_from_disk
+        from auto_core.persistence import load_final_plan_from_disk
 
         loaded = load_final_plan_from_disk(version_dir, orchestrator.state)
 
@@ -2798,7 +2829,7 @@ class TestLoadFinalPlanDedup:
     def test_applies_predictions_when_none_exist(self, orchestrator, tmp_path):
         import json
 
-        from auto_scientist.persistence import load_final_plan_from_disk
+        from auto_core.persistence import load_final_plan_from_disk
 
         orchestrator.state.iteration = 1
         orchestrator.state.prediction_history = []
@@ -2824,7 +2855,7 @@ class TestLoadFinalPlanDedup:
 
 class TestResolvePredictionOutcomes:
     def _add_pending(self, orchestrator, prediction_text, pred_id=""):
-        from auto_scientist.state import PredictionRecord
+        from auto_core.state import PredictionRecord
 
         orchestrator.state.prediction_history.append(
             PredictionRecord(
@@ -3124,7 +3155,7 @@ class TestApplyPredictionUpdatesFollowsFrom:
     """Tests for follows_from normalization inside _apply_prediction_updates()."""
 
     def test_normalizes_invalid_follows_from(self, orchestrator):
-        from auto_scientist.state import PredictionRecord
+        from auto_core.state import PredictionRecord
 
         orchestrator.state.iteration = 1
         orchestrator.state.prediction_history = [
@@ -3152,7 +3183,7 @@ class TestApplyPredictionUpdatesFollowsFrom:
         assert orchestrator.state.prediction_history[1].follows_from is None
 
     def test_preserves_valid_follows_from(self, orchestrator):
-        from auto_scientist.state import PredictionRecord
+        from auto_core.state import PredictionRecord
 
         orchestrator.state.iteration = 1
         orchestrator.state.prediction_history = [
@@ -3209,7 +3240,7 @@ class TestCarryForwardPredictions:
     """Tests for _get_pending_carryforward_predictions()."""
 
     def test_collects_pending_from_prior_iterations(self, orchestrator):
-        from auto_scientist.state import PredictionRecord
+        from auto_core.state import PredictionRecord
 
         orchestrator.state.iteration = 2
         orchestrator.state.prediction_history = [
@@ -3239,7 +3270,7 @@ class TestCarryForwardPredictions:
         assert carried[0]["_carried_forward"] is True
 
     def test_excludes_current_iteration(self, orchestrator):
-        from auto_scientist.state import PredictionRecord
+        from auto_core.state import PredictionRecord
 
         orchestrator.state.iteration = 2
         orchestrator.state.prediction_history = [
@@ -3262,7 +3293,7 @@ class TestCarryForwardPredictions:
         assert carried == []
 
     def test_integration_inject_into_plan(self, orchestrator):
-        from auto_scientist.state import PredictionRecord
+        from auto_core.state import PredictionRecord
 
         orchestrator.state.iteration = 1
         orchestrator.state.prediction_history = [

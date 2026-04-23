@@ -5,6 +5,9 @@
 experiments/
 !experiments/.gitkeep
 
+# Auto-Reviewer runtime output
+review_workspace/
+
 # Python
 __pycache__/
 *.py[cod]

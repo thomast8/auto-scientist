@@ -4,10 +4,10 @@ import asyncio
 from unittest.mock import MagicMock, patch
 
 import pytest
+from auto_core.sdk_backend import SDKMessage
+from auto_core.state import ExperimentState
 
 from auto_scientist.agents.report import run_report
-from auto_scientist.sdk_backend import SDKMessage
-from auto_scientist.state import ExperimentState
 
 
 def _text_block(text: str) -> MagicMock:
@@ -116,7 +116,7 @@ class TestRunReport:
         mock_query.side_effect = fake_query
 
         state = ExperimentState(domain="spo2", goal="predict oxygen levels", iteration=10)
-        from auto_scientist.state import VersionEntry
+        from auto_core.state import VersionEntry
 
         state.versions.append(VersionEntry(version="v07", iteration=7, script_path="/tmp/s.py"))
         notebook_path = tmp_path / "lab_notebook.xml"
@@ -327,6 +327,33 @@ Try GP regression.
 
 
 class TestReportStructuralValidation:
+    @pytest.fixture(autouse=True)
+    def _scientist_report_shape(self):
+        """Pin the scientist-flavored report structure regardless of which
+        app installed its registry earlier in this process."""
+        from auto_core import sdk_utils
+
+        prior_headings = list(sdk_utils._EXPECTED_HEADINGS)
+        prior_version_table = sdk_utils._REPORT_REQUIRE_VERSION_COMPARISON_TABLE
+        sdk_utils._EXPECTED_HEADINGS[:] = [
+            "executive summary",
+            "problem statement",
+            "methodology",
+            "journey",
+            "best approach",
+            "results",
+            "insights",
+            "limitations",
+            "future work",
+            "version comparison",
+        ]
+        sdk_utils._REPORT_REQUIRE_VERSION_COMPARISON_TABLE = True
+        try:
+            yield
+        finally:
+            sdk_utils._EXPECTED_HEADINGS[:] = prior_headings
+            sdk_utils._REPORT_REQUIRE_VERSION_COMPARISON_TABLE = prior_version_table
+
     @pytest.mark.asyncio
     @patch("auto_scientist.agents.report.safe_query")
     async def test_incomplete_report_triggers_retry(self, mock_query, tmp_path):

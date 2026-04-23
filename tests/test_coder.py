@@ -5,9 +5,9 @@ from pathlib import Path
 from unittest.mock import MagicMock, patch
 
 import pytest
+from auto_core.sdk_backend import SDKMessage
 
 from auto_scientist.agents.coder import _check_runtime_success, run_coder
-from auto_scientist.sdk_backend import SDKMessage
 
 _SUCCESS_RUN_RESULT = json.dumps(
     {"success": True, "return_code": 0, "timed_out": False, "error": None}
@@ -45,7 +45,7 @@ def _assistant_msg(blocks: list) -> SDKMessage:
 
 class TestRunCoder:
     @pytest.mark.asyncio
-    @patch("auto_scientist.sdk_backend.claude_query")
+    @patch("auto_core.sdk_backend.claude_query")
     async def test_creates_script_at_expected_path(self, mock_query, tmp_path):
         async def fake_query(**kwargs):
             version_dir = tmp_path / "v01"
@@ -67,7 +67,7 @@ class TestRunCoder:
         assert result == tmp_path / "v01" / "experiment.py"
 
     @pytest.mark.asyncio
-    @patch("auto_scientist.sdk_backend.claude_query")
+    @patch("auto_core.sdk_backend.claude_query")
     async def test_raises_when_script_not_created(self, mock_query, tmp_path):
         async def fake_query(**kwargs):
             yield MagicMock(
@@ -85,7 +85,7 @@ class TestRunCoder:
             )
 
     @pytest.mark.asyncio
-    @patch("auto_scientist.sdk_backend.claude_query")
+    @patch("auto_core.sdk_backend.claude_query")
     async def test_previous_script_exists_uses_has_previous(self, mock_query, tmp_path):
         captured_prompt = {}
 
@@ -115,7 +115,7 @@ class TestRunCoder:
         assert str(previous) in captured_prompt["prompt"]
 
     @pytest.mark.asyncio
-    @patch("auto_scientist.sdk_backend.claude_query")
+    @patch("auto_core.sdk_backend.claude_query")
     async def test_no_previous_script_uses_no_previous(self, mock_query, tmp_path):
         captured_prompt = {}
 
@@ -145,7 +145,7 @@ class TestRunCoder:
         )
 
     @pytest.mark.asyncio
-    @patch("auto_scientist.sdk_backend.claude_query")
+    @patch("auto_core.sdk_backend.claude_query")
     async def test_write_subdirectory_allowed(self, mock_query, tmp_path):
         async def fake_query(**kwargs):
             version_dir = tmp_path / "v01"
@@ -167,7 +167,7 @@ class TestRunCoder:
         assert result == tmp_path / "v01" / "experiment.py"
 
     @pytest.mark.asyncio
-    @patch("auto_scientist.sdk_backend.claude_query")
+    @patch("auto_core.sdk_backend.claude_query")
     async def test_options_configuration(self, mock_query, tmp_path):
         captured_opts = {}
 
@@ -195,7 +195,7 @@ class TestRunCoder:
         assert opts.permission_mode == "acceptEdits"
 
     @pytest.mark.asyncio
-    @patch("auto_scientist.sdk_backend.claude_query")
+    @patch("auto_core.sdk_backend.claude_query")
     async def test_pep723_instruction_in_prompt(self, mock_query, tmp_path):
         """System prompt instructs coder to declare deps via PEP 723 inline metadata."""
         captured_opts = {}
@@ -223,7 +223,7 @@ class TestRunCoder:
         assert "uv run" in system
 
     @pytest.mark.asyncio
-    @patch("auto_scientist.sdk_backend.claude_query")
+    @patch("auto_core.sdk_backend.claude_query")
     async def test_run_instructions_in_prompts(self, mock_query, tmp_path):
         """Prompts include run_timeout_minutes and run_command for self-execution."""
         captured_opts = {}
@@ -292,7 +292,7 @@ class TestRunCoder:
         assert "python3 {script_path}" in captured["system"]
 
     @pytest.mark.asyncio
-    @patch("auto_scientist.sdk_backend.claude_query")
+    @patch("auto_core.sdk_backend.claude_query")
     async def test_anthropic_provider_keeps_uv_run(self, mock_query, tmp_path):
         """Claude coder keeps uv run (uv works fine on the host)."""
         captured_opts = {}
@@ -387,7 +387,7 @@ class TestRunCoder:
 
 class TestCoderMessageBuffer:
     @pytest.mark.asyncio
-    @patch("auto_scientist.sdk_backend.claude_query")
+    @patch("auto_core.sdk_backend.claude_query")
     async def test_populates_message_buffer_with_text(self, mock_query, tmp_path):
         from claude_code_sdk import AssistantMessage, ResultMessage, TextBlock
 
@@ -419,7 +419,7 @@ class TestCoderMessageBuffer:
         assert any("Writing experiment script..." in entry for entry in buf)
 
     @pytest.mark.asyncio
-    @patch("auto_scientist.sdk_backend.claude_query")
+    @patch("auto_core.sdk_backend.claude_query")
     async def test_populates_message_buffer_with_tool_use(self, mock_query, tmp_path):
         from claude_code_sdk import AssistantMessage, ResultMessage, ToolUseBlock
 
@@ -456,7 +456,7 @@ class TestCoderMessageBuffer:
 
 class TestCoderRetry:
     @pytest.mark.asyncio
-    @patch("auto_scientist.sdk_backend.claude_query")
+    @patch("auto_core.sdk_backend.claude_query")
     async def test_retry_on_undeclared_deps(self, mock_query, tmp_path):
         """First attempt has undeclared dep, second fixes it."""
         call_count = 0
@@ -494,7 +494,7 @@ class TestCoderRetry:
         assert call_count == 2
 
     @pytest.mark.asyncio
-    @patch("auto_scientist.sdk_backend.claude_query")
+    @patch("auto_core.sdk_backend.claude_query")
     async def test_retry_on_syntax_error(self, mock_query, tmp_path):
         """First attempt produces script with syntax error, second succeeds."""
         call_count = 0
@@ -526,7 +526,7 @@ class TestCoderRetry:
         assert call_count == 2
 
     @pytest.mark.asyncio
-    @patch("auto_scientist.sdk_backend.claude_query")
+    @patch("auto_core.sdk_backend.claude_query")
     async def test_retry_on_missing_script(self, mock_query, tmp_path):
         """First attempt doesn't create script, second does."""
         call_count = 0
@@ -555,7 +555,7 @@ class TestCoderRetry:
         assert call_count == 2
 
     @pytest.mark.asyncio
-    @patch("auto_scientist.sdk_backend.claude_query")
+    @patch("auto_core.sdk_backend.claude_query")
     async def test_exhausts_retries_raises(self, mock_query, tmp_path):
         """All attempts fail to create script."""
 
@@ -579,7 +579,7 @@ class TestCoderRuntimeRetry:
     """Tests for runtime error recovery in the coder retry loop."""
 
     @pytest.mark.asyncio
-    @patch("auto_scientist.sdk_backend.claude_query")
+    @patch("auto_core.sdk_backend.claude_query")
     async def test_successful_run_no_retry(self, mock_query, tmp_path):
         """Script runs successfully on first attempt, no retry needed."""
         call_count = 0
@@ -606,7 +606,7 @@ class TestCoderRuntimeRetry:
         assert call_count == 1
 
     @pytest.mark.asyncio
-    @patch("auto_scientist.sdk_backend.claude_query")
+    @patch("auto_core.sdk_backend.claude_query")
     async def test_runtime_crash_triggers_retry(self, mock_query, tmp_path):
         """First attempt crashes at runtime, second succeeds."""
         call_count = 0
@@ -657,7 +657,7 @@ class TestCoderRuntimeRetry:
         assert "Fenrite" in captured_prompts[1]
 
     @pytest.mark.asyncio
-    @patch("auto_scientist.sdk_backend.claude_query")
+    @patch("auto_core.sdk_backend.claude_query")
     async def test_runtime_failure_all_attempts_returns_script(self, mock_query, tmp_path):
         """Runtime failure on all attempts still returns script path."""
         call_count = 0
@@ -687,7 +687,7 @@ class TestCoderRuntimeRetry:
         assert call_count == 3  # MAX_ATTEMPTS = 3
 
     @pytest.mark.asyncio
-    @patch("auto_scientist.sdk_backend.claude_query")
+    @patch("auto_core.sdk_backend.claude_query")
     async def test_timeout_does_not_trigger_retry(self, mock_query, tmp_path):
         """Timed-out run should NOT trigger a retry."""
         call_count = 0

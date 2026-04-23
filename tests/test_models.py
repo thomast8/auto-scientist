@@ -4,21 +4,21 @@ import json
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
+from auto_core.model_config import ReasoningConfig
+from auto_core.models.anthropic_client import query_anthropic
+from auto_core.models.google_client import query_google
+from auto_core.models.openai_client import query_openai
+from auto_core.sdk_utils import make_strict_schema
 
 from auto_scientist.images import ImageData
-from auto_scientist.model_config import ReasoningConfig
-from auto_scientist.models.anthropic_client import query_anthropic
-from auto_scientist.models.google_client import query_google
-from auto_scientist.models.openai_client import query_openai
 from auto_scientist.schemas import ScientistPlanOutput
-from auto_scientist.sdk_utils import make_strict_schema
 
 FAKE_IMAGE = ImageData(data="aW1hZ2VieXRlcw==", media_type="image/png")
 
 
 class TestQueryOpenAIStreaming:
     @pytest.mark.asyncio
-    @patch("auto_scientist.models.openai_client.AsyncOpenAI")
+    @patch("auto_core.models.openai_client.AsyncOpenAI")
     async def test_streaming_calls_on_token(self, mock_cls):
         mock_client = AsyncMock()
         mock_cls.return_value = mock_client
@@ -43,7 +43,7 @@ class TestQueryOpenAIStreaming:
         assert tokens == ["hel", "lo"]
 
     @pytest.mark.asyncio
-    @patch("auto_scientist.models.openai_client.AsyncOpenAI")
+    @patch("auto_core.models.openai_client.AsyncOpenAI")
     async def test_streaming_web_search(self, mock_cls):
         mock_client = AsyncMock()
         mock_cls.return_value = mock_client
@@ -65,7 +65,7 @@ class TestQueryOpenAIStreaming:
         assert tokens == ["search", "ed"]
 
     @pytest.mark.asyncio
-    @patch("auto_scientist.models.openai_client.AsyncOpenAI")
+    @patch("auto_core.models.openai_client.AsyncOpenAI")
     async def test_no_on_token_uses_non_streaming(self, mock_cls):
         mock_client = AsyncMock()
         mock_cls.return_value = mock_client
@@ -82,7 +82,7 @@ class TestQueryOpenAIStreaming:
 
 class TestQueryOpenAI:
     @pytest.mark.asyncio
-    @patch("auto_scientist.models.openai_client.AsyncOpenAI")
+    @patch("auto_core.models.openai_client.AsyncOpenAI")
     async def test_standard_call(self, mock_cls):
         mock_client = AsyncMock()
         mock_cls.return_value = mock_client
@@ -102,7 +102,7 @@ class TestQueryOpenAI:
         assert call_kwargs["messages"][0]["content"] == "test prompt"
 
     @pytest.mark.asyncio
-    @patch("auto_scientist.models.openai_client.AsyncOpenAI")
+    @patch("auto_core.models.openai_client.AsyncOpenAI")
     async def test_web_search_uses_responses_api(self, mock_cls):
         mock_client = AsyncMock()
         mock_cls.return_value = mock_client
@@ -117,7 +117,7 @@ class TestQueryOpenAI:
         assert any(t["type"] == "web_search_preview" for t in call_kwargs["tools"])
 
     @pytest.mark.asyncio
-    @patch("auto_scientist.models.openai_client.AsyncOpenAI")
+    @patch("auto_core.models.openai_client.AsyncOpenAI")
     async def test_empty_response_returns_empty_string(self, mock_cls):
         mock_client = AsyncMock()
         mock_cls.return_value = mock_client
@@ -132,7 +132,7 @@ class TestQueryOpenAI:
 
 class TestQueryOpenAIMaxTokens:
     @pytest.mark.asyncio
-    @patch("auto_scientist.models.openai_client.AsyncOpenAI")
+    @patch("auto_core.models.openai_client.AsyncOpenAI")
     async def test_custom_max_tokens(self, mock_cls):
         mock_client = AsyncMock()
         mock_cls.return_value = mock_client
@@ -146,7 +146,7 @@ class TestQueryOpenAIMaxTokens:
         assert call_kwargs["max_tokens"] == 150
 
     @pytest.mark.asyncio
-    @patch("auto_scientist.models.openai_client.AsyncOpenAI")
+    @patch("auto_core.models.openai_client.AsyncOpenAI")
     async def test_default_max_tokens(self, mock_cls):
         mock_client = AsyncMock()
         mock_cls.return_value = mock_client
@@ -160,7 +160,7 @@ class TestQueryOpenAIMaxTokens:
         assert call_kwargs["max_tokens"] == 4096
 
     @pytest.mark.asyncio
-    @patch("auto_scientist.models.openai_client.AsyncOpenAI")
+    @patch("auto_core.models.openai_client.AsyncOpenAI")
     async def test_custom_max_tokens_streaming(self, mock_cls):
         mock_client = AsyncMock()
         mock_cls.return_value = mock_client
@@ -181,7 +181,7 @@ class TestQueryOpenAIMaxTokens:
 
 class TestQueryGoogleStreaming:
     @pytest.mark.asyncio
-    @patch("auto_scientist.models.google_client.genai")
+    @patch("auto_core.models.google_client.genai")
     async def test_streaming_calls_on_token(self, mock_genai):
         async def fake_stream():
             for text in ["goo", "gle"]:
@@ -198,7 +198,7 @@ class TestQueryGoogleStreaming:
         assert tokens == ["goo", "gle"]
 
     @pytest.mark.asyncio
-    @patch("auto_scientist.models.google_client.genai")
+    @patch("auto_core.models.google_client.genai")
     async def test_streaming_skips_none_text(self, mock_genai):
         async def fake_stream():
             yield MagicMock(text=None)
@@ -215,7 +215,7 @@ class TestQueryGoogleStreaming:
         assert tokens == ["data"]
 
     @pytest.mark.asyncio
-    @patch("auto_scientist.models.google_client.genai")
+    @patch("auto_core.models.google_client.genai")
     async def test_no_on_token_uses_non_streaming(self, mock_genai):
         mock_response = MagicMock(text="response")
         mock_genai.Client.return_value.aio.models.generate_content = AsyncMock(
@@ -230,7 +230,7 @@ class TestQueryGoogleStreaming:
 
 class TestQueryGoogle:
     @pytest.mark.asyncio
-    @patch("auto_scientist.models.google_client.genai")
+    @patch("auto_core.models.google_client.genai")
     async def test_standard_call(self, mock_genai):
         mock_response = MagicMock(text="google response")
         mock_response.usage_metadata = MagicMock(prompt_token_count=80, candidates_token_count=30)
@@ -245,7 +245,7 @@ class TestQueryGoogle:
         assert result.output_tokens == 30
 
     @pytest.mark.asyncio
-    @patch("auto_scientist.models.google_client.genai")
+    @patch("auto_core.models.google_client.genai")
     async def test_web_search_adds_config(self, mock_genai):
         mock_response = MagicMock(text="searched")
         mock_genai.Client.return_value.aio.models.generate_content = AsyncMock(
@@ -259,7 +259,7 @@ class TestQueryGoogle:
         assert call_kwargs["config"] is not None
 
     @pytest.mark.asyncio
-    @patch("auto_scientist.models.google_client.genai")
+    @patch("auto_core.models.google_client.genai")
     async def test_empty_response_returns_empty_string(self, mock_genai):
         mock_response = MagicMock(text=None)
         mock_genai.Client.return_value.aio.models.generate_content = AsyncMock(
@@ -287,7 +287,7 @@ def _make_anthropic_stream_mock(chunks):
 
 class TestQueryAnthropicStreaming:
     @pytest.mark.asyncio
-    @patch("auto_scientist.models.anthropic_client.AsyncAnthropic")
+    @patch("auto_core.models.anthropic_client.AsyncAnthropic")
     async def test_streaming_calls_on_token(self, mock_cls):
         mock_client = MagicMock()
         mock_client.messages.create = AsyncMock()
@@ -302,7 +302,7 @@ class TestQueryAnthropicStreaming:
         mock_client.messages.stream.assert_called_once()
 
     @pytest.mark.asyncio
-    @patch("auto_scientist.models.anthropic_client.AsyncAnthropic")
+    @patch("auto_core.models.anthropic_client.AsyncAnthropic")
     async def test_streaming_with_web_search(self, mock_cls):
         mock_client = MagicMock()
         mock_client.messages.create = AsyncMock()
@@ -319,7 +319,7 @@ class TestQueryAnthropicStreaming:
         assert any(t["type"] == "web_search_20250305" for t in call_kwargs["tools"])
 
     @pytest.mark.asyncio
-    @patch("auto_scientist.models.anthropic_client.AsyncAnthropic")
+    @patch("auto_core.models.anthropic_client.AsyncAnthropic")
     async def test_no_on_token_uses_non_streaming(self, mock_cls):
         mock_client = MagicMock()
         mock_client.messages.create = AsyncMock()
@@ -337,7 +337,7 @@ class TestQueryAnthropicStreaming:
 
 class TestQueryAnthropic:
     @pytest.mark.asyncio
-    @patch("auto_scientist.models.anthropic_client.AsyncAnthropic")
+    @patch("auto_core.models.anthropic_client.AsyncAnthropic")
     async def test_standard_call(self, mock_cls):
         mock_client = AsyncMock()
         mock_cls.return_value = mock_client
@@ -356,7 +356,7 @@ class TestQueryAnthropic:
         assert "tools" not in call_kwargs
 
     @pytest.mark.asyncio
-    @patch("auto_scientist.models.anthropic_client.AsyncAnthropic")
+    @patch("auto_core.models.anthropic_client.AsyncAnthropic")
     async def test_web_search_adds_tool(self, mock_cls):
         mock_client = AsyncMock()
         mock_cls.return_value = mock_client
@@ -371,7 +371,7 @@ class TestQueryAnthropic:
         assert any(t["type"] == "web_search_20250305" for t in call_kwargs["tools"])
 
     @pytest.mark.asyncio
-    @patch("auto_scientist.models.anthropic_client.AsyncAnthropic")
+    @patch("auto_core.models.anthropic_client.AsyncAnthropic")
     async def test_empty_response_returns_empty_string(self, mock_cls):
         mock_client = AsyncMock()
         mock_cls.return_value = mock_client
@@ -385,7 +385,7 @@ class TestQueryAnthropic:
         assert result.text == ""
 
     @pytest.mark.asyncio
-    @patch("auto_scientist.models.anthropic_client.AsyncAnthropic")
+    @patch("auto_core.models.anthropic_client.AsyncAnthropic")
     async def test_multiple_text_blocks_joined(self, mock_cls):
         mock_client = AsyncMock()
         mock_cls.return_value = mock_client
@@ -404,7 +404,7 @@ class TestQueryAnthropic:
 
 class TestQueryAnthropicReasoning:
     @pytest.mark.asyncio
-    @patch("auto_scientist.models.anthropic_client.AsyncAnthropic")
+    @patch("auto_core.models.anthropic_client.AsyncAnthropic")
     async def test_no_reasoning_omits_thinking(self, mock_cls):
         mock_client = AsyncMock()
         mock_cls.return_value = mock_client
@@ -417,7 +417,7 @@ class TestQueryAnthropicReasoning:
         assert "thinking" not in call_kwargs
 
     @pytest.mark.asyncio
-    @patch("auto_scientist.models.anthropic_client.AsyncAnthropic")
+    @patch("auto_core.models.anthropic_client.AsyncAnthropic")
     async def test_off_reasoning_omits_thinking(self, mock_cls):
         mock_client = AsyncMock()
         mock_cls.return_value = mock_client
@@ -430,7 +430,7 @@ class TestQueryAnthropicReasoning:
         assert "thinking" not in call_kwargs
 
     @pytest.mark.asyncio
-    @patch("auto_scientist.models.anthropic_client.AsyncAnthropic")
+    @patch("auto_core.models.anthropic_client.AsyncAnthropic")
     async def test_high_reasoning_with_default_budget(self, mock_cls):
         mock_client = AsyncMock()
         mock_cls.return_value = mock_client
@@ -444,7 +444,7 @@ class TestQueryAnthropicReasoning:
         assert call_kwargs["thinking"]["budget_tokens"] == 16384
 
     @pytest.mark.asyncio
-    @patch("auto_scientist.models.anthropic_client.AsyncAnthropic")
+    @patch("auto_core.models.anthropic_client.AsyncAnthropic")
     async def test_budget_override(self, mock_cls):
         mock_client = AsyncMock()
         mock_cls.return_value = mock_client
@@ -461,7 +461,7 @@ class TestQueryAnthropicReasoning:
         assert call_kwargs["thinking"]["budget_tokens"] == 8000
 
     @pytest.mark.asyncio
-    @patch("auto_scientist.models.anthropic_client.AsyncAnthropic")
+    @patch("auto_core.models.anthropic_client.AsyncAnthropic")
     async def test_max_tokens_increased_for_thinking(self, mock_cls):
         mock_client = AsyncMock()
         mock_cls.return_value = mock_client
@@ -479,7 +479,7 @@ class TestQueryAnthropicReasoning:
 
 class TestQueryOpenAIReasoning:
     @pytest.mark.asyncio
-    @patch("auto_scientist.models.openai_client.AsyncOpenAI")
+    @patch("auto_core.models.openai_client.AsyncOpenAI")
     async def test_no_reasoning_omits_effort(self, mock_cls):
         mock_client = AsyncMock()
         mock_cls.return_value = mock_client
@@ -493,7 +493,7 @@ class TestQueryOpenAIReasoning:
         assert "reasoning_effort" not in call_kwargs
 
     @pytest.mark.asyncio
-    @patch("auto_scientist.models.openai_client.AsyncOpenAI")
+    @patch("auto_core.models.openai_client.AsyncOpenAI")
     async def test_high_reasoning_chat_completions(self, mock_cls):
         mock_client = AsyncMock()
         mock_cls.return_value = mock_client
@@ -509,7 +509,7 @@ class TestQueryOpenAIReasoning:
         assert "max_tokens" not in call_kwargs
 
     @pytest.mark.asyncio
-    @patch("auto_scientist.models.openai_client.AsyncOpenAI")
+    @patch("auto_core.models.openai_client.AsyncOpenAI")
     async def test_high_reasoning_responses_api(self, mock_cls):
         mock_client = AsyncMock()
         mock_cls.return_value = mock_client
@@ -527,7 +527,7 @@ class TestQueryOpenAIReasoning:
         assert call_kwargs["reasoning"] == {"effort": "high"}
 
     @pytest.mark.asyncio
-    @patch("auto_scientist.models.openai_client.AsyncOpenAI")
+    @patch("auto_core.models.openai_client.AsyncOpenAI")
     async def test_off_reasoning_omits_effort(self, mock_cls):
         mock_client = AsyncMock()
         mock_cls.return_value = mock_client
@@ -546,7 +546,7 @@ class TestQueryOpenAIReasoning:
 
 class TestQueryGoogleReasoning:
     @pytest.mark.asyncio
-    @patch("auto_scientist.models.google_client.genai")
+    @patch("auto_core.models.google_client.genai")
     async def test_no_reasoning_omits_thinking(self, mock_genai):
         mock_response = MagicMock(text="ok")
         mock_genai.Client.return_value.aio.models.generate_content = AsyncMock(
@@ -560,8 +560,8 @@ class TestQueryGoogleReasoning:
         assert config is None or getattr(config, "thinking_config", None) is None
 
     @pytest.mark.asyncio
-    @patch("auto_scientist.models.google_client.genai")
-    @patch("auto_scientist.models.google_client.types")
+    @patch("auto_core.models.google_client.genai")
+    @patch("auto_core.models.google_client.types")
     async def test_high_reasoning_gemini_25(self, mock_types, mock_genai):
         mock_response = MagicMock(text="ok")
         mock_genai.Client.return_value.aio.models.generate_content = AsyncMock(
@@ -578,8 +578,8 @@ class TestQueryGoogleReasoning:
         mock_types.ThinkingConfig.assert_called_once_with(thinking_budget=16384)
 
     @pytest.mark.asyncio
-    @patch("auto_scientist.models.google_client.genai")
-    @patch("auto_scientist.models.google_client.types")
+    @patch("auto_core.models.google_client.genai")
+    @patch("auto_core.models.google_client.types")
     async def test_high_reasoning_gemini_3(self, mock_types, mock_genai):
         mock_response = MagicMock(text="ok")
         mock_genai.Client.return_value.aio.models.generate_content = AsyncMock(
@@ -598,8 +598,8 @@ class TestQueryGoogleReasoning:
         assert "thinking_level" in call_kwargs
 
     @pytest.mark.asyncio
-    @patch("auto_scientist.models.google_client.genai")
-    @patch("auto_scientist.models.google_client.types")
+    @patch("auto_core.models.google_client.genai")
+    @patch("auto_core.models.google_client.types")
     async def test_budget_override_gemini_25(self, mock_types, mock_genai):
         mock_response = MagicMock(text="ok")
         mock_genai.Client.return_value.aio.models.generate_content = AsyncMock(
@@ -620,7 +620,7 @@ class TestQueryGoogleReasoning:
 
 class TestAnthropicStructuredOutput:
     @pytest.mark.asyncio
-    @patch("auto_scientist.models.anthropic_client.AsyncAnthropic")
+    @patch("auto_core.models.anthropic_client.AsyncAnthropic")
     async def test_response_schema_uses_tool_use(self, mock_cls):
         mock_client = AsyncMock()
         mock_cls.return_value = mock_client
@@ -650,7 +650,7 @@ class TestAnthropicStructuredOutput:
         assert parsed["hypothesis"] == "test"
 
     @pytest.mark.asyncio
-    @patch("auto_scientist.models.anthropic_client.AsyncAnthropic")
+    @patch("auto_core.models.anthropic_client.AsyncAnthropic")
     async def test_system_prompt_passed(self, mock_cls):
         mock_client = AsyncMock()
         mock_cls.return_value = mock_client
@@ -667,7 +667,7 @@ class TestAnthropicStructuredOutput:
         assert call_kwargs.get("system") == "You are a scientist."
 
     @pytest.mark.asyncio
-    @patch("auto_scientist.models.anthropic_client.AsyncAnthropic")
+    @patch("auto_core.models.anthropic_client.AsyncAnthropic")
     async def test_response_schema_with_web_search_no_forced_tool_choice(self, mock_cls):
         mock_client = AsyncMock()
         mock_cls.return_value = mock_client
@@ -699,7 +699,7 @@ class TestAnthropicStructuredOutput:
         assert parsed["hypothesis"] == "test"
 
     @pytest.mark.asyncio
-    @patch("auto_scientist.models.anthropic_client.AsyncAnthropic")
+    @patch("auto_core.models.anthropic_client.AsyncAnthropic")
     async def test_response_schema_extracts_submit_from_mixed_blocks(self, mock_cls):
         """When response has web_search + submit_response blocks, extract submit_response."""
         mock_client = AsyncMock()
@@ -730,7 +730,7 @@ class TestAnthropicStructuredOutput:
         assert parsed["hypothesis"] == "found it"
 
     @pytest.mark.asyncio
-    @patch("auto_scientist.models.anthropic_client.AsyncAnthropic")
+    @patch("auto_core.models.anthropic_client.AsyncAnthropic")
     async def test_response_schema_ignores_non_submit_tool_use(self, mock_cls):
         mock_client = AsyncMock()
         mock_cls.return_value = mock_client
@@ -843,7 +843,7 @@ class TestMakeStrictSchema:
 
 class TestOpenAIStructuredOutputWithWebSearch:
     @pytest.mark.asyncio
-    @patch("auto_scientist.models.openai_client.AsyncOpenAI")
+    @patch("auto_core.models.openai_client.AsyncOpenAI")
     async def test_response_schema_with_web_search_uses_text_format(self, mock_cls):
         mock_client = AsyncMock()
         mock_cls.return_value = mock_client
@@ -872,7 +872,7 @@ class TestOpenAIStructuredOutputWithWebSearch:
 
 class TestOpenAIStructuredOutput:
     @pytest.mark.asyncio
-    @patch("auto_scientist.models.openai_client.AsyncOpenAI")
+    @patch("auto_core.models.openai_client.AsyncOpenAI")
     async def test_response_schema_uses_response_format(self, mock_cls):
         mock_client = AsyncMock()
         mock_cls.return_value = mock_client
@@ -893,7 +893,7 @@ class TestOpenAIStructuredOutput:
         assert result.text == '{"hypothesis": "test"}'
 
     @pytest.mark.asyncio
-    @patch("auto_scientist.models.openai_client.AsyncOpenAI")
+    @patch("auto_core.models.openai_client.AsyncOpenAI")
     async def test_system_prompt_passed(self, mock_cls):
         mock_client = AsyncMock()
         mock_cls.return_value = mock_client
@@ -915,7 +915,7 @@ class TestOpenAIStructuredOutput:
 
 class TestGoogleStructuredOutput:
     @pytest.mark.asyncio
-    @patch("auto_scientist.models.google_client.genai")
+    @patch("auto_core.models.google_client.genai")
     async def test_response_schema_adds_config(self, mock_genai):
         mock_response = MagicMock(text='{"hypothesis": "test"}')
         mock_genai.Client.return_value.aio.models.generate_content = AsyncMock(
@@ -934,8 +934,8 @@ class TestGoogleStructuredOutput:
         assert result.text == '{"hypothesis": "test"}'
 
     @pytest.mark.asyncio
-    @patch("auto_scientist.models.google_client.types")
-    @patch("auto_scientist.models.google_client.genai")
+    @patch("auto_core.models.google_client.types")
+    @patch("auto_core.models.google_client.genai")
     async def test_response_schema_with_web_search_coexist(self, mock_genai, mock_types):
         mock_response = MagicMock(text='{"hypothesis": "test"}')
         mock_genai.Client.return_value.aio.models.generate_content = AsyncMock(
@@ -957,7 +957,7 @@ class TestGoogleStructuredOutput:
         assert config_kwargs["response_mime_type"] == "application/json"
 
     @pytest.mark.asyncio
-    @patch("auto_scientist.models.google_client.genai")
+    @patch("auto_core.models.google_client.genai")
     async def test_system_prompt_passed(self, mock_genai):
         mock_response = MagicMock(text="ok")
         mock_genai.Client.return_value.aio.models.generate_content = AsyncMock(
@@ -980,7 +980,7 @@ class TestGoogleStructuredOutput:
 
 class TestAnthropicImages:
     @pytest.mark.asyncio
-    @patch("auto_scientist.models.anthropic_client.AsyncAnthropic")
+    @patch("auto_core.models.anthropic_client.AsyncAnthropic")
     async def test_images_builds_content_blocks(self, mock_cls):
         mock_client = AsyncMock()
         mock_cls.return_value = mock_client
@@ -998,7 +998,7 @@ class TestAnthropicImages:
         assert content[1]["source"]["data"] == FAKE_IMAGE.data
 
     @pytest.mark.asyncio
-    @patch("auto_scientist.models.anthropic_client.AsyncAnthropic")
+    @patch("auto_core.models.anthropic_client.AsyncAnthropic")
     async def test_no_images_keeps_string_content(self, mock_cls):
         mock_client = AsyncMock()
         mock_cls.return_value = mock_client
@@ -1011,7 +1011,7 @@ class TestAnthropicImages:
         assert call_kwargs["messages"][0]["content"] == "test prompt"
 
     @pytest.mark.asyncio
-    @patch("auto_scientist.models.anthropic_client.AsyncAnthropic")
+    @patch("auto_core.models.anthropic_client.AsyncAnthropic")
     async def test_empty_images_keeps_string_content(self, mock_cls):
         mock_client = AsyncMock()
         mock_cls.return_value = mock_client
@@ -1026,7 +1026,7 @@ class TestAnthropicImages:
 
 class TestOpenAIImages:
     @pytest.mark.asyncio
-    @patch("auto_scientist.models.openai_client.AsyncOpenAI")
+    @patch("auto_core.models.openai_client.AsyncOpenAI")
     async def test_images_chat_completions(self, mock_cls):
         mock_client = AsyncMock()
         mock_cls.return_value = mock_client
@@ -1044,7 +1044,7 @@ class TestOpenAIImages:
         assert "data:image/png;base64," in content[1]["image_url"]["url"]
 
     @pytest.mark.asyncio
-    @patch("auto_scientist.models.openai_client.AsyncOpenAI")
+    @patch("auto_core.models.openai_client.AsyncOpenAI")
     async def test_images_responses_api(self, mock_cls):
         mock_client = AsyncMock()
         mock_cls.return_value = mock_client
@@ -1061,7 +1061,7 @@ class TestOpenAIImages:
         assert content[1]["type"] == "input_image"
 
     @pytest.mark.asyncio
-    @patch("auto_scientist.models.openai_client.AsyncOpenAI")
+    @patch("auto_core.models.openai_client.AsyncOpenAI")
     async def test_no_images_keeps_string(self, mock_cls):
         mock_client = AsyncMock()
         mock_cls.return_value = mock_client
@@ -1077,8 +1077,8 @@ class TestOpenAIImages:
 
 class TestGoogleImages:
     @pytest.mark.asyncio
-    @patch("auto_scientist.models.google_client.genai")
-    @patch("auto_scientist.models.google_client.types")
+    @patch("auto_core.models.google_client.genai")
+    @patch("auto_core.models.google_client.types")
     async def test_images_builds_contents_list(self, mock_types, mock_genai):
         mock_response = MagicMock(text="ok")
         mock_genai.Client.return_value.aio.models.generate_content = AsyncMock(
@@ -1097,7 +1097,7 @@ class TestGoogleImages:
         mock_types.Part.from_bytes.assert_called_once()
 
     @pytest.mark.asyncio
-    @patch("auto_scientist.models.google_client.genai")
+    @patch("auto_core.models.google_client.genai")
     async def test_no_images_keeps_string(self, mock_genai):
         mock_response = MagicMock(text="ok")
         mock_genai.Client.return_value.aio.models.generate_content = AsyncMock(

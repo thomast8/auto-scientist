@@ -2,7 +2,7 @@
 
 import logging
 
-from auto_scientist.log_setup import setup_file_logging
+from auto_core.log_setup import setup_file_logging
 
 
 class TestSetupFileLogging:
@@ -33,9 +33,9 @@ class TestSetupFileLogging:
 
         logger = logging.getLogger("auto_scientist")
         file_handlers = [
-            h for h in logger.handlers
-            if isinstance(h, logging.FileHandler)
-            and h.baseFilename.endswith("debug.log")
+            h
+            for h in logger.handlers
+            if isinstance(h, logging.FileHandler) and h.baseFilename.endswith("debug.log")
         ]
         assert len(file_handlers) == 1
 
@@ -44,9 +44,9 @@ class TestSetupFileLogging:
 
         logger = logging.getLogger("auto_scientist")
         stream_handlers = [
-            h for h in logger.handlers
-            if isinstance(h, logging.StreamHandler)
-            and not isinstance(h, logging.FileHandler)
+            h
+            for h in logger.handlers
+            if isinstance(h, logging.StreamHandler) and not isinstance(h, logging.FileHandler)
         ]
         assert len(stream_handlers) >= 1
 

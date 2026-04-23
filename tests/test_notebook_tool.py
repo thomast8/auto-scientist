@@ -5,14 +5,13 @@ import sys
 from pathlib import Path
 
 import pytest
-
-from auto_scientist.agents.notebook_tool import (
+from auto_core.agents.notebook_tool import (
     _handle_read_notebook,
     _normalize_args,
     build_notebook_mcp_server,
     format_notebook_toc,
 )
-from auto_scientist.notebook import (
+from auto_core.notebook import (
     NOTEBOOK_FILENAME,
     append_entry,
     parse_notebook_entries,

@@ -4,7 +4,7 @@ Replaces the old test_console_log.py that tested init_console_log/close_console_
 The new file logging uses Rich Console(file=..., no_color=True) under PipelineLive.
 """
 
-from auto_scientist.pipeline_live import PipelineLive
+from auto_core.pipeline_live import PipelineLive
 
 
 class TestConsoleLog:

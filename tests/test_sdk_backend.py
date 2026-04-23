@@ -14,14 +14,14 @@ import pytest
 class TestIsolationConfig:
     def test_returns_setting_sources_empty(self):
         """Isolation disables host settings/hooks/CLAUDE.md via --setting-sources ''."""
-        from auto_scientist.sdk_backend import _isolation_config
+        from auto_core.sdk_backend import _isolation_config
 
         cfg = _isolation_config()
         assert cfg.extra_args["setting-sources"] == ""
 
     def test_disallows_agent_and_skill(self):
         """Agent and Skill tools are blocked to prevent host plugin recursion."""
-        from auto_scientist.sdk_backend import _isolation_config
+        from auto_core.sdk_backend import _isolation_config
 
         cfg = _isolation_config()
         assert "Agent" in cfg.extra_args["disallowed-tools"]
@@ -29,21 +29,21 @@ class TestIsolationConfig:
 
     def test_no_bare_flag(self):
         """Isolation does NOT set --bare (which would strip most tools)."""
-        from auto_scientist.sdk_backend import _isolation_config
+        from auto_core.sdk_backend import _isolation_config
 
         cfg = _isolation_config()
         assert "bare" not in cfg.extra_args
 
     def test_disables_auto_memory(self):
         """Auto-memory is disabled to prevent MEMORY.md leakage."""
-        from auto_scientist.sdk_backend import _isolation_config
+        from auto_core.sdk_backend import _isolation_config
 
         cfg = _isolation_config()
         assert cfg.env["CLAUDE_CODE_DISABLE_AUTO_MEMORY"] == "1"
 
     def test_disables_claude_mds(self):
         """CLAUDE.md discovery is disabled via env var."""
-        from auto_scientist.sdk_backend import _isolation_config
+        from auto_core.sdk_backend import _isolation_config
 
         cfg = _isolation_config()
         assert cfg.env["CLAUDE_CODE_DISABLE_CLAUDE_MDS"] == "1"
@@ -56,7 +56,7 @@ class TestIsolationConfig:
 
 class TestSDKOptions:
     def test_construction_with_defaults(self):
-        from auto_scientist.sdk_backend import SDKOptions
+        from auto_core.sdk_backend import SDKOptions
 
         opts = SDKOptions(system_prompt="test", allowed_tools=["Read"], max_turns=10)
         assert opts.system_prompt == "test"
@@ -70,7 +70,7 @@ class TestSDKOptions:
         assert opts.env == {}
 
     def test_construction_with_all_fields(self):
-        from auto_scientist.sdk_backend import SDKOptions
+        from auto_core.sdk_backend import SDKOptions
 
         opts = SDKOptions(
             system_prompt="sys",
@@ -91,13 +91,13 @@ class TestSDKOptions:
         assert opts.env == {"MY_VAR": "val"}
 
     def test_mcp_servers_defaults_to_empty(self):
-        from auto_scientist.sdk_backend import SDKOptions
+        from auto_core.sdk_backend import SDKOptions
 
         opts = SDKOptions(system_prompt="test", allowed_tools=[], max_turns=5)
         assert opts.mcp_servers == {}
 
     def test_mcp_servers_stored(self):
-        from auto_scientist.sdk_backend import SDKOptions
+        from auto_core.sdk_backend import SDKOptions
 
         mock_server = {"type": "sdk", "name": "predictions", "instance": object()}
         opts = SDKOptions(
@@ -116,7 +116,7 @@ class TestSDKOptions:
 
 class TestSDKMessage:
     def test_assistant_message(self):
-        from auto_scientist.sdk_backend import SDKMessage
+        from auto_core.sdk_backend import SDKMessage
 
         msg = SDKMessage(
             type="assistant",
@@ -130,7 +130,7 @@ class TestSDKMessage:
         assert msg.session_id is None
 
     def test_result_message(self):
-        from auto_scientist.sdk_backend import SDKMessage
+        from auto_core.sdk_backend import SDKMessage
 
         msg = SDKMessage(
             type="result",
@@ -145,7 +145,7 @@ class TestSDKMessage:
         assert msg.content_blocks == []
 
     def test_text_property(self):
-        from auto_scientist.sdk_backend import SDKMessage
+        from auto_core.sdk_backend import SDKMessage
 
         msg = SDKMessage(type="assistant", text="hello world")
         assert msg.text == "hello world"
@@ -159,39 +159,39 @@ class TestSDKMessage:
 class TestGetBackend:
     @pytest.fixture(autouse=True)
     def _clear_cache(self):
-        from auto_scientist.sdk_backend import _backend_cache
+        from auto_core.sdk_backend import _backend_cache
 
         _backend_cache.clear()
         yield
         _backend_cache.clear()
 
     def test_anthropic_returns_claude_backend(self):
-        from auto_scientist.sdk_backend import ClaudeBackend, get_backend
+        from auto_core.sdk_backend import ClaudeBackend, get_backend
 
         backend = get_backend("anthropic")
         assert isinstance(backend, ClaudeBackend)
 
     def test_openai_returns_codex_backend(self):
-        from auto_scientist.sdk_backend import CodexBackend, get_backend
+        from auto_core.sdk_backend import CodexBackend, get_backend
 
         backend = get_backend("openai")
         assert isinstance(backend, CodexBackend)
 
     def test_reuses_cached_instance(self):
-        from auto_scientist.sdk_backend import get_backend
+        from auto_core.sdk_backend import get_backend
 
         b1 = get_backend("anthropic")
         b2 = get_backend("anthropic")
         assert b1 is b2
 
     def test_google_raises_value_error(self):
-        from auto_scientist.sdk_backend import get_backend
+        from auto_core.sdk_backend import get_backend
 
         with pytest.raises(ValueError, match="No SDK backend"):
             get_backend("google")
 
     def test_unknown_raises_value_error(self):
-        from auto_scientist.sdk_backend import get_backend
+        from auto_core.sdk_backend import get_backend
 
         with pytest.raises(ValueError, match="No SDK backend"):
             get_backend("deepseek")
@@ -205,7 +205,7 @@ class TestGetBackend:
 class TestClaudeBackend:
     def test_maps_sdk_options_to_claude_code_options(self):
         """ClaudeBackend.build_options converts SDKOptions to ClaudeCodeOptions."""
-        from auto_scientist.sdk_backend import ClaudeBackend, SDKOptions
+        from auto_core.sdk_backend import ClaudeBackend, SDKOptions
 
         backend = ClaudeBackend()
         opts = SDKOptions(
@@ -225,7 +225,7 @@ class TestClaudeBackend:
         assert cc_opts.permission_mode == "acceptEdits"
 
     def test_passes_mcp_servers_when_present(self):
-        from auto_scientist.sdk_backend import ClaudeBackend, SDKOptions
+        from auto_core.sdk_backend import ClaudeBackend, SDKOptions
 
         mock_server = {"type": "sdk", "name": "predictions", "instance": object()}
         backend = ClaudeBackend()
@@ -235,18 +235,18 @@ class TestClaudeBackend:
             max_turns=5,
             mcp_servers={"predictions": mock_server},
         )
-        with patch("auto_scientist.sdk_backend.ClaudeCodeOptions") as mock_cls:
+        with patch("auto_core.sdk_backend.ClaudeCodeOptions") as mock_cls:
             backend._build_claude_options(opts)
             call_kwargs = mock_cls.call_args.kwargs
             assert call_kwargs["mcp_servers"] == {"predictions": mock_server}
 
     def test_omits_mcp_servers_when_empty(self):
-        from auto_scientist.sdk_backend import ClaudeBackend, SDKOptions
+        from auto_core.sdk_backend import ClaudeBackend, SDKOptions
 
         backend = ClaudeBackend()
         opts = SDKOptions(system_prompt="test", allowed_tools=[], max_turns=5)
         # When mcp_servers is empty, it should not be passed to ClaudeCodeOptions
-        with patch("auto_scientist.sdk_backend.ClaudeCodeOptions") as mock_cls:
+        with patch("auto_core.sdk_backend.ClaudeCodeOptions") as mock_cls:
             backend._build_claude_options(opts)
             call_kwargs = mock_cls.call_args.kwargs
             assert "mcp_servers" not in call_kwargs
@@ -254,9 +254,8 @@ class TestClaudeBackend:
     @pytest.mark.asyncio
     async def test_maps_assistant_message_to_sdk_message(self):
         """AssistantMessage from claude_code_sdk maps to SDKMessage(type='assistant')."""
+        from auto_core.sdk_backend import ClaudeBackend, SDKOptions
         from claude_code_sdk import AssistantMessage, ResultMessage, TextBlock
-
-        from auto_scientist.sdk_backend import ClaudeBackend, SDKOptions
 
         text_block = MagicMock(spec=TextBlock)
         text_block.text = "hello"
@@ -278,7 +277,7 @@ class TestClaudeBackend:
         backend = ClaudeBackend()
         opts = SDKOptions(system_prompt="", allowed_tools=[], max_turns=5)
 
-        with patch("auto_scientist.sdk_backend.claude_query", side_effect=fake_query):
+        with patch("auto_core.sdk_backend.claude_query", side_effect=fake_query):
             messages = [msg async for msg in backend.query("test", opts)]
 
         assert len(messages) == 2
@@ -291,7 +290,7 @@ class TestClaudeBackend:
     @pytest.mark.asyncio
     async def test_bare_flag_injected(self):
         """ClaudeBackend injects --bare for subprocess isolation."""
-        from auto_scientist.sdk_backend import ClaudeBackend, SDKOptions
+        from auto_core.sdk_backend import ClaudeBackend, SDKOptions
 
         async def fake_query(**kwargs):
             return
@@ -301,7 +300,7 @@ class TestClaudeBackend:
         opts = SDKOptions(system_prompt="", allowed_tools=[], max_turns=5)
 
         with (
-            patch("auto_scientist.sdk_backend.claude_query", side_effect=fake_query) as mock_q,
+            patch("auto_core.sdk_backend.claude_query", side_effect=fake_query) as mock_q,
         ):
             async for _ in backend.query("test", opts):
                 pass
@@ -318,7 +317,7 @@ class TestClaudeBackend:
     @pytest.mark.asyncio
     async def test_strips_anthropic_api_key(self):
         """When ANTHROPIC_API_KEY is in env, ClaudeBackend strips it from subprocess."""
-        from auto_scientist.sdk_backend import ClaudeBackend, SDKOptions
+        from auto_core.sdk_backend import ClaudeBackend, SDKOptions
 
         async def fake_query(**kwargs):
             return
@@ -328,7 +327,7 @@ class TestClaudeBackend:
         opts = SDKOptions(system_prompt="", allowed_tools=[], max_turns=5)
 
         with (
-            patch("auto_scientist.sdk_backend.claude_query", side_effect=fake_query) as mock_q,
+            patch("auto_core.sdk_backend.claude_query", side_effect=fake_query) as mock_q,
             patch.dict("os.environ", {"ANTHROPIC_API_KEY": "sk-ant-test"}, clear=False),
         ):
             async for _ in backend.query("test", opts):
@@ -341,7 +340,7 @@ class TestClaudeBackend:
     @pytest.mark.asyncio
     async def test_preserves_explicit_anthropic_api_key(self):
         """When ANTHROPIC_API_KEY is explicitly passed in options.env, it is preserved."""
-        from auto_scientist.sdk_backend import ClaudeBackend, SDKOptions
+        from auto_core.sdk_backend import ClaudeBackend, SDKOptions
 
         async def fake_query(**kwargs):
             return
@@ -356,7 +355,7 @@ class TestClaudeBackend:
         )
 
         with (
-            patch("auto_scientist.sdk_backend.claude_query", side_effect=fake_query) as mock_q,
+            patch("auto_core.sdk_backend.claude_query", side_effect=fake_query) as mock_q,
             patch.dict("os.environ", {"ANTHROPIC_API_KEY": "sk-ant-leaked"}, clear=False),
         ):
             async for _ in backend.query("test", opts):
@@ -369,7 +368,7 @@ class TestClaudeBackend:
     @pytest.mark.asyncio
     async def test_no_strip_when_key_absent(self):
         """When ANTHROPIC_API_KEY is not in env, nothing is injected."""
-        from auto_scientist.sdk_backend import ClaudeBackend, SDKOptions
+        from auto_core.sdk_backend import ClaudeBackend, SDKOptions
 
         async def fake_query(**kwargs):
             return
@@ -379,7 +378,7 @@ class TestClaudeBackend:
         opts = SDKOptions(system_prompt="", allowed_tools=[], max_turns=5)
 
         with (
-            patch("auto_scientist.sdk_backend.claude_query", side_effect=fake_query) as mock_q,
+            patch("auto_core.sdk_backend.claude_query", side_effect=fake_query) as mock_q,
             patch.dict("os.environ", {}, clear=False),
         ):
             # Ensure key is not in env for this test
@@ -396,9 +395,8 @@ class TestClaudeBackend:
     @pytest.mark.asyncio
     async def test_skips_none_messages(self):
         """None messages (unknown types) are filtered out."""
+        from auto_core.sdk_backend import ClaudeBackend, SDKOptions
         from claude_code_sdk import AssistantMessage, TextBlock
-
-        from auto_scientist.sdk_backend import ClaudeBackend, SDKOptions
 
         text_block = MagicMock(spec=TextBlock)
         text_block.text = "ok"
@@ -413,7 +411,7 @@ class TestClaudeBackend:
         backend = ClaudeBackend()
         opts = SDKOptions(system_prompt="", allowed_tools=[], max_turns=5)
 
-        with patch("auto_scientist.sdk_backend.claude_query", side_effect=fake_query):
+        with patch("auto_core.sdk_backend.claude_query", side_effect=fake_query):
             messages = [msg async for msg in backend.query("test", opts)]
 
         assert len(messages) == 1
@@ -428,7 +426,7 @@ class TestClaudeBackend:
 class TestCodexBackend:
     def test_maps_allowed_tools_to_sandbox_mode(self):
         """Write/Edit/Bash tools map to workspace-write sandbox mode."""
-        from auto_scientist.sdk_backend import CodexBackend
+        from auto_core.sdk_backend import CodexBackend
 
         assert CodexBackend._resolve_sandbox(["Read", "Write", "Edit", "Bash"]) == "workspace-write"
         assert CodexBackend._resolve_sandbox(["Read", "Glob"]) == "read-only"
@@ -457,7 +455,7 @@ class TestCodexBackend:
 
     def test_resolve_disabled_features_critic(self):
         """Critics (WebSearch only) get shell and agent tools disabled."""
-        from auto_scientist.sdk_backend import CodexBackend
+        from auto_core.sdk_backend import CodexBackend
 
         disabled = CodexBackend._resolve_disabled_features(
             ["WebSearch", "mcp__predictions__read_predictions"]
@@ -469,7 +467,7 @@ class TestCodexBackend:
 
     def test_resolve_disabled_features_coder(self):
         """Coders (shell tools) keep shell enabled but still disable agents."""
-        from auto_scientist.sdk_backend import CodexBackend
+        from auto_core.sdk_backend import CodexBackend
 
         disabled = CodexBackend._resolve_disabled_features(
             ["Read", "Write", "Edit", "Bash", "Glob", "Grep"]
@@ -481,7 +479,7 @@ class TestCodexBackend:
 
     def test_maps_reasoning_effort(self):
         """ReasoningConfig effort levels map to Codex effort strings."""
-        from auto_scientist.sdk_backend import CodexBackend
+        from auto_core.sdk_backend import CodexBackend
 
         backend = CodexBackend()
         assert backend._resolve_effort({"effort": "high"}) == "high"
@@ -513,7 +511,7 @@ class TestCodexBackend:
     @pytest.mark.asyncio
     async def test_chat_streams_sdk_messages(self):
         """CodexBackend.query streams steps from chat() and yields SDKMessages."""
-        from auto_scientist.sdk_backend import CodexBackend, SDKOptions
+        from auto_core.sdk_backend import CodexBackend, SDKOptions
 
         steps = [self._make_mock_step("The answer is 42", "thr-123")]
         mock_client = self._make_mock_client(steps)
@@ -527,7 +525,7 @@ class TestCodexBackend:
         )
 
         with patch(
-            "auto_scientist.sdk_backend.CodexClient.connect_stdio",
+            "auto_core.sdk_backend.CodexClient.connect_stdio",
             return_value=mock_client,
         ):
             messages = [msg async for msg in backend.query("hello", opts)]
@@ -547,7 +545,7 @@ class TestCodexBackend:
     @pytest.mark.asyncio
     async def test_counts_multiple_steps_as_turns(self):
         """CodexBackend.query counts all ConversationSteps as num_turns."""
-        from auto_scientist.sdk_backend import CodexBackend, SDKOptions
+        from auto_core.sdk_backend import CodexBackend, SDKOptions
 
         steps = [
             self._make_mock_step("thinking...", "thr-1"),
@@ -565,7 +563,7 @@ class TestCodexBackend:
         )
 
         with patch(
-            "auto_scientist.sdk_backend.CodexClient.connect_stdio",
+            "auto_core.sdk_backend.CodexClient.connect_stdio",
             return_value=mock_client,
         ):
             messages = [msg async for msg in backend.query("hello", opts)]
@@ -578,7 +576,7 @@ class TestCodexBackend:
     @pytest.mark.asyncio
     async def test_strips_openai_api_key(self):
         """When OPENAI_API_KEY is in env, CodexBackend strips it from subprocess."""
-        from auto_scientist.sdk_backend import CodexBackend, SDKOptions
+        from auto_core.sdk_backend import CodexBackend, SDKOptions
 
         steps = [self._make_mock_step("ok", "thr-1")]
         mock_client = self._make_mock_client(steps)
@@ -588,7 +586,7 @@ class TestCodexBackend:
 
         with (
             patch(
-                "auto_scientist.sdk_backend.CodexClient.connect_stdio",
+                "auto_core.sdk_backend.CodexClient.connect_stdio",
                 return_value=mock_client,
             ) as mock_connect,
             patch.dict("os.environ", {"OPENAI_API_KEY": "sk-test"}, clear=False),
@@ -610,7 +608,7 @@ class TestCodexBackend:
     @pytest.mark.asyncio
     async def test_session_resumption_reuses_client(self):
         """Resume reuses the same client and passes thread_id to chat()."""
-        from auto_scientist.sdk_backend import CodexBackend, SDKOptions
+        from auto_core.sdk_backend import CodexBackend, SDKOptions
 
         # Track kwargs from each chat() call
         chat_calls: list[dict] = []
@@ -631,7 +629,7 @@ class TestCodexBackend:
         # First call: fresh (no resume)
         fresh_opts = SDKOptions(system_prompt="sys", allowed_tools=[], max_turns=5)
         with patch(
-            "auto_scientist.sdk_backend.CodexClient.connect_stdio",
+            "auto_core.sdk_backend.CodexClient.connect_stdio",
             return_value=mock_client,
         ) as mock_connect:
             async for _ in backend.query("first", fresh_opts):
@@ -647,7 +645,7 @@ class TestCodexBackend:
             resume="thr-abc",
         )
         with patch(
-            "auto_scientist.sdk_backend.CodexClient.connect_stdio",
+            "auto_core.sdk_backend.CodexClient.connect_stdio",
             return_value=mock_client,
         ) as mock_connect:
             messages = [msg async for msg in backend.query("continue", resume_opts)]
@@ -670,7 +668,7 @@ class TestCodexBackend:
     @pytest.mark.asyncio
     async def test_resume_without_prior_client_falls_back(self):
         """Resume with no live client logs a warning and starts a fresh thread."""
-        from auto_scientist.sdk_backend import CodexBackend, SDKOptions
+        from auto_core.sdk_backend import CodexBackend, SDKOptions
 
         chat_kwargs_captured: dict = {}
         mock_client = AsyncMock()
@@ -694,7 +692,7 @@ class TestCodexBackend:
         )
 
         with patch(
-            "auto_scientist.sdk_backend.CodexClient.connect_stdio",
+            "auto_core.sdk_backend.CodexClient.connect_stdio",
             return_value=mock_client,
         ) as mock_connect:
             messages = [msg async for msg in backend.query("retry", opts)]
@@ -713,7 +711,7 @@ class TestCodexBackend:
     @pytest.mark.asyncio
     async def test_close_cleans_up_client_and_home(self):
         """close() shuts down the client and removes the temp directory."""
-        from auto_scientist.sdk_backend import CodexBackend, SDKOptions
+        from auto_core.sdk_backend import CodexBackend, SDKOptions
 
         steps = [self._make_mock_step("ok", "thr-1")]
         mock_client = self._make_mock_client(steps)
@@ -722,7 +720,7 @@ class TestCodexBackend:
         opts = SDKOptions(system_prompt="", allowed_tools=[], max_turns=5)
 
         with patch(
-            "auto_scientist.sdk_backend.CodexClient.connect_stdio",
+            "auto_core.sdk_backend.CodexClient.connect_stdio",
             return_value=mock_client,
         ):
             async for _ in backend.query("test", opts):
@@ -743,7 +741,7 @@ class TestCodexBackend:
 
     def test_writes_codex_home_config(self, tmp_path):
         """CodexBackend writes config.toml with MCP and feature flags."""
-        from auto_scientist.sdk_backend import CodexBackend
+        from auto_core.sdk_backend import CodexBackend
 
         mcp_servers = {
             "predictions": {
@@ -772,7 +770,7 @@ class TestCodexBackend:
     @pytest.mark.asyncio
     async def test_codex_home_always_isolates(self):
         """CODEX_HOME is always set in the subprocess env for isolation."""
-        from auto_scientist.sdk_backend import CodexBackend, SDKOptions
+        from auto_core.sdk_backend import CodexBackend, SDKOptions
 
         steps = [self._make_mock_step("ok", "thr-1")]
         mock_client = self._make_mock_client(steps)
@@ -781,7 +779,7 @@ class TestCodexBackend:
         opts = SDKOptions(system_prompt="", allowed_tools=[], max_turns=5)
 
         with patch(
-            "auto_scientist.sdk_backend.CodexClient.connect_stdio",
+            "auto_core.sdk_backend.CodexClient.connect_stdio",
             return_value=mock_client,
         ) as mock_connect:
             async for _ in backend.query("test", opts):
@@ -799,7 +797,7 @@ class TestCodexBackend:
     @pytest.mark.asyncio
     async def test_codex_home_copies_auth(self, tmp_path):
         """Auth.json is copied to isolated CODEX_HOME for subscription auth."""
-        from auto_scientist.sdk_backend import CodexBackend, SDKOptions
+        from auto_core.sdk_backend import CodexBackend, SDKOptions
 
         steps = [self._make_mock_step("ok", "thr-1")]
         mock_client = self._make_mock_client(steps)
@@ -815,10 +813,10 @@ class TestCodexBackend:
 
         with (
             patch(
-                "auto_scientist.sdk_backend.CodexClient.connect_stdio",
+                "auto_core.sdk_backend.CodexClient.connect_stdio",
                 return_value=mock_client,
             ) as mock_connect,
-            patch("auto_scientist.sdk_backend.Path.home", return_value=fake_home),
+            patch("auto_core.sdk_backend.Path.home", return_value=fake_home),
         ):
             async for _ in backend.query("test", opts):
                 pass
@@ -833,7 +831,7 @@ class TestCodexBackend:
     @pytest.mark.asyncio
     async def test_codex_home_contains_mcp_config(self):
         """When MCP servers are provided, config.toml exists in CODEX_HOME."""
-        from auto_scientist.sdk_backend import CodexBackend, SDKOptions
+        from auto_core.sdk_backend import CodexBackend, SDKOptions
 
         steps = [self._make_mock_step("ok", "thr-1")]
         mock_client = self._make_mock_client(steps)
@@ -855,7 +853,7 @@ class TestCodexBackend:
             return mock_client
 
         with patch(
-            "auto_scientist.sdk_backend.CodexClient.connect_stdio",
+            "auto_core.sdk_backend.CodexClient.connect_stdio",
             side_effect=capture_connect,
         ):
             async for _ in backend.query("test", opts):
@@ -873,7 +871,7 @@ class TestCodexBackend:
     @pytest.mark.asyncio
     async def test_end_to_end_fresh_then_resume(self):
         """Simulates the ingestor/report retry flow: fresh call, then resume."""
-        from auto_scientist.sdk_backend import CodexBackend, SDKOptions
+        from auto_core.sdk_backend import CodexBackend, SDKOptions
 
         chat_calls: list[dict] = []
 
@@ -896,7 +894,7 @@ class TestCodexBackend:
         backend = CodexBackend()
 
         with patch(
-            "auto_scientist.sdk_backend.CodexClient.connect_stdio",
+            "auto_core.sdk_backend.CodexClient.connect_stdio",
             return_value=mock_client,
         ) as mock_connect:
             # --- First call: fresh ---
@@ -940,7 +938,7 @@ class TestCodexBackend:
     @pytest.mark.asyncio
     async def test_error_mid_turn_cleans_up_client(self):
         """When chat() raises mid-turn, close() tears down client and temp dir."""
-        from auto_scientist.sdk_backend import CodexBackend, SDKOptions
+        from auto_core.sdk_backend import CodexBackend, SDKOptions
 
         mock_client = AsyncMock()
         mock_client.start = AsyncMock()
@@ -962,7 +960,7 @@ class TestCodexBackend:
 
         with (
             patch(
-                "auto_scientist.sdk_backend.CodexClient.connect_stdio",
+                "auto_core.sdk_backend.CodexClient.connect_stdio",
                 return_value=mock_client,
             ),
             pytest.raises(RuntimeError, match="simulated mid-turn failure"),
@@ -985,7 +983,7 @@ class TestCreateBackend:
     @pytest.mark.asyncio
     async def test_returns_fresh_codex_instance(self):
         """create_backend('openai') yields a new CodexBackend not in the cache."""
-        from auto_scientist.sdk_backend import CodexBackend, _backend_cache, create_backend
+        from auto_core.sdk_backend import CodexBackend, _backend_cache, create_backend
 
         async with create_backend("openai") as backend:
             assert isinstance(backend, CodexBackend)
@@ -994,7 +992,7 @@ class TestCreateBackend:
     @pytest.mark.asyncio
     async def test_returns_fresh_claude_instance(self):
         """create_backend('anthropic') yields a ClaudeBackend."""
-        from auto_scientist.sdk_backend import ClaudeBackend, create_backend
+        from auto_core.sdk_backend import ClaudeBackend, create_backend
 
         async with create_backend("anthropic") as backend:
             assert isinstance(backend, ClaudeBackend)
@@ -1002,7 +1000,7 @@ class TestCreateBackend:
     @pytest.mark.asyncio
     async def test_distinct_instances(self):
         """Two calls yield distinct backend objects."""
-        from auto_scientist.sdk_backend import create_backend
+        from auto_core.sdk_backend import create_backend
 
         async with create_backend("openai") as b1, create_backend("openai") as b2:
             assert b1 is not b2
@@ -1010,7 +1008,7 @@ class TestCreateBackend:
     @pytest.mark.asyncio
     async def test_closes_on_exit(self):
         """Backend.close() is called when the context manager exits normally."""
-        from auto_scientist.sdk_backend import CodexBackend, create_backend
+        from auto_core.sdk_backend import CodexBackend, create_backend
 
         with patch.object(CodexBackend, "close", new_callable=AsyncMock) as mock_close:
             async with create_backend("openai"):
@@ -1020,7 +1018,7 @@ class TestCreateBackend:
     @pytest.mark.asyncio
     async def test_closes_on_exception(self):
         """Backend.close() is called even when the body raises."""
-        from auto_scientist.sdk_backend import CodexBackend, create_backend
+        from auto_core.sdk_backend import CodexBackend, create_backend
 
         with patch.object(CodexBackend, "close", new_callable=AsyncMock) as mock_close:
             with pytest.raises(ValueError, match="boom"):
@@ -1031,7 +1029,7 @@ class TestCreateBackend:
     @pytest.mark.asyncio
     async def test_unknown_provider_raises(self):
         """create_backend with an unsupported provider raises ValueError."""
-        from auto_scientist.sdk_backend import create_backend
+        from auto_core.sdk_backend import create_backend
 
         with pytest.raises(ValueError, match="No SDK backend"):
             async with create_backend("google"):
@@ -1040,7 +1038,7 @@ class TestCreateBackend:
     @pytest.mark.asyncio
     async def test_parallel_backends_get_separate_clients(self):
         """Two parallel create_backend calls produce independent CodexBackend instances."""
-        from auto_scientist.sdk_backend import SDKOptions, create_backend
+        from auto_core.sdk_backend import SDKOptions, create_backend
 
         mock_client_a = AsyncMock()
         mock_client_a.start = AsyncMock()
@@ -1069,7 +1067,7 @@ class TestCreateBackend:
         mock_client_b.chat = mock_chat_b
 
         with patch(
-            "auto_scientist.sdk_backend.CodexClient.connect_stdio",
+            "auto_core.sdk_backend.CodexClient.connect_stdio",
             side_effect=lambda **kw: next(clients),
         ):
             opts = SDKOptions(
@@ -1093,3 +1091,43 @@ class TestCreateBackend:
         assert results["b"] == "response-b"
         mock_client_a.close.assert_called_once()
         mock_client_b.close.assert_called_once()
+
+
+class TestRewriteUvRunForCodex:
+    """`rewrite_uv_run_for_codex` rewrites common uv run shapes for the sandbox."""
+
+    def test_bare_script_path(self):
+        from auto_core.sdk_backend import rewrite_uv_run_for_codex
+
+        assert rewrite_uv_run_for_codex("uv run {script_path}") == "python3 {script_path}"
+
+    def test_uv_run_python_script(self):
+        from auto_core.sdk_backend import rewrite_uv_run_for_codex
+
+        assert rewrite_uv_run_for_codex("uv run python {script_path}") == "python3 {script_path}"
+
+    def test_uv_run_pytest_with_args(self):
+        from auto_core.sdk_backend import rewrite_uv_run_for_codex
+
+        assert (
+            rewrite_uv_run_for_codex("uv run pytest -x -s {script_path}")
+            == "python3 -m pytest -x -s {script_path}"
+        )
+
+    def test_dotpy_first_token(self):
+        from auto_core.sdk_backend import rewrite_uv_run_for_codex
+
+        assert rewrite_uv_run_for_codex("uv run foo.py --flag bar") == "python3 foo.py --flag bar"
+
+    def test_non_uv_command_passthrough(self):
+        from auto_core.sdk_backend import rewrite_uv_run_for_codex
+
+        assert rewrite_uv_run_for_codex("node {script_path}") == "node {script_path}"
+
+    def test_python3_passthrough(self):
+        from auto_core.sdk_backend import rewrite_uv_run_for_codex
+
+        assert (
+            rewrite_uv_run_for_codex("uv run python3 -u {script_path}")
+            == "python3 -u {script_path}"
+        )

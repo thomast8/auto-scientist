@@ -9,9 +9,8 @@ from pathlib import Path
 from typing import Literal
 
 import yaml
+from auto_core.model_config import BUILTIN_PRESETS, AgentModelConfig
 from pydantic import BaseModel, ConfigDict, Field, ValidationError, field_validator, model_validator
-
-from auto_scientist.model_config import BUILTIN_PRESETS, AgentModelConfig
 
 logger = logging.getLogger(__name__)
 
