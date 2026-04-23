@@ -92,12 +92,12 @@ class TestProberResultsArtifacts:
     "ANALYZE: skipped (no results file)".
     """
 
-    def test_pytest_invocation_redirects_stdout_to_results_txt(self) -> None:
-        # PROBER_SYSTEM is a .format() template; pred_id is escaped as {{pred_id}}.
-        assert (
-            "uv run pytest probes/probe_{{pred_id}}.py -x -s "
-            "> results.txt 2>stderr.txt; echo $? > exitcode.txt"
-        ) in PROBER_SYSTEM
+    def test_invocation_redirects_stdout_to_results_txt(self) -> None:
+        # PROBER_SYSTEM is ecosystem-agnostic now (Intake picks the runner),
+        # but the redirect tail that creates results.txt / stderr.txt /
+        # exitcode.txt must still be mandated in the prompt so every run
+        # produces the files auto-core's Analyst gate keys on.
+        assert "> results.txt 2>stderr.txt; echo $? > exitcode.txt" in PROBER_SYSTEM
 
     def test_recap_mentions_results_artifact(self) -> None:
         # Guards against future edits that trim the recap and drop the

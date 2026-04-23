@@ -124,25 +124,60 @@ them in Python.
      produce any `.DELETED` tombstones unless `git show` actually
      failed.
 
-7. Write the ReviewConfig at `{{config_path}}`. JSON fields:
+7. Detect the target repo's language / build system. Look at the file
+   tree of `repo_abs` (top-level + `src/`). Match the first of:
+   - `pyproject.toml` or `setup.py`            -> `python`
+   - `package.json`                            -> `node`
+   - `go.mod`                                  -> `go`
+   - `Cargo.toml`                              -> `rust`
+   - `pom.xml` or `build.gradle(.kts)?`        -> `java` (Maven / Gradle)
+   - `Gemfile`                                 -> `ruby`
+   - anything else                             -> `other`
+   Note which one you matched and any co-signals (e.g. `pytest` in
+   pyproject `[tool.pytest]` or `dev-dependencies`; `jest` in package.json
+   `devDependencies`).
+
+8. Write the ReviewConfig at `{{config_path}}`. JSON fields:
    - `name`: short filesystem-safe slug derived from the PR ref.
    - `description`: one sentence, e.g. "PR review of <pr_ref> against
      <base_ref>".
-   - `run_command`: MUST be exactly the string
-     `uv run pytest -x -s {script_path}` with single curly braces around
-     `script_path`. The Prober substitutes the placeholder at runtime.
-     Do not double the braces (no `{{script_path}}`); do not replace
-     `{script_path}` with a real path.
+   - `run_cwd`: `repo_abs`. The Prober changes to this directory before
+     running the probe, so the target's native import / module resolution
+     applies and no `sys.path` hacks are needed.
+   - `run_command`: a single-line template appropriate to the detected
+     language. Use exactly one `{script_path}` placeholder (single
+     braces, not doubled). The Prober substitutes the probe's absolute
+     path at runtime. Pick from this table unless you have a strong
+     reason to deviate - if you do, note the reason in the notebook
+     entry:
+       python + pytest     -> `uv run pytest -x -s {script_path}`
+       python, no pytest   -> `uv run python {script_path}`
+       node + jest         -> `npx jest --runInBand {script_path}`
+       node, no jest       -> `node {script_path}`
+       go                  -> `go test -run . {script_path}`  (probe
+                              must be `<pkg>/probe_X_test.go` under a
+                              package of the target module; the Prober
+                              will handle placement)
+       rust                -> `cargo test --test probe_X -- --nocapture`
+                              (probe placement handled by Prober)
+       java (maven)        -> `mvn -q -Dtest=<probeclass> test`
+       java (gradle)       -> `./gradlew test --tests <probeclass>`
+       ruby                -> `bundle exec ruby {script_path}`
+       other               -> `bash {script_path}`
+     Examples use `{script_path}` literally - keep the single curly
+     braces; do not double them (no `{{script_path}}`) and do not
+     substitute a real path here.
    - `repo_path`: `repo_abs`.
    - `pr_ref`: whatever pointer you resolved (PR number, URL, or branch).
    - `base_ref`, `head_ref`: as resolved in step 3.
    - `protected_paths`: `[]` unless you have a strong reason.
 
-8. Append a lab notebook entry to the notebook path provided in the
+9. Append a lab notebook entry to the notebook path provided in the
    context. Use `source="intake"` and `version="intake"`. The file is
    XML; append a new `<entry>` inside the existing `<lab_notebook>` root
    (create the root if the file does not yet exist). Body should be
-   brief and structural:
+   brief and structural, and must record the detected language and the
+   chosen run_command so later iterations can recover context:
 
    ```xml
    <entry version="intake" source="intake">
@@ -154,14 +189,16 @@ them in Python.
    Files changed: <n>
    Diff lines: <n>
    Repo path: <repo_abs>
+   Language: <python | node | go | ...>
+   Run command: <exact run_command written to ReviewConfig>
    Goal: <the original prompt>
      </content>
    </entry>
    ```
 
-9. End your turn with a one-line confirmation summarizing what you
-   produced ("Canonicalized PR #42 on owner/repo; 7 touched files, 412
-   diff lines"). No final JSON or speculation.
+10. End your turn with a one-line confirmation summarizing what you
+    produced ("Canonicalized PR #42 on owner/repo; 7 touched files, 412
+    diff lines; python + pytest"). No final JSON or speculation.
 </instructions>"""
 
 _EXAMPLES = """\
@@ -177,14 +214,16 @@ _EXAMPLES = """\
 5. Metadata: no GitHub URL known; fall back to `git log -1` on the head
    to populate title/body/author.
 6. Snapshot each changed file at the head ref.
-7. ReviewConfig with repo_path=/repo, pr_ref="refactor/extract-auto-core",
-   base_ref="main", head_ref="refactor/extract-auto-core", run_command
-   literal.
-8. Notebook intake entry.
+7. Language: `/repo/pyproject.toml` exists and has `[tool.pytest]` -> python
+   + pytest. run_command = "uv run pytest -x -s {script_path}".
+8. ReviewConfig with repo_path=/repo, pr_ref="refactor/extract-auto-core",
+   base_ref="main", head_ref="refactor/extract-auto-core",
+   run_cwd="/repo", and the run_command above.
+9. Notebook intake entry recording language=python and the run_command.
     </walkthrough>
   </example>
   <example>
-    <context>goal = "review https://github.com/anthropics/foo/pull/42"; cwd is unrelated</context>
+    <context>goal = "review https://github.com/anthropics/foo/pull/42"; foo is a Node service; cwd is unrelated</context>
     <walkthrough>
 1. Parse: GitHub PR URL, pr_ref = "anthropics/foo#42".
 2. Locate repo: cwd is not anthropics/foo. Autonomous mode: clone with
@@ -195,8 +234,11 @@ _EXAMPLES = """\
 4. Diff: `gh -R anthropics/foo pr diff 42 > data/diff.patch`.
 5. Metadata: the `gh pr view` output above; flatten author.
 6. Snapshot.
-7. ReviewConfig with pr_ref="anthropics/foo#42", url populated.
-8. Notebook intake entry.
+7. Language: `repo/package.json` present; no jest in devDependencies ->
+   node without a test runner. run_command = "node {script_path}".
+8. ReviewConfig with pr_ref="anthropics/foo#42", url populated,
+   run_cwd=repo_abs, run_command="node {script_path}".
+9. Notebook intake entry recording language=node and the run_command.
     </walkthrough>
   </example>
   <example>
@@ -264,10 +306,15 @@ Rules (quick reference):
 3. Diff via `gh pr diff` or `git diff base...head`; write diff.patch.
 4. Metadata JSON with flattened author.
 5. Snapshot every changed file at head_ref; deleted files get `.DELETED`.
-6. ReviewConfig: run_command MUST be the literal string
-   "uv run pytest -x -s {{script_path}}" with the braces kept verbatim.
-7. Append intake notebook entry (structural facts only).
-8. Call git/gh directly; do not reimplement them in Python.
+6. Detect the target's language via top-level build files (pyproject.toml,
+   package.json, go.mod, Cargo.toml, pom.xml, Gemfile, ...).
+7. ReviewConfig: set `run_cwd` to the repo's absolute path so probes run
+   from the target repo (no sys.path hacks). Set `run_command` to a
+   template appropriate to the language with a single `{{script_path}}`
+   placeholder - single braces, not doubled, never substituted here.
+8. Append intake notebook entry (structural facts only, including
+   language + run_command).
+9. Call git/gh directly; do not reimplement them in Python.
 </recap>"""
 
 
