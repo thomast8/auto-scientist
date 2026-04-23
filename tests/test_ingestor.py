@@ -63,6 +63,43 @@ class TestRunIngestorToolSelection:
         options = call_kwargs.kwargs["options"]
         assert "AskUserQuestion" not in options.allowed_tools
 
+    @pytest.mark.asyncio
+    @patch("auto_scientist.agents.ingestor.safe_query")
+    async def test_interactive_falls_back_on_non_claude_backend(self, mock_query, tmp_path, caplog):
+        """Interactive mode on Codex silently drops AskUserQuestion with a warning.
+
+        Codex has no `AskUserQuestion` equivalent, so advertising it in the
+        toolset would confuse the model. Expect autonomous tool set + a log.
+        """
+        raw_data = tmp_path / "data.csv"
+        raw_data.write_text("a,b\n1,2\n")
+        output_dir = tmp_path / "experiments"
+        output_dir.mkdir()
+        data_dir = output_dir / "data"
+        data_dir.mkdir()
+        (data_dir / "output.csv").write_text("a,b\n1,2\n")
+
+        mock_query.return_value = AsyncMock(
+            __aiter__=lambda self: self,
+            __anext__=AsyncMock(side_effect=StopAsyncIteration),
+        )
+
+        import logging
+
+        with caplog.at_level(logging.WARNING, logger="auto_scientist.agents.ingestor"):
+            await run_ingestor(
+                raw_data,
+                output_dir,
+                "test goal",
+                interactive=True,
+                provider="openai",
+            )
+
+        call_kwargs = mock_query.call_args
+        options = call_kwargs.kwargs["options"]
+        assert "AskUserQuestion" not in options.allowed_tools
+        assert any("Falling back to autonomous" in rec.message for rec in caplog.records)
+
 
 class TestRunIngestorConfigPath:
     """Verify config_path parameter is accepted and forwarded to the prompt."""

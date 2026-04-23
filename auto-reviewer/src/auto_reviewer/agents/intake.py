@@ -72,10 +72,24 @@ async def run_intake(
     notebook_path = output_dir / NOTEBOOK_FILENAME
 
     tools = ["Bash", "Read", "Write", "Glob", "Grep"]
-    if interactive:
+    # `AskUserQuestion` is a Claude Code CLI built-in. The Codex backend
+    # has no equivalent, and prepare_turn_budget's deferred-tool wiring
+    # also only activates for provider=='anthropic'. If the caller asked
+    # for interactive mode on a non-Claude backend, fall back to
+    # autonomous with a clear warning so the agent does not silently
+    # advertise a tool it cannot call.
+    effective_interactive = interactive and provider == "anthropic"
+    if interactive and not effective_interactive:
+        logger.warning(
+            "Intake --interactive is only supported with provider='anthropic' "
+            "(Claude Code supplies AskUserQuestion). Falling back to autonomous "
+            "mode for provider=%r.",
+            provider,
+        )
+    if effective_interactive:
         tools.append("AskUserQuestion")
 
-    mode = "interactive" if interactive else "autonomous"
+    mode = "interactive" if effective_interactive else "autonomous"
 
     max_turns = 30
     prompt_provider = resolve_prompt_provider(provider)
