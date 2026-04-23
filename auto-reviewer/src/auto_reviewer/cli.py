@@ -34,6 +34,9 @@ from auto_core.resume import RewindResult
 from auto_core.state import RunState
 from dotenv import load_dotenv
 
+from auto_reviewer.prep import pre_resolve
+from auto_reviewer.safety.integrity import IntegrityError, verify_unchanged
+
 # Pick up API keys from the repo's .env before any agent tries to talk to
 # an LLM provider.
 load_dotenv()
@@ -115,6 +118,16 @@ def cli() -> None:
     is_flag=True,
     help="Allow the intake agent to ask clarifying questions (AskUserQuestion).",
 )
+@click.option(
+    "--sandbox",
+    type=click.Choice(["none", "docker"], case_sensitive=False),
+    default="none",
+    help=(
+        "Extra isolation layer. 'none' (default) relies on the workspace "
+        "guard + integrity tripwire. 'docker' runs probes in an ephemeral "
+        "container with only the workspace mounted rw (not yet implemented)."
+    ),
+)
 @click.option("-v", "--verbose", is_flag=True)
 def review(
     prompt: str,
@@ -124,6 +137,7 @@ def review(
     preset: str,
     critics: str | None,
     interactive: bool,
+    sandbox: str,
     verbose: bool,
 ) -> None:
     """Review a pull request end-to-end.
@@ -136,16 +150,34 @@ def review(
     workspace = Path(output_dir).resolve() if output_dir else _default_workspace()
     workspace.mkdir(parents=True, exist_ok=True)
 
+    if sandbox == "docker":
+        raise click.UsageError(
+            "--sandbox=docker is not yet implemented. The default --sandbox=none "
+            "already confines writes via the workspace guard + integrity tripwire; "
+            "see docs/auto-reviewer-deferred-work.md."
+        )
+
+    # Pre-Intake resolution. Snapshots the user's cwd so we can detect
+    # any post-run mutation, clones it into the workspace if it's a git
+    # repo so downstream agents never touch the original, and writes a
+    # hint JSON with the metadata Intake needs (remotes, branch, HEAD)
+    # instead of leaking the user's real filesystem path.
+    resolved = pre_resolve(cwd, workspace)
+
+    # The data path Intake uses for reads is the clone when present,
+    # otherwise the workspace itself (remote-only resolution). Either
+    # way, no downstream agent sees the user's original --cwd.
+    data_path = resolved.repo_clone if resolved.repo_clone is not None else workspace
+
     # Initial RunState. The intake agent will refine `data_path` to point at
-    # the canonical data directory once it has populated it. Seeding with
-    # cwd gives `validate_prerequisites` a real directory to check.
+    # the canonical data directory once it has populated it.
     state = RunState(
         domain=_slug(prompt),
         goal=prompt,
         phase="ingestion",
         max_iterations=max_iterations,
         config_path=str(workspace / "domain_config.json"),
-        data_path=str(cwd),
+        data_path=str(data_path),
     )
 
     model_config = ModelConfig.builtin_preset(preset)
@@ -175,7 +207,7 @@ def review(
 
     orchestrator = Orchestrator(
         state=state,
-        data_path=cwd,
+        data_path=data_path,
         output_dir=workspace,
         max_iterations=max_iterations,
         model_config=model_config,
@@ -186,6 +218,21 @@ def review(
         orchestrator,
         "Interrupted. State is persisted at state.json; use `auto-reviewer resume` to continue.",
     )
+
+    # Post-run tripwire: the user's real repo must be byte-identical to
+    # what it was when the run started. A failure here is a bug in the
+    # sandbox layers above — log loudly so the operator investigates.
+    try:
+        verify_unchanged(resolved.fingerprint)
+    except IntegrityError as e:
+        click.echo(
+            f"SANDBOX VIOLATION: {e}\n"
+            "The reviewer ran, but the user's repository was modified "
+            "during the run. This indicates a bug in the sandbox layers; "
+            "please report it.",
+            err=True,
+        )
+        sys.exit(2)
 
 
 @cli.command()
