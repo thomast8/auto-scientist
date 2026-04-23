@@ -39,12 +39,19 @@ class TestReviewCommand:
     @patch("auto_reviewer.cli._run_orchestrator")
     @patch("auto_reviewer.cli.Orchestrator")
     def test_review_routes_through_cleanup_wrapper(self, mock_orch, mock_run, tmp_path):
+        # pre_resolve runs before the orchestrator; point --cwd at a
+        # throwaway non-git dir so no real clone happens in the unit
+        # test path.
+        scratch = tmp_path / "scratch"
+        scratch.mkdir()
         runner = CliRunner()
         result = runner.invoke(
             reviewer_cli.cli,
             [
                 "review",
                 "review my current branch",
+                "--cwd",
+                str(scratch),
                 "--output-dir",
                 str(tmp_path / "review_workspace"),
             ],

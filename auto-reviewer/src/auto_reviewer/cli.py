@@ -146,16 +146,16 @@ def review(
     review - a GitHub PR URL, an owner/repo#N reference, a branch name,
     or simply "my current branch". The intake agent resolves the pointer.
     """
-    cwd = Path(cwd_opt).resolve() if cwd_opt else Path.cwd()
-    workspace = Path(output_dir).resolve() if output_dir else _default_workspace()
-    workspace.mkdir(parents=True, exist_ok=True)
-
     if sandbox == "docker":
         raise click.UsageError(
             "--sandbox=docker is not yet implemented. The default --sandbox=none "
             "already confines writes via the workspace guard + integrity tripwire; "
             "see docs/auto-reviewer-deferred-work.md."
         )
+
+    cwd = Path(cwd_opt).resolve() if cwd_opt else Path.cwd()
+    workspace = Path(output_dir).resolve() if output_dir else _default_workspace()
+    workspace.mkdir(parents=True, exist_ok=True)
 
     # Pre-Intake resolution. Snapshots the user's cwd so we can detect
     # any post-run mutation, clones it into the workspace if it's a git
