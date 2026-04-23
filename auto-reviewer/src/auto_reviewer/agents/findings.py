@@ -25,6 +25,7 @@ from auto_core.sdk_utils import (
     append_block_to_buffer,
     collect_text_from_query,
     prepare_turn_budget,
+    resolve_prompt_provider,
     safe_query,
     validate_report_structure,
 )
@@ -76,7 +77,7 @@ async def run_findings(
     mcp_servers: dict[str, Any] = {
         "notebook": build_notebook_mcp_server(notebook_path, output_dir=output_dir),
     }
-    prompt_provider = "gpt" if provider == "openai" else "claude"
+    prompt_provider = resolve_prompt_provider(provider)
     report_system = build_findings_system(prompt_provider)
     budget = prepare_turn_budget(report_system, max_turns, allowed_tools, provider=provider)
     backend = get_backend(provider)

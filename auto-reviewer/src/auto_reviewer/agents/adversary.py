@@ -51,6 +51,7 @@ from auto_core.sdk_backend import SDKBackend, SDKOptions, create_backend, get_ba
 from auto_core.sdk_utils import (
     collect_text_from_query,
     prepare_turn_budget,
+    resolve_prompt_provider,
     validate_json_output,
 )
 from auto_core.state import PredictionRecord
@@ -754,7 +755,7 @@ def _build_critic_prompt(
         notebook_tool_guidance = ""
         notebook_section = f"<notebook>{notebook_body}</notebook>"
 
-    prompt_provider = "gpt" if provider == "openai" else "claude"
+    prompt_provider = resolve_prompt_provider(provider)
     system = build_adversary_system(prompt_provider).format(
         persona_text=persona_text,
         persona_instructions=effective_instructions,

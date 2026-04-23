@@ -25,6 +25,7 @@ from auto_core.sdk_backend import SDKOptions, get_backend
 from auto_core.sdk_utils import (
     collect_text_from_query,
     prepare_turn_budget,
+    resolve_prompt_provider,
     validate_json_output,
 )
 from auto_core.state import RunState
@@ -187,7 +188,7 @@ async def run_surveyor(
         "notebook": build_notebook_mcp_server(notebook_path, output_dir=notebook_path.parent),
     }
     allowed_tools.append(NOTEBOOK_SPEC.mcp_tool_name)
-    prompt_provider = "gpt" if provider == "openai" else "claude"
+    prompt_provider = resolve_prompt_provider(provider)
     analyst_system = build_surveyor_system(prompt_provider)
     budget = prepare_turn_budget(
         analyst_system + json_instruction, max_turns, allowed_tools, provider=provider

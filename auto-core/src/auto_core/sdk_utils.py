@@ -26,6 +26,30 @@ logger = logging.getLogger(__name__)
 # ---------------------------------------------------------------------------
 
 
+def resolve_prompt_provider(provider: str) -> str:
+    """Map a backend provider to the prompt flavor key.
+
+    Agent system-prompt builders come in two hand-tuned flavors:
+    ``"claude"`` (instructions written for Claude Code's tool-use +
+    thinking loop) and ``"gpt"`` (phrased for OpenAI / Codex). There is
+    currently no Gemini-tuned flavor, so ``"google"`` gets mapped to
+    ``"gpt"`` - Gemini's tool-use behavior is closer to GPT than to
+    Claude, and this makes the silent previous fallback (which treated
+    google as claude) explicit and deliberate.
+
+    Unknown providers raise ``ValueError`` so a new backend cannot be
+    silently shipped with the wrong prompt flavor.
+    """
+    if provider in ("anthropic", "claude"):
+        return "claude"
+    if provider in ("openai", "google", "gpt"):
+        return "gpt"
+    raise ValueError(
+        f"No prompt flavor registered for provider {provider!r}. "
+        "Expected one of: 'anthropic', 'openai', 'google'."
+    )
+
+
 def append_block_to_buffer(block: Any, buffer: list[str]) -> None:
     """Append a content block's text to a message buffer.
 

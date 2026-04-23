@@ -640,3 +640,28 @@ class TestPrepareTurnBudget:
         import auto_core.sdk_utils as mod
 
         assert not hasattr(mod, "with_turn_budget")
+
+
+class TestResolvePromptProvider:
+    def test_anthropic_maps_to_claude(self):
+        from auto_core.sdk_utils import resolve_prompt_provider
+
+        assert resolve_prompt_provider("anthropic") == "claude"
+
+    def test_openai_maps_to_gpt(self):
+        from auto_core.sdk_utils import resolve_prompt_provider
+
+        assert resolve_prompt_provider("openai") == "gpt"
+
+    def test_google_maps_to_gpt(self):
+        """Google has no dedicated prompt flavor; gpt is closer than claude."""
+        from auto_core.sdk_utils import resolve_prompt_provider
+
+        assert resolve_prompt_provider("google") == "gpt"
+
+    def test_unknown_provider_raises(self):
+        import pytest
+        from auto_core.sdk_utils import resolve_prompt_provider
+
+        with pytest.raises(ValueError, match="No prompt flavor"):
+            resolve_prompt_provider("llama")
