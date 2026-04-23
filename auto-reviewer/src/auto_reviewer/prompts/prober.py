@@ -44,28 +44,53 @@ For each iteration:
    target repo). These tell you how the probe must be invoked for this
    target.
 
-2. Choose the highest-priority prediction. Write a probe whose shape
-   matches the target's ecosystem, as hinted by `run_command`:
-   - `pytest ...`                -> `probe_{{pred_id}}.py` with pytest
-                                    test functions
+2. Cover as many predictions as can share a probe file cleanly. The
+   Hunter's `testable_predictions[]` may have 2-5 entries; group
+   together predictions with the same target module(s), compatible
+   fixtures, and the same runtime. Each prediction gets its own test
+   function / assertion block named so the mapping to its `pred_id` is
+   obvious (e.g. `test_pred_<pred_id>` for pytest, `TestPred_<pred_id>`
+   for Go, etc.). Only split into additional probe files when
+   predictions genuinely require different ecosystems or
+   mutually-incompatible setup - covering 4 predictions in one probe
+   file beats four iterations running one probe each. If a prediction
+   is truly off on its own (different module, incompatible fixture),
+   write a second probe file for it; the run step below handles both.
+
+   Write the probe in the shape matching the target's ecosystem, as
+   hinted by `run_command`:
+   - `pytest ...`                -> `probe_<pred_ids>.py` with one
+                                    pytest test function per prediction
+                                    addressed (e.g.
+                                    `test_pred_1_1`, `test_pred_1_2`).
+                                    Naming the file after the primary
+                                    pred_id (or the range) is fine.
    - `python ...`                -> standalone Python script that exits
-                                    non-zero when the bug fires
-   - `node ...` / `npx jest ...` -> probe_{{pred_id}}.js / .test.js
-   - `go test ...`               -> `probe_{{pred_id}}_test.go` (Go test
-                                    files must sit inside a package of
-                                    the target module; create a tiny
-                                    package under `run_cwd/.probe_<id>/`
-                                    if needed and include a minimal
-                                    go.mod replace directive pointing at
-                                    the parent module)
-   - `cargo test ...`            -> integration test under
-                                    `run_cwd/tests/probe_<id>.rs`
-   - `mvn` / `gradle ...`        -> JUnit test class placed under the
-                                    project's standard test source set
-   - `bash ...` / `bundle exec ...` -> standalone script in the matching
-                                    language
-   A probe is correct when it exits non-zero / reports a failing
-   assertion iff the bug fires.
+                                    non-zero when ANY addressed
+                                    prediction fires; print per-pred
+                                    status lines to stdout so the
+                                    Surveyor can attribute outcomes.
+   - `node ...` / `npx jest ...` -> probe file with one test per
+                                    prediction.
+   - `go test ...`               -> probe `_test.go` with one `TestPred_<id>`
+                                    function per prediction. Go test files
+                                    must sit inside a package of the target
+                                    module; create a tiny package under
+                                    `run_cwd/.auto_reviewer_probes/<iter>/`
+                                    and include a minimal go.mod replace
+                                    directive pointing at the parent module.
+   - `cargo test ...`            -> one `#[test]` function per prediction
+                                    in an integration test under
+                                    `run_cwd/tests/probe_<iter>.rs`.
+   - `mvn` / `gradle ...`        -> JUnit test class with one `@Test`
+                                    method per prediction, placed under
+                                    the project's standard test source
+                                    set.
+   - `bash ...` / `bundle exec ...` -> standalone script that exercises
+                                    each prediction in sequence and
+                                    emits per-pred status to stdout.
+   A probe is correct when, for every prediction it addresses, it
+   fails its test iff that prediction's claimed bug fires.
 
 3. Run the probe from `run_cwd` so the target's native import / module
    resolution applies. Example shell pattern:
@@ -120,28 +145,44 @@ Write `run_result.json` with these keys:
     error: str | null        (short description when success=false)
     attempts: int            (how many rewrite+run cycles you did)
 
-Additionally write a `probe_outcome.json` sibling file with:
+Additionally write a `probe_outcome.json` sibling file as a **JSON
+list**, with one entry per prediction you addressed this iteration:
 
-    pred_id: str
-    outcome: "confirmed" | "refuted" | "inconclusive"
-    evidence: str            (quoted stderr/stdout snippet that decides)
-    summary: str             (one-line tree-display summary)
+    [
+      {
+        "pred_id": str,
+        "outcome": "confirmed" | "refuted" | "inconclusive",
+        "evidence": str,      (quoted stderr/stdout snippet that
+                               decides THIS prediction)
+        "summary": str        (one-line tree-display summary for
+                               THIS prediction)
+      },
+      ...
+    ]
 
-`outcome` semantics:
+If you addressed a single prediction this iteration, the list still
+has exactly one entry - do not omit the list wrapper. Unaddressed
+predictions from the Hunter's plan do not appear; the next iteration's
+Surveyor treats them as still-pending.
+
+`outcome` semantics (per prediction):
     confirmed    = probe demonstrated the bug (failing test / assertion).
     refuted      = probe ran clean and the bug did not fire.
-    inconclusive = probe could not be constructed / timed out / flaky.
+    inconclusive = probe could not be constructed / timed out / flaky
+                   for that specific prediction.
 </output_format>
 
 <recap>
 Read `run_command` + `run_cwd` from `domain_config.json`; write a probe
-in the shape matching the target's ecosystem; run it from `run_cwd` with
+in the shape matching the target's ecosystem, covering as many of the
+Hunter's `testable_predictions[]` as share clean setup (one test
+function per prediction); run from `run_cwd` with
 `> results.txt 2>stderr.txt; echo $? > exitcode.txt` so the version
 directory ends up with `results.txt`, `stderr.txt`, and `exitcode.txt`
-alongside `run_result.json` and `probe_outcome.json`; report outcome.
-Never modify the target repo's source. No sys.path / PYTHONPATH hacks -
-if imports fail, the fix is to run from `run_cwd` with the native
-tooling.
+alongside `run_result.json` and `probe_outcome.json`. `probe_outcome.json`
+is a JSON LIST with one entry per addressed prediction. Never modify
+the target repo's source. No sys.path / PYTHONPATH hacks - if imports
+fail, the fix is to run from `run_cwd` with the native tooling.
 </recap>"""
 
 
@@ -152,7 +193,11 @@ Version directory: {version_dir}
 Plan JSON path: {plan_path}
 Review config JSON path: {config_path}
 
-The plan.json at the path above has the BugPlan. Pick the highest-priority
-prediction, write the probe into {version_dir}/probes/, run it, and write
-the two result files next to plan.json.
+The plan.json at the path above has the BugPlan with its full
+`testable_predictions[]`. Cover as many predictions as can share a
+probe file cleanly (same module, same fixtures, same runtime) - each
+as its own test function so outcomes are attributable per prediction.
+Write probes into {version_dir}/probes/, run them, and write the result
+files next to plan.json. probe_outcome.json is a JSON list: one entry
+per prediction you addressed.
 </task>"""
