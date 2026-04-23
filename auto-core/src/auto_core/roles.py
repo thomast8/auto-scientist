@@ -105,6 +105,27 @@ class RoleRegistry:
     # for persistence / state files.
     panel_display_names: Mapping[str, str] = field(default_factory=dict)
 
+    # Report structure the app's Findings / Report agent is expected to emit.
+    # `sdk_utils.validate_report_structure` reads these at runtime; if an
+    # app's report format differs from auto-scientist's, override here.
+    # Defaults match auto-scientist's 10-section experiment report so
+    # auto-scientist works without setting anything explicit.
+    report_expected_headings: list[str] = field(
+        default_factory=lambda: [
+            "executive summary",
+            "problem statement",
+            "methodology",
+            "journey",
+            "best approach",
+            "results",
+            "insights",
+            "limitations",
+            "future work",
+            "version comparison",
+        ]
+    )
+    report_require_version_comparison_table: bool = True
+
 
 def install(registry: RoleRegistry) -> None:
     """Populate the core machinery's module-level lookup tables.
@@ -168,3 +189,12 @@ def install(registry: RoleRegistry) -> None:
     agent_dispatch.STOP_PERSONAS[:] = list(registry.stop_personas)
     if registry.get_model_index_for_debate is not None:
         agent_dispatch.GET_MODEL_INDEX_FOR_DEBATE = registry.get_model_index_for_debate
+
+    # Install the app's report-structure contract so
+    # `sdk_utils.validate_report_structure` checks the right section names.
+    from auto_core import sdk_utils
+
+    sdk_utils._EXPECTED_HEADINGS[:] = list(registry.report_expected_headings)
+    sdk_utils._REPORT_REQUIRE_VERSION_COMPARISON_TABLE = (
+        registry.report_require_version_comparison_table
+    )

@@ -471,6 +471,37 @@ Try Gaussian process regression.
 
 
 class TestValidateReportStructure:
+    """These tests use the auto-scientist experiment report shape
+    (_VALID_REPORT), so they must install the scientist registry's
+    report-structure settings regardless of which app happened to
+    install its registry earlier in the test session.
+    """
+
+    @pytest.fixture(autouse=True)
+    def _scientist_report_shape(self):
+        from auto_core import sdk_utils
+
+        prior_headings = list(sdk_utils._EXPECTED_HEADINGS)
+        prior_version_table = sdk_utils._REPORT_REQUIRE_VERSION_COMPARISON_TABLE
+        sdk_utils._EXPECTED_HEADINGS[:] = [
+            "executive summary",
+            "problem statement",
+            "methodology",
+            "journey",
+            "best approach",
+            "results",
+            "insights",
+            "limitations",
+            "future work",
+            "version comparison",
+        ]
+        sdk_utils._REPORT_REQUIRE_VERSION_COMPARISON_TABLE = True
+        try:
+            yield
+        finally:
+            sdk_utils._EXPECTED_HEADINGS[:] = prior_headings
+            sdk_utils._REPORT_REQUIRE_VERSION_COMPARISON_TABLE = prior_version_table
+
     def test_valid_report_returns_empty(self):
         issues = validate_report_structure(_VALID_REPORT)
         assert issues == []

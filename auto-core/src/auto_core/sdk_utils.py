@@ -472,8 +472,11 @@ collect_text_from_query.last_usage = {}  # type: ignore[attr-defined]
 
 # ── Report structure validation ─────────────────────────────────────────────
 
-# Expected heading keywords for fuzzy matching (case-insensitive substring)
-_EXPECTED_HEADINGS = [
+# Expected heading keywords for fuzzy matching (case-insensitive substring).
+# Mutable module-level state, populated by `auto_core.roles.install()` from
+# the app's RoleRegistry. The default here is the auto-scientist experiment
+# report shape so auto-scientist works without setting anything explicit.
+_EXPECTED_HEADINGS: list[str] = [
     "executive summary",
     "problem statement",
     "methodology",
@@ -486,13 +489,23 @@ _EXPECTED_HEADINGS = [
     "version comparison",
 ]
 
+# When True, `validate_report_structure` also requires that a section whose
+# heading contains "version comparison" include a markdown table. Off when
+# the app's report format does not include a version comparison table
+# (auto-reviewer's Findings has no such section).
+_REPORT_REQUIRE_VERSION_COMPARISON_TABLE: bool = True
+
 
 def validate_report_structure(text: str) -> list[str]:
     """Validate that a report has the expected section structure.
 
     Returns a list of issue strings (empty = valid).
-    Checks for: required headings, non-empty sections, markdown table in
-    Version Comparison section.
+    Checks for: required headings (from `_EXPECTED_HEADINGS`), non-empty
+    sections, and (when `_REPORT_REQUIRE_VERSION_COMPARISON_TABLE` is True)
+    a markdown table in the Version Comparison section.
+
+    Both module-level flags are installed by the app's RoleRegistry at
+    startup; see `auto_core.roles.install()`.
     """
     issues: list[str] = []
     lines = text.split("\n")
@@ -519,18 +532,19 @@ def validate_report_structure(text: str) -> list[str]:
         if not section_content:
             issues.append(f"Empty section: {heading}")
 
-    # Check Version Comparison Table has a markdown table
-    for line_num, heading in heading_indices:
-        if "version comparison" in heading.lower():
-            # Find content until next heading or end
-            end = len(lines)
-            for future_num, _ in heading_indices:
-                if future_num > line_num:
-                    end = future_num
-                    break
-            section = "\n".join(lines[line_num + 1 : end])
-            if "|" not in section:
-                issues.append("Version Comparison Table section missing markdown table")
-            break
+    # Check Version Comparison Table has a markdown table (if required)
+    if _REPORT_REQUIRE_VERSION_COMPARISON_TABLE:
+        for line_num, heading in heading_indices:
+            if "version comparison" in heading.lower():
+                # Find content until next heading or end
+                end = len(lines)
+                for future_num, _ in heading_indices:
+                    if future_num > line_num:
+                        end = future_num
+                        break
+                section = "\n".join(lines[line_num + 1 : end])
+                if "|" not in section:
+                    issues.append("Version Comparison Table section missing markdown table")
+                break
 
     return issues

@@ -37,18 +37,39 @@ AGENT_STYLES: dict[str, str] = {
     "Critic": "yellow",
 }
 
+_INTAKE_DESCRIPTION = "Fetching the PR diff, base refs, and building the review workspace..."
+_SURVEYOR_DESCRIPTION = (
+    "Reading the diff and probe results; surfacing suspicions and resolutions..."
+)
+_HUNTER_DESCRIPTION = "Picking which suspicions to chase and writing reproduction recipes..."
+_ADVERSARY_DESCRIPTION = (
+    "Challenging the Hunter's plan from security, concurrency, API-break, and fuzz angles..."
+)
+_PROBER_DESCRIPTION = "Writing and running reproduction probes inside review_workspace/..."
+_FINDINGS_DESCRIPTION = "Compiling the prioritized findings report with reproducers attached..."
+
 AGENT_DESCRIPTIONS: dict[str, str] = {
-    "Intake": "Fetching the PR diff, base refs, and building the review workspace...",
-    "Surveyor": "Reading the diff and probe results; surfacing suspicions and resolutions...",
-    "Hunter": "Picking which suspicions to chase and writing reproduction recipes...",
-    "Adversary": (
-        "Challenging the Hunter's plan from security, concurrency, API-break, and fuzz angles..."
-    ),
+    # Reviewer-flavored (display) keys.
+    "Intake": _INTAKE_DESCRIPTION,
+    "Surveyor": _SURVEYOR_DESCRIPTION,
+    "Hunter": _HUNTER_DESCRIPTION,
+    "Adversary": _ADVERSARY_DESCRIPTION,
     "Revision": "Revising the BugPlan based on adversary critique...",
-    "Prober": "Writing and running reproduction probes inside review_workspace/...",
-    "Findings": "Compiling the prioritized findings report with reproducers attached...",
+    "Prober": _PROBER_DESCRIPTION,
+    "Findings": _FINDINGS_DESCRIPTION,
     "Assessor": "Evaluating review coverage against the stated review goal...",
     "Stop Revision": "Deciding whether to uphold or withdraw the stop proposal...",
+    # Canonical fallbacks: AgentPanel construction passes the canonical name
+    # (Ingestor/Analyst/Scientist/Critic/Coder/Report), but reviewer panels
+    # are rendered under display names. Mirror the reviewer-framed text under
+    # the canonical keys so the placeholder shows for every launched agent,
+    # matching the canonical-fallback pattern used by SUMMARY_PROMPTS below.
+    "Ingestor": _INTAKE_DESCRIPTION,
+    "Analyst": _SURVEYOR_DESCRIPTION,
+    "Scientist": _HUNTER_DESCRIPTION,
+    "Critic": _ADVERSARY_DESCRIPTION,
+    "Coder": _PROBER_DESCRIPTION,
+    "Report": _FINDINGS_DESCRIPTION,
 }
 
 PHASE_STYLES: dict[str, str] = {
@@ -251,6 +272,19 @@ def build_registry() -> RoleRegistry:
             "Critic": "Adversary",
             "Revision": "Hunter Revision",
         },
+        # The Findings agent's report shape is review-oriented, not
+        # experiment-oriented: no "executive summary", "methodology",
+        # "journey", "version comparison" sections - those belong to
+        # auto-scientist. The reviewer produces a punch-list.
+        report_expected_headings=[
+            "summary",
+            "confirmed bugs",
+            "refuted suspicions",
+            "ungrounded findings",
+            "open abductions",
+            "known limitations",
+        ],
+        report_require_version_comparison_table=False,
     )
 
 
