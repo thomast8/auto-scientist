@@ -142,6 +142,17 @@ class _IsolationConfig:
 def _isolation_config() -> _IsolationConfig:
     """Build isolation settings for SDK subprocesses.
 
+    This helper is **Claude-Code-specific**. It returns CLI flags + env
+    vars that only the ``claude`` binary reads, so it is wired into
+    :meth:`ClaudeBackend._build_claude_options` but must *not* be
+    applied to Codex. The Codex backend isolates through a separate
+    mechanism - see :meth:`CodexBackend._ensure_client`, which
+    allocates a fresh ``$CODEX_HOME`` per run so the Codex
+    subprocess never sees the host's ``~/.codex/config.toml``,
+    AGENTS.md, skills, or global MCP servers. Any future parity fix
+    (e.g. blocking specific Codex built-in tools) belongs there, not
+    here.
+
     Instead of --bare (which strips all tools except Bash/Edit/Read),
     we use targeted flags and env vars to isolate from host config
     while keeping the full tool set (WebSearch, Glob, Grep, Write):
