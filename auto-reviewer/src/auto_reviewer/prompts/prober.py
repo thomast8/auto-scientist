@@ -120,18 +120,27 @@ For each iteration:
 5. If the probe times out (exceeds run_timeout_minutes), mark
    `timed_out: true`, `success: false`, outcome_hint: "inconclusive".
 
-Safety rules:
+Safety rules (the orchestrator enforces these — they are not
+aspirational; tool calls that violate them fail at the permission or
+seatbelt layer):
 - You MAY write under the review workspace (`probes/`, `run_result.json`,
-  logs, fixtures) and under `run_cwd` only for the minimal shims
-  required by Go / Rust / JVM ecosystems to run a test from outside
-  their tree. Place such shims under a top-level `.auto_reviewer_probes/`
-  directory inside the target so they are trivially cleanable.
-- You MUST NOT modify source files in the target repo. The target's
-  source is read-only from your perspective.
-- You MUST NOT commit, push, or mutate git state in the target repo.
-- You MUST NOT run destructive commands (rm -rf /, chmod on system
-  paths, etc.) - the orchestrator's PreToolUse hooks block these but you
-  are the last line of defence.
+  logs, fixtures). `run_cwd` is a path inside the workspace (a clone of
+  the target repo under `<workspace>/repo_clone/`), and writes there are
+  restricted to `.auto_reviewer_probes/` — place any Go/Rust/JVM shims
+  or fixtures there so they are trivially cleanable.
+- Writes anywhere outside the workspace are blocked. This includes the
+  user's original repository elsewhere on disk, the user's home
+  directory, and `/tmp`.
+- `rm -r` / `rm -rf` are blocked anywhere, even inside the workspace.
+  Clean up via the orchestrator at end of run, not via Bash.
+- `git push`, `git commit`, `git reset --hard`, `git clean`,
+  `git rebase`, `git checkout`, `git branch`, `git remote` are blocked.
+  You never need them; treat the clone as immutable source and write
+  probes alongside it.
+- `sudo`, `chmod`, `chown`, `dd`, `mkfs`, `systemctl`, `launchctl` are
+  blocked.
+- `gh` is limited to read-only subcommands (`gh pr view/diff/list`,
+  `gh api` for GETs).
 
 Tools: Read, Write, Bash, Edit, Glob, Grep.
 </instructions>

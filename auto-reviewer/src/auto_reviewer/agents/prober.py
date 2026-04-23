@@ -16,7 +16,13 @@ from pathlib import Path
 from typing import Any
 
 from auto_core.retry import QueryResult, ValidationError, agent_retry_loop
-from auto_core.sdk_backend import CODEX_SANDBOX_ADDENDUM, SDKOptions, get_backend
+from auto_core.safety.tool_guard import make_workspace_guard
+from auto_core.sdk_backend import (
+    CODEX_REVIEWER_POLICY_ADDENDUM,
+    CODEX_SANDBOX_ADDENDUM,
+    SDKOptions,
+    get_backend,
+)
 from auto_core.sdk_utils import (
     append_block_to_buffer,
     collect_text_from_query,
@@ -164,13 +170,25 @@ async def run_prober(
         run_command=run_command,
     )
     if provider == "openai":
-        system_prompt += CODEX_SANDBOX_ADDENDUM
+        system_prompt += CODEX_SANDBOX_ADDENDUM + CODEX_REVIEWER_POLICY_ADDENDUM
 
     user_prompt = PROBER_USER.format(
         workspace_path=str(output_dir),
         version_dir=str(version_dir),
         plan_path=str(version_dir / "plan.json"),
         config_path=str(output_dir / "domain_config.json"),
+    )
+
+    # Probe-mode guard: writes anywhere under output_dir are fine, but
+    # inside the cloned target repo (`<workspace>/repo_clone/`) only the
+    # `.auto_reviewer_probes/` subtree is writable. The probe's cd into
+    # `run_cwd` is safe because the validator on ReviewConfig already
+    # pinned `repo_path` inside the workspace (phase D).
+    repo_clone = output_dir / "repo_clone"
+    guard = make_workspace_guard(
+        workspace=output_dir,
+        repo_clone=repo_clone,
+        mode="probe",
     )
 
     max_turns = 50
@@ -181,11 +199,12 @@ async def run_prober(
         system_prompt=budget.system_prompt,
         allowed_tools=budget.allowed_tools,
         max_turns=budget.max_turns,
-        permission_mode="acceptEdits",
+        permission_mode="default",
         cwd=output_dir,
         model=model,
         extra_args={},
         network_access=provider == "openai",
+        pre_tool_use_hook=guard,
     )
 
     async def _query(prompt: str, resume_session_id: str | None) -> QueryResult:
