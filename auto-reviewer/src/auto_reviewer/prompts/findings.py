@@ -53,14 +53,18 @@ Produce a single markdown document with these sections in this order:
       reproduced behavior matches what the code's docstring / comment /
       README says is intended. These are not bugs. Describe each as a
       hygiene / design-taste observation for follow-up, not a blocker.
-      Examples of what belongs here:
-        - "Data structure X is defined but no caller uses it" -> dead
-          code, consider removing.
-        - "Function Y fails fast with a descriptive error when
-          misconfigured, matching its documented contract" -> working
+      Examples of what belongs here (language- and domain-neutral):
+        - "A data structure is defined but no caller exercises the
+          path the plan claims is broken" -> dead code, consider
+          removing.
+        - "A function's observed behavior matches what its own
+          docstring or nearby comment says is intended (e.g. fail-fast
+          with a descriptive error under misconfiguration)" -> working
           as designed.
-        - "install() clobbers prior entries, but __init__.py explicitly
-          documents single-tenant use" -> working as designed.
+        - "A setup / initialization routine intentionally resets its
+          target state, and that behavior is explicitly documented in
+          the module, README, or class docstring" -> working as
+          designed.
 
     ## Open abductions
       Any `pending_abductions` that the review could not chase. Name
