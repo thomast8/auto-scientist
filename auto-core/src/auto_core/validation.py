@@ -274,9 +274,16 @@ def validate_prerequisites(
             f"Install uv with: curl -LsSf https://astral.sh/uv/install.sh | sh"
         )
 
-    # Validate SDK agent provider+mode combinations
+    # Validate SDK agent provider+mode combinations.
+    #
+    # `scientist` (reused by auto-reviewer as the Hunter slot) also belongs
+    # in `sdk_only_agents`: the scientist / hunter / hunter-revision /
+    # stop-revision implementations call `get_backend(provider)` directly
+    # with no API-mode fallback, so mode='api' would crash at runtime. The
+    # `sdk_capable_agents` list is therefore identical; keep both spellings
+    # for readability.
     mc = model_config
-    sdk_only_agents = ["analyst", "coder", "ingestor", "report", "assessor"]
+    sdk_only_agents = ["analyst", "scientist", "coder", "ingestor", "report", "assessor"]
     sdk_capable_agents = ["analyst", "scientist", "coder", "ingestor", "report", "assessor"]
     needs_claude_cli = False
     needs_codex_cli = False

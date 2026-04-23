@@ -163,7 +163,13 @@ class TestValidatePrerequisites:
         validate_prerequisites(o.state, o.data_path, o.output_dir, o.model_config, o.config)
 
     def test_missing_anthropic_auth_api_mode(self, tmp_path, monkeypatch):
-        """API-mode agents still need API key validation."""
+        """API-mode agents still need API key validation.
+
+        Uses a critic in mode='api' (API-capable slot). Per the tightened
+        ``sdk_only_agents`` list, the scientist slot can no longer use
+        mode='api' - the scientist / hunter implementations have no
+        API-mode dispatch.
+        """
         data = tmp_path / "data.csv"
         data.write_text("x")
         monkeypatch.setattr(
@@ -173,11 +179,38 @@ class TestValidatePrerequisites:
         monkeypatch.setattr("shutil.which", lambda name: "/usr/bin/claude")
         mc = ModelConfig(
             defaults=AgentModelConfig(model="claude-sonnet-4-6"),
+            critics=[
+                AgentModelConfig(
+                    provider="anthropic",
+                    model="claude-sonnet-4-6",
+                    mode="api",
+                )
+            ],
+        )
+        o = self._make_orchestrator(tmp_path, data_path=data, mc=mc)
+        with pytest.raises(RuntimeError, match="Anthropic SDK authentication failed"):
+            validate_prerequisites(o.state, o.data_path, o.output_dir, o.model_config, o.config)
+
+    def test_scientist_mode_api_rejected(self, tmp_path, monkeypatch):
+        """Scientist slot cannot use mode='api'; dispatch is SDK-only."""
+        data = tmp_path / "data.csv"
+        data.write_text("x")
+        monkeypatch.setattr("shutil.which", lambda name: "/usr/bin/claude")
+        monkeypatch.setattr(
+            "auto_core.validation.check_provider_auth",
+            lambda provider: None,
+        )
+        monkeypatch.setattr(
+            "auto_core.validation.check_claude_cli_auth",
+            lambda claude_bin: None,
+        )
+        mc = ModelConfig(
+            defaults=AgentModelConfig(model="claude-sonnet-4-6"),
             scientist=AgentModelConfig(model="claude-sonnet-4-6", mode="api"),
             critics=[],
         )
         o = self._make_orchestrator(tmp_path, data_path=data, mc=mc)
-        with pytest.raises(RuntimeError, match="Anthropic SDK authentication failed"):
+        with pytest.raises(RuntimeError, match="scientist uses mode='api'"):
             validate_prerequisites(o.state, o.data_path, o.output_dir, o.model_config, o.config)
 
     def test_missing_openai_auth_when_summarizer_set(self, tmp_path, monkeypatch):
