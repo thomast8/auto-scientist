@@ -91,6 +91,46 @@ work around installation failures; the framework handles installation.
 _DISALLOWED_SUBPROCESS_TOOLS = "Agent,Skill"
 
 
+def rewrite_uv_run_for_codex(run_command: str) -> str:
+    """Rewrite a ``uv run ...`` command so it executes inside the Codex sandbox.
+
+    ``uv`` panics inside the macOS seatbelt sandbox because the Rust
+    system-configuration crate cannot reach SCDynamicStore, so any
+    ``uv run`` invocation has to be rewritten to use the host ``python3``
+    directly. The patterns Intake / DomainConfig produce:
+
+    - ``uv run {script_path}``  -> ``python3 {script_path}``
+    - ``uv run foo.py [args]``  -> ``python3 foo.py [args]``
+    - ``uv run python [args]``  -> ``python3 [args]``
+    - ``uv run <tool> [args]``  -> ``python3 -m <tool> [args]``  (e.g. pytest)
+
+    Anything that does not start with ``uv run `` is returned unchanged,
+    so ``node {script_path}`` etc pass through. Only the leading ``uv run``
+    is rewritten; the caller is responsible for not chaining further
+    ``uv`` invocations, because ``uv`` is unavailable in the sandbox.
+    """
+    prefix = "uv run "
+    if not run_command.startswith(prefix):
+        return run_command
+
+    rest = run_command[len(prefix) :]
+    tokens = rest.split(None, 1)
+    if not tokens:
+        return run_command
+
+    first = tokens[0]
+    remainder = tokens[1] if len(tokens) > 1 else ""
+    tail = f" {remainder}" if remainder else ""
+
+    if first in {"python", "python3"}:
+        return f"python3{tail}"
+    if first == "{script_path}" or first.endswith(".py"):
+        return f"python3 {rest}"
+    # Any other first token is a CLI tool installed by uv; run it as a
+    # module so python3 can locate it inside the sandbox (e.g. pytest).
+    return f"python3 -m {first}{tail}"
+
+
 @dataclass(frozen=True)
 class _IsolationConfig:
     """CLI extra_args and env vars for subprocess isolation."""

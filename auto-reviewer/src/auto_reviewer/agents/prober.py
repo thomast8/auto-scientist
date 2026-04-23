@@ -148,10 +148,13 @@ async def run_prober(
     new_script_path = version_dir / "run_result.json"
 
     # Codex seatbelt sandbox: uv panics (SCDynamicStore access denied).
-    # Replace uv run with python3; keep ensure_deps prefix (it's copied
-    # as a local script by the orchestrator).
-    if provider == "openai" and "uv run" in run_command:
-        run_command = run_command.replace("uv run", "python3", 1)
+    # Rewrite `uv run ...` to a python3 invocation that handles Intake's
+    # `uv run pytest -x -s {script_path}` / `uv run python {script_path}`
+    # shapes, not just the auto-scientist default `uv run {script_path}`.
+    if provider == "openai":
+        from auto_core.sdk_backend import rewrite_uv_run_for_codex
+
+        run_command = rewrite_uv_run_for_codex(run_command)
 
     prompt_provider = "gpt" if provider == "openai" else "claude"
     system_prompt = build_prober_system(prompt_provider).format(

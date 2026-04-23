@@ -1091,3 +1091,43 @@ class TestCreateBackend:
         assert results["b"] == "response-b"
         mock_client_a.close.assert_called_once()
         mock_client_b.close.assert_called_once()
+
+
+class TestRewriteUvRunForCodex:
+    """`rewrite_uv_run_for_codex` rewrites common uv run shapes for the sandbox."""
+
+    def test_bare_script_path(self):
+        from auto_core.sdk_backend import rewrite_uv_run_for_codex
+
+        assert rewrite_uv_run_for_codex("uv run {script_path}") == "python3 {script_path}"
+
+    def test_uv_run_python_script(self):
+        from auto_core.sdk_backend import rewrite_uv_run_for_codex
+
+        assert rewrite_uv_run_for_codex("uv run python {script_path}") == "python3 {script_path}"
+
+    def test_uv_run_pytest_with_args(self):
+        from auto_core.sdk_backend import rewrite_uv_run_for_codex
+
+        assert (
+            rewrite_uv_run_for_codex("uv run pytest -x -s {script_path}")
+            == "python3 -m pytest -x -s {script_path}"
+        )
+
+    def test_dotpy_first_token(self):
+        from auto_core.sdk_backend import rewrite_uv_run_for_codex
+
+        assert rewrite_uv_run_for_codex("uv run foo.py --flag bar") == "python3 foo.py --flag bar"
+
+    def test_non_uv_command_passthrough(self):
+        from auto_core.sdk_backend import rewrite_uv_run_for_codex
+
+        assert rewrite_uv_run_for_codex("node {script_path}") == "node {script_path}"
+
+    def test_python3_passthrough(self):
+        from auto_core.sdk_backend import rewrite_uv_run_for_codex
+
+        assert (
+            rewrite_uv_run_for_codex("uv run python3 -u {script_path}")
+            == "python3 -u {script_path}"
+        )
