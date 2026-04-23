@@ -31,6 +31,39 @@ logger = logging.getLogger(__name__)
 
 _STDERR_TRUNCATE = 3000
 
+# Path-hack patterns the Prober must NOT write in probes. The contract is
+# that probes run from `run_cwd` (target repo) via the `run_command`
+# template; the target's native import resolution applies, so any manual
+# sys.path / PYTHONPATH manipulation is a bypass of that contract and a
+# red flag for "Prober ran the probe from the wrong directory."
+_FORBIDDEN_PATH_HACKS: tuple[str, ...] = (
+    "sys.path.insert",
+    "sys.path.append",
+    "PYTHONPATH=",
+)
+
+
+def _scan_probes_for_path_hacks(probes_dir: Path) -> tuple[Path, str] | None:
+    """Return (probe_file, offending_pattern) if any probe has a forbidden
+    import-path hack; else None.
+
+    Only scans regular files under `probes_dir`; skips binaries and files
+    we can't decode as text.
+    """
+    if not probes_dir.exists() or not probes_dir.is_dir():
+        return None
+    for probe_file in sorted(probes_dir.iterdir()):
+        if not probe_file.is_file():
+            continue
+        try:
+            text = probe_file.read_text()
+        except (OSError, UnicodeDecodeError):
+            continue
+        for pattern in _FORBIDDEN_PATH_HACKS:
+            if pattern in text:
+                return probe_file, pattern
+    return None
+
 
 def _check_runtime_success(version_dir: Path) -> tuple[bool, str]:
     """Check whether the coder's experiment script ran successfully.
@@ -165,6 +198,23 @@ async def run_prober(
         return QueryResult(raw_output="", session_id=session_id, usage={})
 
     def _validate(result: QueryResult) -> Path:
+        probe_path_hack = _scan_probes_for_path_hacks(version_dir / "probes")
+        if probe_path_hack is not None:
+            probe_file, offending = probe_path_hack
+            raise ValidationError(
+                "<validation_error>\n"
+                f"Probe file {probe_file} contains a forbidden import-path "
+                f"hack: {offending!r}. The contract is to run the probe from "
+                "`run_cwd` (the target repo, as set in domain_config.json) "
+                "using `run_command` with `{script_path}` substituted. When "
+                "the probe runs from the target's own directory, the target's "
+                "native import / module resolution applies and no manual path "
+                "manipulation is needed. Remove the hack, ensure your Bash "
+                "invocation does `cd $run_cwd` before `run_command`, and "
+                "re-run.\n"
+                "</validation_error>"
+            )
+
         if not new_script_path.exists():
             raise ValidationError(
                 "<validation_error>\n"
