@@ -348,8 +348,12 @@ class AgentPanel(Widget):
         summary = self.done_summary
         # Strip summarizer label prefixes like "[done] " or "[15s] "
         summary = re.sub(r"^\[\w+\]\s+", "", summary)
-        # Escape Rich markup in the summary to prevent broken rendering
-        collapsible.title = f"[{self.panel_style}]{rich_escape(summary)}[/]"
+        # Title color comes from title_widget.styles.color (set in
+        # _apply_border_color) so border + symbol + text render in one shade.
+        # Wrapping in Rich [color] markup maps to RGB, which diverges from the
+        # border's ansi_ color and produces two visibly different yellows
+        # (worst on multi-line panels that aren't dimmed by disabled opacity).
+        collapsible.title = rich_escape(summary)
         self.border_subtitle = self._build_footer()
         # Show the CollapsibleTitle now that we have content to toggle
         try:
@@ -400,7 +404,7 @@ class AgentPanel(Widget):
             rich_log = self.query_one(RichLog)
         except NoMatches:
             return
-        collapsible.title = f"[red][error] {rich_escape(msg)}[/red]"
+        collapsible.title = rich_escape(f"[error] {msg}")
         self.border_subtitle = self._build_footer()
         # Show the CollapsibleTitle for the error message
         try:
