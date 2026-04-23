@@ -49,10 +49,8 @@ echo
 echo "Try the review with:"
 echo
 echo "    uv run auto-reviewer review \\"
-echo "      --pr feature/tighten-paginate \\"
-echo "      --repo-path $DEST \\"
-echo "      --base-ref main \\"
-echo "      --goal 'Find correctness bugs in the paginate slice change' \\"
-echo "      --max-iterations 2 \\"
-echo "      --critics ''"
+echo "      \"review feature/tighten-paginate against main in the repo at $DEST\" \\"
+echo "      --cwd $DEST \\"
+echo "      --preset turbo \\"
+echo "      --max-iterations 2"
 echo

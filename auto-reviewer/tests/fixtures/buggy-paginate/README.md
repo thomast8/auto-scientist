@@ -39,17 +39,29 @@ uv sync                      # so `uv run pytest` works
 
 cd -                         # back to auto-scientist repo root
 uv run auto-reviewer review \
-  --pr feature/tighten-paginate \
-  --repo-path /tmp/auto-reviewer-buggy-paginate \
-  --base-ref main \
-  --goal "Find correctness bugs in the paginate slice change" \
-  --max-iterations 2 \
-  --critics ""
+  "review feature/tighten-paginate against main in the repo at /tmp/auto-reviewer-buggy-paginate" \
+  --cwd /tmp/auto-reviewer-buggy-paginate \
+  --preset turbo \
+  --max-iterations 2
 ```
 
-Output lands under `./review_workspace/feature_tighten-paginate/`. Look at
+Output lands under `./review_workspace/review_<timestamp>/`. Look at
 `report.md`, the probe scripts written during iterations, and the `state.json`
 transitions.
+
+## Expected outcome
+
+A sharp review should produce:
+- **1 confirmed bug** tied to `paginate` returning `page_size + 1` items
+  instead of `page_size`. Evidence: a failing pytest probe and a reference
+  to the docstring's "at most page_size entries" claim.
+- **0 phantom bugs** (no HIGH-priority claims without named caller impact).
+- **Design Intent** should call out the docstring/code contradiction
+  explicitly during the iter-0 debate.
+
+Use this fixture as a calibration target: zero-bug PRs and single-bug PRs
+both land here, so regressions in phantom rate or miss rate show up
+immediately.
 
 ## Cleaning up
 
@@ -57,14 +69,3 @@ transitions.
 rm -rf /tmp/auto-reviewer-buggy-paginate
 rm -rf ./review_workspace
 ```
-
-## Known rough edges on first live run
-
-- The Intake agent's prompt says it will use `gh pr view` when available; for
-  a local-only branch (no GitHub PR), it should fall back to
-  `git diff main..feature/tighten-paginate` and `git log main..HEAD`.
-- The Prober runs inside the target repo's Python env. It has no sandbox
-  beyond the orchestrator's PreToolUse hooks. This is a throwaway fixture,
-  so that is fine here.
-- `--critics ""` disables the Adversary debate - keep it off for the MVP
-  smoke. Add critics once the spine is proven.
