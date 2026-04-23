@@ -56,10 +56,22 @@ async def run_ingestor(
     notebook_path = output_dir / NOTEBOOK_FILENAME
 
     tools = ["Bash", "Read", "Write", "Glob", "Grep"]
-    if interactive:
+    # `AskUserQuestion` is a Claude Code CLI built-in; the Codex backend
+    # exposes no equivalent. If interactive mode was requested on a
+    # non-Claude backend, fall back to autonomous with a clear warning
+    # rather than silently advertising a tool the model cannot call.
+    effective_interactive = interactive and provider == "anthropic"
+    if interactive and not effective_interactive:
+        logger.warning(
+            "Ingestor --interactive is only supported with provider='anthropic' "
+            "(Claude Code supplies AskUserQuestion). Falling back to autonomous "
+            "mode for provider=%r.",
+            provider,
+        )
+    if effective_interactive:
         tools.append("AskUserQuestion")
 
-    mode = "interactive" if interactive else "autonomous"
+    mode = "interactive" if effective_interactive else "autonomous"
 
     max_turns = 30
     prompt_provider = resolve_prompt_provider(provider)
