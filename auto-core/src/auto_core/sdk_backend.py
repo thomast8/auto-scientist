@@ -15,7 +15,7 @@ import os
 import re
 import shutil
 import tempfile
-from collections.abc import AsyncIterator
+from collections.abc import AsyncIterator, Awaitable, Callable
 from contextlib import asynccontextmanager
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -27,7 +27,10 @@ import codex_app_server_sdk.transport as _codex_transport_mod
 from claude_code_sdk import (
     AssistantMessage,
     ClaudeCodeOptions,
+    PermissionResultAllow,
+    PermissionResultDeny,
     ResultMessage,
+    ToolPermissionContext,
 )
 from claude_code_sdk import query as claude_query
 from claude_code_sdk._errors import MessageParseError
@@ -36,6 +39,7 @@ from codex_app_server_sdk.errors import CodexProtocolError
 from pydantic import BaseModel
 
 from auto_core.cost_ceiling import record_cost
+from auto_core.safety.tool_guard import PreToolUseHook
 
 logger = logging.getLogger(__name__)
 
@@ -84,6 +88,36 @@ IMPORTANT: Every time you edit the script to add a new import, you MUST also
 add the package to the PEP 723 dependencies block. Do NOT remove imports to
 work around installation failures; the framework handles installation.
 </sandbox_environment>
+"""
+
+# Additional sandbox policy shown only to agents that run under the
+# reviewer's workspace guard. The Codex seatbelt already blocks writes
+# outside cwd; this blurb keeps the model's model-of-the-world accurate.
+CODEX_REVIEWER_POLICY_ADDENDUM = """\
+
+<reviewer_sandbox_policy>
+The seatbelt confines every write to the review workspace. The following
+are kernel-blocked and will fail with EPERM, regardless of what you try:
+
+- Writes outside the workspace (including the user's real repository
+  elsewhere on disk). Use `Read` / `Glob` / `Grep` if you need to
+  inspect it.
+- Subprocess attempts to mutate directories outside the workspace.
+
+The policy additionally rejects these operations even when they would
+resolve inside the workspace — mirroring the Claude-backend guard so
+behaviour is identical across providers:
+
+- `rm -r` / `rm -rf` anywhere (clean up via the orchestrator, not via
+  Bash).
+- `sudo`, `chmod`, `chown`, `dd`, `mkfs`, `systemctl`, `launchctl`.
+- `git push`, `git commit`, `git reset --hard`, `git clean`,
+  `git rebase`, `git checkout`, `git branch`, `git remote`.
+- `gh pr merge/close/edit`, `gh issue *`, `gh repo *`, `gh api -X POST`.
+
+Probes must run the reviewer's script from the workspace clone. Do not
+`cd` to any path that isn't under the workspace.
+</reviewer_sandbox_policy>
 """
 
 # Tools that should never be available to SDK subprocesses.
@@ -319,7 +353,19 @@ def cleanup_sessions() -> int:
 
 @dataclass(frozen=True)
 class SDKOptions:
-    """Unified options for both Claude Code SDK and Codex SDK."""
+    """Unified options for both Claude Code SDK and Codex SDK.
+
+    ``pre_tool_use_hook``: optional workspace guard (see
+    :mod:`auto_core.safety.tool_guard`). When set:
+      - Claude backend wires it to ``ClaudeCodeOptions.can_use_tool``;
+        ``permission_mode`` is forced to ``"default"`` because
+        ``"acceptEdits"`` silently auto-approves edit/write tools and
+        bypasses the callback.
+      - Codex backend cannot call back into Python per-tool; instead it
+        asserts that ``cwd`` matches the guard's workspace so the
+        macOS-seatbelt / Linux-namespace ``workspace-write`` sandbox
+        enforces the boundary at the kernel level.
+    """
 
     system_prompt: str
     allowed_tools: tuple[str, ...] | list[str]
@@ -333,6 +379,7 @@ class SDKOptions:
     mcp_servers: dict[str, Any] = field(default_factory=dict)
     network_access: bool = False
     response_schema: type[BaseModel] | None = None
+    pre_tool_use_hook: PreToolUseHook | None = None
 
 
 @dataclass
@@ -394,6 +441,38 @@ def _extract_stream_delta(event: dict[str, Any]) -> tuple[str, str] | None:
     return None
 
 
+def _make_claude_can_use_tool(
+    hook: PreToolUseHook,
+) -> Callable[
+    [str, dict[str, Any], ToolPermissionContext],
+    Awaitable[PermissionResultAllow | PermissionResultDeny],
+]:
+    """Adapt a synchronous workspace guard to the Claude SDK callback.
+
+    The SDK's `can_use_tool` is `async (tool_name, tool_input, ctx) ->
+    PermissionResultAllow | PermissionResultDeny`. Our guard is
+    synchronous and knows nothing about the SDK's permission-update
+    mechanism — the adapter bridges the two without touching guard
+    state.
+    """
+
+    async def can_use_tool(
+        tool_name: str,
+        tool_input: dict[str, Any],
+        ctx: ToolPermissionContext,  # noqa: ARG001 — SDK signature
+    ) -> PermissionResultAllow | PermissionResultDeny:
+        decision = hook(tool_name, tool_input)
+        if decision.allowed:
+            return PermissionResultAllow()
+        # Default interrupt=False: the SDK surfaces the denial as a tool
+        # error the model can see and course-correct from. interrupt=True
+        # would kill the whole query, which is more aggressive than we
+        # want — a single bad command shouldn't abort a multi-step task.
+        return PermissionResultDeny(message=decision.reason)
+
+    return can_use_tool
+
+
 class ClaudeBackend:
     """Wraps claude_code_sdk.query() behind the SDKBackend interface."""
 
@@ -429,14 +508,35 @@ class ClaudeBackend:
             )
             env["ANTHROPIC_API_KEY"] = ""
 
+        # A pre_tool_use_hook is the reviewer's workspace guard. When
+        # set, the SDK's `can_use_tool` callback runs for every tool
+        # invocation — but only if permission_mode is "default". Modes
+        # "acceptEdits" and "bypassPermissions" silently auto-approve
+        # and never consult the callback, so we force "default" here.
+        # Any caller that set permission_mode deliberately + also passed
+        # a hook is asking for contradictory behaviour; hook wins.
+        permission_mode = options.permission_mode
+        can_use_tool = None
+        if options.pre_tool_use_hook is not None:
+            if permission_mode != "default":
+                logger.info(
+                    "pre_tool_use_hook is set; forcing permission_mode "
+                    "from %r to 'default' so the callback is consulted",
+                    permission_mode,
+                )
+                permission_mode = "default"
+            can_use_tool = _make_claude_can_use_tool(options.pre_tool_use_hook)
+
         kwargs: dict[str, Any] = {
             "system_prompt": options.system_prompt,
             "allowed_tools": options.allowed_tools,
             "max_turns": options.max_turns,
-            "permission_mode": options.permission_mode,
+            "permission_mode": permission_mode,
             "extra_args": extra_args,
             "include_partial_messages": True,
         }
+        if can_use_tool is not None:
+            kwargs["can_use_tool"] = can_use_tool
         if options.model:
             kwargs["model"] = options.model
         if options.cwd:
@@ -723,6 +823,31 @@ class CodexBackend:
         still accessible.  Falls back to a fresh client if the previous
         one was torn down (e.g. after an error).
         """
+        # Codex has no per-tool Python callback; the workspace-write
+        # sandbox is the enforcement layer and its boundary is the
+        # client's cwd. If the caller passed a workspace guard, verify
+        # options.cwd resolves to the same directory so the kernel-level
+        # seatbelt matches what the guard thinks it's protecting. A
+        # mismatch here would silently put the model outside the guard's
+        # jurisdiction — the one case where "fail fast" is strictly
+        # better than trying to recover.
+        if options.pre_tool_use_hook is not None:
+            if options.cwd is None:
+                raise RuntimeError(
+                    "SDKOptions.pre_tool_use_hook is set but options.cwd "
+                    "is None; the Codex seatbelt needs an explicit cwd "
+                    "to pin its workspace-write sandbox to."
+                )
+            cwd_resolved = Path(options.cwd).resolve()
+            guard_workspace = options.pre_tool_use_hook.workspace
+            if cwd_resolved != guard_workspace:
+                raise RuntimeError(
+                    f"Codex cwd {cwd_resolved} does not match the workspace "
+                    f"guard's workspace {guard_workspace}. The seatbelt "
+                    "would confine writes to a different directory than "
+                    "the guard expects; refusing to proceed."
+                )
+
         effort = self._resolve_effort(options.extra_args)
         turn_overrides = TurnOverrides()
         if effort:

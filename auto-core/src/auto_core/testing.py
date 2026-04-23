@@ -36,8 +36,9 @@ def install_claude_sdk_mock() -> None:
     mock_sdk.ClaudeSDKClient = MagicMock
     mock_sdk.Message = type("Message", (), {})
 
-    def _deny_init(self: Any, message: str = "") -> None:
+    def _deny_init(self: Any, message: str = "", interrupt: bool = False) -> None:
         self.message = message
+        self.interrupt = interrupt
 
     mock_sdk.PermissionResultAllow = type(
         "PermissionResultAllow", (), {"__init__": lambda self: None}

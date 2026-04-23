@@ -30,10 +30,9 @@ from __future__ import annotations
 import logging
 import re
 import shlex
-from collections.abc import Callable
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any, Literal
+from typing import Any, Literal, Protocol
 
 logger = logging.getLogger(__name__)
 
@@ -61,7 +60,17 @@ class Decision:
         return cls(allowed=False, reason=reason)
 
 
-PreToolUseHook = Callable[[str, dict[str, Any]], Decision]
+class PreToolUseHook(Protocol):
+    """Callable guard. Carries its workspace / repo_clone / mode so
+    backends can assert the seatbelt boundary matches what the guard
+    expects. Produced by :func:`make_workspace_guard`.
+    """
+
+    workspace: Path
+    repo_clone: Path
+    mode: GuardMode
+
+    def __call__(self, tool_name: str, tool_input: dict[str, Any]) -> Decision: ...
 
 
 # Destructive bash tokens. Matched against whole tokens from shlex.split,
@@ -163,18 +172,35 @@ def make_workspace_guard(
         A callable ``(tool_name, tool_input) -> Decision`` suitable for
         adapting into provider-specific hooks.
     """
-    workspace = workspace.resolve()
-    repo_clone = repo_clone.resolve()
-    if not _is_within(repo_clone, workspace):
+    resolved_workspace = workspace.resolve()
+    resolved_clone = repo_clone.resolve()
+    if not _is_within(resolved_clone, resolved_workspace):
         raise ValueError(
-            f"repo_clone={repo_clone} is not inside workspace={workspace}; "
+            f"repo_clone={resolved_clone} is not inside workspace={resolved_workspace}; "
             "the guard invariant is that the clone lives inside the writable area."
         )
+    return _WorkspaceGuard(resolved_workspace, resolved_clone, mode)
 
-    def guard(tool_name: str, tool_input: dict[str, Any]) -> Decision:
+
+class _WorkspaceGuard:
+    """Concrete hook produced by :func:`make_workspace_guard`.
+
+    Implements the :class:`PreToolUseHook` protocol: exposes the guard's
+    workspace / clone / mode on the instance so backend adapters can
+    assert the seatbelt and the guard agree on boundaries.
+    """
+
+    __slots__ = ("workspace", "repo_clone", "mode")
+
+    def __init__(self, workspace: Path, repo_clone: Path, mode: GuardMode) -> None:
+        self.workspace = workspace
+        self.repo_clone = repo_clone
+        self.mode = mode
+
+    def __call__(self, tool_name: str, tool_input: dict[str, Any]) -> Decision:
         name = tool_name.split("__")[-1]  # strip "mcp__server__tool" prefix if any
 
-        if mode == "read_only":
+        if self.mode == "read_only":
             if name in {"Read", "Glob", "Grep", "AskUserQuestion"}:
                 return Decision.allow()
             return Decision.deny(
@@ -186,10 +212,10 @@ def make_workspace_guard(
             return Decision.allow()
 
         if name in {"Write", "Edit", "NotebookEdit"}:
-            return _check_write(tool_input, workspace, repo_clone, mode)
+            return _check_write(tool_input, self.workspace, self.repo_clone, self.mode)
 
         if name == "Bash":
-            return _check_bash(tool_input, workspace, repo_clone, mode)
+            return _check_bash(tool_input, self.workspace, self.repo_clone, self.mode)
 
         # Unknown tool: reject by default. New tools must be explicitly
         # enumerated so we never silently expand the attack surface.
@@ -197,8 +223,6 @@ def make_workspace_guard(
             f"Tool {name!r} is not on the reviewer allowlist. If the "
             "reviewer needs it, add it to auto_core.safety.tool_guard."
         )
-
-    return guard
 
 
 def _check_write(
