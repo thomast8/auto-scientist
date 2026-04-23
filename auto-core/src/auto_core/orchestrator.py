@@ -1844,7 +1844,7 @@ class Orchestrator:
         # import auto_scientist, but ensure_deps is pure stdlib).
         if "{script_path}" in run_cmd:
             if cfg.provider == "openai":
-                import auto_scientist.ensure_deps as _ed_mod
+                import auto_core.ensure_deps as _ed_mod
 
                 # Bootstrap pip and pre-install common scientific packages
                 # from the HOST as a performance optimization (avoids
@@ -1866,9 +1866,7 @@ class Orchestrator:
                 # Use absolute path so it works even if the coder cd's into a subdirectory
                 run_cmd = f"python3 {ed_dst} --install {{script_path}} && {run_cmd}"
             else:
-                run_cmd = (
-                    f"{sys.executable} -m auto_scientist.ensure_deps {{script_path}} && {run_cmd}"
-                )
+                run_cmd = f"{sys.executable} -m auto_core.ensure_deps {{script_path}} && {run_cmd}"
 
         # Pre-compute data directory listing so coder doesn't waste turns
         data_dir = Path(data_path) if data_path else None

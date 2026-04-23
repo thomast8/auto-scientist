@@ -2048,7 +2048,7 @@ class TestRunCoderOrchestrator:
         # Orchestrator resolves exe to absolute path and prepends ensure_deps
         run_cmd = captured_kwargs["run_command"]
         assert run_cmd.endswith("/usr/bin/python {script_path}")
-        assert "auto_scientist.ensure_deps {script_path} &&" in run_cmd
+        assert "auto_core.ensure_deps {script_path} &&" in run_cmd
 
     @pytest.mark.asyncio
     async def test_run_config_defaults_without_config(self, orchestrator, tmp_path):
@@ -2075,7 +2075,7 @@ class TestRunCoderOrchestrator:
         # Orchestrator resolves exe to absolute path and prepends ensure_deps
         run_cmd = captured_kwargs["run_command"]
         assert run_cmd.endswith("/usr/local/bin/uv run {script_path}")
-        assert "auto_scientist.ensure_deps {script_path} &&" in run_cmd
+        assert "auto_core.ensure_deps {script_path} &&" in run_cmd
 
     @pytest.mark.asyncio
     async def test_run_command_warns_when_exe_not_found(self, orchestrator, tmp_path):
@@ -2101,7 +2101,7 @@ class TestRunCoderOrchestrator:
         # Falls through with original command (unresolved) but still has ensure_deps
         run_cmd = captured_kwargs["run_command"]
         assert run_cmd.endswith("uv run {script_path}")
-        assert "auto_scientist.ensure_deps {script_path} &&" in run_cmd
+        assert "auto_core.ensure_deps {script_path} &&" in run_cmd
 
 
 class TestReadRunResult:

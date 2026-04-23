@@ -285,7 +285,7 @@ class TestInstallDeps:
             '# /// script\n# dependencies = ["numpy>=1.20", "pandas"]\n# ///\n'
             "import numpy\nimport pandas\n"
         )
-        with patch("auto_scientist.ensure_deps.subprocess.run") as mock_run:
+        with patch("auto_core.ensure_deps.subprocess.run") as mock_run:
             mock_run.return_value = subprocess.CompletedProcess(args=[], returncode=0)
             result = install_deps(script)
 
@@ -299,7 +299,7 @@ class TestInstallDeps:
     def test_no_deps_skips_pip(self, tmp_path):
         script = tmp_path / "experiment.py"
         script.write_text("import os\n")
-        with patch("auto_scientist.ensure_deps.subprocess.run") as mock_run:
+        with patch("auto_core.ensure_deps.subprocess.run") as mock_run:
             result = install_deps(script)
 
         assert result == []
@@ -312,7 +312,7 @@ class TestInstallDeps:
         script.write_text(
             '# /// script\n# dependencies = ["nonexistent-pkg"]\n# ///\nimport nonexistent_pkg\n'
         )
-        with patch("auto_scientist.ensure_deps.subprocess.run") as mock_run:
+        with patch("auto_core.ensure_deps.subprocess.run") as mock_run:
             # First call (_ensure_pip): pip --version succeeds
             # Second call (pip install): fails
             mock_run.side_effect = [
