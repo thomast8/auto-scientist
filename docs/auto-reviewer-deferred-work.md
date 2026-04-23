@@ -11,11 +11,22 @@ Canonical plan: `/Users/thomastiotto/.claude/plans/yes-but-do-100-immutable-ston
 
 ## Non-goals for the initial extraction
 
-1. **Isolation sandbox for Prober executing PR code.** The Prober runs code from
+1. ~~**Isolation sandbox for Prober executing PR code.** The Prober runs code from
    the PR it is reviewing. Existing PreToolUse hooks (block writes outside the
    review workspace, block destructive bash) carry over, but "don't execute the
    PR's code with the reviewer's credentials" is a new concern. Deferred to a
-   later milestone once we have real PRs running through the pipeline.
+   later milestone once we have real PRs running through the pipeline.~~
+   **Resolved 2026-04-23** — three-layer sandbox landed on
+   `feat/reviewer-sandbox` (plan
+   `~/.claude/plans/in-terms-of-security-nested-castle.md`):
+   workspace-pinned repo clone (`pre_resolve`), real
+   `auto_core.safety.tool_guard` PreToolUse hook wired into Claude
+   (`can_use_tool`) and enforced via Codex seatbelt (workspace-write
+   with `cwd == workspace` assertion), and post-run integrity tripwire
+   (`verify_unchanged`) that exits 2 on any mutation of the user's
+   real repo. Docker-based extra isolation is still deferred
+   (`--sandbox=docker` is wired but not implemented); the no-container
+   default already prevents mutation.
 2. **Adversary persona catalog expansion.** Ship the initial four personas
    (security, concurrency, API-break, input-fuzzing). Evaluate empirically which
    ones earn their cost before adding more.
