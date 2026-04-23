@@ -58,7 +58,7 @@ class TestRegistryContents:
     def test_review_personas_registered(self):
         names = {p["name"] for p in DEBATE_PERSONAS}
         # Auto-Reviewer's adversary catalog (not the scientist personas).
-        assert names == {"Security", "Concurrency", "API Break", "Input Fuzz"}
+        assert names == {"Design Intent", "Security", "Concurrency", "API Break", "Input Fuzz"}
 
     def test_dispatcher_rejects_unknown_key(self):
         with pytest.raises(RuntimeError, match="No agent function registered"):
