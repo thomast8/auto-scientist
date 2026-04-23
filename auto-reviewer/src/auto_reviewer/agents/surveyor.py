@@ -1,9 +1,10 @@
-"""Analyst agent: structured observation of experiment results + plots.
+"""Surveyor agent: structured observation of the PR diff and probe outcomes.
 
 Uses query() (fresh session each iteration, bounded context).
-Tools: Read (results file + plot PNGs), Glob (find output files).
-Input: results text + lab notebook.
-Output: structured JSON with metrics, observations.
+Tools: Read (diff + touched files + probe results), Glob (find output files).
+Input: the review workspace (diff.patch, touched_files/, probe_results/) and
+the investigation log.
+Output: structured JSON with suspicions, touched symbols, observations.
 max_turns: 30
 """
 
@@ -116,15 +117,14 @@ async def run_surveyor(
 ) -> dict[str, Any]:
     """Survey the PR diff + probe results and produce structured observations.
 
-    Shares its signature with `auto_scientist.agents.analyst.run_analyst`
-    because both are dispatched through `auto_core.agent_dispatch` under the
-    "observer" role. The reviewer ignores `results_path`, `plot_paths`,
-    `data_dir`, `domain_knowledge`, and `timeout_context`: its context comes
-    from the review workspace (diff.patch, touched_files/, probe_results/)
-    and the persisted RunState.
+    Signature matches the shared `auto_core.agent_dispatch` contract for the
+    "observer" role, so several args (`results_path`, `plot_paths`,
+    `data_dir`, `domain_knowledge`, `timeout_context`) are accepted and
+    ignored - the reviewer's context comes from the review workspace
+    (diff.patch, touched_files/, probe_results/) and the persisted RunState.
 
     Args:
-        notebook_path: Path to the review notebook; its parent is the review
+        notebook_path: Path to the investigation log; its parent is the review
             workspace root where state.json and intake artifacts live.
         model: Model override.
         message_buffer: Optional buffer for streaming messages.

@@ -176,7 +176,7 @@ async def _query_stop_agent(
     mcp_servers: dict[str, Any] | None = None,
     backend: SDKBackend | None = None,
 ) -> tuple[Any, Any]:
-    """Query a stop gate agent (critic or scientist) via provider-aware dispatch.
+    """Query a stop gate agent (adversary or reviser) via provider-aware dispatch.
 
     Uses direct API clients for OpenAI/Google, Claude Code SDK for Anthropic.
     Returns (validated_model_instance, result_obj with text/token counts).
@@ -233,15 +233,17 @@ async def run_single_stop_debate(
     prediction_history_records: list[PredictionRecord] | None = None,
     output_dir: Path | None = None,
 ) -> DebateResult:
-    """Run a single critic persona's challenge of the stop decision.
+    """Run a single adversary persona's challenge of the stop decision.
 
-    The scientist responds once via run_scientist_stop_revision after
-    all critics have challenged.
+    The Hunter responds once via run_hunter_stop_revision after all
+    adversaries have challenged.
 
     Args:
-        notebook_path: Path to the run's lab_notebook.xml. SDK-mode critics
-            get a compact TOC + mcp__notebook__read_notebook tool; API-mode
-            critics fall back to the full inline XML.
+        notebook_path: Path to the run's lab_notebook.xml (file-format contract
+            with auto_core; the human-visible artifact name is "investigation
+            log"). SDK-mode adversaries get a compact TOC +
+            mcp__notebook__read_notebook tool; API-mode adversaries fall back
+            to the full inline XML.
         prediction_history_records: Raw PredictionRecord list. Rendered as
             the compact tree in SDK mode (paired with the
             mcp__predictions__read_predictions tool) and as the full-detail
@@ -336,11 +338,11 @@ async def run_single_stop_debate(
 
 
 # ---------------------------------------------------------------------------
-# Scientist Stop Revision
+# Hunter Stop Revision
 # ---------------------------------------------------------------------------
 
 
-async def run_scientist_stop_revision(
+async def run_hunter_stop_revision(
     stop_reason: str,
     completeness_assessment: dict[str, Any],
     concern_ledger: list[dict[str, Any]],
@@ -358,7 +360,7 @@ async def run_scientist_stop_revision(
     """Revise the stop decision after the stop debate.
 
     Returns a HunterPlanOutput-compatible dict. If should_stop is still
-    true, the stop is upheld. If false, the plan contains a real experiment.
+    true, the stop is upheld. If false, the plan contains a real probe.
     """
     notebook_path = Path(notebook_path)
     notebook_entries = parse_notebook_entries(notebook_path)

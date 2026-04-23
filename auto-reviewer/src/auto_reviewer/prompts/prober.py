@@ -16,9 +16,9 @@ A previous probe script exists at: {previous_script_path}
 
 Review it first - you may be able to extend it (e.g. add another
 assertion) rather than starting from scratch. If the earlier probe
-refuted its prediction but the Hunter abducted a new mechanism, write a
-fresh probe that targets the new mechanism; do not reuse the refuted
-shape."""
+refuted its prediction but the Hunter hypothesized a new mechanism,
+write a fresh probe that targets the new mechanism; do not reuse the
+refuted shape."""
 
 
 PROBER_SYSTEM = """\

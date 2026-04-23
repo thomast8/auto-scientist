@@ -107,6 +107,36 @@ class TestProberResultsArtifacts:
         assert "exitcode.txt" in PROBER_SYSTEM.split("<recap>")[-1]
 
 
+class TestReviewerVocabularyInPrompts:
+    """Reviewer prompts must not drift back into auto-scientist vocabulary.
+
+    The `lab notebook` / `## Open abductions` phrasing leaked from the
+    auto-scientist sibling package during extraction. LLM agents read these
+    prompts every turn - seeing science-framed vocabulary nudges them toward
+    a "run an experiment" frame instead of a "find a bug, reproduce it" frame.
+    These assertions catch regressions on future prompt edits.
+
+    Note: the underlying notebook file on disk is still `lab_notebook.xml`
+    with a `<lab_notebook>` XML root, because that is an `auto_core` contract.
+    Only the human-readable prose changed.
+    """
+
+    def test_surveyor_uses_investigation_log_not_lab_notebook(self) -> None:
+        assert "lab notebook" not in SURVEYOR_SYSTEM
+        assert "investigation log" in SURVEYOR_SYSTEM
+
+    def test_hunter_uses_investigation_log_not_lab_notebook(self) -> None:
+        assert "lab notebook" not in HUNTER_SYSTEM
+        assert "investigation log" in HUNTER_SYSTEM
+
+    def test_findings_report_header_is_open_questions(self) -> None:
+        from auto_reviewer.prompts.findings import FINDINGS_SYSTEM
+
+        # User-visible section header in the final review report.
+        assert "## Open abductions" not in FINDINGS_SYSTEM
+        assert "## Open questions" in FINDINGS_SYSTEM
+
+
 class TestReviewerAgentNameLabels:
     """Reviewer agent runners must pass the reviewer vocabulary to the SDK layer.
 

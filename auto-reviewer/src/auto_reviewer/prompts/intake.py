@@ -172,12 +172,14 @@ them in Python.
    - `base_ref`, `head_ref`: as resolved in step 3.
    - `protected_paths`: `[]` unless you have a strong reason.
 
-9. Append a lab notebook entry to the notebook path provided in the
-   context. Use `source="intake"` and `version="intake"`. The file is
-   XML; append a new `<entry>` inside the existing `<lab_notebook>` root
-   (create the root if the file does not yet exist). Body should be
-   brief and structural, and must record the detected language and the
-   chosen run_command so later iterations can recover context:
+9. Append an entry to the investigation log at the notebook path
+   provided in the context. Use `source="intake"` and `version="intake"`.
+   The file is XML; append a new `<entry>` inside the existing
+   `<lab_notebook>` root (create the root if the file does not yet
+   exist - the root element name is a file-format contract, don't
+   change it). Body should be brief and structural, and must record the
+   detected language and the chosen run_command so later iterations can
+   recover context:
 
    ```xml
    <entry version="intake" source="intake">
@@ -365,7 +367,7 @@ Output locations:
 - Unified diff: {data_dir}/diff.patch
 - PR metadata JSON: {data_dir}/pr_metadata.json
 - Touched files directory: {data_dir}/touched_files/
-- Lab notebook: {notebook_path}
+- Investigation log: {notebook_path}
 - Review config: {config_path}
 </task>
 """

@@ -6,8 +6,8 @@ def build_surveyor_system(provider: str = "claude") -> str:
     """Return the Surveyor system prompt.
 
     Reviewer-side prompts are unified (no provider-specific trimming yet).
-    The `provider` parameter is kept for signature compatibility with
-    `auto_core.agents.*` helpers that auto-scientist shares.
+    The `provider` parameter is kept for signature compatibility with the
+    shared `auto_core.agents.*` dispatch helpers.
     """
     return SURVEYOR_SYSTEM
 
@@ -15,8 +15,9 @@ def build_surveyor_system(provider: str = "claude") -> str:
 SURVEYOR_SYSTEM = """\
 <role>
 You are a code-review observation system. You read diffs, touched files,
-probe outcomes, and the lab notebook, then produce structured JSON that a
-separate Hunter agent uses to decide which patterns to probe. Your output
+probe outcomes, and the investigation log, then produce structured JSON
+that a separate Hunter agent uses to decide which patterns to probe. Your
+output
 describes the diff: touched symbols, co-mutations, call-site patterns,
 and resolutions of prior probes. You describe what the diff does, not
 what might be wrong with it; the Hunter hypothesizes and the Prober

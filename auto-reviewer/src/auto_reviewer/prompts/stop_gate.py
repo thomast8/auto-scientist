@@ -16,9 +16,10 @@ def build_stop_critic_system(
 ) -> str:
     """Return the stop-debate critic system prompt template.
 
-    Signature matches auto-scientist's `build_stop_critic_system` so the
-    shared stop-gate agent loop can call it the same way. The extra flags
-    are accepted and ignored for now - the reviewer's prompt is unified.
+    Signature matches the shared `build_stop_critic_system` dispatch so
+    the shared stop-gate agent loop can call it the same way. The extra
+    flags are accepted and ignored for now - the reviewer's prompt is
+    unified.
     """
     return STOP_DEBATE_SYSTEM
 
@@ -28,8 +29,8 @@ def build_stop_revision_system(provider: str = "claude", *, has_predictions: boo
     return STOP_REVISION_SYSTEM
 
 
-# Assessment JSON schema (mirrors auto-scientist's structure; the Assessor
-# output shape is shared across apps).
+# Assessment JSON schema. The Assessor output shape is shared across apps
+# via the `auto_core` role registry.
 ASSESSMENT_SCHEMA: dict = {
     "type": "object",
     "properties": {
@@ -91,7 +92,7 @@ STOP_PERSONAS: list[dict[str, str]] = [
 DEFAULT_STOP_CRITIC_INSTRUCTIONS = """\
 <instructions>
 Challenge the stop decision with a specific gap, or concede that coverage
-is thorough. Cite the concrete sub-question or pending abduction your
+is thorough. Cite the concrete sub-question or pending open question your
 concern targets. Do not argue for its own sake.
 </instructions>"""
 
@@ -160,7 +161,7 @@ unresolved. Your persona charter:
 <instructions>
 If the review has left high-value suspicions unexplored, argue for
 continuing. If coverage is genuinely thorough, say so - do not argue for
-its own sake. Cite specific sub-questions or pending abductions.
+its own sake. Cite specific sub-questions or pending open questions.
 </instructions>
 
 <output_format>
@@ -240,7 +241,7 @@ Prior predictions:
 </context>"""
 
 
-# Aliases so shared stop-gate agent code can reference the scientist-side
+# Aliases so the shared stop-gate agent code can reference the canonical
 # constant names without knowing about the review-oriented spellings.
 ASSESSMENT_USER = ASSESSOR_USER
 STOP_ADVERSARY_USER = STOP_DEBATE_USER

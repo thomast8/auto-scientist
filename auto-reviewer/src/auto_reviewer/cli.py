@@ -35,7 +35,7 @@ from auto_core.state import RunState
 from dotenv import load_dotenv
 
 # Pick up API keys from the repo's .env before any agent tries to talk to
-# an LLM provider. Mirrors auto_scientist.cli.
+# an LLM provider.
 load_dotenv()
 
 logger = logging.getLogger("auto_reviewer")

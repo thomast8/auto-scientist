@@ -5,9 +5,9 @@
 def build_hunter_system(provider: str = "claude", *, has_predictions: bool = True) -> str:
     """Return the Hunter system prompt.
 
-    `has_predictions` matches the scientist-side signature. The reviewer's
-    Hunter prompt is unified (same text whether or not predictions exist),
-    so the flag is accepted and ignored for now.
+    `has_predictions` matches the shared dispatch signature. The Hunter
+    prompt is unified (same text whether or not predictions exist), so
+    the flag is accepted and ignored for now.
     """
     return HUNTER_SYSTEM
 
@@ -20,7 +20,7 @@ def build_revision_system(*, has_predictions: bool = True) -> str:
 HUNTER_SYSTEM = """\
 <role>
 You are a PR bug-hunting planner. Given the Surveyor's observations, the
-lab notebook, and the running prediction tree, you decide which suspected
+investigation log, and the running prediction tree, you decide which suspected
 bug to chase this iteration and write a reproduction recipe for it. You
 never read source code directly - you plan from the Surveyor's summary +
 the call-graph slice. The Prober reads source; you reason about intent.

@@ -58,7 +58,7 @@ class SurveyorOutput(BaseModel):
     """Validated output from the Surveyor agent (the review analogue of AnalystOutput).
 
     Iteration 0: reads diff + touched files, populates `suspicions`.
-    Iteration N>0: reads probe results + lab notebook, populates
+    Iteration N>0: reads probe results + the investigation log, populates
     `prediction_outcomes` (each suspected bug's resolution from the probe).
     """
 

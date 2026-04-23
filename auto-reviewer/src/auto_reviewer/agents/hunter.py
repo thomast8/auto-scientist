@@ -1,8 +1,10 @@
-"""Scientist agent: prompt-in, JSON-out strategic planner with web search.
+"""Hunter agent: prompt-in, JSON-out bug-hunting planner with web search.
 
-Does not read Python code or data files. Receives analysis + notebook via prompt.
-Has web search access to ground hypotheses in real-world knowledge.
-Output: structured JSON plan with hypothesis, strategy, changes, notebook entry.
+Does not read source code directly. Receives the Surveyor's observations +
+the investigation log via prompt injection. Has web search access to ground
+hypotheses against CVE advisories and known failure patterns.
+Output: structured JSON BugPlan with hypothesis, strategy, changes, and the
+next investigation-log entry.
 """
 
 import json
@@ -20,7 +22,6 @@ from auto_core.agents.prediction_tool import (
     PREDICTION_SPEC,
     build_prediction_mcp_server,
     format_compact_tree,
-    format_full_detail,
 )
 from auto_core.model_config import ReasoningConfig, reasoning_to_cc_extra_args
 from auto_core.notebook import parse_notebook_entries
@@ -46,13 +47,13 @@ logger = logging.getLogger(__name__)
 HUNTER_BASE_TOOLS = ["WebSearch"]
 
 
-def _build_scientist_tools_and_mcp(
+def _build_hunter_tools_and_mcp(
     prediction_history: list[PredictionRecord] | None,
     provider: str,
     notebook_path: Path | None = None,
     output_dir: Path | None = None,
 ) -> tuple[list[str], dict[str, Any]]:
-    """Build the tools list and MCP servers dict for a Scientist invocation.
+    """Build the tools list and MCP servers dict for a Hunter invocation.
 
     Both Claude and Codex backends get the same stdio MCP server config.
     Claude passes it via mcp_servers; the CodexBackend writes it to
@@ -161,16 +162,6 @@ HUNTER_PLAN_SCHEMA = {
 }
 
 
-# Re-export for backward compatibility (scripts, tests, orchestrator)
-_format_compact_tree = format_compact_tree
-
-
-# Alias preserved so existing imports (test_scientist.py, scripts/compare_personas.py,
-# scripts/validate_prediction_tool.py) keep working. New code should import
-# format_full_detail from prediction_tool directly.
-_format_predictions_for_prompt = format_full_detail
-
-
 async def run_hunter(
     analysis: dict[str, Any],
     notebook_path: Path,
@@ -185,24 +176,24 @@ async def run_hunter(
     output_dir: Path | None = None,
     pending_abductions: str = "",
 ) -> dict[str, Any]:
-    """Formulate hypothesis and plan based on analysis.
+    """Formulate a BugPlan based on the Surveyor's observations.
 
-    The Scientist does not read code or data files. It receives the analysis
-    JSON and notebook content via prompt injection and returns a structured plan.
-    Has web search access.
+    The Hunter does not read source code. It receives the Surveyor output JSON
+    and investigation-log content via prompt injection and returns a structured
+    BugPlan. Has web search access.
 
     Args:
-        analysis: Structured analysis JSON from the Analyst.
-        notebook_path: Path to the lab notebook (read for context).
-        version: Version string for the new experiment (e.g., 'v01').
-        domain_knowledge: Domain-specific context.
+        analysis: Structured Surveyor output JSON.
+        notebook_path: Path to the investigation log (read for context).
+        version: Version string for the new iteration (e.g., 'v01').
+        domain_knowledge: Repo-level context.
         prediction_history: Accumulated testable predictions and outcomes.
         model: Model override.
         message_buffer: Optional buffer for streaming messages.
-        goal: The user's investigation goal.
+        goal: The user's review goal.
 
     Returns:
-        Structured plan dict with keys: hypothesis, strategy, changes,
+        Structured BugPlan dict with keys: hypothesis, strategy, changes,
         expected_impact, should_stop, stop_reason, notebook_entry.
         Optionally: testable_predictions.
     """
@@ -251,7 +242,7 @@ async def run_hunter(
     if reasoning and reasoning.level != "off":
         extra_args.update(reasoning_to_cc_extra_args(reasoning))
 
-    tools, mcp_servers = _build_scientist_tools_and_mcp(
+    tools, mcp_servers = _build_hunter_tools_and_mcp(
         prediction_history,
         provider,
         notebook_path=notebook_path,
@@ -313,23 +304,23 @@ async def run_hunter_revision(
     output_dir: Path | None = None,
     pending_abductions: str = "",
 ) -> dict[str, Any]:
-    """Revise the plan after a critic debate.
+    """Revise the BugPlan after an adversary debate.
 
     Args:
-        original_plan: The initial plan that was debated.
+        original_plan: The initial BugPlan that was debated.
         concern_ledger: Structured list of ConcernLedgerEntry dicts.
-        analysis: Structured analysis JSON from the Analyst.
-        notebook_path: Path to the lab notebook.
+        analysis: Structured Surveyor output JSON.
+        notebook_path: Path to the investigation log.
         version: Version string.
-        domain_knowledge: Domain-specific context.
+        domain_knowledge: Repo-level context.
         prediction_history: Accumulated testable predictions and outcomes.
         model: Model override.
         message_buffer: Optional buffer for streaming messages.
-        goal: The user's investigation goal.
+        goal: The user's review goal.
         reasoning: Reasoning/effort config for the model.
 
     Returns:
-        Revised plan dict (same schema as the initial plan).
+        Revised BugPlan dict (same schema as the initial plan).
     """
     notebook_path = Path(notebook_path)
     notebook_entries = parse_notebook_entries(notebook_path)
@@ -372,7 +363,7 @@ async def run_hunter_revision(
     if reasoning and reasoning.level != "off":
         extra_args.update(reasoning_to_cc_extra_args(reasoning))
 
-    tools, mcp_servers = _build_scientist_tools_and_mcp(
+    tools, mcp_servers = _build_hunter_tools_and_mcp(
         prediction_history,
         provider,
         notebook_path=notebook_path,

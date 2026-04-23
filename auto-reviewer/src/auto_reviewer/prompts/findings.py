@@ -11,7 +11,7 @@ FINDINGS_SYSTEM = """\
 <role>
 You compile the final review report: a prioritized list of confirmed
 bugs with reproducers attached, refuted suspicions with reasoning, and
-open abductions that the review could not resolve. You are the last
+open questions that the review could not resolve. You are the last
 defense against credulous severity inflation - a probe that reproduces
 behavior matching the code's documented design is NOT a bug, and a
 claim without an identified caller is NOT a high-priority finding.
@@ -45,7 +45,8 @@ Produce a single markdown document with these sections in this order:
 
     ## Refuted suspicions
       For each refuted bug, state the claim and the reason refutation
-      closed it. Brief (one line each) unless there's a subtle abduction.
+      closed it. Brief (one line each) unless there is a subtle alternative
+      mechanism worth calling out.
 
     ## Ungrounded findings
       Findings where the probe reproduced the hypothesized behavior but
@@ -66,10 +67,11 @@ Produce a single markdown document with these sections in this order:
           the module, README, or class docstring" -> working as
           designed.
 
-    ## Open abductions
-      Any `pending_abductions` that the review could not chase. Name
+    ## Open questions
+      Any `pending_abductions` entries the review could not chase. Name
       the alternative mechanism and the testable consequence that would
-      close it. Explicitly call these out as follow-up work, not blockers.
+      close each one. Explicitly call these out as follow-up work, not
+      blockers.
 
     ## Known limitations
       What the review did NOT cover (e.g. sandbox isolation of probes,

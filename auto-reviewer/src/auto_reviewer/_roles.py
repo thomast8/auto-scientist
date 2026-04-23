@@ -195,7 +195,7 @@ def _build_agent_fns() -> dict[str, Callable[..., Any]]:
 
     `canonicalizer` resolves to a deterministic Python function
     (`run_intake`) - PR canonicalization is shell commands, not LLM work.
-    The rest are LLM-driven agents mirroring auto-scientist's structural
+    The rest are LLM-driven agents built on the shared `auto_core` runtime
     machinery with reviewer-flavored prompts + schemas.
     """
     from auto_reviewer.agents.adversary import run_debate, run_single_critic_debate
@@ -205,7 +205,7 @@ def _build_agent_fns() -> dict[str, Callable[..., Any]]:
     from auto_reviewer.agents.prober import run_prober
     from auto_reviewer.agents.stop_gate import (
         run_completeness_assessment,
-        run_scientist_stop_revision,
+        run_hunter_stop_revision,
         run_single_stop_debate,
     )
     from auto_reviewer.agents.surveyor import run_surveyor
@@ -220,7 +220,7 @@ def _build_agent_fns() -> dict[str, Callable[..., Any]]:
         "adversary": run_debate,
         "single_adversary": run_single_critic_debate,
         "assessor": run_completeness_assessment,
-        "stop_reviser": run_scientist_stop_revision,
+        "stop_reviser": run_hunter_stop_revision,
         "stop_adversary": run_single_stop_debate,
     }
 
@@ -272,16 +272,15 @@ def build_registry() -> RoleRegistry:
             "Critic": "Adversary",
             "Revision": "Hunter Revision",
         },
-        # The Findings agent's report shape is review-oriented, not
-        # experiment-oriented: no "executive summary", "methodology",
-        # "journey", "version comparison" sections - those belong to
-        # auto-scientist. The reviewer produces a punch-list.
+        # The Findings agent's report shape is a punch-list for PR reviewers:
+        # no "executive summary", "methodology", "journey", or "version
+        # comparison" sections.
         report_expected_headings=[
             "summary",
             "confirmed bugs",
             "refuted suspicions",
             "ungrounded findings",
-            "open abductions",
+            "open questions",
             "known limitations",
         ],
         report_require_version_comparison_table=False,

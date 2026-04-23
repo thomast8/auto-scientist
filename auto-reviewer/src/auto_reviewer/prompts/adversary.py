@@ -4,8 +4,8 @@
 
 # ---------------------------------------------------------------------------
 # Composable blocks for the Adversary system prompt.
-# Uses the same format-placeholder interface as build_critic_system so the
-# shared _build_critic_prompt function works for both apps without changes.
+# Uses the shared format-placeholder interface so the `_build_critic_prompt`
+# helper in `auto_core` works without per-app special-casing.
 # ---------------------------------------------------------------------------
 
 _ADVERSARY_ROLE = """\
@@ -114,8 +114,8 @@ def build_adversary_system(provider: str = "claude") -> str:
     {notebook_tool_guidance}, and {critic_output_schema} placeholders.
     The caller must .format() the result.
 
-    Mirrors the interface of build_critic_system so the shared
-    _build_critic_prompt function in adversary.py works unchanged.
+    Uses the shared placeholder interface so the `_build_critic_prompt`
+    helper in `auto_core` works unchanged.
     """
     if provider == "gpt":
         return "\n\n".join(
@@ -142,8 +142,8 @@ def build_adversary_system(provider: str = "claude") -> str:
     )
 
 
-# Persona catalog for review debate. Mirrors the shape of auto-scientist's
-# critic PERSONAS list so the shared adversary agent loop can consume them.
+# Persona catalog for review debate. Matches the shared PERSONAS shape so
+# the adversary agent loop in `auto_core` can consume them unchanged.
 PERSONAS: list[dict[str, str]] = [
     {
         "name": "Design Intent",
@@ -354,8 +354,8 @@ DEFAULT_CRITIC_INSTRUCTIONS = """\
 
 
 # ADVERSARY_SYSTEM removed; build_adversary_system() assembles the template
-# from building blocks above using the same placeholder interface as
-# build_critic_system() in auto_scientist.
+# from building blocks above using the shared placeholder interface that
+# `auto_core._build_critic_prompt` consumes.
 
 
 ADVERSARY_PERSONAS: dict[str, str] = {

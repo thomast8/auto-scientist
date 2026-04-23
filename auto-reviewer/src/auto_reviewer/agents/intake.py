@@ -1,15 +1,15 @@
 """Intake agent: LLM-driven PR canonicalization.
 
-Where auto-scientist's Ingestor canonicalizes heterogeneous data (CSV /
-Excel / PDFs), the reviewer's Intake canonicalizes a natural-language
-review prompt. The prompt may point at a PR by URL, `owner/repo#N`, a
-bare branch name, or "the current branch"; the intake agent parses the
-pointer, locates (or clones) the repo, resolves base/head refs, computes
-the diff, snapshots the touched files, and writes a populated
-`ReviewConfig`.
+Given a natural-language review prompt pointing at some code - a GitHub PR
+URL, `owner/repo#N`, a bare branch name, or "the current branch" - the
+Intake agent parses the pointer, locates (or clones) the repo, resolves
+base/head refs, computes the diff, snapshots the touched files, and writes
+a populated `ReviewConfig`. The downstream agents (Surveyor, Hunter,
+Prober, Findings) read the canonicalized workspace and never touch git
+themselves.
 
-Signature matches `auto_scientist.agents.ingestor.run_ingestor` so the
-shared `auto_core.Orchestrator._run_ingestion` dispatch works unchanged.
+Signature matches the shared `auto_core.Orchestrator._run_ingestion`
+dispatch contract.
 """
 
 from __future__ import annotations

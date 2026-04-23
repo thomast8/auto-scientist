@@ -1,11 +1,12 @@
-"""Coder agent: implements and runs the scientist's plan.
+"""Prober agent: implements and runs the Hunter's reproduction recipe.
 
 Uses query() (fresh session, reads/writes files via tools).
 Tools: Read, Write, Edit, Bash, Glob, Grep.
-Input (via prompt): scientist's plan JSON + previous script + run config.
-Output: experiment script + run_result.json at {version_dir}/.
+Input (via prompt): Hunter's BugPlan JSON + previous probe script + run config.
+Output: probe script + run_result.json at {version_dir}/.
 max_turns: 50
-Safety hooks: block writes outside experiments/ dir, block writes to data files.
+Safety hooks: block writes outside the review workspace, block mutation of
+the target repo's source.
 """
 
 import json
@@ -66,12 +67,12 @@ def _scan_probes_for_path_hacks(probes_dir: Path) -> tuple[Path, str] | None:
 
 
 def _check_runtime_success(version_dir: Path) -> tuple[bool, str]:
-    """Check whether the coder's experiment script ran successfully.
+    """Check whether the Prober's probe script ran successfully.
 
     Reads run_result.json first, falls back to exitcode.txt/stderr.txt.
     Returns (True, "") on success or (False, error_description) on failure.
-    Timeouts are treated as success for retry purposes (they need Scientist
-    rethinking, not a coder retry).
+    Timeouts are treated as success for retry purposes (they need Hunter
+    rethinking, not a Prober retry).
     """
     run_result_path = version_dir / "run_result.json"
     exitcode_path = version_dir / "exitcode.txt"
@@ -128,19 +129,19 @@ async def run_prober(
     data_files_listing: str = "",
     provider: str = "anthropic",
 ) -> Path:
-    """Implement the scientist's plan as a runnable experiment script.
+    """Implement the Hunter's plan as a runnable probe script.
 
     Args:
-        plan: Structured plan dict from the Scientist.
-        previous_script: Path to the previous version's script.
-        output_dir: Base experiments directory.
-        version: Version string for the new experiment (e.g., 'v01').
-        domain_knowledge: Domain-specific context.
-        data_path: Absolute path to the dataset.
+        plan: Structured BugPlan dict from the Hunter.
+        previous_script: Path to the previous iteration's probe script.
+        output_dir: Base review-iteration directory.
+        version: Version string for the new probe run (e.g., 'v01').
+        domain_knowledge: Repo-level context.
+        data_path: Absolute path to the target repo's root.
         data_files_listing: Pre-computed listing of files in data_path directory.
 
     Returns:
-        Path to the newly created experiment script.
+        Path to the newly created probe script.
     """
     version_dir = output_dir / version
     version_dir.mkdir(parents=True, exist_ok=True)

@@ -1,16 +1,16 @@
-"""Critic: multi-model critique dispatcher.
+"""Adversary: multi-model critique dispatcher.
 
-Input: scientist's plan + analysis JSON + prediction history + lab notebook
-+ domain knowledge.
+Input: Hunter's BugPlan + Surveyor observations JSON + prediction history +
+investigation log + repo knowledge.
 Output: structured critique with tagged concerns and alternative hypotheses,
 plus raw transcript for debugging.
 
-In SDK mode, critics have web search and interactive prediction tree access
+In SDK mode, adversaries have web search and interactive prediction tree access
 (MCP tool) to query specific predictions, chains, and statistics. In direct
 API mode (OpenAI/Google), prediction history is provided as text in the prompt.
 
-Critics receive the full evidence base but do not see Python code
-(implementation is the Coder's domain).
+Adversaries receive the full evidence base but do not see source code
+(implementation is the Prober's domain).
 
 Personas provide diverse critical perspectives. Each critique runs one persona;
 model assignment rotates across iterations so no model is always the same role.
@@ -82,11 +82,11 @@ def _build_critic_tools_and_mcp(
     notebook_path: Path | None = None,
     output_dir: Path | None = None,
 ) -> tuple[list[str], dict[str, Any]]:
-    """Build the tools list and MCP servers dict for a critic invocation.
+    """Build the tools list and MCP servers dict for an adversary invocation.
 
-    Mirrors the scientist's pattern: base tools + optional prediction MCP +
-    notebook MCP. MCP is only usable in SDK mode; direct API callers ignore
-    mcp_servers and get inline content instead.
+    Base tools + optional prediction MCP + notebook MCP. MCP is only usable in
+    SDK mode; direct API callers ignore mcp_servers and get inline content
+    instead.
     """
     tools = list(CRITIC_BASE_TOOLS)
     mcp_servers: dict[str, Any] = {}
@@ -733,7 +733,7 @@ def _build_critic_prompt(
             f", and a {notebook_tool_name} tool to read full notebook entries "
             "when the Table of Contents title is not enough context"
         )
-        notebook_evidence_text = "a lab notebook Table of Contents"
+        notebook_evidence_text = "an investigation log Table of Contents"
         notebook_pipeline_text = (
             "\nThe notebook in <context> is a Table of Contents only (version, "
             f"source, title per entry). Call {notebook_tool_name} with "
@@ -749,7 +749,7 @@ def _build_critic_prompt(
         notebook_section = f"<notebook_toc>{notebook_body}</notebook_toc>"
     else:
         notebook_role_text = ""
-        notebook_evidence_text = "the lab notebook"
+        notebook_evidence_text = "the investigation log"
         notebook_pipeline_text = ""
         notebook_tool_guidance = ""
         notebook_section = f"<notebook>{notebook_body}</notebook>"

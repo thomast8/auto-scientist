@@ -1,9 +1,11 @@
-"""Report agent: Phase 3 final summary generation.
+"""Findings agent: compiles the final PR review report.
 
-Generates a comprehensive report covering the best approach, the journey from
-first to final version, key insights, and recommendations for future work.
+Generates a prioritized markdown report: confirmed bugs with reproducers,
+refuted suspicions with reasoning, ungrounded findings, open questions, and
+known limitations.
 
-Returns the report content as a string; the orchestrator handles file writing.
+Writes report.md via the Write tool; the orchestrator round-trips it for
+validation.
 """
 
 import logging
@@ -46,12 +48,12 @@ async def run_findings(
     provider: str = "anthropic",
     pending_abductions: str = "",
 ) -> str:
-    """Generate the final experiment report.
+    """Generate the final PR review report.
 
     Args:
-        state: Final experiment state with all version history.
-        notebook_path: Path to the lab notebook.
-        output_dir: Directory containing experiment artifacts (for reading).
+        state: Final review state with all iteration history.
+        notebook_path: Path to the investigation log.
+        output_dir: Review workspace directory (for reading iteration artifacts).
         model: Optional model override.
         message_buffer: Optional buffer for streaming messages.
 
@@ -146,7 +148,7 @@ async def run_findings(
                 "<validation_error>\n"
                 "Your previous output was too short or empty. "
                 "Please generate a comprehensive markdown report with headings, "
-                "covering the experiment journey, key findings, and recommendations.\n"
+                "covering the review journey, key findings, and recommendations.\n"
                 "</validation_error>"
             )
         structure_issues = validate_report_structure(text)

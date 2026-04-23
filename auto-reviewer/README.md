@@ -1,15 +1,22 @@
 # Auto-Reviewer
 
-Autonomous bug-hunting PR reviewer. Sibling of Auto-Scientist on the shared
-`auto_core` runtime. The same orchestrator, state machine, role registry,
-multi-model debate, lab notebook + abduction carry-forward, and information
-boundaries - repurposed for PR review.
+Autonomous bug-hunting PR reviewer. The Intake agent canonicalizes a PR
+into a review workspace; the Surveyor surfaces diff-level suspicions; the
+Hunter turns them into testable claims; the Prober writes and runs
+reproducer probes; the Findings agent compiles a prioritized report with
+reproducers attached. A running **investigation log** carries hypotheses
+and open questions across iterations.
 
 A "confirmed prediction" here is a reproducer (failing test, assertion,
-demonstrated misbehavior), not a metric improvement.
+demonstrated misbehavior).
 
 Pipeline: **Intake** -> **Investigation** loop (Surveyor -> Hunter ->
 (Adversary debate) -> Prober) -> **Findings**.
+
+Auto-Reviewer shares the `auto_core` runtime (orchestrator, state machine,
+role registry, multi-model debate, information boundaries) with its
+sibling package Auto-Scientist. The runtime is generic; the prompts,
+schemas, and agent behaviors here are PR-review specific.
 
 See `docs/auto-reviewer-deferred-work.md` at the repo root for non-goals and
 deferred decisions.
