@@ -26,6 +26,12 @@ auto-core = { workspace = true }
 [tool.pytest.ini_options]
 asyncio_mode = "auto"
 testpaths = ["tests"]
+timeout = 60
+timeout_method = "signal"
+norecursedirs = ["fixtures"]
+markers = [
+    "live: test spawns a real Claude CLI; skipped unless LIVE_CLAUDE=1 is set",
+]
 # Running `pytest` from the repo root picks up auto-scientist's tests via
 # the root pyproject. To run the reviewer suite:
 #   uv run pytest auto-reviewer/tests/

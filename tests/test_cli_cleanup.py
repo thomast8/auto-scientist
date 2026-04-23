@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 import signal
-from types import SimpleNamespace
 from unittest.mock import call, patch
 
 import auto_core.cli_cleanup as cli_cleanup
@@ -19,17 +18,16 @@ class TestCliCleanup:
     def teardown_method(self) -> None:
         _reset_cleanup_state()
 
+    @patch("auto_core.cli_cleanup.time.sleep", lambda _s: None)
+    @patch("auto_core.cli_cleanup._descendant_pids", return_value=[456, 123])
     @patch("auto_core.cli_cleanup.os.kill")
-    @patch("auto_core.cli_cleanup.subprocess.run")
     @patch("auto_core.cli_cleanup.signal.signal")
-    def test_kill_child_processes_terminates_direct_children(
+    def test_kill_child_processes_sigterms_then_sigkills_descendants(
         self,
         mock_signal,
-        mock_run,
         mock_kill,
+        _mock_descendants,
     ) -> None:
-        mock_run.return_value = SimpleNamespace(stdout="123\n456\nbad\n")
-
         cli_cleanup.kill_child_processes()
         cli_cleanup.kill_child_processes()
 
@@ -40,9 +38,12 @@ class TestCliCleanup:
             ],
             any_order=True,
         )
+        # First SIGTERM every descendant, then SIGKILL every descendant.
         assert mock_kill.call_args_list == [
-            call(123, signal.SIGTERM),
             call(456, signal.SIGTERM),
+            call(123, signal.SIGTERM),
+            call(456, signal.SIGKILL),
+            call(123, signal.SIGKILL),
         ]
 
     @patch("auto_core.cli_cleanup.atexit.register")

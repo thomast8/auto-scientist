@@ -35,7 +35,25 @@ from codex_app_server_sdk import CodexClient, ThreadConfig, TurnOverrides
 from codex_app_server_sdk.errors import CodexProtocolError
 from pydantic import BaseModel
 
+from auto_core.cost_ceiling import record_cost
+
 logger = logging.getLogger(__name__)
+
+_CLAUDE_QUERY_MESSAGE_TIMEOUT_ENV = "CLAUDE_QUERY_MESSAGE_TIMEOUT_SECONDS"
+_CLAUDE_QUERY_MESSAGE_TIMEOUT_DEFAULT = 900.0
+
+
+def _resolve_message_timeout() -> float:
+    raw = os.environ.get(_CLAUDE_QUERY_MESSAGE_TIMEOUT_ENV)
+    if raw is None:
+        return _CLAUDE_QUERY_MESSAGE_TIMEOUT_DEFAULT
+    try:
+        return float(raw)
+    except ValueError as exc:
+        raise RuntimeError(
+            f"{_CLAUDE_QUERY_MESSAGE_TIMEOUT_ENV}={raw!r} is not a valid float"
+        ) from exc
+
 
 # Models broken with Codex + ChatGPT subscription auth.
 # Workaround: auto-upgrade to the cheapest working model.
@@ -411,7 +429,19 @@ class ClaudeBackend:
         text_acc = ""
         thinking_acc = ""
 
-        async for msg in claude_query(prompt=prompt, options=cc_opts):
+        message_timeout = _resolve_message_timeout()
+        query_iter = claude_query(prompt=prompt, options=cc_opts).__aiter__()
+        while True:
+            try:
+                msg = await asyncio.wait_for(query_iter.__anext__(), timeout=message_timeout)
+            except StopAsyncIteration:
+                break
+            except TimeoutError:
+                logger.error(
+                    f"Claude CLI stalled for {message_timeout:.0f}s between messages; "
+                    f"aborting query (set {_CLAUDE_QUERY_MESSAGE_TIMEOUT_ENV} to adjust)"
+                )
+                raise
             if msg is None:
                 continue
 
@@ -434,7 +464,9 @@ class ClaudeBackend:
             elif isinstance(msg, ResultMessage):
                 usage = getattr(msg, "usage", None) or {}
                 usage["num_turns"] = getattr(msg, "num_turns", 0)
-                usage["total_cost_usd"] = getattr(msg, "total_cost_usd", None)
+                cost = getattr(msg, "total_cost_usd", None)
+                usage["total_cost_usd"] = cost
+                record_cost(cost)
                 sid = getattr(msg, "session_id", None)
                 if sid:
                     effective_cwd = Path(options.cwd) if options.cwd else Path.cwd()
