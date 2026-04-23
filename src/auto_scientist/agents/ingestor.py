@@ -18,6 +18,7 @@ from auto_core.sdk_utils import (
     append_block_to_buffer,
     collect_text_from_query,
     prepare_turn_budget,
+    resolve_prompt_provider,
     safe_query,
 )
 from pydantic import ValidationError
@@ -61,7 +62,7 @@ async def run_ingestor(
     mode = "interactive" if interactive else "autonomous"
 
     max_turns = 30
-    prompt_provider = "gpt" if provider == "openai" else "claude"
+    prompt_provider = resolve_prompt_provider(provider)
     system_prompt = build_ingestor_system(prompt_provider)
     if provider == "openai":
         system_prompt += CODEX_SANDBOX_ADDENDUM

@@ -21,6 +21,7 @@ from auto_core.sdk_utils import (
     append_block_to_buffer,
     collect_text_from_query,
     prepare_turn_budget,
+    resolve_prompt_provider,
 )
 
 from auto_reviewer.prompts.prober import (
@@ -156,7 +157,7 @@ async def run_prober(
 
         run_command = rewrite_uv_run_for_codex(run_command)
 
-    prompt_provider = "gpt" if provider == "openai" else "claude"
+    prompt_provider = resolve_prompt_provider(provider)
     system_prompt = build_prober_system(prompt_provider).format(
         data_path=data_path or "(not specified)",
         run_timeout_minutes=run_timeout_minutes,

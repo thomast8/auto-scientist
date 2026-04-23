@@ -34,6 +34,7 @@ from auto_core.sdk_backend import SDKBackend, SDKOptions, create_backend, get_ba
 from auto_core.sdk_utils import (
     collect_text_from_query,
     prepare_turn_budget,
+    resolve_prompt_provider,
     validate_json_output,
 )
 from auto_core.state import PredictionRecord
@@ -121,7 +122,7 @@ async def run_completeness_assessment(
     )
 
     max_turns = 10
-    prompt_provider = "gpt" if provider == "openai" else "claude"
+    prompt_provider = resolve_prompt_provider(provider)
     has_predictions = bool(prediction_history)
     assessment_system = build_assessment_system(prompt_provider, has_predictions=has_predictions)
     budget = prepare_turn_budget(
@@ -269,7 +270,7 @@ async def run_single_stop_debate(
         output_dir=output_dir,
     )
 
-    prompt_provider = "gpt" if config.provider == "openai" else "claude"
+    prompt_provider = resolve_prompt_provider(config.provider)
     has_predictions = bool(prediction_history_records)
     critic_system = build_stop_critic_system(
         prompt_provider,
@@ -396,7 +397,7 @@ async def run_scientist_stop_revision(
     )
 
     max_turns = 15
-    prompt_provider = "gpt" if provider == "openai" else "claude"
+    prompt_provider = resolve_prompt_provider(provider)
     has_predictions = bool(prediction_history)
     stop_rev_system = build_stop_revision_system(prompt_provider, has_predictions=has_predictions)
     budget = prepare_turn_budget(

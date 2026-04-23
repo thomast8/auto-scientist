@@ -30,6 +30,7 @@ from auto_core.sdk_backend import SDKOptions, get_backend
 from auto_core.sdk_utils import (
     collect_text_from_query,
     prepare_turn_budget,
+    resolve_prompt_provider,
     validate_json_output,
 )
 from auto_core.state import PredictionRecord
@@ -225,7 +226,7 @@ async def run_hunter(
         version=version,
     )
 
-    prompt_provider = "gpt" if provider == "openai" else "claude"
+    prompt_provider = resolve_prompt_provider(provider)
     has_predictions = bool(prediction_history)
     system_prompt = build_hunter_system(prompt_provider, has_predictions=has_predictions)
 
