@@ -21,7 +21,13 @@ from pathlib import Path
 from auto_core.notebook import NOTEBOOK_FILENAME
 from auto_core.retry import QueryResult, agent_retry_loop
 from auto_core.retry import ValidationError as RetryValidationError
-from auto_core.sdk_backend import CODEX_SANDBOX_ADDENDUM, SDKOptions, get_backend
+from auto_core.safety.tool_guard import make_workspace_guard
+from auto_core.sdk_backend import (
+    CODEX_REVIEWER_POLICY_ADDENDUM,
+    CODEX_SANDBOX_ADDENDUM,
+    SDKOptions,
+    get_backend,
+)
 from auto_core.sdk_utils import (
     append_block_to_buffer,
     collect_text_from_query,
@@ -71,7 +77,19 @@ async def run_intake(
     data_dir.mkdir(parents=True, exist_ok=True)
     notebook_path = output_dir / NOTEBOOK_FILENAME
 
-    tools = ["Bash", "Read", "Write", "Glob", "Grep"]
+    # Workspace guard: the only writable area is `output_dir`. The
+    # Intake role may use Bash (including `git clone` into repo_clone/),
+    # and read-only `git` / `gh` subcommands; Write is explicitly
+    # dropped so writes only happen via audited shell redirection. The
+    # clone path is the one `git clone` is permitted to target.
+    repo_clone = output_dir / "repo_clone"
+    guard = make_workspace_guard(
+        workspace=output_dir,
+        repo_clone=repo_clone,
+        mode="intake",
+    )
+
+    tools = ["Bash", "Read", "Glob", "Grep"]
     # `AskUserQuestion` is a Claude Code CLI built-in. The Codex backend
     # has no equivalent, and prepare_turn_budget's deferred-tool wiring
     # also only activates for provider=='anthropic'. If the caller asked
@@ -95,24 +113,26 @@ async def run_intake(
     prompt_provider = resolve_prompt_provider(provider)
     system_prompt = build_intake_system(prompt_provider)
     if provider == "openai":
-        system_prompt += CODEX_SANDBOX_ADDENDUM
+        system_prompt += CODEX_SANDBOX_ADDENDUM + CODEX_REVIEWER_POLICY_ADDENDUM
     budget = prepare_turn_budget(system_prompt, max_turns, tools, provider=provider)
     backend = get_backend(provider)
     options = SDKOptions(
         system_prompt=budget.system_prompt,
         allowed_tools=budget.allowed_tools,
         max_turns=budget.max_turns,
-        permission_mode="acceptEdits",
+        permission_mode="default",
         cwd=output_dir,
         model=model,
         extra_args={},
+        pre_tool_use_hook=guard,
     )
 
     config_path_str = str(config_path) if config_path else "(not requested)"
+    cwd_hint_path = data_dir / "cwd_hint.json"
 
     prompt = INTAKE_USER.format(
         prompt=goal,
-        cwd=str(raw_data_path.resolve()),
+        cwd_hint_path=str(cwd_hint_path),
         data_dir=str(data_dir),
         notebook_path=str(notebook_path),
         config_path=config_path_str,
@@ -131,11 +151,12 @@ async def run_intake(
                 system_prompt=retry_budget.system_prompt,
                 allowed_tools=retry_budget.allowed_tools,
                 max_turns=retry_budget.max_turns,
-                permission_mode="acceptEdits",
+                permission_mode="default",
                 cwd=output_dir,
                 model=model,
                 resume=resume_session_id,
                 extra_args={},
+                pre_tool_use_hook=guard,
             )
         else:
             current_options[0] = options
@@ -232,6 +253,15 @@ async def run_intake(
                     "local clone of the repository under review.\n"
                     "</validation_error>"
                 )
+            try:
+                cfg.require_inside_workspace(output_dir)
+            except ValueError as e:
+                raise RetryValidationError(
+                    "<validation_error>\n"
+                    f"{e}\nRe-clone the target into {output_dir}/repo_clone/ "
+                    "and set repo_path to that path.\n"
+                    "</validation_error>"
+                ) from e
             if not cfg.pr_ref:
                 raise RetryValidationError(
                     "<validation_error>\n"
