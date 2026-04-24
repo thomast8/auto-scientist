@@ -53,29 +53,50 @@ changed file snapshotted), self-describing, and reproducible
 
 _INSTRUCTIONS = """\
 <instructions>
-You have Bash, Read, Write, Glob, and Grep. In interactive mode you also
-have AskUserQuestion. Use `git` and `gh` directly - do not reimplement
-them in Python.
+You have Bash, Read, Glob, and Grep. In interactive mode you also have
+AskUserQuestion. Use `git` and `gh` directly - do not reimplement them
+in Python. Write files via shell redirection (`>`, `tee`) since the
+`Write` tool is not available in this role - the orchestrator constrains
+your writes via a workspace guard.
+
+Sandbox constraint: every write must land inside the workspace
+directory. `git clone` must target a path under the workspace (pre-made
+at `{{output_dir}}/repo_clone/` when the user's cwd was a git repo; you
+clone there yourself otherwise). Destructive git subcommands (push,
+commit, reset --hard, clean, rebase, checkout, branch, remote) are
+blocked everywhere; you do not need them.
 
 1. Parse the goal. The user's review prompt is in <goal>. Identify the
    pointer shape:
    - GitHub PR URL (https://github.com/owner/repo/pull/N)
    - owner/repo#N notation
-   - bare PR number (N), assumed to live in the repo you will resolve
+   - bare PR number (N), assumed to live in the repo resolved below
    - branch name (local or remote)
-   - "current branch" / "my branch" / similar (use the HEAD in cwd)
-   Record the parsed interpretation in a short status line before you start
-   running commands.
+   - "current branch" / "my branch" / similar (use HEAD in the pre-made
+     clone, see step 2)
+   Record the parsed interpretation in a short status line before you
+   start running commands.
 
-2. Locate the repository. Try these in order:
-   a. The <cwd> from context. If `git -C {cwd} rev-parse --git-dir` succeeds
-      and the pointer matches a branch or PR known to that repo, use it.
-   b. Sibling directories under the workspace's parent (only if obvious).
-   c. Clone. Interactive mode: AskUserQuestion for the clone URL or local
-      path. Autonomous mode: infer the URL from a GitHub pointer and clone
-      to `{{output_dir}}/repo/` with `git clone <url> repo/`. If no URL can
-      be inferred, fail early with a clear error rather than guessing.
-   Once resolved, keep `repo_abs` = the absolute, resolved path.
+2. Locate the repository. Read `{cwd_hint_path}` (JSON). It contains:
+   - `is_git`: whether the user's cwd is itself a git repo
+   - `repo_clone`: absolute path to a pre-made local clone of that repo
+     (present only when `is_git` is true). The orchestrator cloned it
+     before you started so you never have to touch the user's
+     original filesystem path.
+   - `current_branch`, `head_sha`, `remotes`: metadata describing the
+     user's cwd at run start — use this to interpret "my branch",
+     "current branch", or to discover GitHub remote URLs.
+   Resolution rules:
+   a. If `repo_clone` is present AND the pointer matches that repo
+      (branch exists, or PR pointer references the origin remote in
+      the hint), set `repo_abs = <repo_clone>` and proceed.
+   b. Otherwise clone the remote: `git clone <url> {{output_dir}}/repo_clone`.
+      The destination MUST be `{{output_dir}}/repo_clone/` — any other
+      destination is blocked by the sandbox. Interactive mode:
+      AskUserQuestion for the URL. Autonomous mode: infer from the
+      GitHub pointer.
+   Once resolved, `repo_abs` is always `{{output_dir}}/repo_clone` (or
+   a path inside it). Never set it to the value of `cwd_hint.cwd`.
 
 3. Resolve refs.
    - `head_ref`: the PR's head branch (when the pointer is a PR) or the
@@ -206,59 +227,68 @@ them in Python.
 _EXAMPLES = """\
 <examples>
   <example>
-    <context>goal = "review the changes on refactor/extract-auto-core against main"; cwd = /repo that is already checked out at main</context>
+    <context>goal = "review the changes on refactor/extract-auto-core against main"; cwd_hint shows is_git=true with repo_clone = {{output_dir}}/repo_clone (the orchestrator pre-cloned the user's repo)</context>
     <walkthrough>
 1. Parse: local branch name "refactor/extract-auto-core"; base = main.
-2. Locate repo: `git -C /repo rev-parse --git-dir` succeeds; repo_abs = /repo.
+2. Read cwd_hint.json: is_git=true, repo_clone={{output_dir}}/repo_clone,
+   current_branch=refactor/extract-auto-core. repo_abs = {{output_dir}}/repo_clone.
 3. Refs: head_ref = "refactor/extract-auto-core", base_ref = "main".
-   `git -C /repo fetch origin main refactor/extract-auto-core`.
-4. Diff: `git -C /repo diff main...refactor/extract-auto-core > data/diff.patch`.
+   `git -C {{output_dir}}/repo_clone fetch origin main refactor/extract-auto-core`.
+4. Diff: `git -C {{output_dir}}/repo_clone diff main...refactor/extract-auto-core > data/diff.patch`.
 5. Metadata: no GitHub URL known; fall back to `git log -1` on the head
    to populate title/body/author.
 6. Snapshot each changed file at the head ref.
-7. Language: `/repo/pyproject.toml` exists and has `[tool.pytest]` -> python
-   + pytest. run_command = "uv run pytest -x -s {script_path}".
-8. ReviewConfig with repo_path=/repo, pr_ref="refactor/extract-auto-core",
-   base_ref="main", head_ref="refactor/extract-auto-core",
-   run_cwd="/repo", and the run_command above.
+7. Language: `{{output_dir}}/repo_clone/pyproject.toml` exists and has
+   `[tool.pytest]` -> python + pytest. run_command = "uv run pytest -x -s {script_path}".
+8. ReviewConfig with repo_path={{output_dir}}/repo_clone,
+   pr_ref="refactor/extract-auto-core", base_ref="main",
+   head_ref="refactor/extract-auto-core",
+   run_cwd="{{output_dir}}/repo_clone", and the run_command above.
 9. Notebook intake entry recording language=python and the run_command.
     </walkthrough>
   </example>
   <example>
-    <context>goal = "review https://github.com/anthropics/foo/pull/42"; foo is a Node service; cwd is unrelated</context>
+    <context>goal = "review https://github.com/anthropics/foo/pull/42"; cwd_hint shows is_git=false (user ran from a scratch dir)</context>
     <walkthrough>
 1. Parse: GitHub PR URL, pr_ref = "anthropics/foo#42".
-2. Locate repo: cwd is not anthropics/foo. Autonomous mode: clone with
-   `git clone https://github.com/anthropics/foo {{output_dir}}/repo`;
-   repo_abs = {{output_dir}}/repo.
+2. Read cwd_hint.json: is_git=false; no pre-made clone. Autonomous
+   mode: clone with
+   `git clone https://github.com/anthropics/foo {{output_dir}}/repo_clone`;
+   repo_abs = {{output_dir}}/repo_clone.
 3. Refs: `gh -R anthropics/foo pr view 42 --json baseRefName,headRefName,url,title,body,author`
    to get base/head. `git -C repo_abs fetch origin <base_ref> <head_ref>`.
 4. Diff: `gh -R anthropics/foo pr diff 42 > data/diff.patch`.
 5. Metadata: the `gh pr view` output above; flatten author.
 6. Snapshot.
-7. Language: `repo/package.json` present; no jest in devDependencies ->
-   node without a test runner. run_command = "node {script_path}".
+7. Language: `{{output_dir}}/repo_clone/package.json` present; no jest
+   in devDependencies -> node without a test runner. run_command =
+   "node {script_path}".
 8. ReviewConfig with pr_ref="anthropics/foo#42", url populated,
-   run_cwd=repo_abs, run_command="node {script_path}".
+   repo_path={{output_dir}}/repo_clone, run_cwd=repo_abs,
+   run_command="node {script_path}".
 9. Notebook intake entry recording language=node and the run_command.
     </walkthrough>
   </example>
   <example>
-    <context>goal = "review PR #7 on acme/widgets"; the head is on a fork contrib/widgets</context>
+    <context>goal = "review PR #7 on acme/widgets"; the head is on a fork contrib/widgets; cwd_hint shows is_git=false</context>
     <walkthrough>
 1. Parse: owner/repo#N, pr_ref = "acme/widgets#7".
-2. Locate repo: clone acme/widgets if not present.
+2. Read cwd_hint.json: is_git=false. Clone acme/widgets with
+   `git clone https://github.com/acme/widgets {{output_dir}}/repo_clone`.
 3. Refs: `gh -R acme/widgets pr view 7 --json headRepository,headRefName,baseRefName,url,title,body,author`
    shows headRepository.nameWithOwner = "contrib/widgets" and
-   headRefName = "feat/resize". Add the fork as a remote:
-   `git -C repo_abs remote add contrib https://github.com/contrib/widgets`
-   then `git -C repo_abs fetch contrib feat/resize` and `git fetch origin main`.
-   Diff syntax: `git diff origin/main...contrib/feat/resize`.
+   headRefName = "feat/resize". Fetch the fork's head ref via
+   `git -C {{output_dir}}/repo_clone fetch https://github.com/contrib/widgets feat/resize:refs/fork/feat-resize`
+   (direct-fetch the ref by URL since the `git remote add` subcommand
+   is blocked by the sandbox). Diff syntax:
+   `git diff origin/main...refs/fork/feat-resize`.
 4. Diff via `gh -R acme/widgets pr diff 7` (gh handles the fork for you).
 5. Metadata flattened.
-6. Snapshot with `git show contrib/feat/resize:<path>` (the fork remote is
-   where head lives).
-7. ReviewConfig with base_ref="main", head_ref="contrib/feat/resize".
+6. Snapshot with `git show refs/fork/feat-resize:<path>` (the fetched
+   ref is where head lives).
+7. ReviewConfig with base_ref="main",
+   head_ref="refs/fork/feat-resize",
+   repo_path={{output_dir}}/repo_clone.
 8. Notebook intake entry.
     </walkthrough>
   </example>
@@ -284,7 +314,7 @@ you:
 
 Example notebook entries in scope:
 - "PR #42 on anthropics/foo, 7 files changed, 412 diff lines"
-- "Cloned anthropics/foo into {{output_dir}}/repo because cwd was unrelated"
+- "Cloned anthropics/foo into {{output_dir}}/repo_clone because cwd was unrelated"
 - "Base ref resolved to main via `gh pr view --json baseRefName`"
 
 Example notebook entries out of scope:
@@ -355,12 +385,17 @@ INTAKE_USER = """\
 </context>
 
 <inputs>
-<cwd>{cwd}</cwd>
+<cwd_hint_path>{cwd_hint_path}</cwd_hint_path>
 </inputs>
 
 <task>
 Parse the goal, resolve the repository and refs, compute the diff, and
 canonicalize the PR into a review workspace.
+
+The orchestrator has already fingerprinted the user's cwd and (if it
+was a git repo) cloned it into the workspace at `repo_clone/`. Read
+`<cwd_hint_path>` for the metadata you need; you never need to touch
+the user's original filesystem path.
 
 Output locations:
 - Canonical data directory: {data_dir}

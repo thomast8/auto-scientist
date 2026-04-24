@@ -36,8 +36,9 @@ def install_claude_sdk_mock() -> None:
     mock_sdk.ClaudeSDKClient = MagicMock
     mock_sdk.Message = type("Message", (), {})
 
-    def _deny_init(self: Any, message: str = "") -> None:
+    def _deny_init(self: Any, message: str = "", interrupt: bool = False) -> None:
         self.message = message
+        self.interrupt = interrupt
 
     mock_sdk.PermissionResultAllow = type(
         "PermissionResultAllow", (), {"__init__": lambda self: None}
@@ -48,6 +49,13 @@ def install_claude_sdk_mock() -> None:
     mock_sdk.ToolUseBlock = type("ToolUseBlock", (), {})
     mock_sdk.ToolResultBlock = type("ToolResultBlock", (), {})
     mock_sdk.ToolPermissionContext = type("ToolPermissionContext", (), {})
+    mock_sdk.HookContext = type("HookContext", (), {"__init__": lambda self: None})
+
+    def _hook_matcher_init(self: Any, matcher: str | None = None, hooks: Any = None) -> None:
+        self.matcher = matcher
+        self.hooks = hooks if hooks is not None else []
+
+    mock_sdk.HookMatcher = type("HookMatcher", (), {"__init__": _hook_matcher_init})
     mock_sdk.query = MagicMock()
     mock_sdk.McpSdkServerConfig = type("McpSdkServerConfig", (dict,), {})
     mock_sdk.create_sdk_mcp_server = lambda name, version="1.0.0", tools=None: {
@@ -59,6 +67,18 @@ def install_claude_sdk_mock() -> None:
     mock_sdk.SdkMcpTool = type("SdkMcpTool", (), {})
 
     sys.modules["claude_code_sdk"] = mock_sdk
+
+    # `HookJSONOutput` lives under claude_code_sdk.types; stub the
+    # submodule so `from claude_code_sdk.types import HookJSONOutput`
+    # resolves under the mock.
+    mock_types: Any = ModuleType("claude_code_sdk.types")
+    mock_types.HookJSONOutput = dict
+    mock_types.HookContext = mock_sdk.HookContext
+    mock_types.HookMatcher = mock_sdk.HookMatcher
+    mock_types.PermissionResultAllow = mock_sdk.PermissionResultAllow
+    mock_types.PermissionResultDeny = mock_sdk.PermissionResultDeny
+    mock_types.ToolPermissionContext = mock_sdk.ToolPermissionContext
+    sys.modules["claude_code_sdk.types"] = mock_types
 
     mock_internal = ModuleType("claude_code_sdk._internal")
     sys.modules["claude_code_sdk._internal"] = mock_internal
