@@ -15,7 +15,7 @@ import os
 import re
 import shutil
 import tempfile
-from collections.abc import AsyncIterator, Awaitable, Callable
+from collections.abc import AsyncIterable, AsyncIterator, Awaitable, Callable
 from contextlib import asynccontextmanager
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -27,13 +27,13 @@ import codex_app_server_sdk.transport as _codex_transport_mod
 from claude_code_sdk import (
     AssistantMessage,
     ClaudeCodeOptions,
-    PermissionResultAllow,
-    PermissionResultDeny,
+    HookContext,
+    HookMatcher,
     ResultMessage,
-    ToolPermissionContext,
 )
 from claude_code_sdk import query as claude_query
 from claude_code_sdk._errors import MessageParseError
+from claude_code_sdk.types import HookJSONOutput
 from codex_app_server_sdk import CodexClient, ThreadConfig, TurnOverrides
 from codex_app_server_sdk.errors import CodexProtocolError
 from pydantic import BaseModel
@@ -441,36 +441,91 @@ def _extract_stream_delta(event: dict[str, Any]) -> tuple[str, str] | None:
     return None
 
 
-def _make_claude_can_use_tool(
+async def _single_user_message_stream(
+    prompt: str,
+    shutdown: asyncio.Event,
+) -> AsyncIterator[dict[str, Any]]:
+    """Yield a single user-turn message, stay open until ``shutdown`` is set.
+
+    Streaming mode is required for both `can_use_tool` and `hooks` to
+    actually wire up (see SDK's `Query.initialize_if_needed`). More
+    subtly, the hook-dispatch channel is shared with the input stream:
+    if this generator returns too early, the SDK's JS side logs
+    ``error: Stream closed`` every time it tries to send a hook
+    request back, and the hook silently does nothing (tools run
+    unguarded).
+
+    So we yield the one user message and block on ``shutdown`` until
+    the outer consumer has drained the result message and is ready
+    to close the input side. The SDK's prompt-reader task then sees
+    StopAsyncIteration and terminates cleanly.
+    """
+    yield {
+        "type": "user",
+        "message": {"role": "user", "content": prompt},
+        "parent_tool_use_id": None,
+        "session_id": "default",
+    }
+    await shutdown.wait()
+
+
+def _make_claude_pretooluse_hook(
     hook: PreToolUseHook,
 ) -> Callable[
-    [str, dict[str, Any], ToolPermissionContext],
-    Awaitable[PermissionResultAllow | PermissionResultDeny],
+    [dict[str, Any], str | None, HookContext],
+    Awaitable[HookJSONOutput],
 ]:
-    """Adapt a synchronous workspace guard to the Claude SDK callback.
+    """Adapt a workspace guard to the Claude SDK's PreToolUse hook.
 
-    The SDK's `can_use_tool` is `async (tool_name, tool_input, ctx) ->
-    PermissionResultAllow | PermissionResultDeny`. Our guard is
-    synchronous and knows nothing about the SDK's permission-update
-    mechanism — the adapter bridges the two without touching guard
-    state.
+    Unlike `can_use_tool` (which is bypassed for tools in
+    `allowed_tools`), PreToolUse runs for every tool invocation. The
+    hook input dict is shaped per
+    https://docs.anthropic.com/en/docs/claude-code/hooks#hook-input —
+    we pull `tool_name` and `tool_input` from it and call the guard.
+
+    Return shape per Anthropic docs: ``hookSpecificOutput`` with
+    ``permissionDecision`` set to ``"deny"`` (plus a
+    ``permissionDecisionReason``) on denial; an empty dict on allow.
     """
 
-    async def can_use_tool(
-        tool_name: str,
-        tool_input: dict[str, Any],
-        ctx: ToolPermissionContext,  # noqa: ARG001 — SDK signature
-    ) -> PermissionResultAllow | PermissionResultDeny:
+    async def pre_tool_use(
+        input_: dict[str, Any],
+        tool_use_id: str | None,  # noqa: ARG001 — SDK signature
+        context: HookContext,  # noqa: ARG001 — SDK signature
+    ) -> HookJSONOutput:
+        tool_name = input_.get("tool_name", "")
+        tool_input = input_.get("tool_input", {}) or {}
         decision = hook(tool_name, tool_input)
         if decision.allowed:
-            return PermissionResultAllow()
-        # Default interrupt=False: the SDK surfaces the denial as a tool
-        # error the model can see and course-correct from. interrupt=True
-        # would kill the whole query, which is more aggressive than we
-        # want — a single bad command shouldn't abort a multi-step task.
-        return PermissionResultDeny(message=decision.reason)
+            logger.debug("guard allow: %s", tool_name)
+            return {}
+        tool_summary = _summarise_tool_input(tool_name, tool_input)
+        logger.info(
+            "guard deny: tool=%s input=%s reason=%s",
+            tool_name,
+            tool_summary,
+            decision.reason,
+        )
+        return {
+            "hookSpecificOutput": {
+                "hookEventName": "PreToolUse",
+                "permissionDecision": "deny",
+                "permissionDecisionReason": decision.reason,
+            }
+        }
 
-    return can_use_tool
+    return pre_tool_use
+
+
+def _summarise_tool_input(tool_name: str, tool_input: dict[str, Any]) -> str:
+    """Short deterministic summary of a tool call for log context."""
+    if tool_name == "Bash":
+        cmd = str(tool_input.get("command", ""))
+        return f"command={cmd[:200]!r}"
+    for key in ("file_path", "path", "notebook_path"):
+        if key in tool_input:
+            return f"{key}={tool_input[key]!r}"
+    return str(tool_input)[:200]
 
 
 class ClaudeBackend:
@@ -508,35 +563,34 @@ class ClaudeBackend:
             )
             env["ANTHROPIC_API_KEY"] = ""
 
-        # A pre_tool_use_hook is the reviewer's workspace guard. When
-        # set, the SDK's `can_use_tool` callback runs for every tool
-        # invocation — but only if permission_mode is "default". Modes
-        # "acceptEdits" and "bypassPermissions" silently auto-approve
-        # and never consult the callback, so we force "default" here.
-        # Any caller that set permission_mode deliberately + also passed
-        # a hook is asking for contradictory behaviour; hook wins.
-        permission_mode = options.permission_mode
-        can_use_tool = None
+        # A pre_tool_use_hook is the reviewer's workspace guard. Wire it
+        # via `hooks={"PreToolUse": ...}` rather than `can_use_tool`: the
+        # hook fires for *every* tool invocation, whereas `can_use_tool`
+        # is bypassed whenever the tool is already in `allowed_tools`.
+        # For a guard whose whole point is to catch escapes, the hook
+        # path is the right primitive — `allowed_tools` is about
+        # ergonomics, not security.
+        hooks = None
         if options.pre_tool_use_hook is not None:
-            if permission_mode != "default":
-                logger.info(
-                    "pre_tool_use_hook is set; forcing permission_mode "
-                    "from %r to 'default' so the callback is consulted",
-                    permission_mode,
-                )
-                permission_mode = "default"
-            can_use_tool = _make_claude_can_use_tool(options.pre_tool_use_hook)
+            hooks = {
+                "PreToolUse": [
+                    HookMatcher(
+                        matcher="*",
+                        hooks=[_make_claude_pretooluse_hook(options.pre_tool_use_hook)],
+                    )
+                ]
+            }
 
         kwargs: dict[str, Any] = {
             "system_prompt": options.system_prompt,
             "allowed_tools": options.allowed_tools,
             "max_turns": options.max_turns,
-            "permission_mode": permission_mode,
+            "permission_mode": options.permission_mode,
             "extra_args": extra_args,
             "include_partial_messages": True,
         }
-        if can_use_tool is not None:
-            kwargs["can_use_tool"] = can_use_tool
+        if hooks is not None:
+            kwargs["hooks"] = hooks
         if options.model:
             kwargs["model"] = options.model
         if options.cwd:
@@ -580,76 +634,109 @@ class ClaudeBackend:
         text_acc = ""
         thinking_acc = ""
 
+        # The SDK only initialises the hook IPC in streaming mode (see
+        # claude_code_sdk/_internal/query.py initialize_if_needed: hooks
+        # config is skipped when `is_streaming_mode=False`). Additionally,
+        # hooks share the input stream for their control-channel IPC —
+        # closing the stream too early makes every hook fail with
+        # "Stream closed" JS-side (silent unguarded tool calls). So we
+        # keep a long-lived stream and close it only after the final
+        # ResultMessage arrives (see the shutdown_prompt_stream set
+        # below). Non-guard callers keep the cheap string path.
+        sdk_prompt: str | AsyncIterable[dict[str, Any]]
+        shutdown_prompt_stream: asyncio.Event | None = None
+        if options.pre_tool_use_hook is not None:
+            shutdown_prompt_stream = asyncio.Event()
+            sdk_prompt = _single_user_message_stream(prompt, shutdown_prompt_stream)
+        else:
+            sdk_prompt = prompt
+
         message_timeout = _resolve_message_timeout()
-        query_iter = claude_query(prompt=prompt, options=cc_opts).__aiter__()
-        while True:
-            try:
-                msg = await asyncio.wait_for(query_iter.__anext__(), timeout=message_timeout)
-            except StopAsyncIteration:
-                break
-            except TimeoutError:
-                logger.error(
-                    f"Claude CLI stalled for {message_timeout:.0f}s between messages; "
-                    f"aborting query (set {_CLAUDE_QUERY_MESSAGE_TIMEOUT_ENV} to adjust)"
-                )
-                raise
-            if msg is None:
-                continue
-
-            if isinstance(msg, AssistantMessage):
-                # Flush any remaining accumulated stream content before
-                # yielding the complete message (avoids lost tail).
-                if text_acc:
-                    block = type("_SyntheticTextBlock", (), {"text": text_acc})()
-                    yield SDKMessage(type="stream", content_blocks=[block])
-                    text_acc = ""
-                if thinking_acc:
-                    block = type("_SyntheticThinkingBlock", (), {"thinking": thinking_acc})()
-                    yield SDKMessage(type="stream", content_blocks=[block])
-                    thinking_acc = ""
-
-                yield SDKMessage(
-                    type="assistant",
-                    content_blocks=list(msg.content),
-                )
-            elif isinstance(msg, ResultMessage):
-                usage = getattr(msg, "usage", None) or {}
-                usage["num_turns"] = getattr(msg, "num_turns", 0)
-                cost = getattr(msg, "total_cost_usd", None)
-                usage["total_cost_usd"] = cost
-                record_cost(cost)
-                sid = getattr(msg, "session_id", None)
-                if sid:
-                    effective_cwd = Path(options.cwd) if options.cwd else Path.cwd()
-                    _register_session(sid, effective_cwd)
-                yield SDKMessage(
-                    type="result",
-                    result=msg.result if msg.result else None,
-                    usage=usage,
-                    session_id=sid,
-                )
-            elif hasattr(msg, "event"):
-                # StreamEvent - extract text/thinking deltas and accumulate
+        query_iter = claude_query(prompt=sdk_prompt, options=cc_opts).__aiter__()
+        try:
+            while True:
                 try:
-                    parsed = _extract_stream_delta(msg.event)
-                except Exception:
-                    continue
-                if parsed is None:
+                    msg = await asyncio.wait_for(query_iter.__anext__(), timeout=message_timeout)
+                except StopAsyncIteration:
+                    break
+                except TimeoutError:
+                    logger.error(
+                        f"Claude CLI stalled for {message_timeout:.0f}s between messages; "
+                        f"aborting query (set {_CLAUDE_QUERY_MESSAGE_TIMEOUT_ENV} to adjust)"
+                    )
+                    raise
+                if msg is None:
                     continue
 
-                kind, delta = parsed
-                if kind == "text":
-                    text_acc += delta
-                    if len(text_acc) >= _STREAM_CHUNK_SIZE:
+                if isinstance(msg, AssistantMessage):
+                    # Flush any remaining accumulated stream content before
+                    # yielding the complete message (avoids lost tail).
+                    if text_acc:
                         block = type("_SyntheticTextBlock", (), {"text": text_acc})()
                         yield SDKMessage(type="stream", content_blocks=[block])
                         text_acc = ""
-                elif kind == "thinking":
-                    thinking_acc += delta
-                    if len(thinking_acc) >= _STREAM_CHUNK_SIZE:
+                    if thinking_acc:
                         block = type("_SyntheticThinkingBlock", (), {"thinking": thinking_acc})()
                         yield SDKMessage(type="stream", content_blocks=[block])
                         thinking_acc = ""
+
+                    yield SDKMessage(
+                        type="assistant",
+                        content_blocks=list(msg.content),
+                    )
+                elif isinstance(msg, ResultMessage):
+                    usage = getattr(msg, "usage", None) or {}
+                    usage["num_turns"] = getattr(msg, "num_turns", 0)
+                    cost = getattr(msg, "total_cost_usd", None)
+                    usage["total_cost_usd"] = cost
+                    record_cost(cost)
+                    sid = getattr(msg, "session_id", None)
+                    if sid:
+                        effective_cwd = Path(options.cwd) if options.cwd else Path.cwd()
+                        _register_session(sid, effective_cwd)
+                    # Final message — safe to close the prompt stream now
+                    # that no more hook control-requests can arrive. The
+                    # SDK's prompt-reader task sees StopAsyncIteration and
+                    # the query terminates cleanly instead of hanging.
+                    if shutdown_prompt_stream is not None:
+                        shutdown_prompt_stream.set()
+                    yield SDKMessage(
+                        type="result",
+                        result=msg.result if msg.result else None,
+                        usage=usage,
+                        session_id=sid,
+                    )
+                elif hasattr(msg, "event"):
+                    # StreamEvent - extract text/thinking deltas and accumulate
+                    try:
+                        parsed = _extract_stream_delta(msg.event)
+                    except Exception:
+                        continue
+                    if parsed is None:
+                        continue
+
+                    kind, delta = parsed
+                    if kind == "text":
+                        text_acc += delta
+                        if len(text_acc) >= _STREAM_CHUNK_SIZE:
+                            block = type("_SyntheticTextBlock", (), {"text": text_acc})()
+                            yield SDKMessage(type="stream", content_blocks=[block])
+                            text_acc = ""
+                    elif kind == "thinking":
+                        thinking_acc += delta
+                        if len(thinking_acc) >= _STREAM_CHUNK_SIZE:
+                            block = type(
+                                "_SyntheticThinkingBlock",
+                                (),
+                                {"thinking": thinking_acc},
+                            )()
+                            yield SDKMessage(type="stream", content_blocks=[block])
+                            thinking_acc = ""
+        finally:
+            # Ensure the prompt stream is closed on any exit path
+            # (error, timeout, caller breaking out of the outer loop).
+            if shutdown_prompt_stream is not None:
+                shutdown_prompt_stream.set()
 
 
 # ---------------------------------------------------------------------------

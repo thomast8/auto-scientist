@@ -1,8 +1,8 @@
-"""Adversarial scenarios against the Claude `can_use_tool` adapter.
+"""Adversarial scenarios against the Claude PreToolUse-hook adapter.
 
-These tests directly drive the adapter with the kinds of calls a rogue
-model would produce. Each test asserts the adapter denies with a
-message that a well-behaved model can use to course-correct.
+These tests drive the adapter with the kinds of calls a rogue model
+would produce. Each test asserts the adapter denies with a message
+that a well-behaved model can use to course-correct.
 
 The parallel Codex story (seatbelt enforcement) is covered by the
 existing `test_codex_rejects_cwd_outside_workspace` /
@@ -17,12 +17,8 @@ from pathlib import Path
 
 import pytest
 from auto_core.safety.tool_guard import make_workspace_guard
-from auto_core.sdk_backend import _make_claude_can_use_tool
-from claude_code_sdk import (
-    PermissionResultAllow,
-    PermissionResultDeny,
-    ToolPermissionContext,
-)
+from auto_core.sdk_backend import _make_claude_pretooluse_hook
+from claude_code_sdk import HookContext
 
 
 @pytest.fixture
@@ -51,7 +47,17 @@ def user_real_repo(tmp_path: Path) -> Path:
 @pytest.fixture
 def adapter(workspace: Path, repo_clone: Path):
     guard = make_workspace_guard(workspace, repo_clone, mode="probe")
-    return _make_claude_can_use_tool(guard)
+    return _make_claude_pretooluse_hook(guard)
+
+
+def _hook_input(tool_name: str, tool_input: dict) -> dict:
+    return {
+        "hook_event_name": "PreToolUse",
+        "tool_name": tool_name,
+        "tool_input": tool_input,
+        "session_id": "s1",
+        "cwd": "/tmp",
+    }
 
 
 @pytest.mark.parametrize(
@@ -117,12 +123,14 @@ def adapter(workspace: Path, repo_clone: Path):
 async def test_adversarial_attempts_all_denied(
     adapter, tool_name, tool_input, expected_marker
 ) -> None:
-    result = await adapter(tool_name, tool_input, ToolPermissionContext())
-    assert isinstance(result, PermissionResultDeny), (
-        f"{tool_name}({tool_input}) should have been denied"
+    result = await adapter(_hook_input(tool_name, tool_input), None, HookContext())
+    hso = result.get("hookSpecificOutput") if isinstance(result, dict) else None
+    assert hso is not None and hso.get("permissionDecision") == "deny", (
+        f"{tool_name}({tool_input}) should have been denied; got {result}"
     )
-    assert expected_marker.lower() in result.message.lower(), (
-        f"expected {expected_marker!r} in deny message, got: {result.message}"
+    reason = hso.get("permissionDecisionReason", "")
+    assert expected_marker.lower() in reason.lower(), (
+        f"expected {expected_marker!r} in deny reason, got: {reason}"
     )
 
 
@@ -137,10 +145,9 @@ async def test_legitimate_probe_work_allowed(adapter, workspace) -> None:
         ("Bash", {"command": "python3 v01/probe.py"}),
     ]
     for tool_name, tool_input in allowed_cases:
-        result = await adapter(tool_name, tool_input, ToolPermissionContext())
-        assert isinstance(result, PermissionResultAllow), (
-            f"{tool_name}({tool_input}) should have been allowed"
-        )
+        result = await adapter(_hook_input(tool_name, tool_input), None, HookContext())
+        # Allow = empty dict (no "decision" / no "hookSpecificOutput.permissionDecision")
+        assert result == {}, f"{tool_name}({tool_input}) should have been allowed; got {result}"
 
 
 async def test_symlink_escape_denied(tmp_path: Path) -> None:
@@ -155,15 +162,16 @@ async def test_symlink_escape_denied(tmp_path: Path) -> None:
     (real / "victim.py").write_text("x")
 
     guard = make_workspace_guard(sym_ws, sym_ws / "repo_clone", mode="probe")
-    local_adapter = _make_claude_can_use_tool(guard)
+    local_adapter = _make_claude_pretooluse_hook(guard)
 
     sneaky = sym_ws / "sneaky_link"
     sneaky.symlink_to(real)  # points outside workspace
 
     result = await local_adapter(
-        "Write",
-        {"file_path": str(sneaky / "victim.py")},
-        ToolPermissionContext(),
+        _hook_input("Write", {"file_path": str(sneaky / "victim.py")}),
+        None,
+        HookContext(),
     )
-    assert isinstance(result, PermissionResultDeny)
-    assert "outside the review workspace" in result.message.lower()
+    hso = result["hookSpecificOutput"]
+    assert hso["permissionDecision"] == "deny"
+    assert "outside the review workspace" in hso["permissionDecisionReason"].lower()

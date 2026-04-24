@@ -158,14 +158,14 @@ Additionally write a `probe_outcome.json` sibling file as a **JSON
 list**, with one entry per prediction you addressed this iteration:
 
     [
-      {
+      {{
         "pred_id": str,
         "outcome": "confirmed" | "refuted" | "inconclusive",
         "evidence": str,      (quoted stderr/stdout snippet that
                                decides THIS prediction)
         "summary": str        (one-line tree-display summary for
                                THIS prediction)
-      },
+      }},
       ...
     ]
 
