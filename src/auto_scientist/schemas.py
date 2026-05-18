@@ -1,9 +1,10 @@
 """Science-specific Pydantic output schemas for auto-scientist.
 
-The shared / generic types (PredictionOutcome, PlanChange, HypothesisPrediction,
-RefutationReasoning, DeprioritizedAbduction, RunResult, CompletenessAssessmentOutput,
-SubQuestionAssessment) live in `auto_core.schemas`; they are re-exported here so
-existing call sites can keep `from auto_scientist.schemas import *`.
+The shared / generic types (PredictionOutcome, PlanChange,
+HypothesisPrediction, RefutationReasoning, DeprioritizedAbduction,
+DeadEndProposal, RunResult, CompletenessAssessmentOutput,
+SubQuestionAssessment) live in `auto_core.schemas`; they are re-exported here
+so existing call sites can keep `from auto_scientist.schemas import *`.
 
 What stays here: `AnalystOutput`, `ScientistPlanOutput`, `KeyMetric`,
 `DataDiagnostic` - the scientific-investigation output shapes.
@@ -15,6 +16,7 @@ from typing import Literal
 from auto_core.schemas import (  # noqa: F401
     CoderRunResult,
     CompletenessAssessmentOutput,
+    DeadEndProposal,
     DeprioritizedAbduction,
     HypothesisPrediction,
     PlanChange,
@@ -75,3 +77,4 @@ class ScientistPlanOutput(BaseModel):
     testable_predictions: list[HypothesisPrediction] = Field(default_factory=list)
     refutation_reasoning: list[RefutationReasoning] = Field(default_factory=list)
     deprioritized_abductions: list[DeprioritizedAbduction] = Field(default_factory=list)
+    dead_ends: list[DeadEndProposal] = Field(default_factory=list)

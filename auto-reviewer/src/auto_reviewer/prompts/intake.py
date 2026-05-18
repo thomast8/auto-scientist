@@ -193,6 +193,8 @@ blocked everywhere; you do not need them.
    - `pr_ref`: whatever pointer you resolved (PR number, URL, or branch).
    - `base_ref`, `head_ref`: as resolved in step 3.
    - `protected_paths`: `[]` unless you have a strong reason.
+   - `implementer_sandbox_network_access`: `false`. This field is
+     operator-only; generated configs must never enable it.
 
 9. Append an entry to the investigation log at the notebook path
    provided in the context. Use `source="intake"` and `version="intake"`.

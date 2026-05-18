@@ -18,6 +18,7 @@ import json
 import logging
 from pathlib import Path
 
+from auto_core.config import reject_generated_sandbox_network_access
 from auto_core.notebook import NOTEBOOK_FILENAME
 from auto_core.retry import QueryResult, agent_retry_loop
 from auto_core.retry import ValidationError as RetryValidationError
@@ -235,6 +236,7 @@ async def run_intake(
                 )
             try:
                 raw_config = json.loads(config_path.read_text())
+                reject_generated_sandbox_network_access(raw_config)
                 cfg = ReviewConfig.model_validate(raw_config)
             except (ValidationError, json.JSONDecodeError) as e:
                 raise RetryValidationError(
@@ -243,6 +245,12 @@ async def run_intake(
                     "Required fields: name, repo_path, pr_ref, base_ref, "
                     "head_ref, and run_command must contain the literal "
                     '"{script_path}" placeholder.\n'
+                    "</validation_error>"
+                ) from e
+            except ValueError as e:
+                raise RetryValidationError(
+                    "<validation_error>\n"
+                    f"ReviewConfig at {config_path} is invalid: {e}\n"
                     "</validation_error>"
                 ) from e
             if not cfg.repo_path or not Path(cfg.repo_path).exists():

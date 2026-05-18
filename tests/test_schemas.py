@@ -154,6 +154,7 @@ class TestScientistPlanOutput:
         assert p.strategy == "incremental"
         assert len(p.changes) == 1
         assert p.should_stop is False
+        assert p.dead_ends == []
 
     def test_invalid_strategy(self, minimal_valid):
         minimal_valid["strategy"] = "random"
@@ -185,6 +186,19 @@ class TestScientistPlanOutput:
         assert d.get("should_stop") is False
         assert isinstance(d.get("changes"), list)
         assert d["changes"][0].get("what") == "add L2"
+
+    def test_dead_ends_preserved(self, minimal_valid):
+        minimal_valid["dead_ends"] = [
+            {
+                "description": "linear fit family",
+                "evidence": "v02 residuals retained curvature",
+            }
+        ]
+        p = ScientistPlanOutput.model_validate(minimal_valid)
+
+        assert len(p.dead_ends) == 1
+        assert p.dead_ends[0].description == "linear fit family"
+        assert p.dead_ends[0].evidence == "v02 residuals retained curvature"
 
 
 # ---------------------------------------------------------------------------

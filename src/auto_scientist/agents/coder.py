@@ -104,6 +104,110 @@ def _validate_deps(script_path: Path) -> tuple[bool, str]:
     return validate_deps(script_path)
 
 
+def _plan_constraint_text(plan: dict[str, Any], domain_knowledge: str) -> str:
+    """Return normalized text used to detect hard implementation constraints."""
+    return "\n".join(
+        [
+            json.dumps(plan, ensure_ascii=False, sort_keys=True),
+            domain_knowledge,
+        ]
+    ).lower()
+
+
+def _forbids_third_party(text: str) -> bool:
+    phrases = (
+        "standard-library only",
+        "standard library only",
+        "only the python standard library",
+        "python standard library only",
+        "stdlib only",
+        "pure standard-library",
+        "pure standard library",
+        "no third-party",
+        "no third party",
+        "without third-party",
+        "without third party",
+        "no external dependencies",
+        "no external packages",
+        "without external dependencies",
+        "without external packages",
+    )
+    return any(phrase in text for phrase in phrases)
+
+
+def _forbids_plots(text: str) -> bool:
+    phrases = (
+        "no plots",
+        "no plot",
+        "without plots",
+        "without plot",
+        "do not plot",
+        "don't plot",
+        "no figures",
+        "no figure",
+        "without figures",
+        "without figure",
+        "do not generate plots",
+        "do not save plots",
+        "no png",
+        "no pngs",
+    )
+    return any(phrase in text for phrase in phrases)
+
+
+def _validate_plan_constraints(
+    script_path: Path,
+    plan: dict[str, Any],
+    domain_knowledge: str = "",
+) -> tuple[bool, str]:
+    """Reject scripts that violate explicit plan constraints."""
+    constraint_text = _plan_constraint_text(plan, domain_knowledge)
+    source = script_path.read_text(encoding="utf-8")
+
+    if _forbids_third_party(constraint_text):
+        from auto_core.ensure_deps import extract_imports, extract_pep723_dep_strings
+
+        imports = sorted(extract_imports(source))
+        deps = sorted(extract_pep723_dep_strings(source))
+        if imports or deps:
+            details = []
+            if deps:
+                details.append(f"declared dependencies: {', '.join(deps)}")
+            if imports:
+                details.append(f"third-party imports: {', '.join(imports)}")
+            return (
+                False,
+                "The plan explicitly forbids third-party packages, but the script "
+                + "; ".join(details)
+                + ". Rewrite it with only Python standard-library modules and an empty "
+                "PEP 723 dependencies list.",
+            )
+
+    if _forbids_plots(constraint_text):
+        plot_markers = (
+            "matplotlib",
+            "seaborn",
+            "plotly",
+            "bokeh",
+            "altair",
+            ".savefig(",
+            "savefig(",
+            ".png",
+            ".pdf",
+            ".svg",
+        )
+        found = sorted(marker for marker in plot_markers if marker in source.lower())
+        if found:
+            return (
+                False,
+                "The plan explicitly forbids plots or figures, but the script contains "
+                f"plotting markers: {', '.join(found)}. Rewrite it without plot "
+                "generation or plotting dependencies.",
+            )
+
+    return True, ""
+
+
 async def run_coder(
     plan: dict[str, Any],
     previous_script: Path,
@@ -117,6 +221,7 @@ async def run_coder(
     run_command: str = "uv run {script_path}",
     data_files_listing: str = "",
     provider: str = "openai",
+    network_access: bool = False,
 ) -> Path:
     """Implement the scientist's plan as a runnable experiment script.
 
@@ -197,7 +302,7 @@ async def run_coder(
         cwd=output_dir,
         model=model,
         extra_args={},
-        network_access=provider == "openai",
+        network_access=network_access,
     )
 
     async def _query(prompt: str, resume_session_id: str | None) -> QueryResult:
@@ -235,6 +340,14 @@ async def run_coder(
         deps_ok, deps_error = _validate_deps(new_script_path)
         if not deps_ok:
             raise ValidationError(f"<validation_error>\n{deps_error}\n</validation_error>")
+
+        constraints_ok, constraints_error = _validate_plan_constraints(
+            new_script_path,
+            plan,
+            domain_knowledge,
+        )
+        if not constraints_ok:
+            raise ValidationError(f"<validation_error>\n{constraints_error}\n</validation_error>")
 
         # Validate: script ran successfully at runtime
         runtime_ok, runtime_error = _check_runtime_success(new_script_path.parent)

@@ -173,6 +173,8 @@ _INSTRUCTIONS = """\
    - run_command: MUST be exactly the literal string "uv run {script_path}"
      including the curly braces. The orchestrator substitutes {script_path}
      at runtime. Do NOT replace {script_path} with an actual path.
+   - implementer_sandbox_network_access: false. This field is operator-only;
+     generated configs must never enable it.
    - run_cwd: "." (default)
    - run_timeout_minutes: 120 (default, adjust for large datasets)
    - protected_paths: the canonical data directory (experiments must not

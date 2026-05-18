@@ -24,9 +24,9 @@ existing runs; UI labels come from the role registry.
 
 import json
 from pathlib import Path
-from typing import Literal
+from typing import Any, Literal
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, model_validator
 
 Phase = Literal["ingestion", "iteration", "report", "stopped"]
 
@@ -73,6 +73,14 @@ class PredictionRecord(BaseModel):
 SuspectedBug = PredictionRecord
 
 
+class DeadEnd(BaseModel):
+    """A hypothesis or approach confirmed unfeasible during a run."""
+
+    iteration: int
+    description: str
+    evidence: str = ""
+
+
 class RunState(BaseModel):
     """Full state of a run, persisted to JSON after every phase transition."""
 
@@ -81,7 +89,7 @@ class RunState(BaseModel):
     phase: Phase = "ingestion"
     iteration: int = 0
     versions: list[VersionEntry] = Field(default_factory=list)
-    dead_ends: list[str] = Field(default_factory=list)
+    dead_ends: list[DeadEnd] = Field(default_factory=list)
     schedule: str | None = None
     consecutive_failures: int = 0
     data_path: str | None = None
@@ -101,11 +109,28 @@ class RunState(BaseModel):
     def load(cls, path: Path) -> "RunState":
         """Load state from JSON file, migrating legacy phase names."""
         data = json.loads(path.read_text())
-        # Legacy "discovery" phase maps to "iteration".
-        if data.get("phase") == "discovery":
-            data["phase"] = "iteration"
-            data.setdefault("iteration", 0)
         return cls.model_validate(data)
+
+    @model_validator(mode="before")
+    @classmethod
+    def _migrate_legacy_state(cls, data: Any) -> Any:
+        """Migrate legacy persisted shapes before Pydantic validation."""
+        if not isinstance(data, dict):
+            return data
+        migrated = dict(data)
+        # Legacy "discovery" phase maps to "iteration".
+        if migrated.get("phase") == "discovery":
+            migrated["phase"] = "iteration"
+            migrated.setdefault("iteration", 0)
+        legacy_dead_ends = migrated.get("dead_ends")
+        if isinstance(legacy_dead_ends, list):
+            migrated["dead_ends"] = [
+                {"iteration": -1, "description": entry, "evidence": ""}
+                if isinstance(entry, str)
+                else entry
+                for entry in legacy_dead_ends
+            ]
+        return migrated
 
     def record_version(self, entry: VersionEntry) -> None:
         """Add a version / probe entry."""

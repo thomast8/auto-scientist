@@ -3,7 +3,8 @@
 Contains the generic types used by the orchestrator and by any app on the
 shared runtime: `PredictionOutcome`, `PredictionOutcomeReport`,
 `PlanChange`, `HypothesisPrediction` (reproduction recipe in review),
-`RefutationReasoning`, `DeprioritizedAbduction`, `RunResult`, and the
+`RefutationReasoning`, `DeprioritizedAbduction`, `DeadEndProposal`,
+`RunResult`, and the
 `CompletenessAssessmentOutput` family used by the stop gate.
 
 App-specific output schemas (e.g. `AnalystOutput`, `ScientistPlanOutput` for
@@ -77,6 +78,19 @@ class DeprioritizedAbduction(BaseModel):
 
     refuted_pred_id: str
     reason: str
+
+
+class DeadEndProposal(BaseModel):
+    """A direction confirmed unproductive or refuted by direct evidence.
+
+    App-specific planner agents emit this shape; the shared orchestrator stamps
+    the iteration when persisting entries to ExperimentState.
+    """
+
+    model_config = ConfigDict(extra="ignore")
+
+    description: str
+    evidence: str = ""
 
 
 class RunResult(BaseModel):

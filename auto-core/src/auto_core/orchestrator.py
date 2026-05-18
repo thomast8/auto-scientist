@@ -13,13 +13,14 @@ from rich.table import Table
 from rich.text import Text
 
 from auto_core import widgets
-from auto_core.config import RunConfig
+from auto_core.config import RunConfig, clear_generated_sandbox_network_access
 from auto_core.model_config import AgentModelConfig, ModelConfig
 from auto_core.notebook import NOTEBOOK_FILENAME, append_entry, read_notebook
 from auto_core.persistence import (
-    apply_prediction_updates,
+    apply_final_plan_updates,
     build_concern_ledger,
     evaluate,
+    format_dead_ends,
     format_pending_abductions,
     get_pending_carryforward_predictions,
     load_analyst_from_disk,
@@ -28,12 +29,10 @@ from auto_core.persistence import (
     persist_artifact,
     persist_buffer,
     read_run_result,
-    resolve_addressed_abductions,
     resolve_prediction_outcomes,
     restore_iterations_from_manifest,
     save_iteration_manifest,
     save_partial_panels,
-    store_refutation_reasoning,
 )
 from auto_core.pipeline_live import (
     PipelineLive,
@@ -191,6 +190,12 @@ class Orchestrator:
                     config_path = self.output_dir / "domain_config.json"
                     if config_path.exists():
                         config_data = json.loads(config_path.read_text())
+                        if clear_generated_sandbox_network_access(config_data):
+                            logger.warning(
+                                "Cleared operator-only "
+                                "implementer_sandbox_network_access from generated config"
+                            )
+                            config_path.write_text(json.dumps(config_data, indent=2))
                         self.config = RunConfig.model_validate(config_data)
                         self.state.config_path = str(config_path)
 
@@ -611,11 +616,7 @@ class Orchestrator:
 
             # Apply prediction updates from the final plan (after debate revision)
             if final_plan:
-                apply_prediction_updates(final_plan, self.state)
-                # Store new abductions then immediately resolve any the same
-                # plan already addresses (via follows_from or deprioritization).
-                store_refutation_reasoning(final_plan, self.state)
-                resolve_addressed_abductions(final_plan, self.state)
+                apply_final_plan_updates(final_plan, self.state)
 
             # Persist the final plan (post-debate revision if applicable).
             # NOTE: this must happen BEFORE carry-forward injection below,
@@ -983,6 +984,7 @@ class Orchestrator:
                     reasoning=cfg.reasoning,
                     output_dir=self.output_dir,
                     pending_abductions=format_pending_abductions(self.state),
+                    dead_ends=format_dead_ends(self.state),
                 )
 
             plan: dict[str, Any] = await with_summaries(
@@ -1066,6 +1068,7 @@ class Orchestrator:
                     provider=cfg.provider,
                     output_dir=self.output_dir,
                     pending_abductions=format_pending_abductions(self.state),
+                    dead_ends=format_dead_ends(self.state),
                 )
 
             assessment: dict[str, Any] = await with_summaries(
@@ -1188,6 +1191,7 @@ class Orchestrator:
                         goal=self.state.goal,
                         prediction_history_records=self.state.prediction_history,
                         output_dir=self.output_dir,
+                        dead_ends=format_dead_ends(self.state),
                     )
 
                 try:
@@ -1297,6 +1301,7 @@ class Orchestrator:
                     goal=self.state.goal,
                     provider=revision_cfg.provider,
                     output_dir=self.output_dir,
+                    dead_ends=format_dead_ends(self.state),
                 )
 
             revised: dict[str, Any] = await with_summaries(
@@ -1338,7 +1343,7 @@ class Orchestrator:
             # Apply prediction updates only if stop is upheld (the withdrawn
             # path falls through to normal debate which handles predictions)
             if revised.get("should_stop"):
-                apply_prediction_updates(revised, self.state)
+                apply_final_plan_updates(revised, self.state)
 
             collapse_panel(
                 revision_panel,
@@ -1412,6 +1417,7 @@ class Orchestrator:
                     prediction_history_records=self.state.prediction_history,
                     output_dir=self.output_dir,
                     pending_abductions=format_pending_abductions(self.state),
+                    dead_ends=format_dead_ends(self.state),
                 )
             else:
                 critiques = await run_debate(
@@ -1426,6 +1432,7 @@ class Orchestrator:
                     prediction_history_records=self.state.prediction_history,
                     output_dir=self.output_dir,
                     pending_abductions=format_pending_abductions(self.state),
+                    dead_ends=format_dead_ends(self.state),
                 )
             self._live.log(f"DEBATE: received {len(critiques)} critique(s)")
             return critiques
@@ -1450,6 +1457,7 @@ class Orchestrator:
         prediction_history_records: list | None = None,
         output_dir: Path | None = None,
         pending_abductions: str = "",
+        dead_ends: str = "",
     ) -> list:
         """Run per-persona debates in parallel, each with its own summarizer and panel."""
         import asyncio
@@ -1559,6 +1567,7 @@ class Orchestrator:
                     prediction_history_records=prediction_history_records,
                     output_dir=output_dir,
                     pending_abductions=pending_abductions,
+                    dead_ends=dead_ends,
                 )
 
             try:
@@ -1664,6 +1673,7 @@ class Orchestrator:
                     reasoning=cfg.reasoning,
                     output_dir=self.output_dir,
                     pending_abductions=format_pending_abductions(self.state),
+                    dead_ends=format_dead_ends(self.state),
                 )
 
             revised: dict[str, Any] = await with_summaries(
@@ -1754,6 +1764,7 @@ class Orchestrator:
                     provider=cfg.provider,
                     reasoning=cfg.reasoning,
                     pending_abductions=format_pending_abductions(self.state),
+                    dead_ends=format_dead_ends(self.state),
                 )
 
             revised: dict[str, Any] = await with_summaries(
@@ -1789,7 +1800,7 @@ class Orchestrator:
 
         if final_plan:
             persist_artifact(version_dir, "revision_plan.json", final_plan)
-            apply_prediction_updates(final_plan, self.state)
+            apply_final_plan_updates(final_plan, self.state)
             persist_artifact(version_dir, "plan.json", final_plan)
 
         logger.info("Resumed from revision: scientist revision re-run complete")
@@ -1818,8 +1829,16 @@ class Orchestrator:
 
         run_timeout = self.config.run_timeout_minutes if self.config else _DEFAULT_RUN_TIMEOUT
         run_cmd = self.config.run_command if self.config else "uv run {script_path}"
+        implementer_sandbox_network_access = (
+            bool(self.config.implementer_sandbox_network_access) if self.config else False
+        )
 
         cfg = self.model_config.resolve("coder")
+
+        if cfg.provider == "openai":
+            from auto_core.sdk_backend import rewrite_uv_run_for_codex
+
+            run_cmd = rewrite_uv_run_for_codex(run_cmd)
 
         # Resolve the executable to an absolute path so the coder's Bash
         # subprocess can find it even when ~/.local/bin isn't in PATH.
@@ -1846,25 +1865,26 @@ class Orchestrator:
             if cfg.provider == "openai":
                 import auto_core.ensure_deps as _ed_mod
 
-                # Bootstrap pip and pre-install common scientific packages
-                # from the HOST as a performance optimization (avoids
-                # download time inside the sandbox).  The coder sandbox
-                # has network access (danger-full-access) so it can also
-                # pip-install at runtime via ensure_deps --install.
-                try:
-                    _ed_mod._ensure_pip()
-                    _ed_mod._preinstall_scientific_packages()
-                except Exception:
-                    logger.warning(
-                        "Failed to pre-install scientific packages from host; "
-                        "coder will fall back to in-sandbox pip install"
-                    )
+                install_flag = ""
+                if implementer_sandbox_network_access:
+                    # Bootstrap pip and pre-install common scientific packages
+                    # from the host as a performance optimization. Keep this
+                    # behind the same explicit opt-in as sandbox network access.
+                    try:
+                        _ed_mod._ensure_pip()
+                        _ed_mod._preinstall_scientific_packages()
+                    except Exception:
+                        logger.warning(
+                            "Failed to pre-install scientific packages from host; "
+                            "coder will fall back to in-sandbox pip install"
+                        )
+                    install_flag = "--install "
 
                 ed_src = Path(_ed_mod.__file__)
                 ed_dst = self.output_dir / "_ensure_deps.py"
                 shutil.copy2(ed_src, ed_dst)
                 # Use absolute path so it works even if the coder cd's into a subdirectory
-                run_cmd = f"python3 {ed_dst} --install {{script_path}} && {run_cmd}"
+                run_cmd = f"python3 {ed_dst} {install_flag}{{script_path}} && {run_cmd}"
             else:
                 run_cmd = f"{sys.executable} -m auto_core.ensure_deps {{script_path}} && {run_cmd}"
 
@@ -1904,6 +1924,7 @@ class Orchestrator:
                     run_command=run_cmd,
                     data_files_listing=data_files_listing,
                     provider=cfg.provider,
+                    network_access=cfg.provider == "openai" and implementer_sandbox_network_access,
                 )
 
             new_script: Path | None = await with_summaries(
@@ -1968,6 +1989,7 @@ class Orchestrator:
                     message_buffer=buf,
                     provider=cfg.provider,
                     pending_abductions=format_pending_abductions(self.state),
+                    dead_ends=format_dead_ends(self.state),
                 )
 
             report_content = await with_summaries(

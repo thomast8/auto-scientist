@@ -387,7 +387,7 @@ ADVERSARY_USER = """\
 <goal>{goal}</goal>
 <domain_knowledge>{domain_knowledge}</domain_knowledge>
 {notebook_section}
-<surveyor_observations>{analysis_json}</surveyor_observations>{prediction_history_section}{pending_abductions_section}
+<surveyor_observations>{analysis_json}</surveyor_observations>{prediction_history_section}{pending_abductions_section}{dead_ends_section}
 </context>
 
 <data>
@@ -399,7 +399,7 @@ Critique the Hunter's BugPlan. Output your critique as structured JSON with
 concerns (each tagged with severity, confidence, and category), alternative
 reproduction recipes, and an overall assessment.
 
-Evaluate the plan against the evidence base.{prediction_task_text}{abduction_task_text}
+Evaluate the plan against the evidence base.{prediction_task_text}{abduction_task_text}{dead_ends_task_text}
 </task>
 
 <recap>

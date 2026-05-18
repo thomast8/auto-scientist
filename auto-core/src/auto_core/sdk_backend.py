@@ -64,7 +64,11 @@ def _resolve_message_timeout() -> float:
 # Track: https://github.com/openai/codex/issues/14266
 # Remove this when OpenAI fixes the issue.
 CODEX_MODEL_OVERRIDES: dict[str, str] = {
+    "gpt-5-mini": "gpt-5.4-mini",
+    "gpt-5-nano": "gpt-5.4-mini",
     "gpt-5.4-nano": "gpt-5.4-mini",
+    "gpt-5.5-mini": "gpt-5.4-mini",
+    "gpt-5.5-nano": "gpt-5.4-mini",
 }
 
 _CODEX_ENV_ALLOWLIST: frozenset[str] = frozenset(
@@ -159,10 +163,18 @@ def rewrite_uv_run_for_codex(run_command: str) -> str:
     - ``uv run <tool> [args]``  -> ``python3 -m <tool> [args]``  (e.g. pytest)
 
     Anything that does not start with ``uv run `` is returned unchanged,
-    so ``node {script_path}`` etc pass through. Only the leading ``uv run``
-    is rewritten; the caller is responsible for not chaining further
-    ``uv`` invocations, because ``uv`` is unavailable in the sandbox.
+    so ``node {script_path}`` etc pass through. Simple ``&&`` chains are
+    rewritten segment-by-segment because the orchestrator prepends an
+    ``ensure_deps`` command before the actual run command.
     """
+
+    if " && " in run_command:
+        return " && ".join(_rewrite_uv_run_segment(part) for part in run_command.split(" && "))
+
+    return _rewrite_uv_run_segment(run_command)
+
+
+def _rewrite_uv_run_segment(run_command: str) -> str:
     prefix = "uv run "
     if not run_command.startswith(prefix):
         return run_command
@@ -834,7 +846,7 @@ class CodexBackend:
 
         Unlike the Claude Code CLI (which defaults to no extended thinking
         when --effort is omitted), the Codex SDK lets the model choose its
-        own reasoning level when effort is unset.  For gpt-5.4-mini this
+        own reasoning level when effort is unset.  For small GPT models this
         can mean uncapped reasoning that produces no streaming events,
         triggering the inactivity timeout on large prompts.  We therefore
         default to ``"none"`` so reasoning is always explicitly controlled.
@@ -1190,8 +1202,8 @@ class CodexBackend:
             await self.close()
             raise RuntimeError(
                 f"Codex query failed (model={model}, sandbox={sandbox_mode}): {e}\n"
-                f"If using ChatGPT subscription, note that gpt-5.4-nano is not supported "
-                f"by Codex. Use gpt-5.4-mini or higher."
+                f"If using ChatGPT subscription, note that unavailable mini/nano "
+                f"variants may not be supported by Codex. Use gpt-5.4-mini or higher."
             ) from e
         except Exception as e:
             await self.close()

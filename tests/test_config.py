@@ -3,6 +3,11 @@
 import logging
 
 import pytest
+from auto_core.config import (
+    clear_generated_sandbox_network_access,
+    generated_config_requests_sandbox_network_access,
+    reject_generated_sandbox_network_access,
+)
 from pydantic import ValidationError
 
 from auto_scientist.config import DomainConfig
@@ -25,8 +30,20 @@ class TestDomainConfig:
         assert dc.run_timeout_minutes == 120
         assert dc.version_prefix == "v"
         assert dc.protected_paths == []
+        assert dc.implementer_sandbox_network_access is False
         assert not hasattr(dc, "success_criteria") or "success_criteria" not in dc.model_fields
         assert not hasattr(dc, "domain_knowledge") or "domain_knowledge" not in dc.model_fields
+
+    def test_legacy_network_access_alias(self):
+        dc = DomainConfig.model_validate(
+            {
+                "name": "t",
+                "description": "d",
+                "data_paths": [],
+                "implementer_network_access": True,
+            }
+        )
+        assert dc.implementer_sandbox_network_access is True
 
     def test_missing_required_field_raises(self):
         with pytest.raises(ValidationError):
@@ -49,6 +66,7 @@ class TestDomainConfigSerialization:
             data_paths=["a.csv", "b.csv"],
             run_command="python {script_path}",
             protected_paths=["src/"],
+            implementer_sandbox_network_access=True,
         )
         json_str = dc.model_dump_json()
         loaded = DomainConfig.model_validate_json(json_str)
@@ -56,6 +74,7 @@ class TestDomainConfigSerialization:
         assert loaded.data_paths == ["a.csv", "b.csv"]
         assert loaded.run_command == "python {script_path}"
         assert loaded.protected_paths == ["src/"]
+        assert loaded.implementer_sandbox_network_access is True
 
     def test_custom_run_command(self):
         dc = DomainConfig(
@@ -78,6 +97,44 @@ class TestDomainConfigSerialization:
     def test_no_experiment_dependencies_field(self):
         """experiment_dependencies removed; scripts declare deps via PEP 723 inline metadata."""
         assert "experiment_dependencies" not in DomainConfig.model_fields
+
+
+class TestGeneratedSandboxNetworkAccessGuard:
+    @pytest.mark.parametrize(
+        "field",
+        ["implementer_sandbox_network_access", "implementer_network_access"],
+    )
+    @pytest.mark.parametrize("value", [True, "true", "1", 1])
+    def test_truthy_generated_network_access_values_are_rejected(self, field, value):
+        raw_config = {"name": "t", "description": "d", "data_paths": [], field: value}
+
+        assert generated_config_requests_sandbox_network_access(raw_config) is True
+        with pytest.raises(ValueError, match="operator-only"):
+            reject_generated_sandbox_network_access(raw_config)
+
+    @pytest.mark.parametrize("value", [False, "false", "0", 0])
+    def test_false_generated_network_access_values_are_allowed(self, value):
+        raw_config = {
+            "name": "t",
+            "description": "d",
+            "data_paths": [],
+            "implementer_sandbox_network_access": value,
+        }
+
+        assert generated_config_requests_sandbox_network_access(raw_config) is False
+        reject_generated_sandbox_network_access(raw_config)
+
+    @pytest.mark.parametrize(
+        "field",
+        ["implementer_sandbox_network_access", "implementer_network_access"],
+    )
+    @pytest.mark.parametrize("value", ["true", "1", 1])
+    def test_clear_generated_network_access_handles_bool_like_values(self, field, value):
+        raw_config = {"name": "t", "description": "d", "data_paths": [], field: value}
+
+        assert clear_generated_sandbox_network_access(raw_config) is True
+        assert raw_config["implementer_sandbox_network_access"] is False
+        assert "implementer_network_access" not in raw_config
 
 
 class TestDataPathsCoercion:

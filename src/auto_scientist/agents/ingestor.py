@@ -10,6 +10,7 @@ import json
 import logging
 from pathlib import Path
 
+from auto_core.config import reject_generated_sandbox_network_access
 from auto_core.notebook import NOTEBOOK_FILENAME
 from auto_core.retry import QueryResult, agent_retry_loop
 from auto_core.retry import ValidationError as RetryValidationError
@@ -165,6 +166,7 @@ async def run_ingestor(
                             f'(e.g. ["data/file.csv"]), got dict: '
                             f"{raw_config['data_paths']}"
                         )
+                    reject_generated_sandbox_network_access(raw_config)
                     DomainConfig.model_validate(raw_config)
                 except (
                     ValidationError,

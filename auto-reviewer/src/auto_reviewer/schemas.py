@@ -1,8 +1,9 @@
 """Auto-reviewer output schemas.
 
 Generic types (PredictionOutcome, PlanChange, HypothesisPrediction,
-RefutationReasoning, DeprioritizedAbduction, RunResult, CompletenessAssessmentOutput,
-SubQuestionAssessment) come from `auto_core.schemas` and are re-exported.
+RefutationReasoning, DeprioritizedAbduction, DeadEndProposal, RunResult,
+CompletenessAssessmentOutput, SubQuestionAssessment) come from
+`auto_core.schemas` and are re-exported.
 
 Review-specific shapes: `SurveyorOutput` (reviewer analogue of AnalystOutput),
 `HunterPlanOutput` (reviewer analogue of ScientistPlanOutput), `ProberRunResult`
@@ -13,6 +14,7 @@ from typing import Literal
 
 from auto_core.schemas import (  # noqa: F401
     CompletenessAssessmentOutput,
+    DeadEndProposal,
     DeprioritizedAbduction,
     HypothesisPrediction,
     PlanChange,
@@ -103,3 +105,4 @@ class HunterPlanOutput(BaseModel):
     testable_predictions: list[HypothesisPrediction] = Field(default_factory=list)
     refutation_reasoning: list[RefutationReasoning] = Field(default_factory=list)
     deprioritized_abductions: list[DeprioritizedAbduction] = Field(default_factory=list)
+    dead_ends: list[DeadEndProposal] = Field(default_factory=list)

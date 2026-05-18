@@ -11,6 +11,13 @@ install_claude_sdk_mock()
 import pytest  # noqa: E402
 
 import auto_scientist  # noqa: E402, F401  -- import-time install of scientist registry
+from auto_scientist._roles import install_scientist_registry  # noqa: E402
+
+
+@pytest.fixture(autouse=True)
+def _install_scientist_registry():
+    """Keep scientist tests isolated from auto-reviewer collection side effects."""
+    install_scientist_registry()
 
 
 @pytest.fixture(autouse=True)

@@ -59,6 +59,11 @@ entry for each: identify the violated assumption and name an alternative
 mechanism as a `testable_consequence`. If you consciously drop an earlier
 abduction, add a `deprioritized_abductions[]` entry stating why.
 
+If probe evidence or the prediction history confirms that a review path
+is unproductive or refuted, emit a `dead_ends[]` entry with a one-line
+description and the evidence that closed it. Do not use `dead_ends` for
+suspicions you merely chose not to chase.
+
 When every suspicion has been resolved or the notebook shows diminishing
 returns, set `should_stop: true` with a `stop_reason`. Otherwise
 `should_stop: false`, `stop_reason: null`.
@@ -91,7 +96,8 @@ runs AFTER you; do not pre-argue against yourself here.
     }
   ],
   "refutation_reasoning": [],
-  "deprioritized_abductions": []
+  "deprioritized_abductions": [],
+  "dead_ends": []
 }
     </output>
   </example>
@@ -121,7 +127,8 @@ runs AFTER you; do not pre-argue against yourself here.
      "alternative_explanation": "Eviction only fires when keys cluster; uniform access evicts the least-recently-used deterministically",
      "testable_consequence": "Zipf-distributed keys should expose the race"}
   ],
-  "deprioritized_abductions": []
+  "deprioritized_abductions": [],
+  "dead_ends": []
 }
     </output>
   </example>
@@ -140,6 +147,7 @@ Respond with JSON only in the final assistant message. Schema:
     testable_predictions: list[{prediction, diagnostic, if_confirmed, if_refuted, follows_from?}]
     refutation_reasoning: list[{refuted_pred_id, assumptions_violated, alternative_explanation, testable_consequence}]
     deprioritized_abductions: list[{refuted_pred_id, reason}]
+    dead_ends: list[{description, evidence}]
 
 Missing data rule: empty list `[]` when there is nothing, never omit a
 key. Set `follows_from: null` (not absent) when the prediction is new.
@@ -178,6 +186,7 @@ HUNTER_USER = """\
 </prediction_history>
 
 {pending_abductions_section}
+{dead_ends_section}
 </context>
 
 <task>
@@ -185,6 +194,8 @@ Emit a BugPlan for this iteration as JSON per your system prompt's
 schema. Never read source code; the Surveyor output is your only window
 into what the PR changed. On refuted prior predictions, emit
 `refutation_reasoning[]` entries abducing alternative mechanisms.
+Respect <dead_ends> if present: do not re-chase a closed path without
+explicit new evidence.
 </task>"""
 
 
@@ -335,10 +346,13 @@ HUNTER_REVISION_USER = """\
 </prediction_history>
 
 {pending_abductions_section}
+{dead_ends_section}
 </context>
 
 <task>
 Emit the revised BugPlan (same schema as the initial plan - not a diff).
 For each adversary concern either incorporate it or state your defense
 in notebook_entry. Silent capitulation is a failure mode.
+Respect <dead_ends> if present: do not re-chase a closed path without
+explicit new evidence.
 </task>"""

@@ -12,7 +12,7 @@ from auto_core.iteration_manifest import (
 )
 from auto_core.notebook import NOTEBOOK_FILENAME
 from auto_core.resume import RewindResult, rewind_run
-from auto_core.state import ExperimentState, PredictionRecord, VersionEntry
+from auto_core.state import DeadEnd, ExperimentState, PredictionRecord, VersionEntry
 
 
 @pytest.fixture
@@ -264,13 +264,22 @@ class TestRewindRun:
         result = rewind_run(run_dir, 1)
         assert result.state.consecutive_failures == 0
 
-    def test_clears_dead_ends(self, run_dir):
+    def test_trims_dead_ends_by_iteration(self, run_dir):
+        """Rewinding to iteration N keeps dead ends from iterations < N
+        (and legacy iteration=-1 entries) and drops the rest."""
         s = ExperimentState.load(run_dir / "state.json")
-        s.dead_ends = ["dead1", "dead2"]
+        s.dead_ends = [
+            DeadEnd(iteration=0, description="iter0 dead end", evidence=""),
+            DeadEnd(iteration=1, description="iter1 dead end", evidence=""),
+            DeadEnd(iteration=2, description="iter2 dead end", evidence=""),
+            DeadEnd(iteration=-1, description="legacy migrated", evidence=""),
+        ]
         s.save(run_dir / "state.json")
 
         result = rewind_run(run_dir, 1)
-        assert result.state.dead_ends == []
+        kept_descs = {d.description for d in result.state.dead_ends}
+        # Effective iteration is 1: keep entries with iteration < 1 plus legacy.
+        assert kept_descs == {"iter0 dead end", "legacy migrated"}
 
     def test_truncates_notebook(self, run_dir):
         rewind_run(run_dir, 1)

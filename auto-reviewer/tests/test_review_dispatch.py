@@ -12,6 +12,7 @@ back to auto_scientist agents because the orchestrator had hardcoded
 
 from __future__ import annotations
 
+import json
 from pathlib import Path
 from unittest.mock import AsyncMock, patch
 
@@ -22,7 +23,9 @@ from unittest.mock import AsyncMock, patch
 import auto_reviewer  # noqa: F401 - import for side effect
 import pytest
 from auto_core.agent_dispatch import AGENT_FNS, DEBATE_PERSONAS, get_agent_fn
+from auto_core.model_config import AgentModelConfig, ModelConfig
 from auto_core.orchestrator import Orchestrator
+from auto_reviewer.config import ReviewConfig
 from auto_reviewer.state import ReviewState
 
 # ---------------------------------------------------------------------------
@@ -208,3 +211,126 @@ class TestOrchestratorDispatchToReviewerAgents:
             )
             assert result == {"ok": True}
             mock_hunter.assert_called_once()
+
+    @pytest.mark.asyncio
+    async def test_prober_receives_configured_sandbox_network_access(self, tmp_path: Path):
+        workspace = tmp_path / "review_workspace"
+        workspace.mkdir()
+        state = ReviewState(
+            domain="owner/repo#42",
+            goal="g",
+            phase="iteration",
+            iteration=0,
+            data_path=str(tmp_path),
+        )
+        orchestrator = Orchestrator(
+            state=state,
+            data_path=tmp_path,
+            output_dir=workspace,
+            model_config=ModelConfig(defaults=AgentModelConfig(provider="openai", model="gpt-5.5")),
+        )
+        orchestrator.config = ReviewConfig(
+            name="review",
+            description="review config",
+            repo_path=str(tmp_path),
+            run_command="python {script_path}",
+            implementer_sandbox_network_access=True,
+        )
+        captured: dict[str, object] = {}
+
+        async def fake_prober(**kwargs):
+            captured.update(kwargs)
+            return workspace / "v00" / "run_result.json"
+
+        with (
+            patch("auto_core.ensure_deps._ensure_pip"),
+            patch("auto_core.ensure_deps._preinstall_scientific_packages"),
+            patch("auto_reviewer.agents.prober.run_prober", side_effect=fake_prober),
+        ):
+            await orchestrator._run_coder({"hypothesis": "probe cache invalidation"})
+
+        assert captured["provider"] == "openai"
+        assert captured["network_access"] is True
+
+
+class TestIntakeGeneratedConfigGuards:
+    """Generated ReviewConfig cannot opt into operator-only sandbox network access."""
+
+    @pytest.mark.asyncio
+    @patch("auto_reviewer.agents.intake.safe_query")
+    async def test_generated_config_cannot_enable_sandbox_network_access(
+        self, mock_query, tmp_path: Path
+    ):
+        from auto_core.sdk_backend import SDKMessage
+        from auto_reviewer.agents.intake import run_intake
+
+        output_dir = tmp_path / "review_workspace"
+        data_dir = output_dir / "data"
+        touched_dir = data_dir / "touched_files"
+        touched_dir.mkdir(parents=True)
+        (data_dir / "diff.patch").write_text("diff --git a/x.py b/x.py\n")
+        (data_dir / "pr_metadata.json").write_text(
+            json.dumps(
+                {
+                    "title": "PR title",
+                    "baseRefName": "main",
+                    "headRefName": "feature/demo",
+                }
+            )
+        )
+        (touched_dir / "x.py").write_text("print('x')\n")
+
+        repo = tmp_path / "repo"
+        repo.mkdir()
+        config_path = output_dir / "domain_config.json"
+        config_path.write_text(
+            json.dumps(
+                {
+                    "name": "review",
+                    "description": "review",
+                    "run_cwd": str(repo),
+                    "run_command": "uv run pytest -x -s {script_path}",
+                    "repo_path": str(repo),
+                    "pr_ref": "owner/repo#1",
+                    "base_ref": "main",
+                    "head_ref": "feature/demo",
+                    "implementer_sandbox_network_access": True,
+                }
+            )
+        )
+
+        call_count = 0
+
+        async def fake_query(**kwargs):
+            nonlocal call_count
+            call_count += 1
+            if call_count == 2:
+                config_path.write_text(
+                    json.dumps(
+                        {
+                            "name": "review",
+                            "description": "review",
+                            "run_cwd": str(repo),
+                            "run_command": "uv run pytest -x -s {script_path}",
+                            "repo_path": str(repo),
+                            "pr_ref": "owner/repo#1",
+                            "base_ref": "main",
+                            "head_ref": "feature/demo",
+                            "implementer_sandbox_network_access": False,
+                        }
+                    )
+                )
+            yield SDKMessage(type="result", usage={}, session_id="review-session")
+
+        mock_query.side_effect = fake_query
+
+        result = await run_intake(
+            raw_data_path=tmp_path,
+            output_dir=output_dir,
+            goal="review owner/repo#1",
+            config_path=config_path,
+        )
+
+        assert result == data_dir
+        assert call_count == 2
+        assert json.loads(config_path.read_text())["implementer_sandbox_network_access"] is False

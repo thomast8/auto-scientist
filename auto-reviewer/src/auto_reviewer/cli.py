@@ -120,7 +120,7 @@ def cli() -> None:
     default=None,
     help=(
         "Comma-separated adversary model specs, e.g. "
-        "'openai:gpt-4o,google:gemini-2.5-pro'. Empty string disables debate."
+        "'openai:gpt-5.5,google:gemini-2.5-pro'. Empty string disables debate."
     ),
 )
 @click.option(
@@ -272,6 +272,7 @@ def status(run_dir: str) -> None:
                 "probes": len(state.versions),
                 "predictions": len(state.prediction_history),
                 "pending_abductions": len(state.pending_abductions),
+                "dead_ends": len(state.dead_ends),
             },
             indent=2,
         )
