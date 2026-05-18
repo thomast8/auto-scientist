@@ -143,3 +143,9 @@ def test_workspace_inside_source_repo_is_rejected(git_repo: Path) -> None:
     workspace = git_repo / "review_workspace"
     with pytest.raises(RuntimeError, match="outside the repository"):
         pre_resolve(git_repo, workspace)
+
+
+def test_workspace_containing_source_repo_is_rejected(git_repo: Path, tmp_path: Path) -> None:
+    workspace = tmp_path
+    with pytest.raises(RuntimeError, match="disjoint"):
+        pre_resolve(git_repo, workspace)

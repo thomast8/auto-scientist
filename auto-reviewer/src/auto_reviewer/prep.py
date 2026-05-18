@@ -68,6 +68,11 @@ def pre_resolve(cwd: Path, workspace: Path) -> PreResolved:
             f"Review workspace {workspace} is inside the source path {source_path}. "
             "Choose an --output-dir outside the repository being reviewed."
         )
+    if _is_within(source_path, workspace):
+        raise RuntimeError(
+            f"Review workspace {workspace} contains the source path {source_path}. "
+            "Choose an --output-dir that is disjoint from the repository being reviewed."
+        )
 
     workspace.mkdir(parents=True, exist_ok=True)
     data_dir = workspace / "data"

@@ -116,6 +116,25 @@ def test_symlink_retarget_raises(git_repo: Path, tmp_path: Path) -> None:
         verify_unchanged(before)
 
 
+def test_symlinked_directory_retarget_raises(tmp_path: Path) -> None:
+    plain = tmp_path / "plain"
+    target_a = plain / "a"
+    target_b = plain / "b"
+    target_a.mkdir(parents=True)
+    target_b.mkdir()
+    (target_a / "value.txt").write_text("a\n")
+    (target_b / "value.txt").write_text("b\n")
+    link = plain / "linked_dir"
+    link.symlink_to(target_a, target_is_directory=True)
+
+    before = snapshot_repo(plain)
+    link.unlink()
+    link.symlink_to(target_b, target_is_directory=True)
+
+    with pytest.raises(IntegrityError):
+        verify_unchanged(before)
+
+
 def test_content_change_without_porcelain_change_raises(git_repo: Path) -> None:
     # Force a case where porcelain *might* not catch it: re-write a file
     # with identical content. Tree hash should still match -> no raise.

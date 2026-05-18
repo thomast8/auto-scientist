@@ -181,13 +181,16 @@ def _hash_tree(path: Path) -> str:
 def _iter_files(root: Path):
     """Yield every non-.git file under ``root`` (recursively)."""
     for p in root.rglob("*"):
-        if p.is_dir():
-            continue
         try:
             parts = p.relative_to(root).parts
         except ValueError:
             continue
         if parts and parts[0] == ".git":
+            continue
+        if p.is_symlink():
+            yield p
+            continue
+        if p.is_dir():
             continue
         yield p
 
