@@ -22,6 +22,7 @@ import json
 import logging
 import re
 import sys
+import tempfile
 from datetime import datetime
 from pathlib import Path
 
@@ -61,10 +62,10 @@ def _slug(text: str, max_len: int = 60) -> str:
     return (cleaned[:max_len] or "review").rstrip("_")
 
 
-def _default_workspace() -> Path:
-    """Timestamp-named workspace directory under ./review_workspace."""
-    base = Path.cwd() / "review_workspace"
-    base.mkdir(exist_ok=True)
+def _default_workspace(cwd: Path) -> Path:
+    """Timestamp-named workspace directory outside the repo being reviewed."""
+    base = Path(tempfile.gettempdir()) / "auto-reviewer" / _slug(cwd.name, max_len=40)
+    base.mkdir(parents=True, exist_ok=True)
     stamp = datetime.now().strftime("%Y%m%d_%H%M%S")
     candidate = base / f"review_{stamp}"
     i = 1
@@ -92,7 +93,9 @@ def cli() -> None:
     "--output-dir",
     type=click.Path(),
     default=None,
-    help="Review workspace directory. Defaults to ./review_workspace/review_<timestamp>.",
+    help=(
+        "Review workspace directory. Defaults to a timestamped directory under /tmp/auto-reviewer."
+    ),
 )
 @click.option(
     "--max-iterations",
@@ -104,6 +107,13 @@ def cli() -> None:
     "--preset",
     default="default",
     help="Model preset name (passed to auto_core.model_config.ModelConfig.builtin_preset).",
+)
+@click.option(
+    "-p",
+    "--provider",
+    default=None,
+    type=click.Choice(["anthropic", "openai"], case_sensitive=False),
+    help="Default provider for SDK agents: openai (default, uses Codex CLI) or anthropic.",
 )
 @click.option(
     "--critics",
@@ -135,6 +145,7 @@ def review(
     output_dir: str | None,
     max_iterations: int,
     preset: str,
+    provider: str | None,
     critics: str | None,
     interactive: bool,
     sandbox: str,
@@ -154,15 +165,17 @@ def review(
         )
 
     cwd = Path(cwd_opt).resolve() if cwd_opt else Path.cwd()
-    workspace = Path(output_dir).resolve() if output_dir else _default_workspace()
-    workspace.mkdir(parents=True, exist_ok=True)
+    workspace = Path(output_dir).resolve() if output_dir else _default_workspace(cwd)
 
     # Pre-Intake resolution. Snapshots the user's cwd so we can detect
     # any post-run mutation, clones it into the workspace if it's a git
     # repo so downstream agents never touch the original, and writes a
     # hint JSON with the metadata Intake needs (remotes, branch, HEAD)
     # instead of leaking the user's real filesystem path.
-    resolved = pre_resolve(cwd, workspace)
+    try:
+        resolved = pre_resolve(cwd, workspace)
+    except RuntimeError as exc:
+        raise click.ClickException(str(exc)) from exc
 
     # The data path Intake uses for reads is the clone when present,
     # otherwise the workspace itself (remote-only resolution). Either
@@ -180,7 +193,7 @@ def review(
         data_path=str(data_path),
     )
 
-    model_config = ModelConfig.builtin_preset(preset)
+    model_config = ModelConfig.builtin_preset_for_provider(preset, provider)
     if critics is not None:
         if not critics.strip():
             model_config.critics = []
@@ -214,25 +227,29 @@ def review(
         interactive=interactive,
         verbose=verbose,
     )
-    _run_orchestrator(
-        orchestrator,
-        "Interrupted. State is persisted at state.json; use `auto-reviewer resume` to continue.",
-    )
-
-    # Post-run tripwire: the user's real repo must be byte-identical to
-    # what it was when the run started. A failure here is a bug in the
-    # sandbox layers above — log loudly so the operator investigates.
     try:
-        verify_unchanged(resolved.fingerprint)
-    except IntegrityError as e:
-        click.echo(
-            f"SANDBOX VIOLATION: {e}\n"
-            "The reviewer ran, but the user's repository was modified "
-            "during the run. This indicates a bug in the sandbox layers; "
-            "please report it.",
-            err=True,
+        _run_orchestrator(
+            orchestrator,
+            (
+                "Interrupted. State is persisted at state.json; "
+                "use `auto-reviewer resume` to continue."
+            ),
         )
-        sys.exit(2)
+    finally:
+        # Post-run tripwire: the user's real repo must be byte-identical to
+        # what it was when the run started. A failure here is a bug in the
+        # sandbox layers above; log loudly so the operator investigates.
+        try:
+            verify_unchanged(resolved.fingerprint)
+        except IntegrityError as e:
+            click.echo(
+                f"SANDBOX VIOLATION: {e}\n"
+                "The reviewer ran, but the user's repository was modified "
+                "during the run. This indicates a bug in the sandbox layers; "
+                "please report it.",
+                err=True,
+            )
+            sys.exit(2)
 
 
 @cli.command()

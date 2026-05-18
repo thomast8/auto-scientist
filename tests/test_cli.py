@@ -282,7 +282,8 @@ class TestRunCommand:
         assert call_kwargs["state"].goal == "test goal"
         # Default preset should be used
         mc = call_kwargs["model_config"]
-        assert mc.defaults.model == "claude-sonnet-4-6"
+        assert mc.defaults.provider == "openai"
+        assert mc.defaults.model == "gpt-5.5"
         mock_app_cls.assert_called_once()
         mock_app_cls.return_value.run.assert_called_once()
 
@@ -351,7 +352,8 @@ class TestRunCommandPresets:
 
         assert result.exit_code == 0
         mc = mock_orch.call_args.kwargs["model_config"]
-        assert mc.defaults.model == "claude-haiku-4-5-20251001"
+        assert mc.defaults.provider == "openai"
+        assert mc.defaults.model == "gpt-5.5"
 
     @patch("auto_scientist.cli.PipelineApp")
     @patch("auto_scientist.cli.Orchestrator")
@@ -450,6 +452,58 @@ class TestRunCommandPresets:
         mc = mock_orch.call_args.kwargs["model_config"]
         assert mc.summarizer is not None
         assert mc.summarizer.model == "gpt-5.4-nano"
+
+    @patch("auto_scientist.cli.PipelineApp")
+    @patch("auto_scientist.cli.Orchestrator")
+    def test_provider_anthropic_uses_compatibility_preset(self, mock_orch, mock_app_cls, tmp_path):
+        data_file = tmp_path / "data.csv"
+        data_file.write_text("a,b\n1,2\n")
+
+        runner = CliRunner()
+        result = runner.invoke(
+            cli,
+            [
+                "run",
+                "--data",
+                str(data_file),
+                "--goal",
+                "test",
+                "--provider",
+                "anthropic",
+            ],
+        )
+
+        assert result.exit_code == 0
+        mc = mock_orch.call_args.kwargs["model_config"]
+        assert mc.defaults.provider == "anthropic"
+        assert mc.defaults.model == "claude-sonnet-4-6"
+
+    @patch("auto_scientist.cli.PipelineApp")
+    @patch("auto_scientist.cli.Orchestrator")
+    def test_provider_openai_wins_over_anthropic_preset(self, mock_orch, mock_app_cls, tmp_path):
+        data_file = tmp_path / "data.csv"
+        data_file.write_text("a,b\n1,2\n")
+
+        runner = CliRunner()
+        result = runner.invoke(
+            cli,
+            [
+                "run",
+                "--data",
+                str(data_file),
+                "--goal",
+                "test",
+                "--preset",
+                "default-anthropic",
+                "--provider",
+                "openai",
+            ],
+        )
+
+        assert result.exit_code == 0
+        mc = mock_orch.call_args.kwargs["model_config"]
+        assert mc.defaults.provider == "openai"
+        assert mc.defaults.model == "gpt-5.5"
 
 
 class TestNextOutputDir:
@@ -558,7 +612,8 @@ class TestResumeCommand:
         assert call_kwargs["state"].domain == "auto"
         # Should use default preset when no saved config
         mc = call_kwargs["model_config"]
-        assert mc.defaults.model == "claude-sonnet-4-6"
+        assert mc.defaults.provider == "openai"
+        assert mc.defaults.model == "gpt-5.5"
 
     @patch("auto_scientist.cli.PipelineApp")
     @patch("auto_scientist.cli.Orchestrator")
@@ -576,7 +631,8 @@ class TestResumeCommand:
 
         assert result.exit_code == 0
         loaded_mc = mock_orch.call_args.kwargs["model_config"]
-        assert loaded_mc.defaults.model == "claude-haiku-4-5-20251001"
+        assert loaded_mc.defaults.provider == "openai"
+        assert loaded_mc.defaults.model == "gpt-5.5"
 
     @patch("auto_scientist.cli.PipelineApp")
     @patch("auto_scientist.cli.Orchestrator")
@@ -1136,7 +1192,8 @@ class TestYamlConfig:
         kw = mock_orch.call_args.kwargs
         assert kw["state"].goal == "yaml goal"
         assert kw["max_iterations"] == 10
-        assert kw["model_config"].defaults.model == "claude-haiku-4-5-20251001"
+        assert kw["model_config"].defaults.provider == "openai"
+        assert kw["model_config"].defaults.model == "gpt-5.5"
 
     @patch("auto_scientist.cli.PipelineApp")
     @patch("auto_scientist.cli.Orchestrator")
@@ -1187,7 +1244,8 @@ class TestYamlConfig:
 
         assert result.exit_code == 0, result.output
         mc = mock_orch.call_args.kwargs["model_config"]
-        assert mc.defaults.model == "claude-haiku-4-5-20251001"
+        assert mc.defaults.provider == "openai"
+        assert mc.defaults.model == "gpt-5.5"
 
     @patch("auto_scientist.cli.PipelineApp")
     @patch("auto_scientist.cli.Orchestrator")
@@ -1273,7 +1331,8 @@ class TestYamlConfig:
         assert result.exit_code == 0, result.output
         mc = mock_orch.call_args.kwargs["model_config"]
         # Fast preset defaults
-        assert mc.defaults.model == "claude-haiku-4-5-20251001"
+        assert mc.defaults.provider == "openai"
+        assert mc.defaults.model == "gpt-5.5"
         # But scientist overridden by YAML
         assert mc.scientist.model == "claude-opus-4-6"
 

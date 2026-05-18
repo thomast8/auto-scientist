@@ -2,7 +2,7 @@
 # ruff: noqa: E501
 
 
-def build_findings_system(provider: str = "claude") -> str:
+def build_findings_system(provider: str = "gpt") -> str:
     """Return the Findings system prompt."""
     return FINDINGS_SYSTEM
 

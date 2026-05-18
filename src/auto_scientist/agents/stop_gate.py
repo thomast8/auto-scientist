@@ -68,7 +68,7 @@ async def run_completeness_assessment(
     prediction_history: list[PredictionRecord] | None = None,
     model: str | None = None,
     message_buffer: list[str] | None = None,
-    provider: str = "anthropic",
+    provider: str = "openai",
     output_dir: Path | None = None,
     pending_abductions: str = "",
 ) -> dict[str, Any]:
@@ -349,7 +349,7 @@ async def run_scientist_stop_revision(
     model: str | None = None,
     message_buffer: list[str] | None = None,
     goal: str = "",
-    provider: str = "anthropic",
+    provider: str = "openai",
     output_dir: Path | None = None,
 ) -> dict[str, Any]:
     """Revise the stop decision after the stop debate.

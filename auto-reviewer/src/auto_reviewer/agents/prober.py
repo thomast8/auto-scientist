@@ -134,7 +134,7 @@ async def run_prober(
     run_timeout_minutes: int = 120,
     run_command: str = "uv run {script_path}",
     data_files_listing: str = "",
-    provider: str = "anthropic",
+    provider: str = "openai",
 ) -> Path:
     """Implement the Hunter's plan as a runnable probe script.
 
@@ -203,7 +203,7 @@ async def run_prober(
         cwd=output_dir,
         model=model,
         extra_args={},
-        network_access=provider == "openai",
+        network_access=False,
         pre_tool_use_hook=guard,
     )
 

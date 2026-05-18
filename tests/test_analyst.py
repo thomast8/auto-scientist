@@ -6,7 +6,13 @@ from unittest.mock import MagicMock, patch
 import pytest
 from auto_core.sdk_utils import OutputValidationError
 
-from auto_scientist.agents.analyst import run_analyst
+from auto_scientist.agents.analyst import run_analyst as _run_analyst
+
+
+async def run_analyst(*args, **kwargs):
+    """Exercise the legacy Claude-backed path in tests that mock claude_query."""
+    kwargs.setdefault("provider", "anthropic")
+    return await _run_analyst(*args, **kwargs)
 
 
 class TestRunAnalyst:

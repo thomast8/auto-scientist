@@ -356,7 +356,7 @@ def prepare_turn_budget(
     max_turns: int,
     tools: list[str] | None = None,
     *,
-    provider: str = "anthropic",
+    provider: str = "openai",
 ) -> TurnBudgetConfig:
     """Build system prompt, allowed tools, and turn budget for SDK mode.
 

@@ -2,7 +2,7 @@
 # ruff: noqa: E501
 
 
-def build_hunter_system(provider: str = "claude", *, has_predictions: bool = True) -> str:
+def build_hunter_system(provider: str = "gpt", *, has_predictions: bool = True) -> str:
     """Return the Hunter system prompt.
 
     `has_predictions` matches the shared dispatch signature. The Hunter

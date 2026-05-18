@@ -67,6 +67,26 @@ CODEX_MODEL_OVERRIDES: dict[str, str] = {
     "gpt-5.4-nano": "gpt-5.4-mini",
 }
 
+_CODEX_ENV_ALLOWLIST: frozenset[str] = frozenset(
+    {
+        "COLORTERM",
+        "HOME",
+        "LANG",
+        "LC_ALL",
+        "LC_CTYPE",
+        "LOGNAME",
+        "NO_COLOR",
+        "PATH",
+        "SHELL",
+        "SSL_CERT_DIR",
+        "SSL_CERT_FILE",
+        "TERM",
+        "TMP",
+        "TMPDIR",
+        "USER",
+    }
+)
+
 # Codex sandbox addendum for tool-using agents.
 # uv panics inside the Codex macOS seatbelt sandbox because the
 # system-configuration Rust crate can't access SCDynamicStore.
@@ -364,7 +384,9 @@ class SDKOptions:
       - Codex backend cannot call back into Python per-tool; instead it
         asserts that ``cwd`` matches the guard's workspace so the
         macOS-seatbelt / Linux-namespace ``workspace-write`` sandbox
-        enforces the boundary at the kernel level.
+        enforces the boundary at the kernel level. Guarded Codex calls
+        may not request ``network_access`` because that would require
+        ``danger-full-access`` and remove the filesystem boundary.
     """
 
     system_prompt: str
@@ -844,6 +866,24 @@ class CodexBackend:
         return disabled
 
     @staticmethod
+    def _build_subprocess_env(options: SDKOptions, codex_home: Path) -> dict[str, str]:
+        """Build a minimal environment for the Codex app-server subprocess."""
+        env = {
+            key: value
+            for key, value in os.environ.items()
+            if key in _CODEX_ENV_ALLOWLIST and isinstance(value, str)
+        }
+        env.update(options.env)
+        env["CODEX_HOME"] = str(codex_home)
+        if "OPENAI_API_KEY" not in options.env and os.environ.get("OPENAI_API_KEY"):
+            logger.info(
+                "Stripping OPENAI_API_KEY from Codex subprocess env "
+                "(using ChatGPT subscription instead of direct API billing)"
+            )
+            env.pop("OPENAI_API_KEY", None)
+        return env
+
+    @staticmethod
     def _write_codex_home_config(
         codex_home: Path,
         mcp_servers: dict[str, Any] | None = None,
@@ -919,6 +959,13 @@ class CodexBackend:
         # jurisdiction — the one case where "fail fast" is strictly
         # better than trying to recover.
         if options.pre_tool_use_hook is not None:
+            if options.network_access:
+                raise RuntimeError(
+                    "SDKOptions.pre_tool_use_hook cannot be combined with "
+                    "network_access=True for Codex. Network access maps to "
+                    "danger-full-access, which would remove the filesystem "
+                    "sandbox that enforces the workspace guard."
+                )
             if options.cwd is None:
                 raise RuntimeError(
                     "SDKOptions.pre_tool_use_hook is set but options.cwd "
@@ -1002,20 +1049,7 @@ class CodexBackend:
         )
         self._sandbox_mode = sandbox_mode
 
-        # Build environment for the Codex subprocess.
-        # IMPORTANT: create_subprocess_exec replaces the entire env when a
-        # dict is passed, so we must start from os.environ and layer overrides.
-        env: dict[str, str] = {
-            **os.environ,
-            **options.env,
-            "CODEX_HOME": str(codex_home),
-        }
-        if "OPENAI_API_KEY" not in options.env and os.environ.get("OPENAI_API_KEY"):
-            logger.info(
-                "Stripping OPENAI_API_KEY from Codex subprocess env "
-                "(using ChatGPT subscription instead of direct API billing)"
-            )
-            env["OPENAI_API_KEY"] = ""
+        env = self._build_subprocess_env(options, codex_home)
 
         # Build thread config.
         #

@@ -7,6 +7,10 @@ reproducer probes; the Findings agent compiles a prioritized report with
 reproducers attached. A running **investigation log** carries hypotheses
 and open questions across iterations.
 
+Auto-Reviewer uses the shared `auto_core` model presets, so its default
+backend is OpenAI/Codex with GPT-5.5. Pass `--preset default-anthropic`
+or another `*-anthropic` preset only when you intentionally want Claude.
+
 A "confirmed prediction" here is a reproducer (failing test, assertion,
 demonstrated misbehavior).
 

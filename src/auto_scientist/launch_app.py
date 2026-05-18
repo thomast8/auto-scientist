@@ -37,8 +37,8 @@ PRESET_OPTIONS = [
 ]
 
 PROVIDER_OPTIONS = [
-    ("anthropic", "anthropic"),
     ("openai", "openai"),
+    ("anthropic", "anthropic"),
     ("google", "google"),
 ]
 
@@ -58,8 +58,8 @@ MODE_OPTIONS = [
 
 # Top-level provider options (only SDK-capable providers)
 SDK_PROVIDER_OPTIONS = [
-    ("anthropic", "anthropic"),
     ("openai", "openai"),
+    ("anthropic", "anthropic"),
 ]
 
 # Agents that can be overridden, in display order
@@ -72,18 +72,19 @@ _NUM_CRITIC_SLOTS = 4
 
 # Known models per provider (most capable first)
 MODELS_BY_PROVIDER: dict[str, list[tuple[str, str]]] = {
-    "anthropic": [
-        ("claude-opus-4-6", "claude-opus-4-6"),
-        ("claude-sonnet-4-6", "claude-sonnet-4-6"),
-        ("claude-haiku-4-5", "claude-haiku-4-5-20251001"),
-    ],
     "openai": [
+        ("gpt-5.5", "gpt-5.5"),
         ("gpt-5.4", "gpt-5.4"),
         ("gpt-5.4-mini", "gpt-5.4-mini"),
         ("gpt-5.4-nano", "gpt-5.4-nano"),
         ("gpt-4.1", "gpt-4.1"),
         ("o3", "o3"),
         ("o4-mini", "o4-mini"),
+    ],
+    "anthropic": [
+        ("claude-opus-4-6", "claude-opus-4-6"),
+        ("claude-sonnet-4-6", "claude-sonnet-4-6"),
+        ("claude-haiku-4-5", "claude-haiku-4-5-20251001"),
     ],
     "google": [
         ("gemini-3.1-pro-preview", "gemini-3.1-pro-preview"),
@@ -501,12 +502,12 @@ class LaunchApp(App[ExperimentConfig | None]):
                         classes="short-input",
                     )
 
-                # Top-level provider (quick switch between anthropic/openai presets)
+                # Top-level provider (quick switch between openai/anthropic presets)
                 with Horizontal(classes="form-row"):
                     yield Label("Provider:", classes="form-label")
                     yield Select(
                         SDK_PROVIDER_OPTIONS,
-                        value="anthropic",
+                        value="openai",
                         allow_blank=False,
                         id="top-provider-select",
                         classes="short-input",
@@ -547,7 +548,7 @@ class LaunchApp(App[ExperimentConfig | None]):
                         yield Label(f"{display}:", classes="model-label")
                         yield Select(
                             PROVIDER_OPTIONS,
-                            value="anthropic",
+                            value="openai",
                             allow_blank=True,
                             id=f"model-{agent}-provider",
                             classes="model-provider",
@@ -877,7 +878,7 @@ class LaunchApp(App[ExperimentConfig | None]):
             provider_val = self.query_one(f"#model-{agent}-provider", Select).value
             reasoning_val = self.query_one(f"#model-{agent}-reasoning", Select).value
             mode_val = self.query_one(f"#model-{agent}-mode", Select).value
-            provider_str = provider_val if isinstance(provider_val, str) else "anthropic"
+            provider_str = provider_val if isinstance(provider_val, str) else "openai"
             reasoning_str = reasoning_val if isinstance(reasoning_val, str) else "off"
             mode_str = mode_val if isinstance(mode_val, str) else "sdk"
             try:
@@ -900,7 +901,7 @@ class LaunchApp(App[ExperimentConfig | None]):
             provider_val = self.query_one(f"#model-critic-{i}-provider", Select).value
             reasoning_val = self.query_one(f"#model-critic-{i}-reasoning", Select).value
             mode_val = self.query_one(f"#model-critic-{i}-mode", Select).value
-            provider_str = provider_val if isinstance(provider_val, str) else "anthropic"
+            provider_str = provider_val if isinstance(provider_val, str) else "openai"
             reasoning_str = reasoning_val if isinstance(reasoning_val, str) else "off"
             mode_str = mode_val if isinstance(mode_val, str) else "sdk"
             try:

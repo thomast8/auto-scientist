@@ -137,10 +137,14 @@ async def test_adversarial_attempts_all_denied(
 async def test_legitimate_probe_work_allowed(adapter, workspace) -> None:
     """The legitimate allowed surface must still be large enough: write
     a probe, read source, run pytest."""
+    source_file = workspace / "repo_clone" / "src" / "sample.py"
+    source_file.parent.mkdir(parents=True)
+    source_file.write_text("print('ok')\n")
+
     allowed_cases = [
         ("Write", {"file_path": str(workspace / "v01" / "probe.py")}),
         ("Write", {"file_path": str(workspace / "v01" / "run_result.json")}),
-        ("Read", {"file_path": "/any/path/is/fine/for/read.py"}),
+        ("Read", {"file_path": str(source_file)}),
         ("Bash", {"command": "cd repo_clone && uv run pytest -x -s"}),
         ("Bash", {"command": "python3 v01/probe.py"}),
     ]

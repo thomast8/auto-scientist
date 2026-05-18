@@ -3,7 +3,7 @@ the inputs the Prober expects and runs it directly.
 
 Tests the exact piece of the pipeline that needs the sandbox: the
 code-running agent with Bash/Write/Edit under the probe-mode guard.
-Runs in 1-2 minutes on Haiku instead of 6+ for the full pipeline.
+Runs in 1-2 minutes on GPT-5.5 instead of 6+ for the full pipeline.
 """
 
 from __future__ import annotations
@@ -133,10 +133,10 @@ def main() -> int:
                 version=version,
                 domain_knowledge="throwaway",
                 data_path=str(resolved.repo_clone),
-                model="claude-haiku-4-5-20251001",
+                model="gpt-5.5",
                 run_timeout_minutes=5,
                 run_command="uv run pytest -x -s {script_path}",
-                provider="anthropic",
+                provider="openai",
             )
 
         try:

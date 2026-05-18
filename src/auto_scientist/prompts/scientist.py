@@ -706,7 +706,7 @@ Rules (quick reference):
 </recap>"""
 
 
-def build_scientist_system(provider: str = "claude", *, has_predictions: bool = True) -> str:
+def build_scientist_system(provider: str = "gpt", *, has_predictions: bool = True) -> str:
     """Assemble Scientist system prompt in provider-optimal order.
 
     Claude: context first, instructions at end (recency effect).
@@ -748,8 +748,8 @@ def build_scientist_system(provider: str = "claude", *, has_predictions: bool = 
     )
 
 
-# Backward-compatible alias (Claude default, assumes predictions available)
-SCIENTIST_SYSTEM = build_scientist_system("claude")
+# Backward-compatible alias for the default prompt flavor.
+SCIENTIST_SYSTEM = build_scientist_system("gpt")
 
 SCIENTIST_USER = """\
 <context>

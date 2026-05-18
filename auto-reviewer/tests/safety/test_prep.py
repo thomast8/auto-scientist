@@ -19,7 +19,7 @@ import subprocess
 from pathlib import Path
 
 import pytest
-from auto_reviewer.prep import PreResolved, pre_resolve
+from auto_reviewer.prep import PreResolved, _parse_remotes, pre_resolve
 from auto_reviewer.safety.integrity import verify_unchanged
 
 
@@ -77,8 +77,36 @@ def test_cwd_hint_contains_metadata(git_repo: Path, workspace: Path) -> None:
     assert hint["current_branch"] == "main"
     assert hint["head_sha"]  # non-empty SHA
     assert hint["repo_clone"] == str(workspace / "repo_clone")
+    assert "cwd" not in hint
+    assert "toplevel" not in hint
     remotes = hint["remotes"]
     assert any(r["name"] == "origin" for r in remotes)
+
+
+def test_cwd_hint_strips_remote_credentials() -> None:
+    remotes = _parse_remotes(
+        "\n".join(
+            [
+                "origin\thttps://user:secret@example.com/foo/bar.git (fetch)",
+                "origin\tgit@example.com:foo/bar.git (push)",
+                "backup\ttoken@example.com/foo/bar.git (fetch)",
+            ]
+        )
+    )
+
+    assert remotes == [
+        {"name": "origin", "url": "https://example.com/foo/bar.git"},
+        {"name": "origin", "url": "git@example.com:foo/bar.git"},
+        {"name": "backup", "url": "example.com/foo/bar.git"},
+    ]
+
+
+def test_subdir_cwd_clones_repo_toplevel(git_repo: Path, workspace: Path) -> None:
+    subdir = git_repo / "src"
+    resolved = pre_resolve(subdir, workspace)
+    assert resolved.repo_clone == workspace / "repo_clone"
+    assert (resolved.repo_clone / "README.md").read_text() == "# hello\n"
+    verify_unchanged(resolved.fingerprint)
 
 
 def test_non_git_cwd_produces_no_clone(tmp_path: Path, workspace: Path) -> None:
@@ -108,4 +136,10 @@ def test_existing_clone_refuses_to_overwrite(git_repo: Path, workspace: Path) ->
     workspace.mkdir(parents=True)
     (workspace / "repo_clone").mkdir()
     with pytest.raises(RuntimeError, match="already exists"):
+        pre_resolve(git_repo, workspace)
+
+
+def test_workspace_inside_source_repo_is_rejected(git_repo: Path) -> None:
+    workspace = git_repo / "review_workspace"
+    with pytest.raises(RuntimeError, match="outside the repository"):
         pre_resolve(git_repo, workspace)

@@ -59,6 +59,9 @@ class TestReviewCommand:
 
         assert result.exit_code == 0
         mock_orch.assert_called_once()
+        model_config = mock_orch.call_args.kwargs["model_config"]
+        assert model_config.defaults.provider == "openai"
+        assert model_config.defaults.model == "gpt-5.5"
         mock_run.assert_called_once_with(
             mock_orch.return_value,
             (
@@ -66,6 +69,60 @@ class TestReviewCommand:
                 "use `auto-reviewer resume` to continue."
             ),
         )
+
+    @patch("auto_reviewer.cli._run_orchestrator")
+    @patch("auto_reviewer.cli.Orchestrator")
+    def test_review_provider_anthropic_uses_compatibility_preset(
+        self, mock_orch, mock_run, tmp_path
+    ):
+        scratch = tmp_path / "scratch"
+        scratch.mkdir()
+        runner = CliRunner()
+        result = runner.invoke(
+            reviewer_cli.cli,
+            [
+                "review",
+                "review my current branch",
+                "--cwd",
+                str(scratch),
+                "--output-dir",
+                str(tmp_path / "review_workspace"),
+                "--provider",
+                "anthropic",
+            ],
+        )
+
+        assert result.exit_code == 0
+        model_config = mock_orch.call_args.kwargs["model_config"]
+        assert model_config.defaults.provider == "anthropic"
+        assert model_config.defaults.model == "claude-sonnet-4-6"
+
+    @patch("auto_reviewer.cli._run_orchestrator")
+    @patch("auto_reviewer.cli.Orchestrator")
+    def test_review_openai_provider_wins_over_anthropic_preset(self, mock_orch, mock_run, tmp_path):
+        scratch = tmp_path / "scratch"
+        scratch.mkdir()
+        runner = CliRunner()
+        result = runner.invoke(
+            reviewer_cli.cli,
+            [
+                "review",
+                "review my current branch",
+                "--cwd",
+                str(scratch),
+                "--output-dir",
+                str(tmp_path / "review_workspace"),
+                "--preset",
+                "default-anthropic",
+                "--provider",
+                "openai",
+            ],
+        )
+
+        assert result.exit_code == 0
+        model_config = mock_orch.call_args.kwargs["model_config"]
+        assert model_config.defaults.provider == "openai"
+        assert model_config.defaults.model == "gpt-5.5"
 
 
 class TestResumeCommand:
@@ -95,6 +152,9 @@ class TestResumeCommand:
 
         assert result.exit_code == 0
         mock_orch.assert_called_once()
+        model_config = mock_orch.call_args.kwargs["model_config"]
+        assert model_config.defaults.provider == "openai"
+        assert model_config.defaults.model == "gpt-5.5"
         mock_run.assert_called_once_with(
             mock_orch.return_value,
             "Interrupted again. Re-run `auto-reviewer resume` to continue.",

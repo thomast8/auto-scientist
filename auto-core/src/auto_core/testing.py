@@ -1,7 +1,7 @@
 """Shared test-harness helpers for auto-scientist and auto-reviewer.
 
-Guards a dev box where the real ``claude_code_sdk`` is installed from spawning
-live CLI subagents during ``pytest``. See the 2026-04-23 zombie-CLI incident.
+Guards a dev box where the real SDKs are installed from spawning live CLI
+subagents during ``pytest``. See the 2026-04-23 zombie-CLI incident.
 """
 
 from __future__ import annotations
@@ -15,6 +15,7 @@ from unittest.mock import MagicMock
 import pytest
 
 _LIVE_CLAUDE_ENV = "LIVE_CLAUDE"
+_LIVE_CODEX_ENV = "LIVE_CODEX"
 
 
 def install_claude_sdk_mock() -> None:
@@ -101,6 +102,11 @@ def is_live_claude_allowed() -> bool:
     return os.environ.get(_LIVE_CLAUDE_ENV) == "1"
 
 
+def is_live_codex_allowed() -> bool:
+    """Return True when the suite is explicitly opted in to real Codex invocation."""
+    return os.environ.get(_LIVE_CODEX_ENV) == "1"
+
+
 def install_live_claude_block(monkeypatch: pytest.MonkeyPatch) -> None:
     """Patch ``auto_core.sdk_backend.claude_query`` with a raiser and reset cost state.
 
@@ -125,3 +131,21 @@ def install_live_claude_block(monkeypatch: pytest.MonkeyPatch) -> None:
         yield  # pragma: no cover -- makes this an async generator
 
     monkeypatch.setattr("auto_core.sdk_backend.claude_query", _blocked)
+
+
+def install_live_codex_block(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Patch Codex stdio startup with a raiser unless live Codex is allowed."""
+    if is_live_codex_allowed():
+        return
+
+    def _blocked_connect_stdio(*_args: Any, **_kwargs: Any) -> Any:
+        raise RuntimeError(
+            "Live Codex app-server spawn blocked in tests. Patch "
+            "auto_core.sdk_backend.CodexClient.connect_stdio in your test, "
+            "or set LIVE_CODEX=1 and mark the test with @pytest.mark.live."
+        )
+
+    monkeypatch.setattr(
+        "auto_core.sdk_backend.CodexClient.connect_stdio",
+        _blocked_connect_stdio,
+    )

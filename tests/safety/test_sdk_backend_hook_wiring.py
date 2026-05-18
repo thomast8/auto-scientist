@@ -61,7 +61,7 @@ async def test_claude_adapter_allow_returns_empty_dict(workspace: Path, repo_clo
     guard = make_workspace_guard(workspace, repo_clone, mode="intake")
     adapter = _make_claude_pretooluse_hook(guard)
     result = await adapter(
-        _hook_input("Read", {"file_path": "/etc/passwd"}),
+        _hook_input("Read", {"file_path": str(workspace / "notes.md")}),
         None,
         HookContext(),
     )
@@ -147,6 +147,63 @@ async def test_codex_rejects_cwd_outside_workspace(
     backend = CodexBackend()
     with pytest.raises(RuntimeError, match="does not match the workspace"):
         await backend._ensure_client(options, model=None)
+
+
+async def test_codex_rejects_guard_with_network_access(workspace: Path, repo_clone: Path) -> None:
+    guard = make_workspace_guard(workspace, repo_clone, mode="probe")
+    options = SDKOptions(
+        system_prompt="x",
+        allowed_tools=("Read", "Bash"),
+        max_turns=5,
+        cwd=workspace,
+        network_access=True,
+        pre_tool_use_hook=guard,
+    )
+    backend = CodexBackend()
+    with pytest.raises(RuntimeError, match="network_access=True"):
+        await backend._ensure_client(options, model=None)
+
+
+async def test_codex_guarded_happy_path_uses_workspace_write(
+    monkeypatch: pytest.MonkeyPatch, workspace: Path, repo_clone: Path
+) -> None:
+    guard = make_workspace_guard(workspace, repo_clone, mode="probe")
+    options = SDKOptions(
+        system_prompt="x",
+        allowed_tools=("Read", "Bash"),
+        max_turns=5,
+        cwd=workspace,
+        pre_tool_use_hook=guard,
+    )
+    captured_connect: dict[str, object] = {}
+
+    class FakeClient:
+        @classmethod
+        def connect_stdio(cls, **kwargs):
+            captured_connect.update(kwargs)
+            return cls()
+
+        async def start(self) -> None:
+            return None
+
+        async def close(self) -> None:
+            return None
+
+    monkeypatch.setattr(
+        "auto_core.sdk_backend.CodexClient.connect_stdio",
+        FakeClient.connect_stdio,
+    )
+
+    backend = CodexBackend()
+    _client, chat_kwargs, sandbox_mode = await backend._ensure_client(options, model=None)
+    thread_config = chat_kwargs["thread_config"]
+
+    assert captured_connect["cwd"] == str(workspace)
+    assert thread_config.cwd == str(workspace)
+    assert thread_config.sandbox == "workspace-write"
+    assert sandbox_mode == "workspace-write"
+    assert thread_config.approval_policy == "never"
+    await backend.close()
 
 
 # ---------------------------------------------------------------------------

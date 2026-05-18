@@ -51,7 +51,7 @@ async def run_intake(
     config_path: Path | None = None,
     model: str | None = None,
     message_buffer: list[str] | None = None,
-    provider: str = "anthropic",
+    provider: str = "openai",
 ) -> Path:
     """Parse the review prompt and canonicalize a PR into a review workspace.
 

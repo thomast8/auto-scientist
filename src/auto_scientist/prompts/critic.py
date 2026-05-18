@@ -313,7 +313,7 @@ Example:
 </output_format>"""
 
 
-def build_critic_system(provider: str = "claude") -> str:
+def build_critic_system(provider: str = "gpt") -> str:
     """Assemble Critic system prompt template in provider-optimal order.
 
     Returns a template string with {persona_text}, {persona_instructions},
@@ -355,8 +355,8 @@ def build_critic_system(provider: str = "claude") -> str:
     return raw.replace("{{", "{").replace("}}", "}")
 
 
-# Backward-compatible alias (Claude default)
-CRITIC_SYSTEM_BASE = build_critic_system("claude")
+# Backward-compatible alias for the default prompt flavor.
+CRITIC_SYSTEM_BASE = build_critic_system("gpt")
 
 CRITIC_USER = """\
 <context>

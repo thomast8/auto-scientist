@@ -597,11 +597,52 @@ class TestCodexBackend:
         call_kwargs = mock_connect.call_args
         env = call_kwargs.kwargs.get("env")
         assert env is not None, "env must always be passed (CODEX_HOME isolation)"
-        assert env["OPENAI_API_KEY"] == ""
+        assert "OPENAI_API_KEY" not in env
         # Must include parent PATH so subprocess can find the codex binary
         assert "PATH" in env
         # CODEX_HOME must always be set for isolation
         assert "CODEX_HOME" in env
+
+        await backend.close()
+
+    @pytest.mark.asyncio
+    async def test_codex_env_uses_allowlist(self):
+        """Codex subprocess should not inherit unrelated host secrets."""
+        from auto_core.sdk_backend import CodexBackend, SDKOptions
+
+        steps = [self._make_mock_step("ok", "thr-1")]
+        mock_client = self._make_mock_client(steps)
+
+        backend = CodexBackend()
+        opts = SDKOptions(system_prompt="", allowed_tools=[], max_turns=5)
+
+        with (
+            patch(
+                "auto_core.sdk_backend.CodexClient.connect_stdio",
+                return_value=mock_client,
+            ) as mock_connect,
+            patch.dict(
+                "os.environ",
+                {
+                    "PATH": "/usr/bin",
+                    "ANTHROPIC_API_KEY": "secret",
+                    "GOOGLE_API_KEY": "secret",
+                    "GITHUB_TOKEN": "secret",
+                    "DATABASE_URL": "postgres://secret",
+                },
+                clear=True,
+            ),
+        ):
+            async for _ in backend.query("test", opts):
+                pass
+
+        env = mock_connect.call_args.kwargs["env"]
+        assert env["PATH"] == "/usr/bin"
+        assert "CODEX_HOME" in env
+        assert "ANTHROPIC_API_KEY" not in env
+        assert "GOOGLE_API_KEY" not in env
+        assert "GITHUB_TOKEN" not in env
+        assert "DATABASE_URL" not in env
 
         await backend.close()
 

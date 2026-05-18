@@ -7,11 +7,18 @@ from unittest.mock import MagicMock, patch
 import pytest
 from auto_core.sdk_backend import SDKMessage
 
-from auto_scientist.agents.coder import _check_runtime_success, run_coder
+from auto_scientist.agents.coder import _check_runtime_success
+from auto_scientist.agents.coder import run_coder as _run_coder
 
 _SUCCESS_RUN_RESULT = json.dumps(
     {"success": True, "return_code": 0, "timed_out": False, "error": None}
 )
+
+
+async def run_coder(*args, **kwargs):
+    """Exercise the legacy Claude-backed path unless a test chooses a provider."""
+    kwargs.setdefault("provider", "anthropic")
+    return await _run_coder(*args, **kwargs)
 
 
 def _write_success_result(version_dir: Path) -> None:

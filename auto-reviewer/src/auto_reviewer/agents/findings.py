@@ -46,7 +46,7 @@ async def run_findings(
     output_dir: Path,
     model: str | None = None,
     message_buffer: list[str] | None = None,
-    provider: str = "anthropic",
+    provider: str = "openai",
     pending_abductions: str = "",
 ) -> str:
     """Generate the final PR review report.

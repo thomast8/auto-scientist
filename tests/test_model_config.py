@@ -40,14 +40,18 @@ class TestReasoningConfig:
 
 
 class TestAgentModelConfig:
-    def test_defaults_provider_to_anthropic(self):
-        cfg = AgentModelConfig(model="claude-sonnet-4-6")
-        assert cfg.provider == "anthropic"
+    def test_defaults_provider_to_openai(self):
+        cfg = AgentModelConfig(model="gpt-5.5")
+        assert cfg.provider == "openai"
         assert cfg.reasoning.level == "off"
 
     def test_openai_provider(self):
         cfg = AgentModelConfig(provider="openai", model="o4-mini")
         assert cfg.provider == "openai"
+
+    def test_infers_anthropic_provider_from_claude_model(self):
+        cfg = AgentModelConfig(model="claude-sonnet-4-6")
+        assert cfg.provider == "anthropic"
 
     def test_reasoning_string_shorthand(self):
         """A plain string like 'high' should parse as ReasoningConfig(level='high')."""
@@ -137,15 +141,16 @@ class TestReasoningToCCExtraArgs:
 class TestBuiltinPresets:
     def test_default_preset(self):
         mc = ModelConfig.builtin_preset("default")
-        assert mc.defaults.model == "claude-sonnet-4-6"
+        assert mc.defaults.provider == "openai"
+        assert mc.defaults.model == "gpt-5.5"
         assert mc.defaults.reasoning.level == "medium"
-        assert mc.resolve("analyst").model == "claude-sonnet-4-6"
+        assert mc.resolve("analyst").model == "gpt-5.5"
         assert mc.resolve("analyst").reasoning.level == "medium"
-        assert mc.resolve("scientist").model == "claude-opus-4-6"
+        assert mc.resolve("scientist").model == "gpt-5.5"
         assert mc.resolve("scientist").reasoning.level == "medium"
-        assert mc.resolve("coder").model == "claude-sonnet-4-6"
-        assert mc.resolve("ingestor").model == "claude-sonnet-4-6"
-        assert mc.resolve("report").model == "claude-sonnet-4-6"
+        assert mc.resolve("coder").model == "gpt-5.5"
+        assert mc.resolve("ingestor").model == "gpt-5.5"
+        assert mc.resolve("report").model == "gpt-5.5"
         assert mc.summarizer is not None
         assert mc.summarizer.provider == "openai"
         assert mc.summarizer.model == "gpt-5.4-nano"
@@ -153,34 +158,37 @@ class TestBuiltinPresets:
 
     def test_turbo_preset(self):
         mc = ModelConfig.builtin_preset("turbo")
-        assert mc.defaults.model == "claude-haiku-4-5-20251001"
+        assert mc.defaults.provider == "openai"
+        assert mc.defaults.model == "gpt-5.4-nano"
         assert mc.defaults.reasoning.level == "off"
         assert mc.summarizer is not None
         assert mc.summarizer.provider == "openai"
         assert mc.summarizer.model == "gpt-5.4-nano"
         assert mc.summarizer.reasoning.level == "off"
         assert len(mc.critics) == 2
-        assert mc.critics[0].provider == "anthropic"
-        assert mc.critics[0].model == "claude-haiku-4-5-20251001"
+        assert mc.critics[0].provider == "openai"
+        assert mc.critics[0].model == "gpt-5.4-nano"
         assert mc.critics[0].reasoning.level == "off"
         assert mc.critics[1].provider == "openai"
         assert mc.critics[1].model == "gpt-5.4-nano"
         assert mc.critics[1].reasoning.level == "off"
 
-    def test_turbo_preset_all_agents_use_haiku_with_off_reasoning(self):
+    def test_turbo_preset_all_agents_use_nano_with_off_reasoning(self):
         mc = ModelConfig.builtin_preset("turbo")
         for agent in ["analyst", "scientist", "coder", "ingestor", "report", "assessor"]:
             cfg = mc.resolve(agent)
-            assert cfg.model == "claude-haiku-4-5-20251001"
+            assert cfg.provider == "openai"
+            assert cfg.model == "gpt-5.4-nano"
             assert cfg.reasoning.level == "off"
 
     def test_fast_preset(self):
         mc = ModelConfig.builtin_preset("fast")
-        assert mc.defaults.model == "claude-haiku-4-5-20251001"
+        assert mc.defaults.provider == "openai"
+        assert mc.defaults.model == "gpt-5.5"
         assert mc.defaults.reasoning.level == "low"
-        assert mc.resolve("scientist").model == "claude-sonnet-4-6"
+        assert mc.resolve("scientist").model == "gpt-5.5"
         assert mc.resolve("scientist").reasoning.level == "low"
-        assert mc.resolve("analyst").model == "claude-haiku-4-5-20251001"
+        assert mc.resolve("analyst").model == "gpt-5.5"
         assert mc.resolve("analyst").reasoning.level == "low"
 
     def test_medium_is_alias_for_default(self):
@@ -193,7 +201,8 @@ class TestBuiltinPresets:
     def test_high_preset_assessor(self):
         mc = ModelConfig.builtin_preset("high")
         cfg = mc.resolve("assessor")
-        assert cfg.model == "claude-opus-4-6"
+        assert cfg.provider == "openai"
+        assert cfg.model == "gpt-5.5"
         assert cfg.reasoning.level == "medium"
 
     def test_default_preset_assessor_falls_back_to_defaults(self):
@@ -210,8 +219,25 @@ class TestBuiltinPresets:
         assert len(mc.critics) == 2
         assert mc.critics[0].provider == "openai"
         assert mc.critics[0].model == "gpt-5.4-mini"
-        assert mc.critics[1].provider == "anthropic"
-        assert mc.critics[1].model == "claude-sonnet-4-6"
+        assert mc.critics[1].provider == "openai"
+        assert mc.critics[1].model == "gpt-5.5"
+
+    def test_anthropic_variant_preserves_claude_defaults(self):
+        mc = ModelConfig.builtin_preset("default-anthropic")
+        assert mc.defaults.provider == "anthropic"
+        assert mc.defaults.model == "claude-sonnet-4-6"
+        assert mc.resolve("scientist").model == "claude-opus-4-6"
+
+    @pytest.mark.parametrize("preset", ["default", "fast", "turbo"])
+    def test_builtin_provider_override_selects_anthropic_variant(self, preset):
+        mc = ModelConfig.builtin_preset_for_provider(preset, "anthropic")
+        assert mc.defaults.provider == "anthropic"
+        assert mc.defaults.model.startswith("claude-")
+
+    def test_builtin_provider_override_wins_over_conflicting_suffix(self):
+        mc = ModelConfig.builtin_preset_for_provider("default-anthropic", "openai")
+        assert mc.defaults.provider == "openai"
+        assert mc.defaults.model == "gpt-5.5"
 
 
 class TestFromToml:
@@ -319,7 +345,35 @@ class TestFromExperimentConfig:
 
         exp = ExperimentConfig(data="data.csv", goal="test", preset="fast")
         mc = ModelConfig.from_experiment_config(exp)
-        assert mc.defaults.model == "claude-haiku-4-5-20251001"
+        assert mc.defaults.provider == "openai"
+        assert mc.defaults.model == "gpt-5.5"
+
+    def test_provider_anthropic_uses_compatibility_preset(self):
+        from auto_scientist.experiment_config import ExperimentConfig
+
+        exp = ExperimentConfig(
+            data="data.csv",
+            goal="test",
+            preset="default",
+            provider="anthropic",
+        )
+        mc = ModelConfig.from_experiment_config(exp)
+        assert mc.defaults.provider == "anthropic"
+        assert mc.defaults.model == "claude-sonnet-4-6"
+        assert mc.resolve("scientist").model == "claude-opus-4-6"
+
+    def test_provider_openai_wins_over_anthropic_suffix(self):
+        from auto_scientist.experiment_config import ExperimentConfig
+
+        exp = ExperimentConfig(
+            data="data.csv",
+            goal="test",
+            preset="default-anthropic",
+            provider="openai",
+        )
+        mc = ModelConfig.from_experiment_config(exp)
+        assert mc.defaults.provider == "openai"
+        assert mc.defaults.model == "gpt-5.5"
 
     def test_preset_with_agent_override(self):
         from auto_scientist.experiment_config import ExperimentConfig
@@ -337,7 +391,7 @@ class TestFromExperimentConfig:
         assert mc.scientist.model == "claude-opus-4-6"
         assert mc.scientist.reasoning.level == "high"
         # Other agents still use fast preset defaults
-        assert mc.defaults.model == "claude-haiku-4-5-20251001"
+        assert mc.defaults.model == "gpt-5.5"
 
     def test_summaries_false_wins(self):
         from auto_scientist.experiment_config import ExperimentConfig
@@ -362,14 +416,14 @@ class TestFromExperimentConfig:
             preset="default",
             models={
                 "critics": [
-                    {"provider": "openai", "model": "gpt-5.4", "reasoning": "high"},
+                    {"provider": "openai", "model": "gpt-5.5", "reasoning": "high"},
                 ],
             },
         )
         mc = ModelConfig.from_experiment_config(exp)
         # YAML critics replace preset critics entirely
         assert len(mc.critics) == 1
-        assert mc.critics[0].model == "gpt-5.4"
+        assert mc.critics[0].model == "gpt-5.5"
         assert mc.critics[0].reasoning.level == "high"
 
     def test_no_models_uses_preset_as_is(self):
@@ -377,6 +431,6 @@ class TestFromExperimentConfig:
 
         exp = ExperimentConfig(data="data.csv", goal="test", preset="high")
         mc = ModelConfig.from_experiment_config(exp)
-        assert mc.resolve("scientist").model == "claude-opus-4-6"
+        assert mc.resolve("scientist").model == "gpt-5.5"
         assert mc.resolve("scientist").reasoning.level == "high"
         assert len(mc.critics) == 2

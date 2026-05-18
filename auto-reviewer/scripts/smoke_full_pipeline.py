@@ -1,14 +1,14 @@
-"""End-to-end sandbox smoke on Haiku.
+"""End-to-end sandbox smoke on GPT-5.5.
 
 Builds a throwaway git repo, runs the full reviewer pipeline (Intake →
 Surveyor → Hunter → Prober → Findings) with every agent pinned to
-claude-haiku-4-5, verifies the real repo is byte-identical after.
+gpt-5.5, verifies the real repo is byte-identical after.
 
 Uses the Orchestrator directly (not PipelineApp) so the process exits
 cleanly when the pipeline finishes — the TUI keeps its own event loop
 running past the pipeline's end and made earlier runs look hung.
 
-Budget ~10 minutes of wall-clock on Haiku; hard cap 20 minutes via
+Budget ~10 minutes of wall-clock on GPT-5.5; hard cap 20 minutes via
 SIGALRM. Cheap in dollar terms but still a real LLM run — not for CI.
 
 For the narrow sandbox test (just the Prober + guard path), use
@@ -67,17 +67,17 @@ def _build_throwaway_repo(root: Path) -> Path:
     return repo
 
 
-def _haiku_config() -> ModelConfig:
-    haiku = AgentModelConfig.model_validate(
+def _gpt_config() -> ModelConfig:
+    gpt = AgentModelConfig.model_validate(
         {
-            "provider": "anthropic",
-            "model": "claude-haiku-4-5-20251001",
+            "provider": "openai",
+            "model": "gpt-5.5",
             "reasoning": {"level": "off"},
             "mode": "sdk",
         }
     )
     return ModelConfig(
-        defaults=haiku,
+        defaults=gpt,
         critics=[],
         summarizer=None,
     )
@@ -109,7 +109,7 @@ def main() -> int:
             data_path=resolved.repo_clone,
             output_dir=workspace,
             max_iterations=1,
-            model_config=_haiku_config(),
+            model_config=_gpt_config(),
             verbose=True,
         )
 

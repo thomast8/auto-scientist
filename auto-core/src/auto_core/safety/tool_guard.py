@@ -144,6 +144,8 @@ _COMMAND_SEPARATORS: tuple[str, ...] = (";", "&&", "||", "|", "&")
 
 # Bash token patterns that are always considered a shell redirection.
 _REDIRECT_TOKENS: tuple[str, ...] = (">", ">>", "<", "<<", "<<<", "&>", "2>", "2>>")
+_HEREDOC_TOKENS: tuple[str, ...] = ("<<", "<<<")
+_SHELL_OPERATOR_RE = re.compile(r"(2>>|2>|&>|>>>|>>|>|<<<|<<|<|&&|\|\||[;|&])")
 
 
 def make_workspace_guard(
@@ -202,13 +204,18 @@ class _WorkspaceGuard:
 
         if self.mode == "read_only":
             if name in {"Read", "Glob", "Grep", "AskUserQuestion"}:
-                return Decision.allow()
+                if name == "AskUserQuestion":
+                    return Decision.allow()
+                return _check_read(name, tool_input, self.workspace)
             return Decision.deny(
                 f"Tool {name!r} is not available in read-only mode; "
                 "only Read, Glob, Grep, AskUserQuestion are permitted."
             )
 
-        if name in {"Read", "Glob", "Grep", "AskUserQuestion", "WebSearch", "WebFetch"}:
+        if name in {"Read", "Glob", "Grep"}:
+            return _check_read(name, tool_input, self.workspace)
+
+        if name in {"AskUserQuestion", "WebSearch", "WebFetch"}:
             return Decision.allow()
 
         if name in {"Write", "Edit", "NotebookEdit"}:
@@ -238,9 +245,45 @@ def _check_write(
     if not target:
         return Decision.deny("Write tool call has no file_path/path/notebook_path argument.")
     resolved = _resolve(target, workspace)
+    return _check_writable_path(resolved, workspace, repo_clone, mode, "Write target")
+
+
+def _check_read(tool_name: str, tool_input: dict[str, Any], workspace: Path) -> Decision:
+    """Verify Read/Glob/Grep targets resolve inside the workspace."""
+    fields: tuple[str, ...]
+    if tool_name == "Read":
+        fields = ("file_path", "path")
+    elif tool_name == "Glob":
+        fields = ("path", "pattern")
+    else:
+        fields = ("path", "glob")
+
+    for field in fields:
+        raw = tool_input.get(field)
+        if raw is None:
+            continue
+        if not isinstance(raw, str) or not raw.strip():
+            continue
+        resolved = _resolve(raw, workspace)
+        if not _is_within(resolved, workspace):
+            return Decision.deny(
+                f"{tool_name} {field} {resolved} is outside the review workspace "
+                f"{workspace}. The reviewer may only read under the workspace directory."
+            )
+    return Decision.allow()
+
+
+def _check_writable_path(
+    resolved: Path,
+    workspace: Path,
+    repo_clone: Path,
+    mode: GuardMode,
+    label: str,
+) -> Decision:
+    """Verify an already-resolved write target is inside the writable area."""
     if not _is_within(resolved, workspace):
         return Decision.deny(
-            f"Write target {resolved} is outside the review workspace {workspace}. "
+            f"{label} {resolved} is outside the review workspace {workspace}. "
             "The reviewer may only write under the workspace directory."
         )
     if mode == "probe" and _is_within(resolved, repo_clone):
@@ -265,8 +308,9 @@ def _check_bash(
     if not isinstance(command, str) or not command.strip():
         return Decision.deny("Bash tool call has no command argument.")
 
+    normalized_command = _normalise_shell_syntax(command)
     try:
-        tokens = shlex.split(command, posix=True)
+        tokens = shlex.split(normalized_command, posix=True)
     except ValueError as e:
         return Decision.deny(f"Bash command failed to tokenise ({e}); refusing to run.")
 
@@ -276,16 +320,24 @@ def _check_bash(
     # abs-path scan to avoid a less-specific deny reason.
     redirect_target_indices: set[int] = set()
     for i, tok in enumerate(tokens):
+        if tok in _HEREDOC_TOKENS:
+            return Decision.deny(
+                "Bash heredoc and here-string redirections are not permitted "
+                "in reviewer sandbox commands."
+            )
         if tok in _REDIRECT_TOKENS and i + 1 < len(tokens):
             target = tokens[i + 1]
             redirect_target_indices.add(i + 1)
-            if target.startswith("/") or target.startswith("~"):
-                resolved = _resolve(target, workspace)
-                if not _is_within(resolved, workspace):
-                    return Decision.deny(
-                        f"Bash redirection to {resolved} is outside the workspace "
-                        f"{workspace}. Redirect to a path under the workspace."
-                    )
+            resolved = _resolve(target, workspace)
+            verdict = _check_writable_path(
+                resolved,
+                workspace,
+                repo_clone,
+                mode,
+                "Bash redirection to",
+            )
+            if not verdict.allowed:
+                return verdict
 
     # Split on shell operators so each segment gets its own verb check.
     segments: list[list[str]] = [[]]
@@ -329,6 +381,13 @@ def _check_bash_segment(
     # Base-name the command so /usr/bin/rm and rm are treated alike.
     head_base = Path(head).name if "/" in head else head
 
+    if _looks_like_path_arg(head):
+        resolved_head = _resolve(head, workspace)
+        if not _is_within(resolved_head, workspace):
+            return Decision.deny(
+                f"Bash executable path {resolved_head} is outside workspace {workspace}."
+            )
+
     if head_base in _DESTRUCTIVE_VERBS:
         return Decision.deny(
             f"Bash command starts with destructive verb {head_base!r}; "
@@ -344,13 +403,13 @@ def _check_bash_segment(
     if head_base == "gh":
         return _check_gh(rest)
 
-    # Any absolute-path argument must resolve inside workspace.
+    # Any path-like argument must resolve inside workspace.
     for arg in rest:
-        if arg.startswith("/") or arg.startswith("~"):
+        if _looks_like_path_arg(arg):
             resolved = _resolve(arg, workspace)
             if not _is_within(resolved, workspace):
                 return Decision.deny(
-                    f"Bash command references absolute path {resolved} "
+                    f"Bash command references path {resolved} "
                     f"outside workspace {workspace}. Paths passed as arguments "
                     "must resolve inside the workspace."
                 )
@@ -490,12 +549,23 @@ def _check_gh(args: list[str]) -> Decision:
             f"read-only PR allowlist {_GH_READONLY_PR_SUBSUB}."
         )
     if sub == "api":
+        if any(re.search(r"\bmutation\b", a, flags=re.IGNORECASE) for a in args):
+            return Decision.deny(
+                "`gh api` GraphQL mutations are not permitted. Only read-only "
+                "GET/HEAD API requests are allowed."
+            )
         # gh api is GET by default; reject explicit mutations.
-        if any(a in {"-X", "--method"} for a in args):
-            method_idx = next(i for i, a in enumerate(args) if a in {"-X", "--method"})
-            if method_idx + 1 < len(args) and args[method_idx + 1].upper() not in {"GET", "HEAD"}:
+        for i, arg in enumerate(args):
+            method: str | None = None
+            if arg in {"-X", "--method"} and i + 1 < len(args):
+                method = args[i + 1]
+            elif arg.startswith("--method="):
+                method = arg.split("=", 1)[1]
+            elif arg.startswith("-X") and len(arg) > 2:
+                method = arg[2:]
+            if method and method.upper() not in {"GET", "HEAD"}:
                 return Decision.deny(
-                    f"`gh api -X {args[method_idx + 1]}` is a mutating HTTP "
+                    f"`gh api -X {method}` is a mutating HTTP "
                     "method. Only GET/HEAD requests are permitted."
                 )
         return Decision.allow()
@@ -505,6 +575,19 @@ def _check_gh(args: list[str]) -> Decision:
             "only uses `gh pr view/diff/list` and `gh api` for GET requests."
         )
     return Decision.allow()
+
+
+def _normalise_shell_syntax(command: str) -> str:
+    """Surround shell operators with spaces so shlex exposes them as tokens."""
+    return _SHELL_OPERATOR_RE.sub(r" \1 ", command)
+
+
+def _looks_like_path_arg(arg: str) -> bool:
+    if not arg or arg.startswith("-"):
+        return False
+    if "://" in arg or re.match(r"^[A-Za-z0-9_.-]+@[A-Za-z0-9_.-]+:", arg):
+        return False
+    return arg.startswith(("/", "~", ".", "..")) or "/" in arg
 
 
 def _resolve(raw: str, anchor: Path) -> Path:

@@ -93,11 +93,19 @@ def test_happy_path_leaves_real_repo_byte_identical(git_repo: Path, tmp_path: Pa
     mock_run.assert_called_once()
 
     # The pre-resolution ran: clone + hint file exist.
-    assert (workspace / "repo_clone").is_dir()
-    assert (workspace / "repo_clone" / "README.md").read_text() == "alpha\n"
+    repo_clone = workspace / "repo_clone"
+    assert repo_clone.is_dir()
+    assert (repo_clone / "README.md").read_text() == "alpha\n"
     hint = json.loads((workspace / "data" / "cwd_hint.json").read_text())
     assert hint["is_git"] is True
-    assert hint["repo_clone"] == str(workspace / "repo_clone")
+    assert hint["repo_clone"] == str(repo_clone)
+
+    orchestrator_kwargs = mock_orch.call_args.kwargs
+    state = orchestrator_kwargs["state"]
+    assert orchestrator_kwargs["data_path"] == repo_clone
+    assert orchestrator_kwargs["output_dir"] == workspace
+    assert state.data_path == str(repo_clone)
+    assert str(git_repo) not in state.model_dump_json()
 
     # The real repo is unchanged.
     after = snapshot_repo(git_repo)
@@ -152,11 +160,10 @@ def test_tripwire_fires_when_real_repo_mutated(git_repo: Path, tmp_path: Path) -
     assert "SANDBOX VIOLATION" in result.output
 
 
-def test_hint_file_does_not_contain_absolute_user_paths_beyond_cwd(
+def test_hint_file_does_not_contain_absolute_user_source_paths(
     git_repo: Path, tmp_path: Path
 ) -> None:
-    """Sanity check: the hint is scoped. The LLM sees its own workspace
-    and the user's cwd metadata, not unrelated paths (home, secrets)."""
+    """The hint is scoped to clone path plus non-path git metadata."""
     workspace = tmp_path / "ws"
     with (
         patch("auto_reviewer.cli.Orchestrator"),
@@ -168,12 +175,48 @@ def test_hint_file_does_not_contain_absolute_user_paths_beyond_cwd(
     # Only documented keys — no stray env dump.
     assert set(hint.keys()).issubset(
         {
-            "cwd",
             "is_git",
             "repo_clone",
-            "toplevel",
             "head_sha",
             "current_branch",
             "remotes",
         }
     )
+    assert str(git_repo) not in json.dumps(hint)
+
+
+def test_output_dir_inside_real_repo_is_rejected(git_repo: Path) -> None:
+    workspace = git_repo / "review_workspace"
+    runner = CliRunner()
+    result = runner.invoke(
+        reviewer_cli.cli,
+        [
+            "review",
+            "review my current branch",
+            "--cwd",
+            str(git_repo),
+            "--output-dir",
+            str(workspace),
+        ],
+    )
+
+    assert result.exit_code != 0
+    assert "outside the repository being reviewed" in result.output
+    assert not workspace.exists()
+
+
+def test_tripwire_runs_when_orchestrator_exits(git_repo: Path, tmp_path: Path) -> None:
+    workspace = tmp_path / "ws"
+
+    def _mutate_real_and_exit(*_args, **_kwargs) -> None:
+        (git_repo / "README.md").write_text("tampered\n")
+        raise SystemExit(130)
+
+    with (
+        patch("auto_reviewer.cli.Orchestrator"),
+        patch("auto_reviewer.cli._run_orchestrator", side_effect=_mutate_real_and_exit),
+    ):
+        result = _invoke(git_repo, workspace)
+
+    assert result.exit_code == 2, result.output
+    assert "SANDBOX VIOLATION" in result.output

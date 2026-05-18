@@ -196,7 +196,7 @@ Rules (quick reference):
 </recap>"""
 
 
-def build_assessment_system(provider: str = "claude", *, has_predictions: bool = True) -> str:
+def build_assessment_system(provider: str = "gpt", *, has_predictions: bool = True) -> str:
     """Assemble Assessment system prompt in provider-optimal order.
 
     When *has_predictions* is False, MCP tool references are omitted.
@@ -228,7 +228,7 @@ def build_assessment_system(provider: str = "claude", *, has_predictions: bool =
 
 
 # Backward-compatible alias (assumes predictions available)
-ASSESSMENT_SYSTEM = build_assessment_system("claude")
+ASSESSMENT_SYSTEM = build_assessment_system("gpt")
 
 ASSESSMENT_USER = """\
 <context>
@@ -497,7 +497,7 @@ Example:
 
 
 def build_stop_critic_system(
-    provider: str = "claude",
+    provider: str = "gpt",
     *,
     has_predictions: bool = True,
     has_prediction_tool: bool = True,
@@ -564,7 +564,7 @@ def build_stop_critic_system(
 
 
 # Backward-compatible alias (assumes predictions available + SDK tool access)
-STOP_CRITIC_SYSTEM_BASE = build_stop_critic_system("claude")
+STOP_CRITIC_SYSTEM_BASE = build_stop_critic_system("gpt")
 
 STOP_CRITIC_USER = """\
 <context>
@@ -711,7 +711,7 @@ Example (withdrawal):
 </output_format>"""
 
 
-def build_stop_revision_system(provider: str = "claude", *, has_predictions: bool = True) -> str:
+def build_stop_revision_system(provider: str = "gpt", *, has_predictions: bool = True) -> str:
     """Assemble Stop Revision system prompt in provider-optimal order."""
     note = _PREDICTION_TOOL_NOTE if has_predictions else ""
     rev_role = _STOP_REV_ROLE.format(
@@ -740,7 +740,7 @@ def build_stop_revision_system(provider: str = "claude", *, has_predictions: boo
 
 
 # Backward-compatible alias (assumes predictions available)
-STOP_REVISION_SYSTEM = build_stop_revision_system("claude")
+STOP_REVISION_SYSTEM = build_stop_revision_system("gpt")
 
 STOP_REVISION_USER = """\
 <context>

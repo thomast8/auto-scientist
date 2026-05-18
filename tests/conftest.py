@@ -1,6 +1,10 @@
-"""Test configuration: block live Claude CLI by default, mock absent SDK modules."""
+"""Test configuration: block live SDK subprocesses by default."""
 
-from auto_core.testing import install_claude_sdk_mock, install_live_claude_block
+from auto_core.testing import (
+    install_claude_sdk_mock,
+    install_live_claude_block,
+    install_live_codex_block,
+)
 
 install_claude_sdk_mock()
 
@@ -10,8 +14,9 @@ import auto_scientist  # noqa: E402, F401  -- import-time install of scientist r
 
 
 @pytest.fixture(autouse=True)
-def _block_live_claude_sdk(monkeypatch):
+def _block_live_sdks(monkeypatch):
     install_live_claude_block(monkeypatch)
+    install_live_codex_block(monkeypatch)
 
 
 @pytest.fixture(autouse=True)

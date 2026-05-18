@@ -2,13 +2,13 @@
 # ruff: noqa: E501
 
 
-def build_assessment_system(provider: str = "claude", *, has_predictions: bool = True) -> str:
+def build_assessment_system(provider: str = "gpt", *, has_predictions: bool = True) -> str:
     """Return the Assessor (completeness-assessment) system prompt."""
     return ASSESSOR_SYSTEM
 
 
 def build_stop_critic_system(
-    provider: str = "claude",
+    provider: str = "gpt",
     *,
     has_predictions: bool = True,
     has_prediction_tool: bool = False,
@@ -24,7 +24,7 @@ def build_stop_critic_system(
     return STOP_DEBATE_SYSTEM
 
 
-def build_stop_revision_system(provider: str = "claude", *, has_predictions: bool = True) -> str:
+def build_stop_revision_system(provider: str = "gpt", *, has_predictions: bool = True) -> str:
     """Return the stop-revision system prompt."""
     return STOP_REVISION_SYSTEM
 

@@ -165,23 +165,12 @@ def _resolve_model_config(
     if config_path and preset:
         raise click.UsageError("--config and --preset are mutually exclusive")
 
-    # Resolve preset name, applying provider variant if applicable
     preset_name = preset or "default"
-    if provider and provider != "anthropic":
-        variant = f"{preset_name}-{provider}"
-        from auto_core.model_config import BUILTIN_PRESETS
-
-        if variant in BUILTIN_PRESETS:
-            preset_name = variant
 
     if config_path:
         model_config = ModelConfig.from_toml(Path(config_path))
     else:
-        model_config = ModelConfig.builtin_preset(preset_name)
-
-    # If provider variant didn't exist, override defaults.provider
-    if provider and provider != "anthropic" and not preset_name.endswith(f"-{provider}"):
-        model_config.defaults = model_config.defaults.model_copy(update={"provider": provider})
+        model_config = ModelConfig.builtin_preset_for_provider(preset_name, provider)
 
     if no_summaries:
         model_config.summarizer = None
@@ -296,7 +285,7 @@ def cli(ctx: click.Context, config_path: str | None):
     "-p",
     default=None,
     type=click.Choice(["anthropic", "openai"], case_sensitive=False),
-    help="Default provider for SDK agents: anthropic (default) or openai (uses Codex CLI).",
+    help="Default provider for SDK agents: openai (default, uses Codex CLI) or anthropic.",
 )
 @click.option(
     "-v",
@@ -479,7 +468,7 @@ def run(
     "-p",
     default=None,
     type=click.Choice(["anthropic", "openai"], case_sensitive=False),
-    help="Default provider for SDK agents: anthropic (default) or openai (uses Codex CLI).",
+    help="Default provider for SDK agents: openai (default, uses Codex CLI) or anthropic.",
 )
 @click.option(
     "-v",

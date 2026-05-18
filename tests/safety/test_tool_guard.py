@@ -62,9 +62,16 @@ def test_repo_clone_must_be_inside_workspace(tmp_path: Path) -> None:
 
 def test_read_only_allows_read_glob_grep(workspace: Path, repo_clone: Path) -> None:
     guard = make_workspace_guard(workspace, repo_clone, mode="read_only")
-    assert guard("Read", {"file_path": "/etc/passwd"}).allowed is True
+    assert guard("Read", {"file_path": str(workspace / "data" / "notes.md")}).allowed is True
     assert guard("Glob", {"pattern": "**/*.py"}).allowed is True
     assert guard("Grep", {"pattern": "foo"}).allowed is True
+
+
+def test_read_tools_outside_workspace_denied(workspace: Path, repo_clone: Path) -> None:
+    guard = make_workspace_guard(workspace, repo_clone, mode="read_only")
+    assert not guard("Read", {"file_path": "/etc/passwd"}).allowed
+    assert not guard("Glob", {"pattern": "/etc/*"}).allowed
+    assert not guard("Grep", {"pattern": "x", "path": "../outside"}).allowed
 
 
 def test_read_only_denies_write_and_bash(workspace: Path, repo_clone: Path) -> None:
@@ -221,6 +228,24 @@ def test_bash_redirect_outside_denied(
     assert "redirection" in d.reason.lower()
 
 
+@pytest.mark.parametrize(
+    "command",
+    [
+        "echo hi >/tmp/pwned",
+        "cat </tmp/secret",
+        "echo hi > ../outside",
+        "echo hi > repo_clone/src/prod.py",
+    ],
+)
+def test_bash_compact_or_relative_redirect_escape_denied(
+    command: str, workspace: Path, repo_clone: Path
+) -> None:
+    (repo_clone / "src").mkdir(exist_ok=True)
+    guard = make_workspace_guard(workspace, repo_clone, mode="probe")
+    d = guard("Bash", {"command": command})
+    assert not d.allowed, f"should deny: {command}"
+
+
 # ---------------------------------------------------------------------------
 # Bash: git subcommand policy
 # ---------------------------------------------------------------------------
@@ -347,6 +372,18 @@ def test_bash_gh_api_post_denied(workspace: Path, repo_clone: Path) -> None:
     assert not d.allowed
 
 
+def test_bash_gh_api_method_equals_post_denied(workspace: Path, repo_clone: Path) -> None:
+    guard = make_workspace_guard(workspace, repo_clone, mode="intake")
+    d = guard("Bash", {"command": "gh api --method=POST repos/foo/bar/issues"})
+    assert not d.allowed
+
+
+def test_bash_gh_api_graphql_mutation_denied(workspace: Path, repo_clone: Path) -> None:
+    guard = make_workspace_guard(workspace, repo_clone, mode="intake")
+    d = guard("Bash", {"command": "gh api graphql -f query='mutation { closeIssue }'"})
+    assert not d.allowed
+
+
 # ---------------------------------------------------------------------------
 # Bash: chained commands must each pass
 # ---------------------------------------------------------------------------
@@ -356,6 +393,12 @@ def test_bash_chained_destructive_segment_denied(workspace: Path, repo_clone: Pa
     guard = make_workspace_guard(workspace, repo_clone, mode="probe")
     # Innocuous first command, destructive second.
     d = guard("Bash", {"command": "echo hi && rm -rf /"})
+    assert not d.allowed
+
+
+def test_bash_semicolon_destructive_segment_denied(workspace: Path, repo_clone: Path) -> None:
+    guard = make_workspace_guard(workspace, repo_clone, mode="probe")
+    d = guard("Bash", {"command": "echo ok; git push origin HEAD"})
     assert not d.allowed
 
 
@@ -387,7 +430,7 @@ def test_mcp_tool_name_strips_prefix(workspace: Path, repo_clone: Path) -> None:
     # SDK sometimes prefixes MCP tool names; the stripped name is what we
     # check against the allowlist.
     guard = make_workspace_guard(workspace, repo_clone, mode="intake")
-    d = guard("mcp__some_server__Read", {"file_path": "/etc/passwd"})
+    d = guard("mcp__some_server__Read", {"file_path": str(workspace / "note.md")})
     assert d.allowed
 
 

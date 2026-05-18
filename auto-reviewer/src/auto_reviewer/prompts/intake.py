@@ -78,13 +78,13 @@ blocked everywhere; you do not need them.
    start running commands.
 
 2. Locate the repository. Read `{cwd_hint_path}` (JSON). It contains:
-   - `is_git`: whether the user's cwd is itself a git repo
+   - `is_git`: whether the user's cwd is inside a git repo
    - `repo_clone`: absolute path to a pre-made local clone of that repo
      (present only when `is_git` is true). The orchestrator cloned it
      before you started so you never have to touch the user's
      original filesystem path.
    - `current_branch`, `head_sha`, `remotes`: metadata describing the
-     user's cwd at run start — use this to interpret "my branch",
+     user's repo at run start - use this to interpret "my branch",
      "current branch", or to discover GitHub remote URLs.
    Resolution rules:
    a. If `repo_clone` is present AND the pointer matches that repo
@@ -96,7 +96,8 @@ blocked everywhere; you do not need them.
       AskUserQuestion for the URL. Autonomous mode: infer from the
       GitHub pointer.
    Once resolved, `repo_abs` is always `{{output_dir}}/repo_clone` (or
-   a path inside it). Never set it to the value of `cwd_hint.cwd`.
+   a path inside it). The hint never includes the user's original
+   filesystem path.
 
 3. Resolve refs.
    - `head_ref`: the PR's head branch (when the pointer is a PR) or the
@@ -350,7 +351,7 @@ Rules (quick reference):
 </recap>"""
 
 
-def build_intake_system(provider: str = "claude") -> str:
+def build_intake_system(provider: str = "gpt") -> str:
     """Assemble Intake system prompt in provider-optimal order."""
     if provider == "gpt":
         return "\n\n".join(
@@ -375,7 +376,7 @@ def build_intake_system(provider: str = "claude") -> str:
     )
 
 
-INTAKE_SYSTEM = build_intake_system("claude")
+INTAKE_SYSTEM = build_intake_system("gpt")
 
 
 INTAKE_USER = """\

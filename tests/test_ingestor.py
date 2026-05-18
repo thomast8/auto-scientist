@@ -20,7 +20,7 @@ class TestRunIngestorToolSelection:
     @pytest.mark.asyncio
     @patch("auto_scientist.agents.ingestor.safe_query")
     async def test_interactive_mode_includes_ask_user(self, mock_query, tmp_path):
-        """In interactive mode, AskUserQuestion tool should be included."""
+        """Anthropic interactive mode should include AskUserQuestion."""
         raw_data = tmp_path / "data.csv"
         raw_data.write_text("a,b\n1,2\n")
         output_dir = tmp_path / "experiments"
@@ -34,7 +34,13 @@ class TestRunIngestorToolSelection:
             __anext__=AsyncMock(side_effect=StopAsyncIteration),
         )
 
-        await run_ingestor(raw_data, output_dir, "test goal", interactive=True)
+        await run_ingestor(
+            raw_data,
+            output_dir,
+            "test goal",
+            interactive=True,
+            provider="anthropic",
+        )
 
         call_kwargs = mock_query.call_args
         options = call_kwargs.kwargs["options"]

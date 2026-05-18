@@ -99,7 +99,7 @@ async def run_analyst(
     data_dir: Path | None = None,
     model: str | None = None,
     message_buffer: list[str] | None = None,
-    provider: str = "anthropic",
+    provider: str = "openai",
     timeout_context: dict | None = None,
 ) -> dict[str, Any]:
     """Analyze experiment results and produce structured observation.

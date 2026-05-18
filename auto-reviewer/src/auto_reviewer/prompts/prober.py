@@ -2,7 +2,7 @@
 # ruff: noqa: E501
 
 
-def build_prober_system(provider: str = "claude") -> str:
+def build_prober_system(provider: str = "gpt") -> str:
     """Return the Prober system prompt."""
     return PROBER_SYSTEM
 

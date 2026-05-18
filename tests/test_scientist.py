@@ -11,8 +11,12 @@ from claude_code_sdk import AssistantMessage, ResultMessage, TextBlock
 from auto_scientist.agents.scientist import (
     _format_compact_tree,
     _format_predictions_for_prompt,
-    run_scientist,
-    run_scientist_revision,
+)
+from auto_scientist.agents.scientist import (
+    run_scientist as _run_scientist,
+)
+from auto_scientist.agents.scientist import (
+    run_scientist_revision as _run_scientist_revision,
 )
 
 SAMPLE_LEDGER = [
@@ -47,6 +51,18 @@ SAMPLE_PLAN = {
     "stop_reason": None,
     "notebook_entry": "First hypothesis\n\nTesting incremental approach",
 }
+
+
+async def run_scientist(*args, **kwargs):
+    """Exercise the legacy Claude-backed path in tests that mock claude_query."""
+    kwargs.setdefault("provider", "anthropic")
+    return await _run_scientist(*args, **kwargs)
+
+
+async def run_scientist_revision(*args, **kwargs):
+    """Exercise the legacy Claude-backed path in tests that mock claude_query."""
+    kwargs.setdefault("provider", "anthropic")
+    return await _run_scientist_revision(*args, **kwargs)
 
 
 class TestRunScientist:

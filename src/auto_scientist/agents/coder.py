@@ -116,7 +116,7 @@ async def run_coder(
     run_timeout_minutes: int = 120,
     run_command: str = "uv run {script_path}",
     data_files_listing: str = "",
-    provider: str = "anthropic",
+    provider: str = "openai",
 ) -> Path:
     """Implement the scientist's plan as a runnable experiment script.
 

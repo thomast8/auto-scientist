@@ -175,7 +175,7 @@ Dataset location:
 </output_format>"""
 
 
-def build_coder_system(provider: str = "claude") -> str:
+def build_coder_system(provider: str = "gpt") -> str:
     """Assemble Coder system prompt in provider-optimal order.
 
     Returns a template string with {run_command}, {run_timeout_minutes},
@@ -207,8 +207,8 @@ def build_coder_system(provider: str = "claude") -> str:
     )
 
 
-# Backward-compatible alias (Claude default)
-CODER_SYSTEM = build_coder_system("claude")
+# Backward-compatible alias for the default prompt flavor.
+CODER_SYSTEM = build_coder_system("gpt")
 
 CODER_USER = """\
 <context>
