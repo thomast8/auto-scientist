@@ -27,6 +27,7 @@ from auto_core.sdk_utils import (
     prepare_turn_budget,
     resolve_prompt_provider,
     safe_query,
+    strip_report_preamble,
     validate_report_structure,
 )
 from auto_core.state import ExperimentState
@@ -38,6 +39,14 @@ logger = logging.getLogger(__name__)
 
 # Minimum report length to consider valid (characters)
 MIN_REPORT_LENGTH = 100
+FINDINGS_REPORT_HEADINGS = (
+    "summary",
+    "confirmed bugs",
+    "refuted suspicions",
+    "ungrounded findings",
+    "open questions",
+    "known limitations",
+)
 
 
 async def run_findings(
@@ -96,6 +105,7 @@ async def run_findings(
     last_full_text = [""]
 
     async def _query(prompt_text: str, resume_session_id: str | None) -> QueryResult:
+        report_state_before = _report_file_state(report_path)
         opts = options
         if resume_session_id is not None:
             retry_budget = prepare_turn_budget(report_system, max_turns, allowed_tools)
@@ -125,20 +135,17 @@ async def run_findings(
                 usage = message.usage
                 collect_text_from_query.last_usage = usage  # type: ignore[attr-defined]
 
-        raw = "\n".join(report_parts)
+        raw = strip_report_preamble("\n".join(report_parts), FINDINGS_REPORT_HEADINGS)
         # The agent's contract is to write report.md via the Write tool. When
-        # that file exists, it (not the text channel) is the artifact we
-        # validate against, because tool_use blocks are excluded from
-        # report_parts and the text channel is usually just narration.
-        if report_path.exists():
+        # that file was created or changed by this attempt, it (not the text
+        # channel) is the artifact we validate against. An unchanged preexisting
+        # file can be stale from a prior failed attempt, so keep the text
+        # fallback in that case.
+        report_state_after = _report_file_state(report_path)
+        if report_state_after is not None and report_state_after != report_state_before:
             disk_text = report_path.read_text().strip()
             if disk_text:
-                raw = disk_text
-        else:
-            heading_idx = raw.find("\n# ")
-            if heading_idx != -1:
-                raw = raw[heading_idx + 1 :]
-            raw = raw.strip()
+                raw = strip_report_preamble(disk_text, FINDINGS_REPORT_HEADINGS)
         last_full_text[0] = raw
         return QueryResult(raw_output=raw, session_id=sid, usage={})
 
@@ -167,12 +174,12 @@ async def run_findings(
     def _on_exhausted(result: QueryResult | None, error: Exception) -> str:
         if result is None:
             raise error
-        # Re-read the file so we never clobber a good on-disk report with
-        # stale narration from last_full_text.
-        if report_path.exists():
-            full_text = report_path.read_text().strip() or last_full_text[0]
-        else:
-            full_text = last_full_text[0]
+        full_text = last_full_text[0]
+        if not full_text and report_path.exists():
+            full_text = strip_report_preamble(
+                report_path.read_text(),
+                FINDINGS_REPORT_HEADINGS,
+            )
         if not full_text:
             raise RuntimeError("Report generation produced no output after 3 attempts")
 
@@ -199,3 +206,10 @@ async def run_findings(
             on_exhausted=_on_exhausted,
         ),
     )
+
+
+def _report_file_state(path: Path) -> tuple[int, int] | None:
+    if not path.exists():
+        return None
+    stat = path.stat()
+    return (stat.st_mtime_ns, stat.st_size)
