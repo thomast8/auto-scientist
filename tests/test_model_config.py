@@ -153,32 +153,32 @@ class TestBuiltinPresets:
         assert mc.resolve("report").model == "gpt-5.5"
         assert mc.summarizer is not None
         assert mc.summarizer.provider == "openai"
-        assert mc.summarizer.model == "gpt-5.4-nano"
+        assert mc.summarizer.model == "gpt-5.5-nano"
         assert mc.summarizer.reasoning.level == "off"
 
     def test_turbo_preset(self):
         mc = ModelConfig.builtin_preset("turbo")
         assert mc.defaults.provider == "openai"
-        assert mc.defaults.model == "gpt-5.4-nano"
+        assert mc.defaults.model == "gpt-5.5"
         assert mc.defaults.reasoning.level == "off"
         assert mc.summarizer is not None
         assert mc.summarizer.provider == "openai"
-        assert mc.summarizer.model == "gpt-5.4-nano"
+        assert mc.summarizer.model == "gpt-5.5-nano"
         assert mc.summarizer.reasoning.level == "off"
         assert len(mc.critics) == 2
         assert mc.critics[0].provider == "openai"
-        assert mc.critics[0].model == "gpt-5.4-nano"
+        assert mc.critics[0].model == "gpt-5.5"
         assert mc.critics[0].reasoning.level == "off"
         assert mc.critics[1].provider == "openai"
-        assert mc.critics[1].model == "gpt-5.4-nano"
+        assert mc.critics[1].model == "gpt-5.5"
         assert mc.critics[1].reasoning.level == "off"
 
-    def test_turbo_preset_all_agents_use_nano_with_off_reasoning(self):
+    def test_turbo_preset_all_agents_use_fast_latest_family_model_with_off_reasoning(self):
         mc = ModelConfig.builtin_preset("turbo")
         for agent in ["analyst", "scientist", "coder", "ingestor", "report", "assessor"]:
             cfg = mc.resolve(agent)
             assert cfg.provider == "openai"
-            assert cfg.model == "gpt-5.4-nano"
+            assert cfg.model == "gpt-5.5"
             assert cfg.reasoning.level == "off"
 
     def test_fast_preset(self):
@@ -218,7 +218,7 @@ class TestBuiltinPresets:
         mc = ModelConfig.builtin_preset("default")
         assert len(mc.critics) == 2
         assert mc.critics[0].provider == "openai"
-        assert mc.critics[0].model == "gpt-5.4-mini"
+        assert mc.critics[0].model == "gpt-5.5"
         assert mc.critics[1].provider == "openai"
         assert mc.critics[1].model == "gpt-5.5"
 
@@ -226,7 +226,7 @@ class TestBuiltinPresets:
         mc = ModelConfig.builtin_preset("default-anthropic")
         assert mc.defaults.provider == "anthropic"
         assert mc.defaults.model == "claude-sonnet-4-6"
-        assert mc.resolve("scientist").model == "claude-opus-4-6"
+        assert mc.resolve("scientist").model == "claude-opus-4-7"
 
     @pytest.mark.parametrize("preset", ["default", "fast", "turbo"])
     def test_builtin_provider_override_selects_anthropic_variant(self, preset):
@@ -238,6 +238,68 @@ class TestBuiltinPresets:
         mc = ModelConfig.builtin_preset_for_provider("default-anthropic", "openai")
         assert mc.defaults.provider == "openai"
         assert mc.defaults.model == "gpt-5.5"
+
+    @pytest.mark.parametrize("preset", ["turbo", "fast", "default", "medium", "high", "max"])
+    def test_openai_builtin_presets_use_latest_default_model_class(self, preset):
+        mc = ModelConfig.builtin_preset(preset)
+        configs = [
+            mc.defaults,
+            *(
+                mc.resolve(agent)
+                for agent in ["analyst", "scientist", "coder", "ingestor", "report"]
+            ),
+            *mc.critics,
+        ]
+        if mc.summarizer is not None:
+            configs.append(mc.summarizer)
+
+        openai_configs = [cfg for cfg in configs if cfg.provider == "openai"]
+        assert openai_configs
+        assert {cfg.model for cfg in openai_configs} <= {
+            "gpt-5.5",
+            "gpt-5.5-mini",
+            "gpt-5.5-nano",
+        }
+
+    @pytest.mark.parametrize(
+        "preset",
+        [
+            "turbo-anthropic",
+            "fast-anthropic",
+            "default-anthropic",
+            "medium-anthropic",
+            "high-anthropic",
+            "max-anthropic",
+        ],
+    )
+    def test_anthropic_builtin_presets_use_latest_default_model_class(self, preset):
+        mc = ModelConfig.builtin_preset(preset)
+        configs = [
+            mc.defaults,
+            *(
+                mc.resolve(agent)
+                for agent in ["analyst", "scientist", "coder", "ingestor", "report"]
+            ),
+            *mc.critics,
+        ]
+        if mc.summarizer is not None:
+            configs.append(mc.summarizer)
+
+        anthropic_configs = [cfg for cfg in configs if cfg.provider == "anthropic"]
+        assert anthropic_configs
+        assert {cfg.model for cfg in anthropic_configs} <= {
+            "claude-opus-4-7",
+            "claude-sonnet-4-6",
+            "claude-haiku-4-5-20251001",
+        }
+
+        openai_configs = [cfg for cfg in configs if cfg.provider == "openai"]
+        assert openai_configs
+        assert {cfg.model for cfg in openai_configs} <= {
+            "gpt-5.5",
+            "gpt-5.5-mini",
+            "gpt-5.5-nano",
+        }
 
 
 class TestFromToml:
@@ -360,7 +422,7 @@ class TestFromExperimentConfig:
         mc = ModelConfig.from_experiment_config(exp)
         assert mc.defaults.provider == "anthropic"
         assert mc.defaults.model == "claude-sonnet-4-6"
-        assert mc.resolve("scientist").model == "claude-opus-4-6"
+        assert mc.resolve("scientist").model == "claude-opus-4-7"
 
     def test_provider_openai_wins_over_anthropic_suffix(self):
         from auto_scientist.experiment_config import ExperimentConfig

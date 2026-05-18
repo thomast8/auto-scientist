@@ -77,105 +77,106 @@ class AgentModelConfig(BaseModel):
 
 
 _ANTHROPIC_COMPAT_PRESETS: dict[str, dict] = {
-    # Smoke tests, cheapest possible, quality not important
+    # Smoke tests: latest fast Anthropic model + GPT-5.5 family sidecars.
     "turbo": {
         "defaults": {"model": "claude-haiku-4-5-20251001", "reasoning": "off"},
         "summarizer": {
             "provider": "openai",
-            "model": "gpt-5.4-nano",
+            "model": "gpt-5.5-nano",
             "reasoning": "off",
             "mode": "api",
         },
         "critics": [
             {"provider": "anthropic", "model": "claude-haiku-4-5-20251001", "reasoning": "off"},
-            {"provider": "openai", "model": "gpt-5.4-nano", "reasoning": "off"},
+            {"provider": "openai", "model": "gpt-5.5", "reasoning": "off"},
         ],
     },
-    # Quick but competent: scientist upgraded so plans are usable
+    # Quick but competent: latest fast defaults, stronger planner.
     "fast": {
         "defaults": {"model": "claude-haiku-4-5-20251001", "reasoning": "low"},
         "scientist": {"model": "claude-sonnet-4-6", "reasoning": "low"},
         "summarizer": {
             "provider": "openai",
-            "model": "gpt-5.4-nano",
+            "model": "gpt-5.5-nano",
             "reasoning": "off",
             "mode": "api",
         },
         "critics": [
-            {"provider": "openai", "model": "gpt-5.4-mini", "reasoning": "low"},
+            {"provider": "openai", "model": "gpt-5.5-mini", "reasoning": "low"},
             {"provider": "anthropic", "model": "claude-haiku-4-5-20251001", "reasoning": "low"},
         ],
     },
-    # Balanced quality/cost
+    # Balanced quality using latest Claude family models.
     "default": {
         "defaults": {"model": "claude-sonnet-4-6", "reasoning": "medium"},
-        "scientist": {"model": "claude-opus-4-6", "reasoning": "medium"},
+        "scientist": {"model": "claude-opus-4-7", "reasoning": "medium"},
         "summarizer": {
             "provider": "openai",
-            "model": "gpt-5.4-nano",
+            "model": "gpt-5.5-nano",
             "reasoning": "off",
             "mode": "api",
         },
         "critics": [
-            {"provider": "openai", "model": "gpt-5.4-mini", "reasoning": "medium"},
+            {"provider": "openai", "model": "gpt-5.5-mini", "reasoning": "medium"},
             {"provider": "anthropic", "model": "claude-sonnet-4-6", "reasoning": "medium"},
         ],
     },
-    # High quality: analyst upgraded to Opus for deeper observations
+    # High quality: latest Opus where deeper reasoning pays off.
     "high": {
         "defaults": {"model": "claude-sonnet-4-6", "reasoning": "high"},
-        "analyst": {"model": "claude-opus-4-6", "reasoning": "medium"},
-        "scientist": {"model": "claude-opus-4-6", "reasoning": "high"},
-        "assessor": {"model": "claude-opus-4-6", "reasoning": "medium"},
+        "analyst": {"model": "claude-opus-4-7", "reasoning": "medium"},
+        "scientist": {"model": "claude-opus-4-7", "reasoning": "high"},
+        "assessor": {"model": "claude-opus-4-7", "reasoning": "medium"},
         "summarizer": {
             "provider": "openai",
-            "model": "gpt-5.4-nano",
+            "model": "gpt-5.5-nano",
             "reasoning": "off",
             "mode": "api",
         },
         "critics": [
             {"provider": "openai", "model": "gpt-5.5", "reasoning": "high"},
-            {"provider": "anthropic", "model": "claude-opus-4-6", "reasoning": "high"},
+            {"provider": "anthropic", "model": "claude-opus-4-7", "reasoning": "high"},
         ],
     },
-    # Best quality, but coder/ingestor/report stay on Sonnet (they're high-volume)
+    # Best quality across every core agent.
     "max": {
-        "defaults": {"model": "claude-opus-4-6", "reasoning": "high"},
-        "scientist": {"model": "claude-opus-4-6", "reasoning": "max"},
+        "defaults": {"model": "claude-opus-4-7", "reasoning": "high"},
+        "scientist": {"model": "claude-opus-4-7", "reasoning": "max"},
         "coder": {"model": "claude-sonnet-4-6", "reasoning": "high"},
         "ingestor": {"model": "claude-sonnet-4-6", "reasoning": "high"},
         "report": {"model": "claude-sonnet-4-6", "reasoning": "high"},
         "summarizer": {
             "provider": "openai",
-            "model": "gpt-5.4-mini",
+            "model": "gpt-5.5-nano",
             "reasoning": "off",
             "mode": "api",
         },
         "critics": [
             {"provider": "openai", "model": "gpt-5.5", "reasoning": "max"},
-            {"provider": "anthropic", "model": "claude-opus-4-6", "reasoning": "max"},
+            {"provider": "anthropic", "model": "claude-opus-4-7", "reasoning": "max"},
         ],
     },
 }
 
-# Model mapping: Anthropic -> OpenAI equivalents
-# opus/sonnet -> gpt-5.5, haiku -> gpt-5.4-nano
+# Model mapping: Anthropic -> OpenAI equivalents.
+# Built-in OpenAI presets stay on the GPT-5.5 model family. SDK agents use
+# the full tool-capable model; lightweight API sidecars can use mini/nano.
 _OPENAI_PRESETS: dict[str, dict] = {
     "turbo-openai": {
         "defaults": {
             "provider": "openai",
-            "model": "gpt-5.4-nano",
+            "model": "gpt-5.5",
             "reasoning": "off",
         },
         "summarizer": {
             "provider": "openai",
-            "model": "gpt-5.4-nano",
+            "model": "gpt-5.5-nano",
             "reasoning": "off",
             "mode": "api",
         },
         "critics": [
-            {"provider": "openai", "model": "gpt-5.4-nano", "reasoning": "off"},
-            {"provider": "openai", "model": "gpt-5.4-nano", "reasoning": "off"},
+            {"provider": "openai", "model": "gpt-5.5", "reasoning": "off"},
+            {"provider": "openai", "model": "gpt-5.5", "reasoning": "off"},
         ],
     },
     "fast-openai": {
@@ -187,13 +188,13 @@ _OPENAI_PRESETS: dict[str, dict] = {
         "scientist": {"provider": "openai", "model": "gpt-5.5", "reasoning": "low"},
         "summarizer": {
             "provider": "openai",
-            "model": "gpt-5.4-nano",
+            "model": "gpt-5.5-nano",
             "reasoning": "off",
             "mode": "api",
         },
         "critics": [
             {"provider": "openai", "model": "gpt-5.5", "reasoning": "low"},
-            {"provider": "openai", "model": "gpt-5.4-mini", "reasoning": "low"},
+            {"provider": "openai", "model": "gpt-5.5", "reasoning": "low"},
         ],
     },
     "default-openai": {
@@ -205,12 +206,12 @@ _OPENAI_PRESETS: dict[str, dict] = {
         "scientist": {"provider": "openai", "model": "gpt-5.5", "reasoning": "medium"},
         "summarizer": {
             "provider": "openai",
-            "model": "gpt-5.4-nano",
+            "model": "gpt-5.5-nano",
             "reasoning": "off",
             "mode": "api",
         },
         "critics": [
-            {"provider": "openai", "model": "gpt-5.4-mini", "reasoning": "medium"},
+            {"provider": "openai", "model": "gpt-5.5", "reasoning": "medium"},
             {"provider": "openai", "model": "gpt-5.5", "reasoning": "medium"},
         ],
     },
@@ -225,13 +226,13 @@ _OPENAI_PRESETS: dict[str, dict] = {
         "assessor": {"provider": "openai", "model": "gpt-5.5", "reasoning": "medium"},
         "summarizer": {
             "provider": "openai",
-            "model": "gpt-5.4-nano",
+            "model": "gpt-5.5-nano",
             "reasoning": "off",
             "mode": "api",
         },
         "critics": [
             {"provider": "openai", "model": "gpt-5.5", "reasoning": "high"},
-            {"provider": "openai", "model": "gpt-5.4-mini", "reasoning": "high"},
+            {"provider": "openai", "model": "gpt-5.5", "reasoning": "high"},
         ],
     },
     "max-openai": {
@@ -246,13 +247,13 @@ _OPENAI_PRESETS: dict[str, dict] = {
         "report": {"provider": "openai", "model": "gpt-5.5", "reasoning": "high"},
         "summarizer": {
             "provider": "openai",
-            "model": "gpt-5.4-nano",
+            "model": "gpt-5.5-nano",
             "reasoning": "off",
             "mode": "api",
         },
         "critics": [
             {"provider": "openai", "model": "gpt-5.5", "reasoning": "max"},
-            {"provider": "openai", "model": "gpt-5.4-mini", "reasoning": "max"},
+            {"provider": "openai", "model": "gpt-5.5", "reasoning": "max"},
         ],
     },
 }

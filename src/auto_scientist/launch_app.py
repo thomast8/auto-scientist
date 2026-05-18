@@ -74,6 +74,8 @@ _NUM_CRITIC_SLOTS = 4
 MODELS_BY_PROVIDER: dict[str, list[tuple[str, str]]] = {
     "openai": [
         ("gpt-5.5", "gpt-5.5"),
+        ("gpt-5.5-mini", "gpt-5.5-mini"),
+        ("gpt-5.5-nano", "gpt-5.5-nano"),
         ("gpt-5.4", "gpt-5.4"),
         ("gpt-5.4-mini", "gpt-5.4-mini"),
         ("gpt-5.4-nano", "gpt-5.4-nano"),
@@ -82,6 +84,7 @@ MODELS_BY_PROVIDER: dict[str, list[tuple[str, str]]] = {
         ("o4-mini", "o4-mini"),
     ],
     "anthropic": [
+        ("claude-opus-4-7", "claude-opus-4-7"),
         ("claude-opus-4-6", "claude-opus-4-6"),
         ("claude-sonnet-4-6", "claude-sonnet-4-6"),
         ("claude-haiku-4-5", "claude-haiku-4-5-20251001"),
