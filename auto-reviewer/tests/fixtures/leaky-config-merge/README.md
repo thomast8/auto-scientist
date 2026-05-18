@@ -69,7 +69,7 @@ Run the same fixture across model tiers and compare:
 
 | Tier | Expected result |
 |---|---|
-| `--preset turbo` (GPT-5.5, off reasoning) | Fastest current-model-family smoke; may under-probe cross-file callers |
+| `--preset turbo` (requests GPT-5.4 nano, off reasoning) | Fastest current-model-family smoke; Codex SDK may execute GPT-5.4 mini until nano is supported directly |
 | `--preset default` (GPT-5.5) | Should catch bug, may under-probe |
 | `--preset high` (GPT-5.5 high reasoning) | Should catch bug, cite docstring, probe with multi-key config |
 

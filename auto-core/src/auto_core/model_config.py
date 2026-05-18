@@ -77,18 +77,18 @@ class AgentModelConfig(BaseModel):
 
 
 _ANTHROPIC_COMPAT_PRESETS: dict[str, dict] = {
-    # Smoke tests: latest fast Anthropic model + GPT-5.5 family sidecars.
+    # Smoke tests: latest fast Anthropic model + latest OpenAI sidecars.
     "turbo": {
         "defaults": {"model": "claude-haiku-4-5-20251001", "reasoning": "off"},
         "summarizer": {
             "provider": "openai",
-            "model": "gpt-5.5-nano",
+            "model": "gpt-5.4-nano",
             "reasoning": "off",
             "mode": "api",
         },
         "critics": [
             {"provider": "anthropic", "model": "claude-haiku-4-5-20251001", "reasoning": "off"},
-            {"provider": "openai", "model": "gpt-5.5", "reasoning": "off"},
+            {"provider": "openai", "model": "gpt-5.4-nano", "reasoning": "off"},
         ],
     },
     # Quick but competent: latest fast defaults, stronger planner.
@@ -97,12 +97,12 @@ _ANTHROPIC_COMPAT_PRESETS: dict[str, dict] = {
         "scientist": {"model": "claude-sonnet-4-6", "reasoning": "low"},
         "summarizer": {
             "provider": "openai",
-            "model": "gpt-5.5-nano",
+            "model": "gpt-5.4-nano",
             "reasoning": "off",
             "mode": "api",
         },
         "critics": [
-            {"provider": "openai", "model": "gpt-5.5-mini", "reasoning": "low"},
+            {"provider": "openai", "model": "gpt-5.4-mini", "reasoning": "low"},
             {"provider": "anthropic", "model": "claude-haiku-4-5-20251001", "reasoning": "low"},
         ],
     },
@@ -112,12 +112,12 @@ _ANTHROPIC_COMPAT_PRESETS: dict[str, dict] = {
         "scientist": {"model": "claude-opus-4-7", "reasoning": "medium"},
         "summarizer": {
             "provider": "openai",
-            "model": "gpt-5.5-nano",
+            "model": "gpt-5.4-nano",
             "reasoning": "off",
             "mode": "api",
         },
         "critics": [
-            {"provider": "openai", "model": "gpt-5.5-mini", "reasoning": "medium"},
+            {"provider": "openai", "model": "gpt-5.4-mini", "reasoning": "medium"},
             {"provider": "anthropic", "model": "claude-sonnet-4-6", "reasoning": "medium"},
         ],
     },
@@ -129,7 +129,7 @@ _ANTHROPIC_COMPAT_PRESETS: dict[str, dict] = {
         "assessor": {"model": "claude-opus-4-7", "reasoning": "medium"},
         "summarizer": {
             "provider": "openai",
-            "model": "gpt-5.5-nano",
+            "model": "gpt-5.4-nano",
             "reasoning": "off",
             "mode": "api",
         },
@@ -147,7 +147,7 @@ _ANTHROPIC_COMPAT_PRESETS: dict[str, dict] = {
         "report": {"model": "claude-sonnet-4-6", "reasoning": "high"},
         "summarizer": {
             "provider": "openai",
-            "model": "gpt-5.5-nano",
+            "model": "gpt-5.4-nano",
             "reasoning": "off",
             "mode": "api",
         },
@@ -159,24 +159,24 @@ _ANTHROPIC_COMPAT_PRESETS: dict[str, dict] = {
 }
 
 # Model mapping: Anthropic -> OpenAI equivalents.
-# Built-in OpenAI presets stay on the GPT-5.5 model family. SDK agents use
-# the full tool-capable model; lightweight API sidecars can use mini/nano.
+# Built-in OpenAI presets use the latest available OpenAI model for each size
+# class: full GPT-5.5, GPT-5.4 mini, and GPT-5.4 nano.
 _OPENAI_PRESETS: dict[str, dict] = {
     "turbo-openai": {
         "defaults": {
             "provider": "openai",
-            "model": "gpt-5.5",
+            "model": "gpt-5.4-nano",
             "reasoning": "off",
         },
         "summarizer": {
             "provider": "openai",
-            "model": "gpt-5.5-nano",
+            "model": "gpt-5.4-nano",
             "reasoning": "off",
             "mode": "api",
         },
         "critics": [
-            {"provider": "openai", "model": "gpt-5.5", "reasoning": "off"},
-            {"provider": "openai", "model": "gpt-5.5", "reasoning": "off"},
+            {"provider": "openai", "model": "gpt-5.4-nano", "reasoning": "off"},
+            {"provider": "openai", "model": "gpt-5.4-nano", "reasoning": "off"},
         ],
     },
     "fast-openai": {
@@ -188,13 +188,13 @@ _OPENAI_PRESETS: dict[str, dict] = {
         "scientist": {"provider": "openai", "model": "gpt-5.5", "reasoning": "low"},
         "summarizer": {
             "provider": "openai",
-            "model": "gpt-5.5-nano",
+            "model": "gpt-5.4-nano",
             "reasoning": "off",
             "mode": "api",
         },
         "critics": [
             {"provider": "openai", "model": "gpt-5.5", "reasoning": "low"},
-            {"provider": "openai", "model": "gpt-5.5", "reasoning": "low"},
+            {"provider": "openai", "model": "gpt-5.4-mini", "reasoning": "low"},
         ],
     },
     "default-openai": {
@@ -206,12 +206,12 @@ _OPENAI_PRESETS: dict[str, dict] = {
         "scientist": {"provider": "openai", "model": "gpt-5.5", "reasoning": "medium"},
         "summarizer": {
             "provider": "openai",
-            "model": "gpt-5.5-nano",
+            "model": "gpt-5.4-nano",
             "reasoning": "off",
             "mode": "api",
         },
         "critics": [
-            {"provider": "openai", "model": "gpt-5.5", "reasoning": "medium"},
+            {"provider": "openai", "model": "gpt-5.4-mini", "reasoning": "medium"},
             {"provider": "openai", "model": "gpt-5.5", "reasoning": "medium"},
         ],
     },
@@ -226,13 +226,13 @@ _OPENAI_PRESETS: dict[str, dict] = {
         "assessor": {"provider": "openai", "model": "gpt-5.5", "reasoning": "medium"},
         "summarizer": {
             "provider": "openai",
-            "model": "gpt-5.5-nano",
+            "model": "gpt-5.4-nano",
             "reasoning": "off",
             "mode": "api",
         },
         "critics": [
             {"provider": "openai", "model": "gpt-5.5", "reasoning": "high"},
-            {"provider": "openai", "model": "gpt-5.5", "reasoning": "high"},
+            {"provider": "openai", "model": "gpt-5.4-mini", "reasoning": "high"},
         ],
     },
     "max-openai": {
@@ -247,13 +247,13 @@ _OPENAI_PRESETS: dict[str, dict] = {
         "report": {"provider": "openai", "model": "gpt-5.5", "reasoning": "high"},
         "summarizer": {
             "provider": "openai",
-            "model": "gpt-5.5-nano",
+            "model": "gpt-5.4-nano",
             "reasoning": "off",
             "mode": "api",
         },
         "critics": [
             {"provider": "openai", "model": "gpt-5.5", "reasoning": "max"},
-            {"provider": "openai", "model": "gpt-5.5", "reasoning": "max"},
+            {"provider": "openai", "model": "gpt-5.4-mini", "reasoning": "max"},
         ],
     },
 }

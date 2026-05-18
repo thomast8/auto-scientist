@@ -253,13 +253,13 @@ models:
 
 | Preset | Use case | Scientist | Critics |
 |--------|----------|-----------|---------|
-| `turbo` | Smoke tests | GPT-5.5 (off reasoning) | GPT-5.5 + GPT-5.5 |
-| `fast` | Speed/cost | GPT-5.5 (low reasoning) | GPT-5.5 + GPT-5.5 |
-| `default` | Balanced | GPT-5.5 (medium reasoning) | GPT-5.5 + GPT-5.5 |
-| `high` | Quality | GPT-5.5 (high reasoning) | GPT-5.5 + GPT-5.5 |
-| `max` | Maximum | GPT-5.5 (max reasoning) | GPT-5.5 + GPT-5.5 |
+| `turbo` | Smoke tests | GPT-5.4 nano (off reasoning) | GPT-5.4 nano + GPT-5.4 nano |
+| `fast` | Speed/cost | GPT-5.5 (low reasoning) | GPT-5.5 + GPT-5.4 mini |
+| `default` | Balanced | GPT-5.5 (medium reasoning) | GPT-5.4 mini + GPT-5.5 |
+| `high` | Quality | GPT-5.5 (high reasoning) | GPT-5.5 + GPT-5.4 mini |
+| `max` | Maximum | GPT-5.5 (max reasoning) | GPT-5.5 + GPT-5.4 mini |
 
-All core agents default to the [Codex CLI](https://github.com/openai/codex) OpenAI backend with the GPT-5.5 model family. SDK agents currently use full GPT-5.5 because the local SDK path needs reliable tool output; lightweight API sidecars such as summaries use GPT-5.5 nano. Use `--provider anthropic` or an `*-anthropic` preset to opt into the Claude Code SDK; those presets use the latest Claude family models (Haiku 4.5, Sonnet 4.6, and Opus 4.7). Critics support mixed providers (OpenAI, Google, Anthropic), with API-mode critics using their provider API keys and per-token billing.
+All core agents default to the [Codex CLI](https://github.com/openai/codex) OpenAI backend. Built-in OpenAI presets use the latest available model in each size class: GPT-5.5 for full-size lanes, GPT-5.4 mini for mini lanes, and GPT-5.4 nano for nano lanes. Turbo requests GPT-5.4 nano for every lane, but the Codex SDK currently promotes SDK-mode nano calls to GPT-5.4 mini under ChatGPT subscription auth until Codex supports nano directly; API-mode sidecars keep the requested nano model. Use `--provider anthropic` or an `*-anthropic` preset to opt into the Claude Code SDK; those presets use the latest Claude family models (Haiku 4.5, Sonnet 4.6, and Opus 4.7). Critics support mixed providers (OpenAI, Google, Anthropic), with API-mode critics using their provider API keys and per-token billing.
 
 ## CLI Reference
 

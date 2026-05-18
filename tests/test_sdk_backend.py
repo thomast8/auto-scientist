@@ -543,6 +543,43 @@ class TestCodexBackend:
         await backend.close()
 
     @pytest.mark.asyncio
+    async def test_codex_nano_uses_cheapest_supported_runtime_model(self):
+        """Codex gets the current fallback model while config still requests nano."""
+        from auto_core.sdk_backend import CodexBackend, SDKOptions
+
+        chat_kwargs_captured: dict = {}
+        mock_client = AsyncMock()
+        mock_client.start = AsyncMock()
+        mock_client.close = AsyncMock()
+
+        async def mock_chat(*args, **kwargs):
+            chat_kwargs_captured.update(kwargs)
+            for step in [self._make_mock_step("ok", "thr-1")]:
+                yield step
+
+        mock_client.chat = mock_chat
+
+        backend = CodexBackend()
+        opts = SDKOptions(
+            system_prompt="test",
+            allowed_tools=["Read"],
+            max_turns=10,
+            model="gpt-5.4-nano",
+        )
+
+        with patch(
+            "auto_core.sdk_backend.CodexClient.connect_stdio",
+            return_value=mock_client,
+        ):
+            async for _ in backend.query("hello", opts):
+                pass
+
+        assert opts.model == "gpt-5.4-nano"
+        assert chat_kwargs_captured["thread_config"].model == "gpt-5.4-mini"
+
+        await backend.close()
+
+    @pytest.mark.asyncio
     async def test_counts_multiple_steps_as_turns(self):
         """CodexBackend.query counts all ConversationSteps as num_turns."""
         from auto_core.sdk_backend import CodexBackend, SDKOptions
