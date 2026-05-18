@@ -94,8 +94,10 @@ def test_element_costs_yaml(tmp_path):
     for elem in ["Fe", "Cr", "Ni", "Mo", "V"]:
         assert elem in costs
         # Costs are nested: {elem: {price_usd_per_kg: float, ...}}
-        price = costs[elem] if isinstance(costs[elem], (int, float)) else (
-            costs[elem]["price_usd_per_kg"]
+        price = (
+            costs[elem]
+            if isinstance(costs[elem], int | float)
+            else (costs[elem]["price_usd_per_kg"])
         )
         assert price > 0
 
