@@ -10,6 +10,8 @@ from auto_core.sdk_backend import SDKMessage
 from auto_scientist.agents.coder import (
     _check_runtime_success,
     _validate_plan_constraints,
+)
+from auto_scientist.agents.coder import (
     run_coder as _run_coder,
 )
 

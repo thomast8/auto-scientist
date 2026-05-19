@@ -488,7 +488,7 @@ class TestRunCommandPresets:
         assert result.exit_code == 0
         mc = mock_orch.call_args.kwargs["model_config"]
         assert mc.summarizer is not None
-        assert mc.summarizer.model == "gpt-5.5"
+        assert mc.summarizer.model == "gpt-5.4-nano"
 
     @patch("auto_scientist.cli.PipelineApp")
     @patch("auto_scientist.cli.Orchestrator")

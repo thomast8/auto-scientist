@@ -75,11 +75,22 @@ def strip_report_preamble(
 
     headings_to_match = expected_headings if expected_headings is not None else _EXPECTED_HEADINGS
     normalized_expected = [heading.casefold() for heading in headings_to_match if heading.strip()]
+    start_candidates = []
     heading_candidates = []
     for idx, heading in headings:
         heading_key = heading.casefold()
+        normalized_heading = _normalize_report_heading(heading)
+        if normalized_heading in _REPORT_START_HEADINGS or normalized_heading.startswith(
+            "review of "
+        ):
+            start_candidates.append(idx)
         if any(expected in heading_key for expected in normalized_expected):
             heading_candidates.append(idx)
+
+    if start_candidates:
+        has_transcript_markers = any(marker in raw for marker in _REPORT_TRANSCRIPT_MARKERS)
+        start_idx = start_candidates[-1] if has_transcript_markers else start_candidates[0]
+        return "\n".join(lines[start_idx:]).strip()
 
     if heading_candidates:
         has_transcript_markers = any(marker in raw for marker in _REPORT_TRANSCRIPT_MARKERS)

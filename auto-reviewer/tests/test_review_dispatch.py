@@ -282,6 +282,8 @@ class TestIntakeGeneratedConfigGuards:
 
         repo = tmp_path / "repo"
         repo.mkdir()
+        repo_clone = output_dir / "repo_clone"
+        repo_clone.mkdir()
         config_path = output_dir / "domain_config.json"
         config_path.write_text(
             json.dumps(
@@ -310,9 +312,9 @@ class TestIntakeGeneratedConfigGuards:
                         {
                             "name": "review",
                             "description": "review",
-                            "run_cwd": str(repo),
+                            "run_cwd": str(repo_clone),
                             "run_command": "uv run pytest -x -s {script_path}",
-                            "repo_path": str(repo),
+                            "repo_path": str(repo_clone),
                             "pr_ref": "owner/repo#1",
                             "base_ref": "main",
                             "head_ref": "feature/demo",
