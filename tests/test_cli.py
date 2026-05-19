@@ -4,7 +4,7 @@ from unittest.mock import MagicMock, patch
 
 import yaml
 from auto_core.model_config import ModelConfig
-from auto_core.state import ExperimentState
+from auto_core.state import DeadEnd, ExperimentState
 from click.testing import CliRunner
 
 from auto_scientist.cli import (
@@ -122,7 +122,13 @@ class TestStatusCommand:
             goal="test",
             phase="iteration",
             iteration=2,
-            dead_ends=["Tried polynomial fit, R^2 < 0.5"],
+            dead_ends=[
+                DeadEnd(
+                    iteration=1,
+                    description="Tried polynomial fit",
+                    evidence="R^2 < 0.5",
+                )
+            ],
         )
         state.save(tmp_path / "state.json")
 
@@ -330,6 +336,37 @@ class TestRunOrchestratorCleanup:
 
 
 class TestRunCommandPresets:
+    @patch("auto_scientist.cli.PipelineApp")
+    @patch("auto_scientist.cli.Orchestrator")
+    def test_turbo_preset_uses_nano_models(self, mock_orch, mock_app_cls, tmp_path):
+        data_file = tmp_path / "data.csv"
+        data_file.write_text("a,b\n1,2\n")
+
+        runner = CliRunner()
+        result = runner.invoke(
+            cli,
+            [
+                "run",
+                "--data",
+                str(data_file),
+                "--goal",
+                "test",
+                "--preset",
+                "turbo",
+            ],
+        )
+
+        assert result.exit_code == 0
+        mc = mock_orch.call_args.kwargs["model_config"]
+        assert mc.defaults.provider == "openai"
+        assert mc.defaults.model == "gpt-5.4-nano"
+        assert mc.summarizer is not None
+        assert mc.summarizer.model == "gpt-5.4-nano"
+        assert [critic.model for critic in mc.critics] == [
+            "gpt-5.4-nano",
+            "gpt-5.4-nano",
+        ]
+
     @patch("auto_scientist.cli.PipelineApp")
     @patch("auto_scientist.cli.Orchestrator")
     def test_fast_preset(self, mock_orch, mock_app_cls, tmp_path):

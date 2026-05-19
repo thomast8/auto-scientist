@@ -10,10 +10,11 @@ import json
 import logging
 from pathlib import Path
 
+from auto_core.config import reject_generated_sandbox_network_access
 from auto_core.notebook import NOTEBOOK_FILENAME
 from auto_core.retry import QueryResult, agent_retry_loop
 from auto_core.retry import ValidationError as RetryValidationError
-from auto_core.sdk_backend import CODEX_SANDBOX_ADDENDUM, SDKOptions, get_backend
+from auto_core.sdk_backend import SDKOptions, codex_sandbox_addendum, get_backend
 from auto_core.sdk_utils import (
     append_block_to_buffer,
     collect_text_from_query,
@@ -77,7 +78,7 @@ async def run_ingestor(
     prompt_provider = resolve_prompt_provider(provider)
     system_prompt = build_ingestor_system(prompt_provider)
     if provider == "openai":
-        system_prompt += CODEX_SANDBOX_ADDENDUM
+        system_prompt += codex_sandbox_addendum()
     budget = prepare_turn_budget(system_prompt, max_turns, tools, provider=provider)
     backend = get_backend(provider)
     options = SDKOptions(
@@ -165,6 +166,7 @@ async def run_ingestor(
                             f'(e.g. ["data/file.csv"]), got dict: '
                             f"{raw_config['data_paths']}"
                         )
+                    reject_generated_sandbox_network_access(raw_config)
                     DomainConfig.model_validate(raw_config)
                 except (
                     ValidationError,

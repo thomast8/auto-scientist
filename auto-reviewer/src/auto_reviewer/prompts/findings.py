@@ -73,6 +73,11 @@ Produce a single markdown document with these sections in this order:
       close each one. Explicitly call these out as follow-up work, not
       blockers.
 
+    ## Ruled out
+      Any `dead_ends` entries: review paths confirmed unproductive or
+      refuted, plus the evidence that closed them. These are negative
+      results, not open questions.
+
     ## Known limitations
       What the review did NOT cover (e.g. sandbox isolation of probes,
       performance regressions, style, out-of-scope changes in the PR).
@@ -105,6 +110,7 @@ Notebook (read via mcp__notebook__read_notebook tool):
 
 Prior predictions:
 {prediction_tree}
+{dead_ends_section}
 
 Workspace path: {workspace_path}
 </context>"""

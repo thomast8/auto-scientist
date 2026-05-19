@@ -111,6 +111,10 @@ Decompose the review goal into concrete sub-questions. For each:
   - `evidence[]`: probe IDs / notebook entries that support coverage
   - `gaps[]`: specific unanswered aspects
 
+Treat `dead_ends` as negative coverage evidence: they show a path was
+explored and closed. If a sub-question has only dead ends and no positive
+or confirmed findings, coverage should not be rated thorough.
+
 Roll up into `overall_coverage` and `recommendation`. You may only
 recommend "stop" if `overall_coverage == "thorough"`.
 </instructions>
@@ -130,46 +134,37 @@ Only stop when coverage is thorough. JSON only.
 
 ASSESSOR_USER = """\
 <context>
-Review goal: {goal}
-PR: {pr_ref}
-Iteration: {iteration}
-Proposed stop reason: {stop_reason}
-
-Repository knowledge:
-{repo_knowledge}
-
-Notebook TOC:
-{notebook_toc}
-
-Prior predictions:
-{prediction_tree}
-
-Pending abductions:
-{pending_abductions}
+<review_goal>{goal}</review_goal>
+<stop_reason>{stop_reason}</stop_reason>
+<repo_knowledge>{domain_knowledge}</repo_knowledge>
+<prediction_history>{prediction_history}</prediction_history>
+{pending_abductions_section}{dead_ends_section}<notebook_toc>{notebook_content}</notebook_toc>
 </context>"""
 
 
 STOP_DEBATE_SYSTEM = """\
 <role>
-You are {persona}, challenging a proposal to stop the review. You assess
+You are an adversarial reviewer challenging a proposal to stop the review. You assess
 whether the proposed stop reason is premature given what's left
 unresolved. Your persona charter:
 
-{persona_charter}
+{persona_text}
 </role>
 
 <instructions>
+{persona_instructions}
+
 If the review has left high-value suspicions unexplored, argue for
 continuing. If coverage is genuinely thorough, say so - do not argue for
 its own sake. Cite specific sub-questions or pending open questions.
+If dead ends are present, treat each as negative coverage evidence. A
+sub-question covered only by dead ends without positive findings is a
+reason to challenge an early stop, not endorse it.
 </instructions>
 
 <output_format>
 JSON only. Schema:
-
-    concerns: list[{claim, rationale, severity}]
-    recommendation: "continue" | "stop"
-    rationale: str
+{critic_output_schema}
 </output_format>
 
 <recap>
@@ -179,20 +174,23 @@ Challenge the stop decision by concrete gap, or concede. JSON only.
 
 STOP_DEBATE_USER = """\
 <context>
-Review goal: {goal}
-PR: {pr_ref}
-Iteration: {iteration}
-Proposed stop reason: {stop_reason}
+<review_goal>{goal}</review_goal>
+<repo_knowledge>{domain_knowledge}</repo_knowledge>
+{notebook_section}
+<surveyor_observations>{analysis_json}</surveyor_observations>
+<prediction_history>{prediction_history}</prediction_history>
+{dead_ends_section}
+</context>
 
-Assessor output:
-{assessment_json}
+<data>
+<stop_reason>{stop_reason}</stop_reason>
+<completeness_assessment>{completeness_assessment}</completeness_assessment>
+</data>
 
-Notebook TOC:
-{notebook_toc}
-
-Prior predictions:
-{prediction_tree}
-</context>"""
+<task>
+Challenge the stop decision if the assessment or evidence leaves concrete
+review gaps. Output structured JSON matching the schema.
+</task>"""
 
 
 STOP_REVISION_SYSTEM = """\
@@ -210,6 +208,8 @@ Output schema matches the Hunter's initial plan (hypothesis, strategy,
 changes, expected_impact, should_stop, stop_reason, notebook_entry,
 testable_predictions, refutation_reasoning, deprioritized_abductions).
 Set should_stop according to the upheld / withdrawn decision.
+The revised BugPlan must respect dead ends if present and must not
+re-chase a closed path without explicit reopening evidence.
 </instructions>
 
 <output_format>
@@ -223,22 +223,30 @@ Uphold or withdraw. Full plan JSON, not a diff.
 
 STOP_REVISION_USER = """\
 <context>
-Review goal: {goal}
-Iteration: {iteration}
-Proposed stop reason: {stop_reason}
+<review_goal>{goal}</review_goal>
+<repo_knowledge>{domain_knowledge}</repo_knowledge>
+<notebook_toc>{notebook_content}</notebook_toc>
+<surveyor_observations>{analysis_json}</surveyor_observations>
+<prediction_history>{prediction_history}</prediction_history>
+{dead_ends_section}
+</context>
 
-Concern ledger (from stop debate):
-{concern_ledger}
+<data>
+<original_stop_reason>{stop_reason}</original_stop_reason>
+<completeness_assessment>{completeness_assessment}</completeness_assessment>
+<concern_ledger>{concern_ledger}</concern_ledger>
+<plan_schema>{plan_schema}</plan_schema>
+</data>
 
-Assessor output:
-{assessment_json}
-
-Notebook TOC:
-{notebook_toc}
-
-Prior predictions:
-{prediction_tree}
-</context>"""
+<task>
+Either uphold the stop decision or withdraw it.
+If maintaining: update stop_reason to address each concern.
+If withdrawing: produce a full BugPlan targeting the identified gaps.
+The plan must respect <dead_ends> if present and not re-chase any
+recorded dead end without explicit reopening justification.
+The new version is: {version}
+</task>
+"""
 
 
 # Aliases so the shared stop-gate agent code can reference the canonical

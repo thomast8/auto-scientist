@@ -7,8 +7,13 @@ from unittest.mock import MagicMock, patch
 import pytest
 from auto_core.sdk_backend import SDKMessage
 
-from auto_scientist.agents.coder import _check_runtime_success
-from auto_scientist.agents.coder import run_coder as _run_coder
+from auto_scientist.agents.coder import (
+    _check_runtime_success,
+    _validate_plan_constraints,
+)
+from auto_scientist.agents.coder import (
+    run_coder as _run_coder,
+)
 
 _SUCCESS_RUN_RESULT = json.dumps(
     {"success": True, "return_code": 0, "timed_out": False, "error": None}
@@ -274,6 +279,7 @@ class TestRunCoder:
         async def fake_query(prompt, options):
             captured["prompt"] = prompt
             captured["system"] = options.system_prompt
+            captured["options"] = options
             version_dir = tmp_path / "v01"
             version_dir.mkdir(parents=True, exist_ok=True)
             (version_dir / "experiment.py").write_text("print('ok')")
@@ -297,6 +303,82 @@ class TestRunCoder:
         assert "uv run" not in captured["prompt"]
         # System prompt actionable step should also have python3
         assert "python3 {script_path}" in captured["system"]
+        assert "Dependency installation is not available" in captured["system"]
+        assert "Dependencies are installed automatically" not in captured["system"]
+        assert captured["options"].network_access is False
+
+    @pytest.mark.asyncio
+    @patch("auto_scientist.agents.coder.get_backend")
+    async def test_openai_provider_with_network_access_allows_pep723_install(
+        self, mock_get_backend, tmp_path
+    ):
+        captured = {}
+
+        async def fake_query(prompt, options):
+            captured["system"] = options.system_prompt
+            captured["options"] = options
+            version_dir = tmp_path / "v01"
+            version_dir.mkdir(parents=True, exist_ok=True)
+            (version_dir / "experiment.py").write_text("print('ok')")
+            _write_success_result(version_dir)
+            yield _result_msg()
+
+        mock_backend = MagicMock()
+        mock_backend.query = fake_query
+        mock_get_backend.return_value = mock_backend
+
+        await run_coder(
+            plan={"hypothesis": "test", "changes": []},
+            previous_script=tmp_path / "nonexistent" / "experiment.py",
+            output_dir=tmp_path,
+            version="v01",
+            provider="openai",
+            network_access=True,
+        )
+
+        assert "Dependency installation is enabled" in captured["system"]
+        assert "PEP 723" in captured["system"]
+        assert captured["options"].network_access is True
+
+    @pytest.mark.asyncio
+    @patch("auto_scientist.agents.coder.get_backend")
+    async def test_openai_provider_rewrites_chained_uv_run(self, mock_get_backend, tmp_path):
+        """Codex coder removes uv run even when ensure_deps is already chained."""
+        captured = {}
+
+        async def fake_query(prompt, options):
+            captured["prompt"] = prompt
+            captured["system"] = options.system_prompt
+            version_dir = tmp_path / "v01"
+            version_dir.mkdir(parents=True, exist_ok=True)
+            (version_dir / "experiment.py").write_text("print('ok')")
+            _write_success_result(version_dir)
+            yield _result_msg()
+
+        mock_backend = MagicMock()
+        mock_backend.query = fake_query
+        mock_get_backend.return_value = mock_backend
+
+        run_command = "python3 _ensure_deps.py {script_path} && uv run {script_path}"
+        await run_coder(
+            plan={"hypothesis": "test", "changes": []},
+            previous_script=tmp_path / "nonexistent" / "experiment.py",
+            output_dir=tmp_path,
+            version="v01",
+            provider="openai",
+            run_command=run_command,
+        )
+
+        assert "uv run" not in captured["prompt"]
+        assert "&& python3 {script_path}" in captured["prompt"]
+        assert (
+            "Run: `python3 _ensure_deps.py {script_path} && python3 {script_path}"
+            in captured["system"]
+        )
+        assert (
+            "Run: `python3 _ensure_deps.py {script_path} && uv run {script_path}"
+            not in captured["system"]
+        )
 
     @pytest.mark.asyncio
     @patch("auto_core.sdk_backend.claude_query")
@@ -830,3 +912,56 @@ class TestCoderPromptBuilder:
 
         assert system.count("<recap>") == 2
         assert "You do not change methodology or use the lab notebook." in system
+
+    def test_prompt_treats_dependency_and_plot_constraints_as_hard(self):
+        from auto_scientist.prompts.coder import build_coder_system
+
+        system = build_coder_system("gpt")
+
+        assert "must be empty" in system
+        assert "no plan constraint forbids plots" in system
+        assert "Obey explicit plan constraints on dependencies" in system
+
+
+class TestCoderPlanConstraintValidation:
+    def test_rejects_third_party_when_plan_requires_standard_library(self, tmp_path):
+        script = tmp_path / "experiment.py"
+        script.write_text(
+            '# /// script\n# dependencies = ["matplotlib"]\n# ///\n'
+            "import csv\n"
+            "import matplotlib.pyplot as plt\n"
+        )
+        plan = {"expected_impact": "Use only the Python standard library; no third-party packages."}
+
+        ok, error = _validate_plan_constraints(script, plan)
+
+        assert ok is False
+        assert "forbids third-party packages" in error
+        assert "matplotlib" in error
+
+    def test_rejects_plots_when_plan_forbids_plots(self, tmp_path):
+        script = tmp_path / "experiment.py"
+        script.write_text(
+            "# /// script\n# dependencies = []\n# ///\n"
+            "from pathlib import Path\n"
+            "Path('fit.png').write_text('not actually an image')\n"
+        )
+        plan = {"changes": [{"what": "Compute numeric summaries with no plots."}]}
+
+        ok, error = _validate_plan_constraints(script, plan)
+
+        assert ok is False
+        assert "forbids plots" in error
+        assert ".png" in error
+
+    def test_allows_standard_library_without_plots(self, tmp_path):
+        script = tmp_path / "experiment.py"
+        script.write_text(
+            "# /// script\n# dependencies = []\n# ///\nimport csv\nimport statistics\nprint('ok')\n"
+        )
+        plan = {"changes": [{"what": "Use standard library only and no plots."}]}
+
+        ok, error = _validate_plan_constraints(script, plan)
+
+        assert ok is True
+        assert error == ""

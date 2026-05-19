@@ -17,7 +17,7 @@ from auto_core.iteration_manifest import (
     load_manifest,
 )
 from auto_core.runner import RunResult
-from auto_core.state import ExperimentState, PredictionRecord, VersionEntry
+from auto_core.state import DeadEnd, ExperimentState, PredictionRecord, VersionEntry
 
 logger = logging.getLogger(__name__)
 
@@ -32,6 +32,29 @@ INFRA_FILES = {
     "plan.json",
     "debate.json",
 }
+
+_PROMPT_STRING_LIMIT = 4000
+
+
+def _sanitize_prompt_data(value: Any) -> Any:
+    """Recursively escape untrusted text before injecting it into prompts."""
+    if isinstance(value, str):
+        text = value
+        if len(text) > _PROMPT_STRING_LIMIT:
+            text = f"{text[:_PROMPT_STRING_LIMIT]}... [truncated]"
+        return text.replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;")
+    if isinstance(value, list):
+        return [_sanitize_prompt_data(item) for item in value]
+    if isinstance(value, dict):
+        return {
+            _sanitize_prompt_data(key): _sanitize_prompt_data(item) for key, item in value.items()
+        }
+    return value
+
+
+def _format_prompt_json(value: Any) -> str:
+    """Format JSON data that is safe to embed inside prompt markup."""
+    return json.dumps(_sanitize_prompt_data(value), indent=2)
 
 
 def persist_buffer(
@@ -228,16 +251,7 @@ def load_final_plan_from_disk(version_dir: Path, state: ExperimentState) -> dict
         logger.error(f"Cannot load final plan: {e}")
         return None
 
-    existing = {
-        p.pred_id for p in state.prediction_history if p.iteration_prescribed == state.iteration
-    }
-    if not existing:
-        apply_prediction_updates(plan, state)
-    else:
-        logger.info(
-            f"Predictions for iteration {state.iteration + 1} already in state, "
-            f"skipping re-application ({len(existing)} found)"
-        )
+    apply_final_plan_updates(plan, state, skip_existing_predictions=True)
 
     logger.info(f"Loaded final plan from {plan_path}")
     return plan
@@ -369,8 +383,6 @@ def apply_prediction_updates(plan: dict[str, Any], state: ExperimentState) -> No
     Skips malformed or empty prediction entries and carried-forward predictions
     (which already have PredictionRecords).
     """
-    known_pred_ids = {r.pred_id for r in state.prediction_history if r.pred_id}
-
     known_pred_ids = {r.pred_id for r in state.prediction_history if r.pred_id}
 
     predictions = plan.get("testable_predictions", [])
@@ -577,13 +589,32 @@ def store_refutation_reasoning(plan: dict[str, Any], state: ExperimentState) -> 
     """Extract refutation_reasoning from the Scientist's plan and append to state."""
     reasoning_list = plan.get("refutation_reasoning", [])
     stored_ids: list[str] = []
+    existing = {
+        (
+            entry.get("refuted_pred_id", ""),
+            entry.get("assumptions_violated", ""),
+            entry.get("alternative_explanation", ""),
+            entry.get("testable_consequence", ""),
+        )
+        for entry in state.pending_abductions
+        if isinstance(entry, dict)
+    }
     for entry in reasoning_list:
         if not isinstance(entry, dict):
             continue
         pid = entry.get("refuted_pred_id", "")
         if not pid:
             continue
+        key = (
+            pid,
+            entry.get("assumptions_violated", ""),
+            entry.get("alternative_explanation", ""),
+            entry.get("testable_consequence", ""),
+        )
+        if key in existing:
+            continue
         state.pending_abductions.append(entry)
+        existing.add(key)
         stored_ids.append(pid)
     if stored_ids:
         logger.info(
@@ -633,7 +664,91 @@ def format_pending_abductions(state: ExperimentState) -> str:
     """
     if not state.pending_abductions:
         return ""
-    return json.dumps(state.pending_abductions, indent=2)
+    return _format_prompt_json(state.pending_abductions)
+
+
+def _dead_end_key(description: str, evidence: str) -> tuple[str, str]:
+    """Return a stable key for dead-end deduplication."""
+    return (" ".join(description.split()).casefold(), " ".join(evidence.split()).casefold())
+
+
+def record_dead_ends(plan: dict[str, Any], state: ExperimentState) -> None:
+    """Append Scientist-declared dead ends to state, stamped with current iteration.
+
+    Silently skips entries that are missing either a description or evidence.
+    Each surviving entry becomes a DeadEnd model on state.dead_ends so future
+    iterations of the Scientist, Critics, Stop Gate, and Report see it as a
+    negative constraint.
+    """
+    raw_entries = plan.get("dead_ends") or []
+    if not isinstance(raw_entries, list):
+        return
+    recorded: list[str] = []
+    existing = {_dead_end_key(entry.description, entry.evidence) for entry in state.dead_ends}
+    for entry in raw_entries:
+        if not isinstance(entry, dict):
+            continue
+        desc = (entry.get("description") or "").strip()
+        if not desc:
+            continue
+        evidence = (entry.get("evidence") or "").strip()
+        if not evidence:
+            continue
+        key = _dead_end_key(desc, evidence)
+        if key in existing:
+            continue
+        state.dead_ends.append(
+            DeadEnd(iteration=state.iteration, description=desc, evidence=evidence)
+        )
+        existing.add(key)
+        recorded.append(desc)
+    if recorded:
+        log_entries = (" ".join(desc.split())[:60] for desc in recorded)
+        logger.info(
+            f"Recorded {len(recorded)} dead end(s) at iteration {state.iteration}: "
+            f"{'; '.join(log_entries)}"
+        )
+
+
+def apply_final_plan_updates(
+    plan: dict[str, Any],
+    state: ExperimentState,
+    *,
+    skip_existing_predictions: bool = False,
+) -> None:
+    """Apply all persisted state side effects from a final plan.
+
+    Final plans can be produced on the normal path, reloaded from disk on
+    coder resume, or regenerated on revision resume. Keeping the side effects
+    together prevents predictions, abductions, and dead ends from drifting
+    across those paths.
+    """
+    existing = {
+        p.pred_id for p in state.prediction_history if p.iteration_prescribed == state.iteration
+    }
+    if skip_existing_predictions and existing:
+        logger.info(
+            f"Predictions for iteration {state.iteration + 1} already in state, "
+            f"skipping re-application ({len(existing)} found)"
+        )
+    else:
+        apply_prediction_updates(plan, state)
+
+    store_refutation_reasoning(plan, state)
+    resolve_addressed_abductions(plan, state)
+    record_dead_ends(plan, state)
+
+
+def format_dead_ends(state: ExperimentState) -> str:
+    """Format dead ends as JSON for injection into agent prompts.
+
+    Returns empty string if no dead ends have been recorded. The formatted
+    output is consumed by the Scientist (plan + revision), Critics, Stop
+    Gate, and Report so all four see the same negative-constraint list.
+    """
+    if not state.dead_ends:
+        return ""
+    return _format_prompt_json([d.model_dump() for d in state.dead_ends])
 
 
 def build_concern_ledger(debate_results: list) -> list[dict[str, Any]]:

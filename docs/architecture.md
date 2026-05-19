@@ -318,6 +318,7 @@ class DomainConfig(BaseModel):
     run_timeout_minutes: int = 120
     version_prefix: str = "v"
     protected_paths: list[str] = []
+    implementer_sandbox_network_access: bool = False
 ```
 
 ### ExperimentState
@@ -329,7 +330,7 @@ class ExperimentState(BaseModel):
     phase: str                               # "ingestion", "iteration", "report", "stopped"
     iteration: int = 0
     versions: list[VersionEntry] = []
-    dead_ends: list[str] = []
+    dead_ends: list[DeadEnd] = []            # {iteration, description, evidence}
     best_version: str | None = None
     schedule: str | None = None              # e.g., "22:00-06:00"
     consecutive_failures: int = 0

@@ -47,6 +47,7 @@ members = ["auto-core", "auto-reviewer"]
 
 [tool.uv.sources]
 auto-core = { workspace = true }
+auto-reviewer = { workspace = true }
 
 [tool.ruff]
 target-version = "py312"
@@ -70,6 +71,7 @@ python_version = "3.12"
 ignore_missing_imports = true
 warn_return_any = true
 warn_unused_configs = true
+exclude = ["auto-reviewer/tests/fixtures"]
 
 [[tool.mypy.overrides]]
 module = "tests.conftest"
@@ -77,6 +79,7 @@ ignore_errors = true  # dynamic mock modules for claude_code_sdk cannot be typed
 
 [dependency-groups]
 dev = [
+    "auto-reviewer",
     "mypy>=1.19.1",
     "numpy>=1.26.0",
     "openpyxl>=3.1.0",

@@ -55,6 +55,7 @@ class TestLaunchAppConstruction:
             for agent in ["ingestor", "analyst", "scientist", "coder", "report"]:
                 sel = app.query_one(f"#model-{agent}-provider", Select)
                 assert not sel.disabled
+                assert sel.value == "openai"
 
     async def test_prefill_from_config(self):
         cfg = ExperimentConfig(
@@ -83,6 +84,25 @@ class TestLaunchAppConstruction:
             from textual.widgets import Select
 
             assert app.query_one("#top-provider-select", Select).value == "openai"
+
+    async def test_turbo_prefill_sets_nano_model_fields(self):
+        cfg = ExperimentConfig(
+            data="/path/to/data.csv",
+            goal="Test goal",
+            preset="turbo",
+            provider="openai",
+        )
+        app = LaunchApp(prefill=cfg)
+        async with app.run_test() as pilot:
+            from textual.widgets import Select
+
+            await pilot.pause()
+            await pilot.pause()
+
+            assert app.query_one("#model-scientist-name", Select).value == "gpt-5.4-nano"
+            assert app.query_one("#model-summarizer-name", Select).value == "gpt-5.4-nano"
+            assert app.query_one("#model-critic-0-name", Select).value == "gpt-5.4-nano"
+            assert app.query_one("#model-critic-1-name", Select).value == "gpt-5.4-nano"
 
 
 class TestLaunchAppRun:

@@ -192,6 +192,40 @@ class TestRunReport:
         assert "```" not in result
 
     @pytest.mark.asyncio
+    @patch("auto_scientist.agents.report.validate_report_structure", return_value=[])
+    @patch("auto_scientist.agents.report.safe_query")
+    async def test_prefers_current_report_when_tool_output_has_report_heading(
+        self, mock_query, _mock_validate, tmp_path
+    ):
+        """Tool output with a report-like heading does not become the saved report."""
+        long_content = "Detailed findings about the investigation. " * 3
+
+        async def fake_query(**kwargs):
+            yield _assistant_msg(
+                "[tool]\n"
+                "## Executive Summary\n"
+                "Earlier report artifact.\n"
+                "[assistant]\n"
+                f"## 1. Executive Summary\n\n{long_content}"
+            )
+            yield _result_msg()
+
+        mock_query.side_effect = fake_query
+
+        state = ExperimentState(domain="test", goal="test goal")
+        notebook_path = tmp_path / "lab_notebook.xml"
+        notebook_path.write_text("# Notebook")
+
+        result = await run_report(
+            state=state,
+            notebook_path=notebook_path,
+            output_dir=tmp_path,
+        )
+
+        assert result.startswith("## 1. Executive Summary")
+        assert "Earlier report artifact" not in result
+
+    @pytest.mark.asyncio
     @patch("auto_scientist.agents.report.safe_query")
     async def test_raises_when_no_text(self, mock_query, tmp_path):
         """If the agent produces no text blocks, raise RuntimeError."""
@@ -582,3 +616,43 @@ class TestReportPromptBuilder:
 
         assert system.count("<recap>") == 2
         assert "You run once after the investigation ends." in system
+
+    def test_report_user_includes_dead_ends_when_present(self):
+        from auto_scientist.prompts.report import REPORT_USER
+
+        section = (
+            "<dead_ends>\n"
+            '[{"iteration":2,"description":"polynomial regression","evidence":"v02 r2=0.31"}]\n'
+            "</dead_ends>\n"
+        )
+        prompt = REPORT_USER.format(
+            domain="d",
+            goal="g",
+            total_iterations=3,
+            best_version="v02",
+            notebook_content="nb",
+            pending_abductions_section="",
+            dead_ends_section=section,
+        )
+        assert "<dead_ends>" in prompt
+        assert "polynomial regression" in prompt
+
+    def test_report_user_omits_dead_ends_when_empty(self):
+        from auto_scientist.prompts.report import REPORT_USER
+
+        prompt = REPORT_USER.format(
+            domain="d",
+            goal="g",
+            total_iterations=3,
+            best_version="v02",
+            notebook_content="nb",
+            pending_abductions_section="",
+            dead_ends_section="",
+        )
+        assert "<dead_ends>" not in prompt
+
+    def test_report_system_instructs_ruled_out_section(self):
+        from auto_scientist.prompts.report import build_report_system
+
+        system = build_report_system("claude")
+        assert "Ruled Out" in system or "dead_ends" in system

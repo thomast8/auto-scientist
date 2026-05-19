@@ -10,13 +10,30 @@ surface in a live smoke run.
 from __future__ import annotations
 
 import inspect
+import json
+from types import SimpleNamespace
+from typing import Any
+from unittest.mock import MagicMock, patch
 
 import pytest
-from auto_reviewer.agents import findings, hunter, surveyor
+from auto_core.model_config import AgentModelConfig
+from auto_core.notebook import append_entry
+from auto_core.sdk_backend import SDKMessage
+from auto_core.sdk_utils import validate_report_structure
+from auto_core.state import ExperimentState
+from auto_reviewer.agents import adversary, findings, hunter, prober, stop_gate, surveyor
 from auto_reviewer.prompts.adversary import build_adversary_system
+from auto_reviewer.prompts.findings import FINDINGS_USER
 from auto_reviewer.prompts.hunter import HUNTER_SYSTEM
 from auto_reviewer.prompts.prober import PROBER_SYSTEM
+from auto_reviewer.prompts.stop_gate import (
+    ASSESSMENT_USER,
+    STOP_ADVERSARY_USER,
+    STOP_DEBATE_SYSTEM,
+    STOP_REVISION_USER,
+)
 from auto_reviewer.prompts.surveyor import SURVEYOR_SYSTEM, build_surveyor_system
+from auto_reviewer.schemas import HunterPlanOutput
 
 
 class TestSurveyorScopeBoundary:
@@ -58,6 +75,449 @@ class TestHunterHypothesisFraming:
         # testable claim.
         assert '"the bug is X"' not in HUNTER_SYSTEM
         assert "under condition Y, behavior X would fire" in HUNTER_SYSTEM
+
+
+class TestReviewerDeadEnds:
+    """Auto-reviewer gets the same dead-end contract as auto-scientist."""
+
+    def test_hunter_schema_accepts_dead_ends(self) -> None:
+        plan = HunterPlanOutput.model_validate(
+            {
+                "hypothesis": "Cache eviction cannot race on the single-thread path",
+                "strategy": "incremental",
+                "changes": [],
+                "expected_impact": "No reproducer signal",
+                "should_stop": False,
+                "stop_reason": None,
+                "notebook_entry": "Closed the single-thread race hypothesis.",
+                "dead_ends": [
+                    {
+                        "description": "single-thread eviction race",
+                        "evidence": "probe 1.0 passed with deterministic scheduler",
+                    }
+                ],
+            }
+        )
+
+        assert plan.dead_ends[0].description == "single-thread eviction race"
+        assert plan.dead_ends[0].evidence == "probe 1.0 passed with deterministic scheduler"
+
+    def test_hunter_schema_defaults_dead_ends_to_empty(self) -> None:
+        plan = HunterPlanOutput.model_validate(
+            {
+                "hypothesis": "Probe the cache invalidation path",
+                "strategy": "incremental",
+                "changes": [],
+                "expected_impact": "A failing repro if the suspicion is valid",
+                "should_stop": False,
+                "stop_reason": None,
+                "notebook_entry": "Planning the next probe.",
+            }
+        )
+
+        assert plan.dead_ends == []
+
+    @pytest.mark.parametrize(
+        "dead_end",
+        [
+            {"description": "", "evidence": "probe passed"},
+            {"description": "single-thread race", "evidence": ""},
+        ],
+    )
+    def test_hunter_schema_requires_dead_end_description_and_evidence(self, dead_end) -> None:
+        with pytest.raises(ValueError):
+            HunterPlanOutput.model_validate(
+                {
+                    "hypothesis": "Probe the cache invalidation path",
+                    "strategy": "incremental",
+                    "changes": [],
+                    "expected_impact": "A failing repro if the suspicion is valid",
+                    "should_stop": False,
+                    "stop_reason": None,
+                    "notebook_entry": "Planning the next probe.",
+                    "dead_ends": [dead_end],
+                }
+            )
+
+    def test_hunter_json_schema_mentions_dead_ends(self) -> None:
+        assert "dead_ends" in hunter.HUNTER_PLAN_SCHEMA["properties"]
+        assert "dead_ends" in HUNTER_SYSTEM
+
+    def test_hunter_user_prompts_inject_dead_ends(self) -> None:
+        section = hunter._build_dead_ends_section("1. single-thread race - probe passed")
+        assert "<dead_ends>" in section
+        assert "Do not re-chase" in section
+
+        for template in (hunter.HUNTER_USER, hunter.HUNTER_REVISION_USER):
+            rendered = template.format(
+                goal="review PR",
+                domain_knowledge="repo context",
+                version="v02",
+                analysis_json="{}",
+                notebook_content="toc",
+                prediction_history="tree",
+                pending_abductions_section="",
+                dead_ends_section=section,
+                original_plan="{}",
+                concern_ledger="[]",
+            )
+            assert "<dead_ends>" in rendered
+            assert "single-thread race" in rendered
+
+    def test_adversary_prompt_flags_rechasing_dead_ends(self) -> None:
+        _system, user = adversary._build_critic_prompt(
+            plan={"hypothesis": "single-thread eviction race"},
+            notebook_content="toc",
+            domain_knowledge="repo context",
+            dead_ends="1. single-thread eviction race - probe passed",
+        )
+
+        assert "<dead_ends>" in user
+        assert "re-chases an entry" in user
+
+    def test_findings_prompt_surfaces_ruled_out_paths(self) -> None:
+        rendered = FINDINGS_USER.format(
+            state_json="{}",
+            notebook_toc="toc",
+            prediction_tree="tree",
+            dead_ends_section="<dead_ends>closed path</dead_ends>",
+            workspace_path="/tmp/review",
+        )
+        assert "<dead_ends>closed path</dead_ends>" in rendered
+
+    def test_findings_report_structure_requires_ruled_out_section(self) -> None:
+        report_without_ruled_out = """\
+# Review
+
+## Summary
+Done.
+
+## Confirmed bugs
+None.
+
+## Refuted suspicions
+Single-thread race refuted.
+
+## Ungrounded findings
+None.
+
+## Open questions
+None.
+
+## Known limitations
+Sandboxed probe only.
+"""
+
+        issues = validate_report_structure(report_without_ruled_out)
+
+        assert "Missing section: ruled out" in issues
+
+    def test_stop_gate_prompt_templates_accept_dead_ends(self) -> None:
+        assessment = ASSESSMENT_USER.format(
+            goal="review PR",
+            stop_reason="all clear",
+            domain_knowledge="repo context",
+            prediction_history="tree",
+            pending_abductions_section="",
+            dead_ends_section="<dead_ends>closed path</dead_ends>",
+            notebook_content="toc",
+        )
+        stop_system = STOP_DEBATE_SYSTEM.format(
+            persona_text="coverage auditor",
+            persona_instructions="challenge gaps",
+            critic_output_schema="{}",
+        )
+        stop_user = STOP_ADVERSARY_USER.format(
+            goal="review PR",
+            domain_knowledge="repo context",
+            notebook_section="<notebook_toc>toc</notebook_toc>",
+            analysis_json="{}",
+            prediction_history="tree",
+            dead_ends_section="<dead_ends>closed path</dead_ends>",
+            stop_reason="all clear",
+            completeness_assessment="{}",
+        )
+        revision_user = STOP_REVISION_USER.format(
+            goal="review PR",
+            domain_knowledge="repo context",
+            notebook_content="toc",
+            analysis_json="{}",
+            prediction_history="tree",
+            dead_ends_section="<dead_ends>closed path</dead_ends>",
+            stop_reason="all clear",
+            completeness_assessment="{}",
+            concern_ledger="[]",
+            plan_schema="{}",
+            version="v03",
+        )
+
+        assert "<dead_ends>closed path</dead_ends>" in assessment
+        assert "coverage auditor" in stop_system
+        assert "<dead_ends>closed path</dead_ends>" in stop_user
+        assert "not re-chase" in revision_user
+
+    @pytest.mark.parametrize(
+        "func",
+        [
+            hunter.run_hunter,
+            hunter.run_hunter_revision,
+            adversary.run_single_critic_debate,
+            adversary.run_debate,
+            findings.run_findings,
+            stop_gate.run_completeness_assessment,
+            stop_gate.run_single_stop_debate,
+            stop_gate.run_hunter_stop_revision,
+        ],
+    )
+    def test_shared_role_entrypoints_accept_dead_ends(self, func) -> None:
+        param = inspect.signature(func).parameters["dead_ends"]
+        assert param.default == ""
+
+    @pytest.mark.asyncio
+    async def test_hunter_entrypoint_injects_dead_ends(self, tmp_path) -> None:
+        notebook = tmp_path / "lab_notebook.xml"
+        append_entry(notebook, "initial review note", version="v00", source="surveyor")
+        captured: dict[str, str] = {}
+
+        async def fake_retry(**kwargs):
+            captured["prompt"] = kwargs["prompt"]
+            return {
+                "hypothesis": "probe cache invalidation",
+                "strategy": "incremental",
+                "changes": [],
+                "expected_impact": "signal",
+                "should_stop": False,
+                "stop_reason": None,
+                "notebook_entry": "next probe",
+            }
+
+        with (
+            patch.object(hunter, "get_backend", return_value=object()),
+            patch.object(hunter, "agent_retry_loop", side_effect=fake_retry),
+        ):
+            await hunter.run_hunter(
+                analysis={"observations": []},
+                notebook_path=notebook,
+                version="v01",
+                dead_ends="single-thread race closed",
+            )
+
+        assert "<dead_ends>" in captured["prompt"]
+        assert "single-thread race closed" in captured["prompt"]
+
+    @pytest.mark.asyncio
+    async def test_findings_entrypoint_injects_dead_ends(self, tmp_path) -> None:
+        notebook = tmp_path / "lab_notebook.xml"
+        append_entry(notebook, "review complete", version="v00", source="hunter")
+        captured: dict[str, str] = {}
+
+        async def fake_retry(**kwargs):
+            captured["prompt"] = kwargs["prompt"]
+            return "# Review of PR\n\n## Summary\n\nDone."
+
+        with (
+            patch.object(findings, "get_backend", return_value=object()),
+            patch.object(findings, "agent_retry_loop", side_effect=fake_retry),
+        ):
+            await findings.run_findings(
+                state=ExperimentState(domain="owner/repo#1", goal="review PR"),
+                notebook_path=notebook,
+                output_dir=tmp_path,
+                dead_ends="single-thread race closed",
+            )
+
+        assert "Dead ends:" in captured["prompt"]
+        assert "single-thread race closed" in captured["prompt"]
+
+    @pytest.mark.asyncio
+    async def test_findings_strips_transcript_before_review_report(self, tmp_path) -> None:
+        notebook = tmp_path / "lab_notebook.xml"
+        append_entry(notebook, "review complete", version="v00", source="hunter")
+        report = (
+            "[tool]\n"
+            "# Raw diff output\n"
+            "not the report\n"
+            "# Review of owner/repo#1\n\n"
+            "## Summary\n"
+            f"{'Done. ' * 30}"
+        )
+
+        block = MagicMock()
+        block.text = report
+        del block.name
+
+        async def fake_query(**kwargs):
+            yield SDKMessage(type="assistant", content_blocks=[block])
+            yield SDKMessage(type="result", result=None, usage={}, session_id="sid")
+
+        with (
+            patch.object(findings, "get_backend", return_value=object()),
+            patch.object(findings, "safe_query", side_effect=fake_query),
+            patch.object(findings, "validate_report_structure", return_value=[]),
+        ):
+            result = await findings.run_findings(
+                state=ExperimentState(domain="owner/repo#1", goal="review PR"),
+                notebook_path=notebook,
+                output_dir=tmp_path,
+            )
+
+        assert result.startswith("# Review of owner/repo#1")
+        assert "Raw diff output" not in result
+
+    @pytest.mark.asyncio
+    async def test_stop_gate_entrypoint_injects_dead_ends(self, tmp_path) -> None:
+        notebook = tmp_path / "lab_notebook.xml"
+        append_entry(notebook, "stop proposed", version="v00", source="hunter")
+        captured: dict[str, str] = {}
+
+        async def fake_retry(**kwargs):
+            captured["prompt"] = kwargs["prompt"]
+            return {
+                "sub_questions": [],
+                "overall_coverage": "partial",
+                "recommendation": "continue",
+            }
+
+        with (
+            patch.object(stop_gate, "get_backend", return_value=object()),
+            patch.object(stop_gate, "agent_retry_loop", side_effect=fake_retry),
+        ):
+            await stop_gate.run_completeness_assessment(
+                goal="review PR",
+                stop_reason="complete",
+                notebook_path=notebook,
+                dead_ends="single-thread race closed",
+            )
+
+        assert "<dead_ends>" in captured["prompt"]
+        assert "single-thread race closed" in captured["prompt"]
+
+    @pytest.mark.asyncio
+    async def test_stop_critic_entrypoint_injects_dead_ends(self, tmp_path) -> None:
+        notebook = tmp_path / "lab_notebook.xml"
+        append_entry(notebook, "stop proposed", version="v00", source="hunter")
+        captured: dict[str, str] = {}
+
+        async def fake_query(_config, prompt, **_kwargs):
+            captured["prompt"] = prompt
+            return (
+                stop_gate.CriticOutput(
+                    concerns=[],
+                    alternative_hypotheses=[],
+                    overall_assessment="Looks premature.",
+                ),
+                SimpleNamespace(
+                    text="Looks premature.",
+                    input_tokens=1,
+                    output_tokens=1,
+                    thinking_tokens=0,
+                ),
+            )
+
+        with patch.object(stop_gate, "_query_stop_agent", side_effect=fake_query):
+            await stop_gate.run_single_stop_debate(
+                config=AgentModelConfig(provider="openai", model="gpt-5.5", mode="api"),
+                stop_reason="complete",
+                completeness_assessment={
+                    "sub_questions": [],
+                    "overall_coverage": "partial",
+                    "recommendation": "continue",
+                },
+                notebook_path=notebook,
+                dead_ends="single-thread race closed",
+            )
+
+        assert "<dead_ends>" in captured["prompt"]
+        assert "single-thread race closed" in captured["prompt"]
+
+    @pytest.mark.asyncio
+    async def test_stop_revision_entrypoint_injects_dead_ends(self, tmp_path) -> None:
+        notebook = tmp_path / "lab_notebook.xml"
+        append_entry(notebook, "stop proposed", version="v00", source="hunter")
+        captured: dict[str, str] = {}
+        plan = {
+            "hypothesis": "Probe another path",
+            "strategy": "incremental",
+            "changes": [],
+            "expected_impact": "More coverage",
+            "should_stop": False,
+            "stop_reason": None,
+            "notebook_entry": "Continuing.",
+        }
+
+        async def fake_collect(prompt, *_args, **_kwargs):
+            captured["prompt"] = prompt
+            return json.dumps(plan), {}, None
+
+        with patch.object(stop_gate, "collect_text_from_query", side_effect=fake_collect):
+            await stop_gate.run_hunter_stop_revision(
+                stop_reason="complete",
+                completeness_assessment={
+                    "sub_questions": [],
+                    "overall_coverage": "partial",
+                    "recommendation": "continue",
+                },
+                concern_ledger=[],
+                analysis={},
+                notebook_path=notebook,
+                version="v02",
+                dead_ends="single-thread race closed",
+            )
+
+        assert "<dead_ends>" in captured["prompt"]
+        assert "single-thread race closed" in captured["prompt"]
+
+    def test_prober_openai_network_access_requires_explicit_opt_in(self) -> None:
+        param = inspect.signature(prober.run_prober).parameters["network_access"]
+        assert param.default is False
+
+    @pytest.mark.asyncio
+    @pytest.mark.parametrize("network_access", [False, True])
+    async def test_prober_openai_network_access_flows_to_sdk_options(
+        self,
+        tmp_path,
+        network_access: bool,
+    ) -> None:
+        captured: dict[str, Any] = {}
+
+        async def fake_query(prompt, options):
+            captured["prompt"] = prompt
+            captured["options"] = options
+            version_dir = tmp_path / "v01"
+            version_dir.mkdir(parents=True, exist_ok=True)
+            (version_dir / "run_result.json").write_text(
+                json.dumps(
+                    {
+                        "success": True,
+                        "return_code": 0,
+                        "timed_out": False,
+                        "error": None,
+                        "attempts": 1,
+                    }
+                )
+            )
+            yield SimpleNamespace(type="result", usage={}, session_id="session-1")
+
+        with patch.object(prober, "get_backend", return_value=SimpleNamespace(query=fake_query)):
+            result = await prober.run_prober(
+                plan={"hypothesis": "probe cache invalidation", "changes": []},
+                previous_script=tmp_path / "missing.py",
+                output_dir=tmp_path,
+                version="v01",
+                provider="openai",
+                network_access=network_access,
+            )
+
+        assert result == tmp_path / "v01" / "run_result.json"
+        assert captured["options"].network_access is network_access
+        assert "<runtime_contract>" in captured["options"].system_prompt
+        if network_access:
+            assert "Dependency installation is enabled" in captured["options"].system_prompt
+        else:
+            assert "Dependency installation is not available" in captured["options"].system_prompt
+            assert (
+                "Dependencies are installed automatically" not in captured["options"].system_prompt
+            )
 
 
 class TestAdversaryScopeBoundary:

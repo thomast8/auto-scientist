@@ -281,6 +281,7 @@ def build_registry() -> RoleRegistry:
             "refuted suspicions",
             "ungrounded findings",
             "open questions",
+            "ruled out",
             "known limitations",
         ],
         report_require_version_comparison_table=False,

@@ -142,6 +142,15 @@ _ASSESS_INSTRUCTIONS = """\
    abductions to be either resolved (via a prediction with follows_from)
    or explicitly deprioritized with justification.
 
+3a. Check dead_ends (if present). These are directions the Scientist
+    has confirmed unfeasible by direct evidence. Each dead end is part
+    of the negative answer space and counts as evidence that the
+    sub-question it covers has been explored, not as a gap. Do not
+    rate a sub-question shallow purely because a dead end exists for
+    it - the dead end is itself a result. However, if a sub-question
+    only has dead ends and no positive findings, the overall coverage
+    cannot be thorough.
+
 4. For shallow and unexplored sub-questions, list specific gaps. Be
    concrete: "Only tested quadratic dose-response; saturating,
    piecewise, and interaction effects not explored" is better than
@@ -236,7 +245,7 @@ ASSESSMENT_USER = """\
 <stop_reason>{stop_reason}</stop_reason>
 <domain_knowledge>{domain_knowledge}</domain_knowledge>
 <prediction_history>{prediction_history}</prediction_history>
-{pending_abductions_section}<notebook_toc>{notebook_content}</notebook_toc>
+{pending_abductions_section}{dead_ends_section}<notebook_toc>{notebook_content}</notebook_toc>
 </context>
 
 <task>
@@ -573,7 +582,7 @@ STOP_CRITIC_USER = """\
 {notebook_section}
 <analysis>{analysis_json}</analysis>
 <prediction_history>{prediction_history}</prediction_history>
-</context>
+{dead_ends_section}</context>
 
 <data>
 <stop_reason>{stop_reason}</stop_reason>
@@ -586,6 +595,10 @@ above identifies gaps in coverage. Challenge the stop decision based on these
 gaps. Output your critique as structured JSON with concerns (each tagged with
 severity, confidence, and category), alternative hypotheses (investigations
 that should still be pursued), and an overall assessment.
+
+If <dead_ends> is present, treat each entry as part of the negative answer
+space - a sub-question covered by only dead ends without positive findings
+is a reason to challenge an early stop, not to endorse it.
 </task>
 
 <recap>
@@ -749,7 +762,7 @@ STOP_REVISION_USER = """\
 <notebook_toc>{notebook_content}</notebook_toc>
 <analysis>{analysis_json}</analysis>
 <prediction_history>{prediction_history}</prediction_history>
-</context>
+{dead_ends_section}</context>
 
 <data>
 <original_stop_reason>{stop_reason}</original_stop_reason>
@@ -764,6 +777,8 @@ maintain or withdraw your stop decision.
 If maintaining: update stop_reason to address each concern
 (explain why peripheral ones are not blocking).
 If withdrawing: produce a full experiment plan targeting the identified gaps.
+The plan must respect <dead_ends> if present and not re-tread any
+recorded dead end without explicit reopening justification.
 
 Output a complete plan (all fields).
 

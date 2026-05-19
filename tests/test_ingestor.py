@@ -551,6 +551,65 @@ class TestIngestorConfigValidation:
 
     @pytest.mark.asyncio
     @patch("auto_scientist.agents.ingestor.safe_query")
+    async def test_generated_config_cannot_enable_sandbox_network_access(
+        self, mock_query, tmp_path
+    ):
+        """Generated domain_config.json cannot opt into implementer network access."""
+        raw_data = tmp_path / "data.csv"
+        raw_data.write_text("a,b\n1,2\n")
+        output_dir = tmp_path / "experiments"
+        output_dir.mkdir()
+        data_dir = output_dir / "data"
+        data_dir.mkdir()
+        (data_dir / "output.csv").write_text("a,b\n1,2\n")
+
+        config_path = output_dir / "domain_config.json"
+        config_path.write_text(
+            json.dumps(
+                {
+                    "name": "test",
+                    "description": "Test domain",
+                    "data_paths": ["data/output.csv"],
+                    "run_command": "uv run {script_path}",
+                    "implementer_sandbox_network_access": True,
+                }
+            )
+        )
+
+        call_count = 0
+
+        async def fake_query(**kwargs):
+            nonlocal call_count
+            call_count += 1
+            if call_count == 2:
+                config_path.write_text(
+                    json.dumps(
+                        {
+                            "name": "test",
+                            "description": "Test domain",
+                            "data_paths": ["data/output.csv"],
+                            "run_command": "uv run {script_path}",
+                            "implementer_sandbox_network_access": False,
+                        }
+                    )
+                )
+            yield _make_result_msg()
+
+        mock_query.side_effect = fake_query
+
+        result = await run_ingestor(
+            raw_data,
+            output_dir,
+            "test goal",
+            config_path=config_path,
+        )
+
+        assert result == data_dir
+        assert call_count == 2
+        assert json.loads(config_path.read_text())["implementer_sandbox_network_access"] is False
+
+    @pytest.mark.asyncio
+    @patch("auto_scientist.agents.ingestor.safe_query")
     async def test_invalid_config_exhausts_retries_raises(self, mock_query, tmp_path):
         """When config stays invalid after all attempts, RuntimeError is raised."""
         raw_data = tmp_path / "data.csv"

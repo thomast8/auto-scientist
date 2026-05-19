@@ -64,7 +64,11 @@ def _resolve_message_timeout() -> float:
 # Track: https://github.com/openai/codex/issues/14266
 # Remove this when OpenAI fixes the issue.
 CODEX_MODEL_OVERRIDES: dict[str, str] = {
+    "gpt-5-mini": "gpt-5.4-mini",
+    "gpt-5-nano": "gpt-5.4-mini",
     "gpt-5.4-nano": "gpt-5.4-mini",
+    "gpt-5.5-mini": "gpt-5.4-mini",
+    "gpt-5.5-nano": "gpt-5.4-mini",
 }
 
 _CODEX_ENV_ALLOWLIST: frozenset[str] = frozenset(
@@ -87,7 +91,7 @@ _CODEX_ENV_ALLOWLIST: frozenset[str] = frozenset(
     }
 )
 
-# Codex sandbox addendum for tool-using agents.
+# Codex sandbox addenda for tool-using agents.
 # uv panics inside the Codex macOS seatbelt sandbox because the
 # system-configuration Rust crate can't access SCDynamicStore.
 # Track: https://github.com/astral-sh/uv/issues/16664
@@ -98,17 +102,41 @@ CODEX_SANDBOX_ADDENDUM = """\
 You are running inside a sandboxed environment where `uv` is not available.
 The run command in the task instructions already uses `python3` instead.
 
-Dependencies are installed automatically by the run command. You do NOT need
-to run `pip install` manually. Just declare all third-party packages in the
-PEP 723 metadata block and use the exact run command from the task
-instructions. The framework will install everything before executing the
-script.
+Dependency installation is not available in this run. Use the Python standard
+library and packages that are already importable in the environment. Do NOT add
+new third-party imports unless the task instructions explicitly say dependency
+installation/network access is enabled.
+
+If a required package is missing, report that in the run output instead of
+trying to install it manually. Use the exact run command from the task
+instructions.
+</sandbox_environment>
+"""
+
+CODEX_SANDBOX_INSTALL_ADDENDUM = """\
+
+<sandbox_environment>
+You are running inside a sandboxed environment where `uv` is not available.
+The run command in the task instructions already uses `python3` instead.
+
+Dependency installation is enabled for this run. You do NOT need to run
+`pip install` manually. Declare all third-party packages in the PEP 723
+metadata block and use the exact run command from the task instructions. The
+framework will install everything before executing the script.
 
 IMPORTANT: Every time you edit the script to add a new import, you MUST also
 add the package to the PEP 723 dependencies block. Do NOT remove imports to
 work around installation failures; the framework handles installation.
 </sandbox_environment>
 """
+
+
+def codex_sandbox_addendum(*, network_access: bool = False) -> str:
+    """Return Codex sandbox instructions matching dependency-install access."""
+    if network_access:
+        return CODEX_SANDBOX_INSTALL_ADDENDUM
+    return CODEX_SANDBOX_ADDENDUM
+
 
 # Additional sandbox policy shown only to agents that run under the
 # reviewer's workspace guard. The Codex seatbelt already blocks writes
@@ -159,10 +187,18 @@ def rewrite_uv_run_for_codex(run_command: str) -> str:
     - ``uv run <tool> [args]``  -> ``python3 -m <tool> [args]``  (e.g. pytest)
 
     Anything that does not start with ``uv run `` is returned unchanged,
-    so ``node {script_path}`` etc pass through. Only the leading ``uv run``
-    is rewritten; the caller is responsible for not chaining further
-    ``uv`` invocations, because ``uv`` is unavailable in the sandbox.
+    so ``node {script_path}`` etc pass through. Simple ``&&`` chains are
+    rewritten segment-by-segment because the orchestrator prepends an
+    ``ensure_deps`` command before the actual run command.
     """
+
+    if " && " in run_command:
+        return " && ".join(_rewrite_uv_run_segment(part) for part in run_command.split(" && "))
+
+    return _rewrite_uv_run_segment(run_command)
+
+
+def _rewrite_uv_run_segment(run_command: str) -> str:
     prefix = "uv run "
     if not run_command.startswith(prefix):
         return run_command
@@ -834,7 +870,7 @@ class CodexBackend:
 
         Unlike the Claude Code CLI (which defaults to no extended thinking
         when --effort is omitted), the Codex SDK lets the model choose its
-        own reasoning level when effort is unset.  For gpt-5.4-mini this
+        own reasoning level when effort is unset.  For small GPT models this
         can mean uncapped reasoning that produces no streaming events,
         triggering the inactivity timeout on large prompts.  We therefore
         default to ``"none"`` so reasoning is always explicitly controlled.
@@ -1190,8 +1226,8 @@ class CodexBackend:
             await self.close()
             raise RuntimeError(
                 f"Codex query failed (model={model}, sandbox={sandbox_mode}): {e}\n"
-                f"If using ChatGPT subscription, note that gpt-5.4-nano is not supported "
-                f"by Codex. Use gpt-5.4-mini or higher."
+                f"If using ChatGPT subscription, note that unavailable mini/nano "
+                f"variants may not be supported by Codex. Use gpt-5.4-mini or higher."
             ) from e
         except Exception as e:
             await self.close()

@@ -19,8 +19,8 @@ from auto_core.retry import QueryResult, ValidationError, agent_retry_loop
 from auto_core.safety.tool_guard import make_workspace_guard
 from auto_core.sdk_backend import (
     CODEX_REVIEWER_POLICY_ADDENDUM,
-    CODEX_SANDBOX_ADDENDUM,
     SDKOptions,
+    codex_sandbox_addendum,
     get_backend,
 )
 from auto_core.sdk_utils import (
@@ -135,6 +135,7 @@ async def run_prober(
     run_command: str = "uv run {script_path}",
     data_files_listing: str = "",
     provider: str = "openai",
+    network_access: bool = False,
 ) -> Path:
     """Implement the Hunter's plan as a runnable probe script.
 
@@ -164,13 +165,17 @@ async def run_prober(
         run_command = rewrite_uv_run_for_codex(run_command)
 
     prompt_provider = resolve_prompt_provider(provider)
-    system_prompt = build_prober_system(prompt_provider).format(
-        data_path=data_path or "(not specified)",
-        run_timeout_minutes=run_timeout_minutes,
-        run_command=run_command,
+    system_prompt = build_prober_system(prompt_provider) + (
+        "\n\n<runtime_contract>\n"
+        f"Data path: {data_path or '(not specified)'}\n"
+        f"Run timeout: {run_timeout_minutes} minutes\n"
+        f"Run command: {run_command}\n"
+        "</runtime_contract>"
     )
     if provider == "openai":
-        system_prompt += CODEX_SANDBOX_ADDENDUM + CODEX_REVIEWER_POLICY_ADDENDUM
+        system_prompt += (
+            codex_sandbox_addendum(network_access=network_access) + CODEX_REVIEWER_POLICY_ADDENDUM
+        )
 
     user_prompt = PROBER_USER.format(
         workspace_path=str(output_dir),
@@ -203,7 +208,7 @@ async def run_prober(
         cwd=output_dir,
         model=model,
         extra_args={},
-        network_access=False,
+        network_access=network_access,
         pre_tool_use_hook=guard,
     )
 

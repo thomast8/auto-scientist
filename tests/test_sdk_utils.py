@@ -13,6 +13,7 @@ from auto_core.sdk_utils import (
     collect_text_from_query,
     prepare_turn_budget,
     safe_query,
+    strip_preamble_before_report_heading,
     validate_json_output,
     validate_report_structure,
 )
@@ -137,6 +138,46 @@ class TestTolerantParseMessage:
             _tolerant_parse_message({"type": "foo_event"})
 
         assert "foo_event" in caplog.text
+
+
+class TestStripPreambleBeforeReportHeading:
+    def test_strips_transcript_before_numbered_executive_summary(self):
+        raw = (
+            "[userMessage]\n"
+            "cat v01/results.txt\n"
+            "[tool]\n"
+            "# Raw notebook output\n"
+            "Earlier notes.\n"
+            "## 1. Executive Summary\n"
+            "Real report."
+        )
+
+        result = strip_preamble_before_report_heading(raw)
+
+        assert result.startswith("## 1. Executive Summary")
+        assert "Raw notebook output" not in result
+
+    def test_prefers_later_report_start_when_tool_output_has_report_heading(self):
+        raw = (
+            "[tool]\n"
+            "## Executive Summary\n"
+            "Earlier report artifact.\n"
+            "[assistant]\n"
+            "## 1. Executive Summary\n"
+            "Current report."
+        )
+
+        result = strip_preamble_before_report_heading(raw)
+
+        assert result.startswith("## 1. Executive Summary")
+        assert "Earlier report artifact" not in result
+
+    def test_strips_transcript_before_review_title(self):
+        raw = "[tool]\n# Raw diff\n...\n# Review of owner/repo#1\n\n## Summary\nDone."
+
+        result = strip_preamble_before_report_heading(raw)
+
+        assert result.startswith("# Review of owner/repo#1")
 
 
 class TestSafeQuery:

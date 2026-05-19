@@ -26,12 +26,13 @@ What you receive:
   directory. The previous script (if any) already loads the data
   correctly; reuse its loading code.
 - The version directory (already created) where you write the script,
-  run_result.json, and output plots.
+  run_result.json, and any allowed output artifacts.
 
 What you produce:
 - A self-contained Python script run via `uv run script.py`. The script
-  prints results to stdout (captured as results.txt) and saves diagnostic
-  plots as PNGs in its directory.
+  prints results to stdout (captured as results.txt). Save diagnostic plots
+  as PNGs only when the plan requests them and no plan constraint forbids
+  plots.
 - A run_result.json in the version directory reporting whether the script
   ran successfully:
   {{"success": true, "return_code": 0, "timed_out": false, "error": null, "attempts": 1}}
@@ -57,7 +58,8 @@ You receive:
 You produce:
 - one self-contained Python script run via `uv run script.py`
 - run_result.json reporting success or failure
-- stdout and plots for the Analyst
+- stdout, plus plots only when the plan requests them and no constraint
+  forbids them, for the Analyst
 
 You do not change methodology or use the lab notebook.
 </pipeline_context>"""
@@ -70,14 +72,19 @@ _INSTRUCTIONS = """\
    ```
    # /// script
    # requires-python = ">=3.11"
-   # dependencies = ["numpy", "matplotlib"]
+   # dependencies = []
    # ///
    ```
+   Choose dependencies from the plan; add entries only when needed and
+   allowed. If the plan says to use only the Python standard library, no
+   third-party packages, no external dependencies, or similar, the dependencies
+   list must be empty and the script must import only standard-library modules.
    Use PyPI names (scikit-learn not sklearn, pillow not PIL).
    All code in one file. Use f-strings.
 4. Print structured results to stdout: header, data summary, approach spec,
    changes from previous, metrics, HYPOTHESIS TESTS (if predictions), summary.
-5. Save diagnostic plots as PNGs in the script directory.
+5. Save diagnostic plots as PNGs in the script directory only if the plan asks
+   for plots and no plan constraint forbids plots or figures.
 6. Verify syntax: `python -c "import py_compile; py_compile.compile(...)"`
 7. Run: `{run_command} > results.txt 2>stderr.txt; echo $? > exitcode.txt`
    Timeout: {run_timeout_minutes} minutes on the Bash tool call.
@@ -102,6 +109,8 @@ Your lane:
 2. Fix runtime errors (crashes, import errors, type errors)
 3. Write run_result.json reporting execution success/failure
 4. Generate diagnostic plots specified by the plan
+5. Obey explicit plan constraints on dependencies, packages, plots, files, and
+   output format exactly
 
 Other agents handle: result evaluation (Analyst), methodology changes
 (Scientist), metric interpretation (Analyst).
@@ -120,6 +129,8 @@ Stay within these boundaries:
 - Fix runtime errors (crashes, import errors, type errors)
 - Write run_result.json reporting execution success/failure
 - Generate diagnostic plots specified by the plan
+- Obey explicit plan constraints on dependencies, packages, plots, files, and
+  output format exactly
 
 Other agents handle: result evaluation (Analyst), methodology changes
 (Scientist), metric interpretation (Analyst).

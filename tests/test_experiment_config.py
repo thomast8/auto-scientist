@@ -158,7 +158,7 @@ class TestExperimentConfigModels:
             models={
                 "critics": [
                     {"provider": "google", "model": "gemini-3.1-pro-preview"},
-                    {"provider": "openai", "model": "gpt-5.4"},
+                    {"provider": "openai", "model": "gpt-5.5"},
                 ],
             },
         )
@@ -255,7 +255,7 @@ class TestToYaml:
             goal="test",
             models={
                 "scientist": {"model": "claude-opus-4-6"},
-                "critics": [{"provider": "openai", "model": "gpt-5.4"}],
+                "critics": [{"provider": "openai", "model": "gpt-5.5"}],
             },
         )
         out_path = tmp_path / "output.yaml"
@@ -264,7 +264,7 @@ class TestToYaml:
         loaded = ExperimentConfig.from_yaml(out_path)
         assert loaded.models.scientist.model == "claude-opus-4-6"
         assert len(loaded.models.critics) == 1
-        assert loaded.models.critics[0].model == "gpt-5.4"
+        assert loaded.models.critics[0].model == "gpt-5.5"
 
 
 # Root of the project (tests/ is one level down from repo root)
