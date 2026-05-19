@@ -29,6 +29,7 @@ from auto_core.persistence import (
     persist_artifact,
     persist_buffer,
     read_run_result,
+    record_dead_ends,
     resolve_prediction_outcomes,
     restore_iterations_from_manifest,
     save_iteration_manifest,
@@ -1339,6 +1340,11 @@ class Orchestrator:
                     f"reconsidered."
                 )
                 append_entry(notebook_path, gate_entry, version, "stop_gate")
+
+                # A withdrawn stop can still close out specific directions.
+                # Persist those immediately so the normal debate/revision path
+                # does not have to echo them for later agents to see them.
+                record_dead_ends(revised, self.state)
 
             # Apply prediction updates only if stop is upheld (the withdrawn
             # path falls through to normal debate which handles predictions)

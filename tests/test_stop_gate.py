@@ -512,6 +512,34 @@ class TestRunSingleStopDebate:
         assert isinstance(result, DebateResult)
 
     @pytest.mark.asyncio
+    async def test_threads_dead_ends_to_stop_critic_prompt(
+        self, openai_config, valid_assessment, stop_notebook
+    ):
+        from auto_scientist.agents.stop_gate import run_single_stop_debate
+
+        captured: dict[str, str] = {}
+        valid_result = AgentResult(
+            text=_pad(_valid_critic_json()), input_tokens=10, output_tokens=5
+        )
+
+        async def fake_query(_config, prompt, **_kwargs):
+            captured["prompt"] = prompt
+            return valid_result, None
+
+        with patch(QUERY_CRITIC_PATH, new_callable=AsyncMock, side_effect=fake_query):
+            await run_single_stop_debate(
+                config=openai_config,
+                stop_reason="All criteria met",
+                completeness_assessment=valid_assessment,
+                notebook_path=stop_notebook,
+                goal="discover alloy fatigue mechanism",
+                dead_ends="linear fit closed by v02 residual audit",
+            )
+
+        assert "<dead_ends>" in captured["prompt"]
+        assert "linear fit closed" in captured["prompt"]
+
+    @pytest.mark.asyncio
     async def test_critic_output_is_parsed(self, openai_config, valid_assessment, stop_notebook):
         """The critic's response is parsed into a CriticOutput instance."""
         from auto_scientist.agents.stop_gate import run_single_stop_debate
@@ -958,6 +986,33 @@ class TestRunScientistStopRevision:
 
         assert result["should_stop"] is False
         assert result["hypothesis"] == "Nonlinear effects explain remaining variance"
+
+    @pytest.mark.asyncio
+    async def test_threads_dead_ends_to_stop_revision_prompt(self, stop_notebook, valid_assessment):
+        from auto_scientist.agents.stop_gate import run_scientist_stop_revision
+
+        plan = _valid_scientist_plan_dict(should_stop=False)
+        raw_json = json.dumps(plan)
+        captured: dict[str, str] = {}
+
+        async def fake_collect(prompt, *_args, **_kwargs):
+            captured["prompt"] = prompt
+            return raw_json, {}, None
+
+        with patch(COLLECT_TEXT_PATH, new_callable=AsyncMock, side_effect=fake_collect):
+            await run_scientist_stop_revision(
+                stop_reason="seemed complete",
+                completeness_assessment=valid_assessment,
+                concern_ledger=[],
+                analysis={"key_metrics": [{"name": "r2", "value": 0.85}]},
+                notebook_path=stop_notebook,
+                version="v03",
+                goal="discover alloy fatigue",
+                dead_ends="linear fit closed by v02 residual audit",
+            )
+
+        assert "<dead_ends>" in captured["prompt"]
+        assert "linear fit closed" in captured["prompt"]
 
     @pytest.mark.asyncio
     async def test_returns_plan_dict_when_stop_upheld(self, stop_notebook, valid_assessment):

@@ -89,8 +89,8 @@ class DeadEndProposal(BaseModel):
 
     model_config = ConfigDict(extra="ignore")
 
-    description: str
-    evidence: str = ""
+    description: str = Field(min_length=1)
+    evidence: str = Field(min_length=1)
 
 
 class RunResult(BaseModel):

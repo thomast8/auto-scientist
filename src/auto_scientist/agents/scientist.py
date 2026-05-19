@@ -182,8 +182,8 @@ SCIENTIST_PLAN_SCHEMA = {
             "items": {
                 "type": "object",
                 "properties": {
-                    "description": {"type": "string"},
-                    "evidence": {"type": "string"},
+                    "description": {"type": "string", "minLength": 1},
+                    "evidence": {"type": "string", "minLength": 1},
                 },
                 "required": ["description", "evidence"],
             },

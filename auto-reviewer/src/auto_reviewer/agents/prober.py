@@ -19,8 +19,8 @@ from auto_core.retry import QueryResult, ValidationError, agent_retry_loop
 from auto_core.safety.tool_guard import make_workspace_guard
 from auto_core.sdk_backend import (
     CODEX_REVIEWER_POLICY_ADDENDUM,
-    CODEX_SANDBOX_ADDENDUM,
     SDKOptions,
+    codex_sandbox_addendum,
     get_backend,
 )
 from auto_core.sdk_utils import (
@@ -173,7 +173,9 @@ async def run_prober(
         "</runtime_contract>"
     )
     if provider == "openai":
-        system_prompt += CODEX_SANDBOX_ADDENDUM + CODEX_REVIEWER_POLICY_ADDENDUM
+        system_prompt += (
+            codex_sandbox_addendum(network_access=network_access) + CODEX_REVIEWER_POLICY_ADDENDUM
+        )
 
     user_prompt = PROBER_USER.format(
         workspace_path=str(output_dir),

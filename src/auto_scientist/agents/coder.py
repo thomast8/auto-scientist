@@ -15,7 +15,7 @@ from pathlib import Path
 from typing import Any
 
 from auto_core.retry import QueryResult, ValidationError, agent_retry_loop
-from auto_core.sdk_backend import CODEX_SANDBOX_ADDENDUM, SDKOptions, get_backend
+from auto_core.sdk_backend import SDKOptions, codex_sandbox_addendum, get_backend
 from auto_core.sdk_utils import (
     append_block_to_buffer,
     collect_text_from_query,
@@ -265,7 +265,7 @@ async def run_coder(
         run_command=run_command,
     )
     if provider == "openai":
-        system_prompt += CODEX_SANDBOX_ADDENDUM
+        system_prompt += codex_sandbox_addendum(network_access=network_access)
 
     # Build data files section so coder doesn't need to discover files
     if data_files_listing:

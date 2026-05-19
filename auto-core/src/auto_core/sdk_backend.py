@@ -91,7 +91,7 @@ _CODEX_ENV_ALLOWLIST: frozenset[str] = frozenset(
     }
 )
 
-# Codex sandbox addendum for tool-using agents.
+# Codex sandbox addenda for tool-using agents.
 # uv panics inside the Codex macOS seatbelt sandbox because the
 # system-configuration Rust crate can't access SCDynamicStore.
 # Track: https://github.com/astral-sh/uv/issues/16664
@@ -102,17 +102,41 @@ CODEX_SANDBOX_ADDENDUM = """\
 You are running inside a sandboxed environment where `uv` is not available.
 The run command in the task instructions already uses `python3` instead.
 
-Dependencies are installed automatically by the run command. You do NOT need
-to run `pip install` manually. Just declare all third-party packages in the
-PEP 723 metadata block and use the exact run command from the task
-instructions. The framework will install everything before executing the
-script.
+Dependency installation is not available in this run. Use the Python standard
+library and packages that are already importable in the environment. Do NOT add
+new third-party imports unless the task instructions explicitly say dependency
+installation/network access is enabled.
+
+If a required package is missing, report that in the run output instead of
+trying to install it manually. Use the exact run command from the task
+instructions.
+</sandbox_environment>
+"""
+
+CODEX_SANDBOX_INSTALL_ADDENDUM = """\
+
+<sandbox_environment>
+You are running inside a sandboxed environment where `uv` is not available.
+The run command in the task instructions already uses `python3` instead.
+
+Dependency installation is enabled for this run. You do NOT need to run
+`pip install` manually. Declare all third-party packages in the PEP 723
+metadata block and use the exact run command from the task instructions. The
+framework will install everything before executing the script.
 
 IMPORTANT: Every time you edit the script to add a new import, you MUST also
 add the package to the PEP 723 dependencies block. Do NOT remove imports to
 work around installation failures; the framework handles installation.
 </sandbox_environment>
 """
+
+
+def codex_sandbox_addendum(*, network_access: bool = False) -> str:
+    """Return Codex sandbox instructions matching dependency-install access."""
+    if network_access:
+        return CODEX_SANDBOX_INSTALL_ADDENDUM
+    return CODEX_SANDBOX_ADDENDUM
+
 
 # Additional sandbox policy shown only to agents that run under the
 # reviewer's workspace guard. The Codex seatbelt already blocks writes

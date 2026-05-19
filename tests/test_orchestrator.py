@@ -1530,6 +1530,77 @@ class TestRunIteration:
         assert (version_dir / "plan.json").exists()
 
     @pytest.mark.asyncio
+    async def test_stop_gate_withdrawn_records_dead_ends(self, orchestrator, tmp_path):
+        orchestrator.output_dir.mkdir(parents=True, exist_ok=True)
+        orchestrator.model_config.critics = []
+        orchestrator.state.phase = "iteration"
+        orchestrator.state.iteration = 2
+        version_dir = orchestrator.output_dir / "v02"
+        version_dir.mkdir(parents=True, exist_ok=True)
+
+        assessment = {
+            "sub_questions": [
+                {
+                    "question": "missing branch covered",
+                    "coverage": "shallow",
+                    "evidence": [],
+                    "gaps": ["needs one more probe"],
+                }
+            ],
+            "overall_coverage": "partial",
+            "recommendation": "continue",
+        }
+        revised_plan = {
+            "should_stop": False,
+            "hypothesis": "probe remaining branch",
+            "strategy": "incremental",
+            "changes": [
+                {
+                    "what": "probe cache branch",
+                    "why": "cover gap",
+                    "how": "targeted check",
+                    "priority": 1,
+                }
+            ],
+            "expected_impact": "close final gap",
+            "stop_reason": None,
+            "notebook_entry": "Stop withdrawn",
+            "dead_ends": [
+                {
+                    "description": "single-thread cache race",
+                    "evidence": "stop-gate audit found no shared state",
+                }
+            ],
+        }
+
+        async def fake_assessor(**_kwargs):
+            return assessment
+
+        async def fake_reviser(**_kwargs):
+            return revised_plan
+
+        def fake_get_agent_fn(key):
+            return {"assessor": fake_assessor, "stop_reviser": fake_reviser}[key]
+
+        async def passthrough(coro_fn, _agent_name, message_buffer, **_kwargs):
+            return await coro_fn(message_buffer)
+
+        with (
+            patch("auto_core.agent_dispatch.get_agent_fn", side_effect=fake_get_agent_fn),
+            patch("auto_core.orchestrator.with_summaries", side_effect=passthrough),
+        ):
+            result = await orchestrator._run_stop_gate(
+                {"should_stop": True, "stop_reason": "complete"},
+                analysis={},
+                version_dir=version_dir,
+            )
+
+        assert result == revised_plan
+        assert orchestrator.state.dead_ends[0].description == "single-thread cache race"
+        assert orchestrator.state.dead_ends[0].evidence == "stop-gate audit found no shared state"
+        assert not (version_dir / "plan.json").exists()
+
+    @pytest.mark.asyncio
     async def test_scientist_plan_persisted_before_stop_gate(self, orchestrator, tmp_path):
         """plan.json must be written as soon as the Scientist produces a plan.
 
@@ -3835,7 +3906,20 @@ class TestDeadEndsPersistence:
             "dead_ends": [
                 {"description": "", "evidence": "x"},
                 {"description": "   ", "evidence": "y"},
-                {"description": "real one", "evidence": ""},
+                {"description": "real one", "evidence": "real evidence"},
+            ],
+        }
+        record_dead_ends(plan, orchestrator.state)
+        assert len(orchestrator.state.dead_ends) == 1
+        assert orchestrator.state.dead_ends[0].description == "real one"
+        assert orchestrator.state.dead_ends[0].evidence == "real evidence"
+
+    def test_record_dead_ends_skips_empty_evidence(self, orchestrator):
+        plan = {
+            "dead_ends": [
+                {"description": "no evidence", "evidence": ""},
+                {"description": "blank evidence", "evidence": "   "},
+                {"description": "real one", "evidence": "v02 ruled it out"},
             ],
         }
         record_dead_ends(plan, orchestrator.state)
@@ -3857,7 +3941,11 @@ class TestDeadEndsPersistence:
 
     def test_record_dead_ends_logs_single_line_entries(self, orchestrator, caplog):
         caplog.set_level(logging.INFO, logger="auto_core.persistence")
-        plan = {"dead_ends": [{"description": "line one\nline two", "evidence": ""}]}
+        plan = {
+            "dead_ends": [
+                {"description": "line one\nline two", "evidence": "evidence one\nline two"}
+            ]
+        }
         record_dead_ends(plan, orchestrator.state)
 
         assert "line one line two" in caplog.text

@@ -16,6 +16,7 @@ from typing import Any
 from unittest.mock import MagicMock, patch
 
 import pytest
+from auto_core.model_config import AgentModelConfig
 from auto_core.notebook import append_entry
 from auto_core.sdk_backend import SDKMessage
 from auto_core.sdk_utils import validate_report_structure
@@ -115,6 +116,28 @@ class TestReviewerDeadEnds:
         )
 
         assert plan.dead_ends == []
+
+    @pytest.mark.parametrize(
+        "dead_end",
+        [
+            {"description": "", "evidence": "probe passed"},
+            {"description": "single-thread race", "evidence": ""},
+        ],
+    )
+    def test_hunter_schema_requires_dead_end_description_and_evidence(self, dead_end) -> None:
+        with pytest.raises(ValueError):
+            HunterPlanOutput.model_validate(
+                {
+                    "hypothesis": "Probe the cache invalidation path",
+                    "strategy": "incremental",
+                    "changes": [],
+                    "expected_impact": "A failing repro if the suspicion is valid",
+                    "should_stop": False,
+                    "stop_reason": None,
+                    "notebook_entry": "Planning the next probe.",
+                    "dead_ends": [dead_end],
+                }
+            )
 
     def test_hunter_json_schema_mentions_dead_ends(self) -> None:
         assert "dead_ends" in hunter.HUNTER_PLAN_SCHEMA["properties"]
@@ -369,6 +392,81 @@ Sandboxed probe only.
         assert "<dead_ends>" in captured["prompt"]
         assert "single-thread race closed" in captured["prompt"]
 
+    @pytest.mark.asyncio
+    async def test_stop_critic_entrypoint_injects_dead_ends(self, tmp_path) -> None:
+        notebook = tmp_path / "lab_notebook.xml"
+        append_entry(notebook, "stop proposed", version="v00", source="hunter")
+        captured: dict[str, str] = {}
+
+        async def fake_query(_config, prompt, **_kwargs):
+            captured["prompt"] = prompt
+            return (
+                stop_gate.CriticOutput(
+                    concerns=[],
+                    alternative_hypotheses=[],
+                    overall_assessment="Looks premature.",
+                ),
+                SimpleNamespace(
+                    text="Looks premature.",
+                    input_tokens=1,
+                    output_tokens=1,
+                    thinking_tokens=0,
+                ),
+            )
+
+        with patch.object(stop_gate, "_query_stop_agent", side_effect=fake_query):
+            await stop_gate.run_single_stop_debate(
+                config=AgentModelConfig(provider="openai", model="gpt-5.5", mode="api"),
+                stop_reason="complete",
+                completeness_assessment={
+                    "sub_questions": [],
+                    "overall_coverage": "partial",
+                    "recommendation": "continue",
+                },
+                notebook_path=notebook,
+                dead_ends="single-thread race closed",
+            )
+
+        assert "<dead_ends>" in captured["prompt"]
+        assert "single-thread race closed" in captured["prompt"]
+
+    @pytest.mark.asyncio
+    async def test_stop_revision_entrypoint_injects_dead_ends(self, tmp_path) -> None:
+        notebook = tmp_path / "lab_notebook.xml"
+        append_entry(notebook, "stop proposed", version="v00", source="hunter")
+        captured: dict[str, str] = {}
+        plan = {
+            "hypothesis": "Probe another path",
+            "strategy": "incremental",
+            "changes": [],
+            "expected_impact": "More coverage",
+            "should_stop": False,
+            "stop_reason": None,
+            "notebook_entry": "Continuing.",
+        }
+
+        async def fake_collect(prompt, *_args, **_kwargs):
+            captured["prompt"] = prompt
+            return json.dumps(plan), {}, None
+
+        with patch.object(stop_gate, "collect_text_from_query", side_effect=fake_collect):
+            await stop_gate.run_hunter_stop_revision(
+                stop_reason="complete",
+                completeness_assessment={
+                    "sub_questions": [],
+                    "overall_coverage": "partial",
+                    "recommendation": "continue",
+                },
+                concern_ledger=[],
+                analysis={},
+                notebook_path=notebook,
+                version="v02",
+                dead_ends="single-thread race closed",
+            )
+
+        assert "<dead_ends>" in captured["prompt"]
+        assert "single-thread race closed" in captured["prompt"]
+
     def test_prober_openai_network_access_requires_explicit_opt_in(self) -> None:
         param = inspect.signature(prober.run_prober).parameters["network_access"]
         assert param.default is False
@@ -413,6 +511,13 @@ Sandboxed probe only.
         assert result == tmp_path / "v01" / "run_result.json"
         assert captured["options"].network_access is network_access
         assert "<runtime_contract>" in captured["options"].system_prompt
+        if network_access:
+            assert "Dependency installation is enabled" in captured["options"].system_prompt
+        else:
+            assert "Dependency installation is not available" in captured["options"].system_prompt
+            assert (
+                "Dependencies are installed automatically" not in captured["options"].system_prompt
+            )
 
 
 class TestAdversaryScopeBoundary:

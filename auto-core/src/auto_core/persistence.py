@@ -675,10 +675,10 @@ def _dead_end_key(description: str, evidence: str) -> tuple[str, str]:
 def record_dead_ends(plan: dict[str, Any], state: ExperimentState) -> None:
     """Append Scientist-declared dead ends to state, stamped with current iteration.
 
-    Silently skips entries that are missing a description. Each surviving
-    entry becomes a DeadEnd model on state.dead_ends so future iterations
-    of the Scientist, Critics, Stop Gate, and Report see it as a negative
-    constraint.
+    Silently skips entries that are missing either a description or evidence.
+    Each surviving entry becomes a DeadEnd model on state.dead_ends so future
+    iterations of the Scientist, Critics, Stop Gate, and Report see it as a
+    negative constraint.
     """
     raw_entries = plan.get("dead_ends") or []
     if not isinstance(raw_entries, list):
@@ -692,6 +692,8 @@ def record_dead_ends(plan: dict[str, Any], state: ExperimentState) -> None:
         if not desc:
             continue
         evidence = (entry.get("evidence") or "").strip()
+        if not evidence:
+            continue
         key = _dead_end_key(desc, evidence)
         if key in existing:
             continue

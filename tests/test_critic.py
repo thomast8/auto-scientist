@@ -605,6 +605,25 @@ class TestRunDebateWithContext:
         assert "rmse" in critic_prompt
 
     @pytest.mark.asyncio
+    async def test_run_debate_threads_dead_ends_to_critic_prompt(
+        self, plan, two_critics, notebook_path
+    ):
+        with (
+            patch(OPENAI_PATH, new_callable=AsyncMock, return_value=_CR()) as mock_openai,
+            patch(GOOGLE_PATH, new_callable=AsyncMock, return_value=_CR()),
+        ):
+            await run_debate(
+                critic_configs=two_critics,
+                plan=plan,
+                notebook_path=notebook_path,
+                dead_ends="linear fit closed by v02 residual audit",
+            )
+
+        critic_prompt = mock_openai.call_args[0][1]
+        assert "<dead_ends>" in critic_prompt
+        assert "linear fit closed" in critic_prompt
+
+    @pytest.mark.asyncio
     async def test_prediction_history_in_critic_prompt(self, plan, notebook_path):
         """When prediction records are provided, prediction persona's prompt includes them."""
         critic = AgentModelConfig(provider="openai", model="gpt-4o", mode="api")
@@ -633,6 +652,22 @@ class TestRunDebateWithContext:
         critic_prompt = mock_openai.call_args[0][1]
         assert "<prediction_history>" in critic_prompt
         assert "polynomial fits well" in critic_prompt
+
+    @pytest.mark.asyncio
+    async def test_single_critic_threads_dead_ends_to_prompt(self, plan, notebook_path):
+        critic = AgentModelConfig(provider="openai", model="gpt-4o", mode="api")
+        with patch(OPENAI_PATH, new_callable=AsyncMock, return_value=_CR()) as mock_openai:
+            await run_single_critic_debate(
+                config=critic,
+                plan=plan,
+                notebook_path=notebook_path,
+                persona={"name": "Methodologist", "system_text": ""},
+                dead_ends="linear fit closed by v02 residual audit",
+            )
+
+        critic_prompt = mock_openai.call_args[0][1]
+        assert "<dead_ends>" in critic_prompt
+        assert "linear fit closed" in critic_prompt
 
 
 class TestPersonas:

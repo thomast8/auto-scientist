@@ -303,7 +303,42 @@ class TestRunCoder:
         assert "uv run" not in captured["prompt"]
         # System prompt actionable step should also have python3
         assert "python3 {script_path}" in captured["system"]
+        assert "Dependency installation is not available" in captured["system"]
+        assert "Dependencies are installed automatically" not in captured["system"]
         assert captured["options"].network_access is False
+
+    @pytest.mark.asyncio
+    @patch("auto_scientist.agents.coder.get_backend")
+    async def test_openai_provider_with_network_access_allows_pep723_install(
+        self, mock_get_backend, tmp_path
+    ):
+        captured = {}
+
+        async def fake_query(prompt, options):
+            captured["system"] = options.system_prompt
+            captured["options"] = options
+            version_dir = tmp_path / "v01"
+            version_dir.mkdir(parents=True, exist_ok=True)
+            (version_dir / "experiment.py").write_text("print('ok')")
+            _write_success_result(version_dir)
+            yield _result_msg()
+
+        mock_backend = MagicMock()
+        mock_backend.query = fake_query
+        mock_get_backend.return_value = mock_backend
+
+        await run_coder(
+            plan={"hypothesis": "test", "changes": []},
+            previous_script=tmp_path / "nonexistent" / "experiment.py",
+            output_dir=tmp_path,
+            version="v01",
+            provider="openai",
+            network_access=True,
+        )
+
+        assert "Dependency installation is enabled" in captured["system"]
+        assert "PEP 723" in captured["system"]
+        assert captured["options"].network_access is True
 
     @pytest.mark.asyncio
     @patch("auto_scientist.agents.coder.get_backend")

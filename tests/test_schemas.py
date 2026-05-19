@@ -200,6 +200,19 @@ class TestScientistPlanOutput:
         assert p.dead_ends[0].description == "linear fit family"
         assert p.dead_ends[0].evidence == "v02 residuals retained curvature"
 
+    @pytest.mark.parametrize(
+        "dead_end",
+        [
+            {"description": "", "evidence": "v02 residuals retained curvature"},
+            {"description": "linear fit family", "evidence": ""},
+        ],
+    )
+    def test_dead_ends_require_description_and_evidence(self, minimal_valid, dead_end):
+        minimal_valid["dead_ends"] = [dead_end]
+
+        with pytest.raises(ValidationError):
+            ScientistPlanOutput.model_validate(minimal_valid)
+
 
 # ---------------------------------------------------------------------------
 # HypothesisPrediction
