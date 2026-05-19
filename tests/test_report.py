@@ -85,6 +85,113 @@ class TestRunReport:
         assert "Let me read" not in result
 
     @pytest.mark.asyncio
+    @patch("auto_scientist.agents.report.validate_report_structure", return_value=[])
+    @patch("auto_scientist.agents.report.safe_query")
+    async def test_strips_tool_transcript_before_section_heading(
+        self, mock_query, _mock_validate, tmp_path
+    ):
+        """Tool transcript chatter before a section heading is not written as report content."""
+
+        async def fake_query(**kwargs):
+            yield _assistant_msg(
+                "[userMessage]\n"
+                "Reading version files before drafting.\n"
+                "[tool]\n"
+                "sed -n '1,120p' v00/results.txt\n"
+                "# README\n\n"
+                "This is tool output, not the report.\n\n"
+                "    # code comment from a shell snippet\n\n"
+                "## Executive Summary\n\n"
+                "The final report starts here and contains the useful content."
+            )
+            yield _result_msg()
+
+        mock_query.side_effect = fake_query
+
+        state = ExperimentState(domain="test", goal="test goal")
+        notebook_path = tmp_path / "lab_notebook.xml"
+        notebook_path.write_text("# Notebook")
+
+        result = await run_report(
+            state=state,
+            notebook_path=notebook_path,
+            output_dir=tmp_path,
+        )
+
+        assert result.startswith("## Executive Summary")
+        assert "[userMessage]" not in result
+        assert "sed -n" not in result
+        assert "# README" not in result
+
+    @pytest.mark.asyncio
+    @patch("auto_scientist.agents.report.validate_report_structure", return_value=[])
+    @patch("auto_scientist.agents.report.safe_query")
+    async def test_strips_adjacent_tool_heading_before_report_heading(
+        self, mock_query, _mock_validate, tmp_path
+    ):
+        """A tool heading adjacent to a report heading is still treated as preamble."""
+
+        async def fake_query(**kwargs):
+            yield _assistant_msg(
+                "[tool]\n"
+                "# README\n\n"
+                "## Executive Summary\n\n"
+                "The final report starts here and contains the useful content."
+            )
+            yield _result_msg()
+
+        mock_query.side_effect = fake_query
+
+        state = ExperimentState(domain="test", goal="test goal")
+        notebook_path = tmp_path / "lab_notebook.xml"
+        notebook_path.write_text("# Notebook")
+
+        result = await run_report(
+            state=state,
+            notebook_path=notebook_path,
+            output_dir=tmp_path,
+        )
+
+        assert result.startswith("## Executive Summary")
+        assert "# README" not in result
+
+    @pytest.mark.asyncio
+    @patch("auto_scientist.agents.report.validate_report_structure", return_value=[])
+    @patch("auto_scientist.agents.report.safe_query")
+    async def test_ignores_report_like_heading_inside_fenced_tool_output(
+        self, mock_query, _mock_validate, tmp_path
+    ):
+        """A report-like heading inside a fenced snippet is not treated as the report start."""
+
+        async def fake_query(**kwargs):
+            yield _assistant_msg(
+                "[tool]\n"
+                "```markdown\n"
+                "## Executive Summary\n\n"
+                "This README sample is not the report.\n"
+                "```\n\n"
+                "## Executive Summary\n\n"
+                "The final report starts here and contains the useful content."
+            )
+            yield _result_msg()
+
+        mock_query.side_effect = fake_query
+
+        state = ExperimentState(domain="test", goal="test goal")
+        notebook_path = tmp_path / "lab_notebook.xml"
+        notebook_path.write_text("# Notebook")
+
+        result = await run_report(
+            state=state,
+            notebook_path=notebook_path,
+            output_dir=tmp_path,
+        )
+
+        assert result.startswith("## Executive Summary")
+        assert "README sample" not in result
+        assert "```" not in result
+
+    @pytest.mark.asyncio
     @patch("auto_scientist.agents.report.safe_query")
     async def test_raises_when_no_text(self, mock_query, tmp_path):
         """If the agent produces no text blocks, raise RuntimeError."""
@@ -432,7 +539,14 @@ class TestReportStructuralValidation:
         """When report stays incomplete after all retries, a warning header is prepended."""
 
         async def fake_query(**kwargs):
-            yield _assistant_msg(_INCOMPLETE_REPORT)
+            yield _assistant_msg(
+                "[userMessage]\n"
+                "Inspecting files before writing the incomplete report.\n"
+                "[tool]\n"
+                "# README\n\n"
+                "This belongs to command output, not the report.\n\n"
+                f"{_INCOMPLETE_REPORT}"
+            )
             yield _result_msg(session_id="report-session-warn")
 
         mock_query.side_effect = fake_query
@@ -448,6 +562,8 @@ class TestReportStructuralValidation:
         )
         assert result.startswith("> **WARNING: This report is incomplete.**")
         assert "Missing sections:" in result
+        assert "[userMessage]" not in result
+        assert "# README" not in result
 
 
 class TestReportPromptBuilder:

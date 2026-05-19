@@ -9,14 +9,17 @@ from __future__ import annotations
 import logging
 import tomllib
 from pathlib import Path
-from typing import TYPE_CHECKING, ClassVar, Literal
+from typing import TYPE_CHECKING, ClassVar, Literal, cast
 
 if TYPE_CHECKING:
     from auto_scientist.experiment_config import ExperimentConfig
 
-from pydantic import BaseModel, ConfigDict, Field, field_validator
+from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
 logger = logging.getLogger(__name__)
+
+ProviderName = Literal["anthropic", "openai", "google"]
+_PROVIDER_NAMES: frozenset[str] = frozenset(("anthropic", "openai", "google"))
 
 
 class ReasoningConfig(BaseModel):
@@ -40,10 +43,29 @@ class AgentModelConfig(BaseModel):
 
     model_config = ConfigDict(validate_assignment=True)
 
-    provider: Literal["anthropic", "openai", "google"] = "anthropic"
+    provider: ProviderName = "openai"
     model: str = Field(min_length=1)
     reasoning: ReasoningConfig = ReasoningConfig()
     mode: Literal["sdk", "api"] = "sdk"
+
+    @model_validator(mode="before")
+    @classmethod
+    def _infer_provider_from_model_name(cls, values):
+        """Keep old config files working when the model name names a provider."""
+        if not isinstance(values, dict) or values.get("provider") is not None:
+            return values
+        model = values.get("model")
+        if isinstance(model, str):
+            inferred_provider: str | None = None
+            if model.startswith("claude-"):
+                inferred_provider = "anthropic"
+            elif model.startswith("gemini-"):
+                inferred_provider = "google"
+            if inferred_provider is not None:
+                updated = dict(values)
+                updated["provider"] = inferred_provider
+                return updated
+        return values
 
     @field_validator("reasoning", mode="before")
     @classmethod
@@ -54,8 +76,8 @@ class AgentModelConfig(BaseModel):
         return v
 
 
-BUILTIN_PRESETS: dict[str, dict] = {
-    # Smoke tests, cheapest possible, quality not important
+_ANTHROPIC_COMPAT_PRESETS: dict[str, dict] = {
+    # Smoke tests: latest fast Anthropic model + latest OpenAI sidecars.
     "turbo": {
         "defaults": {"model": "claude-haiku-4-5-20251001", "reasoning": "off"},
         "summarizer": {
@@ -69,7 +91,7 @@ BUILTIN_PRESETS: dict[str, dict] = {
             {"provider": "openai", "model": "gpt-5.4-nano", "reasoning": "off"},
         ],
     },
-    # Quick but competent: scientist upgraded so plans are usable
+    # Quick but competent: latest fast defaults, stronger planner.
     "fast": {
         "defaults": {"model": "claude-haiku-4-5-20251001", "reasoning": "low"},
         "scientist": {"model": "claude-sonnet-4-6", "reasoning": "low"},
@@ -84,10 +106,10 @@ BUILTIN_PRESETS: dict[str, dict] = {
             {"provider": "anthropic", "model": "claude-haiku-4-5-20251001", "reasoning": "low"},
         ],
     },
-    # Balanced quality/cost
+    # Balanced quality using latest Claude family models.
     "default": {
         "defaults": {"model": "claude-sonnet-4-6", "reasoning": "medium"},
-        "scientist": {"model": "claude-opus-4-6", "reasoning": "medium"},
+        "scientist": {"model": "claude-opus-4-7", "reasoning": "medium"},
         "summarizer": {
             "provider": "openai",
             "model": "gpt-5.4-nano",
@@ -99,12 +121,12 @@ BUILTIN_PRESETS: dict[str, dict] = {
             {"provider": "anthropic", "model": "claude-sonnet-4-6", "reasoning": "medium"},
         ],
     },
-    # High quality: analyst upgraded to Opus for deeper observations
+    # High quality: latest Opus where deeper reasoning pays off.
     "high": {
         "defaults": {"model": "claude-sonnet-4-6", "reasoning": "high"},
-        "analyst": {"model": "claude-opus-4-6", "reasoning": "medium"},
-        "scientist": {"model": "claude-opus-4-6", "reasoning": "high"},
-        "assessor": {"model": "claude-opus-4-6", "reasoning": "medium"},
+        "analyst": {"model": "claude-opus-4-7", "reasoning": "medium"},
+        "scientist": {"model": "claude-opus-4-7", "reasoning": "high"},
+        "assessor": {"model": "claude-opus-4-7", "reasoning": "medium"},
         "summarizer": {
             "provider": "openai",
             "model": "gpt-5.4-nano",
@@ -112,33 +134,33 @@ BUILTIN_PRESETS: dict[str, dict] = {
             "mode": "api",
         },
         "critics": [
-            {"provider": "openai", "model": "gpt-5.4", "reasoning": "high"},
-            {"provider": "anthropic", "model": "claude-opus-4-6", "reasoning": "high"},
+            {"provider": "openai", "model": "gpt-5.5", "reasoning": "high"},
+            {"provider": "anthropic", "model": "claude-opus-4-7", "reasoning": "high"},
         ],
     },
-    # Best quality, but coder/ingestor/report stay on Sonnet (they're high-volume)
+    # Best quality across every core agent.
     "max": {
-        "defaults": {"model": "claude-opus-4-6", "reasoning": "high"},
-        "scientist": {"model": "claude-opus-4-6", "reasoning": "max"},
+        "defaults": {"model": "claude-opus-4-7", "reasoning": "high"},
+        "scientist": {"model": "claude-opus-4-7", "reasoning": "max"},
         "coder": {"model": "claude-sonnet-4-6", "reasoning": "high"},
         "ingestor": {"model": "claude-sonnet-4-6", "reasoning": "high"},
         "report": {"model": "claude-sonnet-4-6", "reasoning": "high"},
         "summarizer": {
             "provider": "openai",
-            "model": "gpt-5.4-mini",
+            "model": "gpt-5.4-nano",
             "reasoning": "off",
             "mode": "api",
         },
         "critics": [
-            {"provider": "openai", "model": "gpt-5.4", "reasoning": "max"},
-            {"provider": "anthropic", "model": "claude-opus-4-6", "reasoning": "max"},
+            {"provider": "openai", "model": "gpt-5.5", "reasoning": "max"},
+            {"provider": "anthropic", "model": "claude-opus-4-7", "reasoning": "max"},
         ],
     },
 }
-BUILTIN_PRESETS["medium"] = BUILTIN_PRESETS["default"]
 
-# Model mapping: Anthropic -> OpenAI equivalents
-# claude-opus-4-6 -> gpt-5.4, claude-sonnet-4-6 -> gpt-5.4-mini, haiku -> gpt-5.4-nano
+# Model mapping: Anthropic -> OpenAI equivalents.
+# Built-in OpenAI presets use the latest available OpenAI model for each size
+# class: full GPT-5.5, GPT-5.4 mini, and GPT-5.4 nano.
 _OPENAI_PRESETS: dict[str, dict] = {
     "turbo-openai": {
         "defaults": {
@@ -154,16 +176,16 @@ _OPENAI_PRESETS: dict[str, dict] = {
         },
         "critics": [
             {"provider": "openai", "model": "gpt-5.4-nano", "reasoning": "off"},
-            {"provider": "anthropic", "model": "claude-haiku-4-5-20251001", "reasoning": "off"},
+            {"provider": "openai", "model": "gpt-5.4-nano", "reasoning": "off"},
         ],
     },
     "fast-openai": {
         "defaults": {
             "provider": "openai",
-            "model": "gpt-5.4-nano",
+            "model": "gpt-5.5",
             "reasoning": "low",
         },
-        "scientist": {"provider": "openai", "model": "gpt-5.4-mini", "reasoning": "low"},
+        "scientist": {"provider": "openai", "model": "gpt-5.5", "reasoning": "low"},
         "summarizer": {
             "provider": "openai",
             "model": "gpt-5.4-nano",
@@ -171,17 +193,17 @@ _OPENAI_PRESETS: dict[str, dict] = {
             "mode": "api",
         },
         "critics": [
+            {"provider": "openai", "model": "gpt-5.5", "reasoning": "low"},
             {"provider": "openai", "model": "gpt-5.4-mini", "reasoning": "low"},
-            {"provider": "anthropic", "model": "claude-haiku-4-5-20251001", "reasoning": "low"},
         ],
     },
     "default-openai": {
         "defaults": {
             "provider": "openai",
-            "model": "gpt-5.4-mini",
+            "model": "gpt-5.5",
             "reasoning": "medium",
         },
-        "scientist": {"provider": "openai", "model": "gpt-5.4", "reasoning": "medium"},
+        "scientist": {"provider": "openai", "model": "gpt-5.5", "reasoning": "medium"},
         "summarizer": {
             "provider": "openai",
             "model": "gpt-5.4-nano",
@@ -190,18 +212,18 @@ _OPENAI_PRESETS: dict[str, dict] = {
         },
         "critics": [
             {"provider": "openai", "model": "gpt-5.4-mini", "reasoning": "medium"},
-            {"provider": "anthropic", "model": "claude-sonnet-4-6", "reasoning": "medium"},
+            {"provider": "openai", "model": "gpt-5.5", "reasoning": "medium"},
         ],
     },
     "high-openai": {
         "defaults": {
             "provider": "openai",
-            "model": "gpt-5.4-mini",
+            "model": "gpt-5.5",
             "reasoning": "high",
         },
-        "analyst": {"provider": "openai", "model": "gpt-5.4", "reasoning": "medium"},
-        "scientist": {"provider": "openai", "model": "gpt-5.4", "reasoning": "high"},
-        "assessor": {"provider": "openai", "model": "gpt-5.4", "reasoning": "medium"},
+        "analyst": {"provider": "openai", "model": "gpt-5.5", "reasoning": "medium"},
+        "scientist": {"provider": "openai", "model": "gpt-5.5", "reasoning": "high"},
+        "assessor": {"provider": "openai", "model": "gpt-5.5", "reasoning": "medium"},
         "summarizer": {
             "provider": "openai",
             "model": "gpt-5.4-nano",
@@ -209,35 +231,45 @@ _OPENAI_PRESETS: dict[str, dict] = {
             "mode": "api",
         },
         "critics": [
-            {"provider": "openai", "model": "gpt-5.4", "reasoning": "high"},
-            {"provider": "anthropic", "model": "claude-opus-4-6", "reasoning": "high"},
+            {"provider": "openai", "model": "gpt-5.5", "reasoning": "high"},
+            {"provider": "openai", "model": "gpt-5.4-mini", "reasoning": "high"},
         ],
     },
     "max-openai": {
         "defaults": {
             "provider": "openai",
-            "model": "gpt-5.4",
+            "model": "gpt-5.5",
             "reasoning": "high",
         },
-        "scientist": {"provider": "openai", "model": "gpt-5.4", "reasoning": "max"},
-        "coder": {"provider": "openai", "model": "gpt-5.4-mini", "reasoning": "high"},
-        "ingestor": {"provider": "openai", "model": "gpt-5.4-mini", "reasoning": "high"},
-        "report": {"provider": "openai", "model": "gpt-5.4-mini", "reasoning": "high"},
+        "scientist": {"provider": "openai", "model": "gpt-5.5", "reasoning": "max"},
+        "coder": {"provider": "openai", "model": "gpt-5.5", "reasoning": "high"},
+        "ingestor": {"provider": "openai", "model": "gpt-5.5", "reasoning": "high"},
+        "report": {"provider": "openai", "model": "gpt-5.5", "reasoning": "high"},
         "summarizer": {
             "provider": "openai",
-            "model": "gpt-5.4-mini",
+            "model": "gpt-5.4-nano",
             "reasoning": "off",
             "mode": "api",
         },
         "critics": [
-            {"provider": "openai", "model": "gpt-5.4", "reasoning": "max"},
-            {"provider": "anthropic", "model": "claude-opus-4-6", "reasoning": "max"},
+            {"provider": "openai", "model": "gpt-5.5", "reasoning": "max"},
+            {"provider": "openai", "model": "gpt-5.4-mini", "reasoning": "max"},
         ],
     },
 }
 _OPENAI_PRESETS["medium-openai"] = _OPENAI_PRESETS["default-openai"]
 
-BUILTIN_PRESETS.update(_OPENAI_PRESETS)
+_ANTHROPIC_PRESETS = {f"{name}-anthropic": cfg for name, cfg in _ANTHROPIC_COMPAT_PRESETS.items()}
+_OPENAI_BASE_PRESETS = {name.removesuffix("-openai"): cfg for name, cfg in _OPENAI_PRESETS.items()}
+
+BUILTIN_PRESETS = {
+    **_OPENAI_BASE_PRESETS,
+    **_OPENAI_PRESETS,
+    **_ANTHROPIC_PRESETS,
+}
+BUILTIN_PRESETS["medium"] = BUILTIN_PRESETS["default"]
+BUILTIN_PRESETS["medium-openai"] = BUILTIN_PRESETS["default-openai"]
+BUILTIN_PRESETS["medium-anthropic"] = BUILTIN_PRESETS["default-anthropic"]
 
 
 CC_EFFORT_MAP: dict[str, str] = {
@@ -311,35 +343,11 @@ class ModelConfig(BaseModel):
         Loads the preset, then layers per-agent model overrides from the
         YAML models block on top. summaries=False always nullifies the summarizer.
 
-        If exp_config.provider is set, tries "{preset}-{provider}" first (e.g.
-        "default-openai"), then falls back to the base preset with the defaults
-        provider overridden.
+        If exp_config.provider is set, explicit provider selection wins over
+        any suffix already present on the preset name.
         """
-        preset_name = exp_config.preset
         provider = getattr(exp_config, "provider", None)
-
-        if provider and provider != "anthropic":
-            variant = f"{preset_name}-{provider}"
-            if variant in BUILTIN_PRESETS:
-                preset_name = variant
-            else:
-                # Fall back: load base preset but override defaults.provider
-                mc = cls.builtin_preset(preset_name)
-                mc.defaults = mc.defaults.model_copy(update={"provider": provider})
-                # Continue with overrides below
-                if exp_config.models is not None:
-                    overrides = exp_config.models
-                    for field in cls._AGENT_FIELDS:
-                        agent_override = getattr(overrides, field, None)
-                        if agent_override is not None:
-                            setattr(mc, field, agent_override)
-                    if overrides.critics:
-                        mc.critics = list(overrides.critics)
-                if not exp_config.summaries:
-                    mc.summarizer = None
-                return mc
-
-        mc = cls.builtin_preset(preset_name)
+        mc = cls.builtin_preset_for_provider(exp_config.preset, provider)
 
         if exp_config.models is not None:
             overrides = exp_config.models
@@ -361,6 +369,59 @@ class ModelConfig(BaseModel):
         if name not in BUILTIN_PRESETS:
             raise ValueError(f"Unknown preset: {name!r}. Available: {list(BUILTIN_PRESETS)}")
         return cls._from_dict(BUILTIN_PRESETS[name])
+
+    @classmethod
+    def builtin_preset_for_provider(
+        cls,
+        name: str = "default",
+        provider: str | None = None,
+    ) -> ModelConfig:
+        """Return a built-in preset after applying an explicit provider.
+
+        Unsuffixed preset names are OpenAI defaults. If a caller supplies a
+        provider explicitly, that choice wins over any suffix already present
+        on ``name``. For example, ``default-anthropic`` with provider
+        ``openai`` resolves to ``default``.
+        """
+        normalized_provider = cls._normalize_provider(provider)
+        preset_name = cls._preset_name_for_provider(name, normalized_provider)
+        mc = cls.builtin_preset(preset_name)
+        if (
+            normalized_provider
+            and mc.defaults.provider != normalized_provider
+            and not preset_name.endswith(f"-{normalized_provider}")
+        ):
+            mc.defaults = mc.defaults.model_copy(update={"provider": normalized_provider})
+        return mc
+
+    @staticmethod
+    def _normalize_provider(provider: str | None) -> ProviderName | None:
+        if provider is None:
+            return None
+        if provider not in _PROVIDER_NAMES:
+            available = sorted(_PROVIDER_NAMES)
+            raise ValueError(f"Unknown provider: {provider!r}. Available: {available}")
+        return cast("ProviderName", provider)
+
+    @staticmethod
+    def _preset_name_for_provider(
+        name: str,
+        provider: ProviderName | None,
+    ) -> str:
+        if provider is None:
+            return name
+        base = name
+        for suffix_provider in ("openai", "anthropic"):
+            suffix = f"-{suffix_provider}"
+            if base.endswith(suffix):
+                base = base[: -len(suffix)]
+                break
+        if provider == "openai" and base in BUILTIN_PRESETS:
+            return base
+        variant = f"{base}-{provider}"
+        if variant in BUILTIN_PRESETS:
+            return variant
+        return base if base in BUILTIN_PRESETS else name
 
     @classmethod
     def from_toml(cls, path: Path) -> ModelConfig:

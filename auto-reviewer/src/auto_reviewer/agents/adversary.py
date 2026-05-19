@@ -626,7 +626,7 @@ def _build_critic_prompt(
     has_predictions: bool = True,
     has_mcp_tool: bool = True,
     has_notebook_tool: bool = True,
-    provider: str = "anthropic",
+    provider: str = "openai",
     pending_abductions: str = "",
 ) -> tuple[str, str]:
     """Build the (system, user) prompt pair sent to critic models.

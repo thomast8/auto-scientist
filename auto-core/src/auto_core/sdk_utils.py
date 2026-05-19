@@ -9,7 +9,7 @@ The monkey-patch for unknown message types now lives in sdk_backend.py
 
 import json
 import logging
-from collections.abc import AsyncIterator
+from collections.abc import AsyncIterator, Sequence
 from dataclasses import dataclass
 from typing import Any
 
@@ -48,6 +48,62 @@ def resolve_prompt_provider(provider: str) -> str:
         f"No prompt flavor registered for provider {provider!r}. "
         "Expected one of: 'anthropic', 'openai', 'google'."
     )
+
+
+def strip_report_preamble(
+    text: str,
+    expected_headings: Sequence[str] | None = None,
+) -> str:
+    """Drop tool chatter before the first report-shaped markdown heading."""
+    raw = text.strip()
+    if not raw:
+        return raw
+
+    lines = raw.splitlines()
+    headings: list[tuple[int, str]] = []
+    in_fence = False
+    for idx, line in enumerate(lines):
+        if _is_markdown_fence(line):
+            in_fence = not in_fence
+            continue
+        if in_fence:
+            continue
+        heading = _markdown_heading_text(line)
+        if heading is not None:
+            headings.append((idx, heading))
+
+    headings_to_match = expected_headings if expected_headings is not None else _EXPECTED_HEADINGS
+    normalized_expected = [heading.casefold() for heading in headings_to_match if heading.strip()]
+    for idx, heading in headings:
+        heading_key = heading.casefold()
+        if any(expected in heading_key for expected in normalized_expected):
+            return "\n".join(lines[idx:]).strip()
+
+    if headings:
+        return "\n".join(lines[headings[0][0] :]).strip()
+
+    return raw
+
+
+def _is_markdown_fence(line: str) -> bool:
+    stripped = line.lstrip(" ")
+    if len(line) - len(stripped) > 3:
+        return False
+    return stripped.startswith("```") or stripped.startswith("~~~")
+
+
+def _markdown_heading_text(line: str) -> str | None:
+    """Return ATX heading text for non-code-block markdown heading lines."""
+    stripped_spaces = line.lstrip(" ")
+    if len(line) - len(stripped_spaces) > 3 or stripped_spaces.startswith("\t"):
+        return None
+
+    hash_count = len(stripped_spaces) - len(stripped_spaces.lstrip("#"))
+    if not 1 <= hash_count <= 6:
+        return None
+    if len(stripped_spaces) == hash_count or not stripped_spaces[hash_count].isspace():
+        return None
+    return stripped_spaces[hash_count:].strip().rstrip("#").strip()
 
 
 def append_block_to_buffer(block: Any, buffer: list[str]) -> None:
@@ -356,7 +412,7 @@ def prepare_turn_budget(
     max_turns: int,
     tools: list[str] | None = None,
     *,
-    provider: str = "anthropic",
+    provider: str = "openai",
 ) -> TurnBudgetConfig:
     """Build system prompt, allowed tools, and turn budget for SDK mode.
 

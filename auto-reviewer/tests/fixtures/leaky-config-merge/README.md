@@ -69,9 +69,9 @@ Run the same fixture across model tiers and compare:
 
 | Tier | Expected result |
 |---|---|
-| `--preset turbo` (Haiku) | Likely: misses cross-file caller, produces phantom or rubber-stamps |
-| `--preset default` (Sonnet) | Should catch bug, may under-probe |
-| `--preset high` (Opus) | Should catch bug, cite docstring, probe with multi-key config |
+| `--preset turbo` (requests GPT-5.4 nano, off reasoning) | Fastest current-model-family smoke; Codex SDK may execute GPT-5.4 mini until nano is supported directly |
+| `--preset default` (GPT-5.5) | Should catch bug, may under-probe |
+| `--preset high` (GPT-5.5 high reasoning) | Should catch bug, cite docstring, probe with multi-key config |
 
 ## Run
 

@@ -2,7 +2,7 @@
 # ruff: noqa: E501
 
 
-def build_surveyor_system(provider: str = "claude") -> str:
+def build_surveyor_system(provider: str = "gpt") -> str:
     """Return the Surveyor system prompt.
 
     Reviewer-side prompts are unified (no provider-specific trimming yet).

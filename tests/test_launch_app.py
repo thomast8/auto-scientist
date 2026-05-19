@@ -39,12 +39,12 @@ class TestLaunchAppConstruction:
             mode_sel = app.query_one("#model-summarizer-mode", Select)
             assert mode_sel is not None
 
-    async def test_top_provider_defaults_to_anthropic(self):
+    async def test_top_provider_defaults_to_openai(self):
         app = LaunchApp()
         async with app.run_test() as _pilot:
             from textual.widgets import Select
 
-            assert app.query_one("#top-provider-select", Select).value == "anthropic"
+            assert app.query_one("#top-provider-select", Select).value == "openai"
 
     async def test_agent_provider_not_locked(self):
         """All agent provider dropdowns should be enabled (not locked to anthropic)."""

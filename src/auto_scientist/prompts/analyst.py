@@ -459,7 +459,7 @@ Rules (quick reference):
 </recap>"""
 
 
-def build_analyst_system(provider: str = "claude") -> str:
+def build_analyst_system(provider: str = "gpt") -> str:
     """Assemble Analyst system prompt in provider-optimal order."""
     if provider == "gpt":
         return "\n\n".join(
@@ -489,8 +489,8 @@ def build_analyst_system(provider: str = "claude") -> str:
     )
 
 
-# Backward-compatible alias (Claude default)
-ANALYST_SYSTEM = build_analyst_system("claude")
+# Backward-compatible alias for the default prompt flavor.
+ANALYST_SYSTEM = build_analyst_system("gpt")
 
 ANALYST_USER = """\
 <context>

@@ -237,12 +237,12 @@ interactive: false       # Human-in-the-loop at decision points
 # Per-agent model overrides
 models:
   scientist:
-    provider: anthropic
-    model: claude-opus-4-6
+    provider: openai
+    model: gpt-5.5
     reasoning: high
   critics:
     - provider: openai
-      model: gpt-5.4
+      model: gpt-5.5
       reasoning: medium
     - provider: google
       model: gemini-3.1-pro-preview
@@ -253,12 +253,13 @@ models:
 
 | Preset | Use case | Scientist | Critics |
 |--------|----------|-----------|---------|
-| `default` | Balanced | opus-4-6 (medium reasoning) | Gemini 3.1 Pro + GPT-5.4 |
-| `fast` | Speed/cost | haiku-4-5 | Gemini Flash Lite + GPT-5.4-nano |
-| `high` | Quality | opus-4-6 (high reasoning) | Gemini 3.1 Pro + GPT-5.4 (high) |
-| `max` | Maximum | opus-4-6 (max reasoning) | Gemini 3.1 Pro + GPT-5.4 (max) |
+| `turbo` | Smoke tests | GPT-5.4 nano (off reasoning) | GPT-5.4 nano + GPT-5.4 nano |
+| `fast` | Speed/cost | GPT-5.5 (low reasoning) | GPT-5.5 + GPT-5.4 mini |
+| `default` | Balanced | GPT-5.5 (medium reasoning) | GPT-5.4 mini + GPT-5.5 |
+| `high` | Quality | GPT-5.5 (high reasoning) | GPT-5.5 + GPT-5.4 mini |
+| `max` | Maximum | GPT-5.5 (max reasoning) | GPT-5.5 + GPT-5.4 mini |
 
-All core agents run through either the [Claude Code SDK](https://docs.anthropic.com/en/docs/claude-code) (Anthropic, default) or [Codex CLI](https://github.com/openai/codex) (OpenAI), using your subscription instead of per-token API billing. Use `--provider openai` to switch to the Codex backend. Critics support mixed providers (OpenAI, Google) via direct API calls, which require their respective API keys and are billed per-token.
+All core agents default to the [Codex CLI](https://github.com/openai/codex) OpenAI backend. Built-in OpenAI presets use the latest available model in each size class: GPT-5.5 for full-size lanes, GPT-5.4 mini for mini lanes, and GPT-5.4 nano for nano lanes. Turbo requests GPT-5.4 nano for every lane, but the Codex SDK currently promotes SDK-mode nano calls to GPT-5.4 mini under ChatGPT subscription auth until Codex supports nano directly; API-mode sidecars keep the requested nano model. Use `--provider anthropic` or an `*-anthropic` preset to opt into the Claude Code SDK; those presets use the latest Claude family models (Haiku 4.5, Sonnet 4.6, and Opus 4.7). Critics support mixed providers (OpenAI, Google, Anthropic), with API-mode critics using their provider API keys and per-token billing.
 
 ## CLI Reference
 
@@ -270,7 +271,7 @@ All core agents run through either the [Claude Code SDK](https://docs.anthropic.
 | `--goal <text>` | *(required without YAML)* | Investigation goal |
 | `-c, --config <path>` | | YAML config file |
 | `--preset <name>` | `default` | Model preset |
-| `-p, --provider <name>` | `anthropic` | SDK backend: `anthropic` or `openai` |
+| `-p, --provider <name>` | `openai` | SDK backend: `openai` or `anthropic` |
 | `--max-iterations <int>` | `20` | Maximum iterations |
 | `--output-dir <path>` | `experiments` | Output directory |
 | `--schedule <window>` | | Time window, e.g. `"22:00-06:00"` |
@@ -346,9 +347,9 @@ uv run ruff check src/ tests/
 
 - Python >= 3.12
 - [uv](https://docs.astral.sh/uv/)
-- [Claude Code CLI](https://docs.anthropic.com/en/docs/claude-code) (`npm install -g @anthropic-ai/claude-code`) for Anthropic backend
-- [Codex CLI](https://github.com/openai/codex) (`npm install -g @openai/codex`) for OpenAI backend (optional)
-- API keys: `OPENAI_API_KEY` (for OpenAI critics or Codex backend), `GOOGLE_API_KEY` (optional, for Google critics)
+- [Codex CLI](https://github.com/openai/codex) (`npm install -g @openai/codex`) for the default OpenAI backend
+- [Claude Code CLI](https://docs.anthropic.com/en/docs/claude-code) (`npm install -g @anthropic-ai/claude-code`) only for Anthropic backend runs
+- API keys: `OPENAI_API_KEY` (for OpenAI API-mode critics/summaries), `GOOGLE_API_KEY` (optional, for Google critics)
 
 ## Architecture
 

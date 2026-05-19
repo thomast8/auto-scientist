@@ -37,7 +37,7 @@ async def run_ingestor(
     config_path: Path | None = None,
     model: str | None = None,
     message_buffer: list[str] | None = None,
-    provider: str = "anthropic",
+    provider: str = "openai",
 ) -> Path:
     """Inspect raw data and produce a canonical dataset.
 

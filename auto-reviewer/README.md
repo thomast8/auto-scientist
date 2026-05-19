@@ -7,6 +7,15 @@ reproducer probes; the Findings agent compiles a prioritized report with
 reproducers attached. A running **investigation log** carries hypotheses
 and open questions across iterations.
 
+Auto-Reviewer uses the shared `auto_core` model presets, so its default
+backend is OpenAI/Codex. The default preset uses GPT-5.5 for full-size lanes
+and GPT-5.4 mini/nano for smaller lanes. Turbo requests GPT-5.4 nano for
+every lane, with the shared Codex SDK fallback promoting SDK-mode nano calls
+to GPT-5.4 mini under ChatGPT subscription auth until Codex supports nano
+directly. Pass `--preset default-anthropic` or another `*-anthropic` preset
+only when you intentionally want Claude; Anthropic presets use the latest
+Claude family models.
+
 A "confirmed prediction" here is a reproducer (failing test, assertion,
 demonstrated misbehavior).
 

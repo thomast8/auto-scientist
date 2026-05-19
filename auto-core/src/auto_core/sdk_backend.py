@@ -15,7 +15,7 @@ import os
 import re
 import shutil
 import tempfile
-from collections.abc import AsyncIterator
+from collections.abc import AsyncIterable, AsyncIterator, Awaitable, Callable
 from contextlib import asynccontextmanager
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -27,15 +27,19 @@ import codex_app_server_sdk.transport as _codex_transport_mod
 from claude_code_sdk import (
     AssistantMessage,
     ClaudeCodeOptions,
+    HookContext,
+    HookMatcher,
     ResultMessage,
 )
 from claude_code_sdk import query as claude_query
 from claude_code_sdk._errors import MessageParseError
+from claude_code_sdk.types import HookJSONOutput
 from codex_app_server_sdk import CodexClient, ThreadConfig, TurnOverrides
 from codex_app_server_sdk.errors import CodexProtocolError
 from pydantic import BaseModel
 
 from auto_core.cost_ceiling import record_cost
+from auto_core.safety.tool_guard import PreToolUseHook
 
 logger = logging.getLogger(__name__)
 
@@ -63,6 +67,26 @@ CODEX_MODEL_OVERRIDES: dict[str, str] = {
     "gpt-5.4-nano": "gpt-5.4-mini",
 }
 
+_CODEX_ENV_ALLOWLIST: frozenset[str] = frozenset(
+    {
+        "COLORTERM",
+        "HOME",
+        "LANG",
+        "LC_ALL",
+        "LC_CTYPE",
+        "LOGNAME",
+        "NO_COLOR",
+        "PATH",
+        "SHELL",
+        "SSL_CERT_DIR",
+        "SSL_CERT_FILE",
+        "TERM",
+        "TMP",
+        "TMPDIR",
+        "USER",
+    }
+)
+
 # Codex sandbox addendum for tool-using agents.
 # uv panics inside the Codex macOS seatbelt sandbox because the
 # system-configuration Rust crate can't access SCDynamicStore.
@@ -84,6 +108,36 @@ IMPORTANT: Every time you edit the script to add a new import, you MUST also
 add the package to the PEP 723 dependencies block. Do NOT remove imports to
 work around installation failures; the framework handles installation.
 </sandbox_environment>
+"""
+
+# Additional sandbox policy shown only to agents that run under the
+# reviewer's workspace guard. The Codex seatbelt already blocks writes
+# outside cwd; this blurb keeps the model's model-of-the-world accurate.
+CODEX_REVIEWER_POLICY_ADDENDUM = """\
+
+<reviewer_sandbox_policy>
+The seatbelt confines every write to the review workspace. The following
+are kernel-blocked and will fail with EPERM, regardless of what you try:
+
+- Writes outside the workspace (including the user's real repository
+  elsewhere on disk). Use `Read` / `Glob` / `Grep` if you need to
+  inspect it.
+- Subprocess attempts to mutate directories outside the workspace.
+
+The policy additionally rejects these operations even when they would
+resolve inside the workspace — mirroring the Claude-backend guard so
+behaviour is identical across providers:
+
+- `rm -r` / `rm -rf` anywhere (clean up via the orchestrator, not via
+  Bash).
+- `sudo`, `chmod`, `chown`, `dd`, `mkfs`, `systemctl`, `launchctl`.
+- `git push`, `git commit`, `git reset --hard`, `git clean`,
+  `git rebase`, `git checkout`, `git branch`, `git remote`.
+- `gh pr merge/close/edit`, `gh issue *`, `gh repo *`, `gh api -X POST`.
+
+Probes must run the reviewer's script from the workspace clone. Do not
+`cd` to any path that isn't under the workspace.
+</reviewer_sandbox_policy>
 """
 
 # Tools that should never be available to SDK subprocesses.
@@ -319,7 +373,21 @@ def cleanup_sessions() -> int:
 
 @dataclass(frozen=True)
 class SDKOptions:
-    """Unified options for both Claude Code SDK and Codex SDK."""
+    """Unified options for both Claude Code SDK and Codex SDK.
+
+    ``pre_tool_use_hook``: optional workspace guard (see
+    :mod:`auto_core.safety.tool_guard`). When set:
+      - Claude backend wires it to ``ClaudeCodeOptions.can_use_tool``;
+        ``permission_mode`` is forced to ``"default"`` because
+        ``"acceptEdits"`` silently auto-approves edit/write tools and
+        bypasses the callback.
+      - Codex backend cannot call back into Python per-tool; instead it
+        asserts that ``cwd`` matches the guard's workspace so the
+        macOS-seatbelt / Linux-namespace ``workspace-write`` sandbox
+        enforces the boundary at the kernel level. Guarded Codex calls
+        may not request ``network_access`` because that would require
+        ``danger-full-access`` and remove the filesystem boundary.
+    """
 
     system_prompt: str
     allowed_tools: tuple[str, ...] | list[str]
@@ -333,6 +401,7 @@ class SDKOptions:
     mcp_servers: dict[str, Any] = field(default_factory=dict)
     network_access: bool = False
     response_schema: type[BaseModel] | None = None
+    pre_tool_use_hook: PreToolUseHook | None = None
 
 
 @dataclass
@@ -394,6 +463,93 @@ def _extract_stream_delta(event: dict[str, Any]) -> tuple[str, str] | None:
     return None
 
 
+async def _single_user_message_stream(
+    prompt: str,
+    shutdown: asyncio.Event,
+) -> AsyncIterator[dict[str, Any]]:
+    """Yield a single user-turn message, stay open until ``shutdown`` is set.
+
+    Streaming mode is required for both `can_use_tool` and `hooks` to
+    actually wire up (see SDK's `Query.initialize_if_needed`). More
+    subtly, the hook-dispatch channel is shared with the input stream:
+    if this generator returns too early, the SDK's JS side logs
+    ``error: Stream closed`` every time it tries to send a hook
+    request back, and the hook silently does nothing (tools run
+    unguarded).
+
+    So we yield the one user message and block on ``shutdown`` until
+    the outer consumer has drained the result message and is ready
+    to close the input side. The SDK's prompt-reader task then sees
+    StopAsyncIteration and terminates cleanly.
+    """
+    yield {
+        "type": "user",
+        "message": {"role": "user", "content": prompt},
+        "parent_tool_use_id": None,
+        "session_id": "default",
+    }
+    await shutdown.wait()
+
+
+def _make_claude_pretooluse_hook(
+    hook: PreToolUseHook,
+) -> Callable[
+    [dict[str, Any], str | None, HookContext],
+    Awaitable[HookJSONOutput],
+]:
+    """Adapt a workspace guard to the Claude SDK's PreToolUse hook.
+
+    Unlike `can_use_tool` (which is bypassed for tools in
+    `allowed_tools`), PreToolUse runs for every tool invocation. The
+    hook input dict is shaped per
+    https://docs.anthropic.com/en/docs/claude-code/hooks#hook-input —
+    we pull `tool_name` and `tool_input` from it and call the guard.
+
+    Return shape per Anthropic docs: ``hookSpecificOutput`` with
+    ``permissionDecision`` set to ``"deny"`` (plus a
+    ``permissionDecisionReason``) on denial; an empty dict on allow.
+    """
+
+    async def pre_tool_use(
+        input_: dict[str, Any],
+        tool_use_id: str | None,  # noqa: ARG001 — SDK signature
+        context: HookContext,  # noqa: ARG001 — SDK signature
+    ) -> HookJSONOutput:
+        tool_name = input_.get("tool_name", "")
+        tool_input = input_.get("tool_input", {}) or {}
+        decision = hook(tool_name, tool_input)
+        if decision.allowed:
+            logger.debug("guard allow: %s", tool_name)
+            return {}
+        tool_summary = _summarise_tool_input(tool_name, tool_input)
+        logger.info(
+            "guard deny: tool=%s input=%s reason=%s",
+            tool_name,
+            tool_summary,
+            decision.reason,
+        )
+        return {
+            "hookSpecificOutput": {
+                "hookEventName": "PreToolUse",
+                "permissionDecision": "deny",
+                "permissionDecisionReason": decision.reason,
+            }
+        }
+
+    return pre_tool_use
+
+
+def _summarise_tool_input(tool_name: str, tool_input: dict[str, Any]) -> str:
+    """Short deterministic summary of a tool call for log context."""
+    if tool_name == "Bash":
+        cmd = str(tool_input.get("command", ""))
+        return f"command={cmd[:200]!r}"
+    for key in ("file_path", "path", "notebook_path"):
+        if key in tool_input:
+            return f"{key}={tool_input[key]!r}"
+    return str(tool_input)[:200]
+
+
 class ClaudeBackend:
     """Wraps claude_code_sdk.query() behind the SDKBackend interface."""
 
@@ -429,6 +585,24 @@ class ClaudeBackend:
             )
             env["ANTHROPIC_API_KEY"] = ""
 
+        # A pre_tool_use_hook is the reviewer's workspace guard. Wire it
+        # via `hooks={"PreToolUse": ...}` rather than `can_use_tool`: the
+        # hook fires for *every* tool invocation, whereas `can_use_tool`
+        # is bypassed whenever the tool is already in `allowed_tools`.
+        # For a guard whose whole point is to catch escapes, the hook
+        # path is the right primitive — `allowed_tools` is about
+        # ergonomics, not security.
+        hooks = None
+        if options.pre_tool_use_hook is not None:
+            hooks = {
+                "PreToolUse": [
+                    HookMatcher(
+                        matcher="*",
+                        hooks=[_make_claude_pretooluse_hook(options.pre_tool_use_hook)],
+                    )
+                ]
+            }
+
         kwargs: dict[str, Any] = {
             "system_prompt": options.system_prompt,
             "allowed_tools": options.allowed_tools,
@@ -437,6 +611,8 @@ class ClaudeBackend:
             "extra_args": extra_args,
             "include_partial_messages": True,
         }
+        if hooks is not None:
+            kwargs["hooks"] = hooks
         if options.model:
             kwargs["model"] = options.model
         if options.cwd:
@@ -480,76 +656,109 @@ class ClaudeBackend:
         text_acc = ""
         thinking_acc = ""
 
+        # The SDK only initialises the hook IPC in streaming mode (see
+        # claude_code_sdk/_internal/query.py initialize_if_needed: hooks
+        # config is skipped when `is_streaming_mode=False`). Additionally,
+        # hooks share the input stream for their control-channel IPC —
+        # closing the stream too early makes every hook fail with
+        # "Stream closed" JS-side (silent unguarded tool calls). So we
+        # keep a long-lived stream and close it only after the final
+        # ResultMessage arrives (see the shutdown_prompt_stream set
+        # below). Non-guard callers keep the cheap string path.
+        sdk_prompt: str | AsyncIterable[dict[str, Any]]
+        shutdown_prompt_stream: asyncio.Event | None = None
+        if options.pre_tool_use_hook is not None:
+            shutdown_prompt_stream = asyncio.Event()
+            sdk_prompt = _single_user_message_stream(prompt, shutdown_prompt_stream)
+        else:
+            sdk_prompt = prompt
+
         message_timeout = _resolve_message_timeout()
-        query_iter = claude_query(prompt=prompt, options=cc_opts).__aiter__()
-        while True:
-            try:
-                msg = await asyncio.wait_for(query_iter.__anext__(), timeout=message_timeout)
-            except StopAsyncIteration:
-                break
-            except TimeoutError:
-                logger.error(
-                    f"Claude CLI stalled for {message_timeout:.0f}s between messages; "
-                    f"aborting query (set {_CLAUDE_QUERY_MESSAGE_TIMEOUT_ENV} to adjust)"
-                )
-                raise
-            if msg is None:
-                continue
-
-            if isinstance(msg, AssistantMessage):
-                # Flush any remaining accumulated stream content before
-                # yielding the complete message (avoids lost tail).
-                if text_acc:
-                    block = type("_SyntheticTextBlock", (), {"text": text_acc})()
-                    yield SDKMessage(type="stream", content_blocks=[block])
-                    text_acc = ""
-                if thinking_acc:
-                    block = type("_SyntheticThinkingBlock", (), {"thinking": thinking_acc})()
-                    yield SDKMessage(type="stream", content_blocks=[block])
-                    thinking_acc = ""
-
-                yield SDKMessage(
-                    type="assistant",
-                    content_blocks=list(msg.content),
-                )
-            elif isinstance(msg, ResultMessage):
-                usage = getattr(msg, "usage", None) or {}
-                usage["num_turns"] = getattr(msg, "num_turns", 0)
-                cost = getattr(msg, "total_cost_usd", None)
-                usage["total_cost_usd"] = cost
-                record_cost(cost)
-                sid = getattr(msg, "session_id", None)
-                if sid:
-                    effective_cwd = Path(options.cwd) if options.cwd else Path.cwd()
-                    _register_session(sid, effective_cwd)
-                yield SDKMessage(
-                    type="result",
-                    result=msg.result if msg.result else None,
-                    usage=usage,
-                    session_id=sid,
-                )
-            elif hasattr(msg, "event"):
-                # StreamEvent - extract text/thinking deltas and accumulate
+        query_iter = claude_query(prompt=sdk_prompt, options=cc_opts).__aiter__()
+        try:
+            while True:
                 try:
-                    parsed = _extract_stream_delta(msg.event)
-                except Exception:
-                    continue
-                if parsed is None:
+                    msg = await asyncio.wait_for(query_iter.__anext__(), timeout=message_timeout)
+                except StopAsyncIteration:
+                    break
+                except TimeoutError:
+                    logger.error(
+                        f"Claude CLI stalled for {message_timeout:.0f}s between messages; "
+                        f"aborting query (set {_CLAUDE_QUERY_MESSAGE_TIMEOUT_ENV} to adjust)"
+                    )
+                    raise
+                if msg is None:
                     continue
 
-                kind, delta = parsed
-                if kind == "text":
-                    text_acc += delta
-                    if len(text_acc) >= _STREAM_CHUNK_SIZE:
+                if isinstance(msg, AssistantMessage):
+                    # Flush any remaining accumulated stream content before
+                    # yielding the complete message (avoids lost tail).
+                    if text_acc:
                         block = type("_SyntheticTextBlock", (), {"text": text_acc})()
                         yield SDKMessage(type="stream", content_blocks=[block])
                         text_acc = ""
-                elif kind == "thinking":
-                    thinking_acc += delta
-                    if len(thinking_acc) >= _STREAM_CHUNK_SIZE:
+                    if thinking_acc:
                         block = type("_SyntheticThinkingBlock", (), {"thinking": thinking_acc})()
                         yield SDKMessage(type="stream", content_blocks=[block])
                         thinking_acc = ""
+
+                    yield SDKMessage(
+                        type="assistant",
+                        content_blocks=list(msg.content),
+                    )
+                elif isinstance(msg, ResultMessage):
+                    usage = getattr(msg, "usage", None) or {}
+                    usage["num_turns"] = getattr(msg, "num_turns", 0)
+                    cost = getattr(msg, "total_cost_usd", None)
+                    usage["total_cost_usd"] = cost
+                    record_cost(cost)
+                    sid = getattr(msg, "session_id", None)
+                    if sid:
+                        effective_cwd = Path(options.cwd) if options.cwd else Path.cwd()
+                        _register_session(sid, effective_cwd)
+                    # Final message — safe to close the prompt stream now
+                    # that no more hook control-requests can arrive. The
+                    # SDK's prompt-reader task sees StopAsyncIteration and
+                    # the query terminates cleanly instead of hanging.
+                    if shutdown_prompt_stream is not None:
+                        shutdown_prompt_stream.set()
+                    yield SDKMessage(
+                        type="result",
+                        result=msg.result if msg.result else None,
+                        usage=usage,
+                        session_id=sid,
+                    )
+                elif hasattr(msg, "event"):
+                    # StreamEvent - extract text/thinking deltas and accumulate
+                    try:
+                        parsed = _extract_stream_delta(msg.event)
+                    except Exception:
+                        continue
+                    if parsed is None:
+                        continue
+
+                    kind, delta = parsed
+                    if kind == "text":
+                        text_acc += delta
+                        if len(text_acc) >= _STREAM_CHUNK_SIZE:
+                            block = type("_SyntheticTextBlock", (), {"text": text_acc})()
+                            yield SDKMessage(type="stream", content_blocks=[block])
+                            text_acc = ""
+                    elif kind == "thinking":
+                        thinking_acc += delta
+                        if len(thinking_acc) >= _STREAM_CHUNK_SIZE:
+                            block = type(
+                                "_SyntheticThinkingBlock",
+                                (),
+                                {"thinking": thinking_acc},
+                            )()
+                            yield SDKMessage(type="stream", content_blocks=[block])
+                            thinking_acc = ""
+        finally:
+            # Ensure the prompt stream is closed on any exit path
+            # (error, timeout, caller breaking out of the outer loop).
+            if shutdown_prompt_stream is not None:
+                shutdown_prompt_stream.set()
 
 
 # ---------------------------------------------------------------------------
@@ -657,6 +866,24 @@ class CodexBackend:
         return disabled
 
     @staticmethod
+    def _build_subprocess_env(options: SDKOptions, codex_home: Path) -> dict[str, str]:
+        """Build a minimal environment for the Codex app-server subprocess."""
+        env = {
+            key: value
+            for key, value in os.environ.items()
+            if key in _CODEX_ENV_ALLOWLIST and isinstance(value, str)
+        }
+        env.update(options.env)
+        env["CODEX_HOME"] = str(codex_home)
+        if "OPENAI_API_KEY" not in options.env and os.environ.get("OPENAI_API_KEY"):
+            logger.info(
+                "Stripping OPENAI_API_KEY from Codex subprocess env "
+                "(using ChatGPT subscription instead of direct API billing)"
+            )
+            env.pop("OPENAI_API_KEY", None)
+        return env
+
+    @staticmethod
     def _write_codex_home_config(
         codex_home: Path,
         mcp_servers: dict[str, Any] | None = None,
@@ -723,10 +950,44 @@ class CodexBackend:
         still accessible.  Falls back to a fresh client if the previous
         one was torn down (e.g. after an error).
         """
+        guard_workspace: Path | None = None
+        # Codex has no per-tool Python callback; the workspace-write
+        # sandbox is the enforcement layer and its boundary must match
+        # the guard workspace. If the caller passed a workspace guard,
+        # verify options.cwd resolves to the same directory, then pass an
+        # explicit sandbox policy below so temp directories do not remain
+        # writable escape hatches.
+        if options.pre_tool_use_hook is not None:
+            if options.network_access:
+                raise RuntimeError(
+                    "SDKOptions.pre_tool_use_hook cannot be combined with "
+                    "network_access=True for Codex. Network access maps to "
+                    "danger-full-access, which would remove the filesystem "
+                    "sandbox that enforces the workspace guard."
+                )
+            if options.cwd is None:
+                raise RuntimeError(
+                    "SDKOptions.pre_tool_use_hook is set but options.cwd "
+                    "is None; the Codex seatbelt needs an explicit cwd "
+                    "to pin its workspace-write sandbox to."
+                )
+            cwd_resolved = Path(options.cwd).resolve()
+            guard_workspace = options.pre_tool_use_hook.workspace
+            if cwd_resolved != guard_workspace:
+                raise RuntimeError(
+                    f"Codex cwd {cwd_resolved} does not match the workspace "
+                    f"guard's workspace {guard_workspace}. The seatbelt "
+                    "would confine writes to a different directory than "
+                    "the guard expects; refusing to proceed."
+                )
+            guard_workspace = cwd_resolved
+
         effort = self._resolve_effort(options.extra_args)
         turn_overrides = TurnOverrides()
         if effort:
             turn_overrides.effort = effort  # type: ignore[assignment]
+        if guard_workspace is not None:
+            turn_overrides.sandbox_policy = self._guarded_workspace_write_policy(guard_workspace)
 
         # Structured output: set output_schema on the turn overrides so
         # Codex mechanically constrains the model to valid JSON.
@@ -790,20 +1051,7 @@ class CodexBackend:
         )
         self._sandbox_mode = sandbox_mode
 
-        # Build environment for the Codex subprocess.
-        # IMPORTANT: create_subprocess_exec replaces the entire env when a
-        # dict is passed, so we must start from os.environ and layer overrides.
-        env: dict[str, str] = {
-            **os.environ,
-            **options.env,
-            "CODEX_HOME": str(codex_home),
-        }
-        if "OPENAI_API_KEY" not in options.env and os.environ.get("OPENAI_API_KEY"):
-            logger.info(
-                "Stripping OPENAI_API_KEY from Codex subprocess env "
-                "(using ChatGPT subscription instead of direct API billing)"
-            )
-            env["OPENAI_API_KEY"] = ""
+        env = self._build_subprocess_env(options, codex_home)
 
         # Build thread config.
         #
@@ -950,6 +1198,23 @@ class CodexBackend:
             raise RuntimeError(
                 f"Codex query failed (model={model}, sandbox={sandbox_mode}): {e}"
             ) from e
+
+    @staticmethod
+    def _guarded_workspace_write_policy(workspace: Path) -> dict[str, Any]:
+        """Strict Codex sandbox policy for guarded reviewer turns.
+
+        Codex's named ``workspace-write`` mode may leave platform temp
+        directories writable. Reviewer agents run against throwaway clones,
+        so the only writable root they need is the review workspace itself.
+        """
+        workspace_str = str(workspace)
+        return {
+            "type": "workspaceWrite",
+            "networkAccess": False,
+            "writableRoots": [workspace_str],
+            "excludeSlashTmp": True,
+            "excludeTmpdirEnvVar": True,
+        }
 
 
 # ---------------------------------------------------------------------------

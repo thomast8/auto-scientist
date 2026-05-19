@@ -104,7 +104,7 @@ Out-of-scope suggestions:
 </scope_boundary>"""
 
 
-def build_adversary_system(provider: str = "claude") -> str:
+def build_adversary_system(provider: str = "gpt") -> str:
     """Assemble Adversary system prompt template in provider-optimal order.
 
     Returns a template string with {persona_text}, {persona_instructions},

@@ -233,7 +233,7 @@ Rules (quick reference):
 </recap>"""
 
 
-def build_ingestor_system(provider: str = "claude") -> str:
+def build_ingestor_system(provider: str = "gpt") -> str:
     """Assemble Ingestor system prompt in provider-optimal order."""
     if provider == "gpt":
         return "\n\n".join(
@@ -256,8 +256,8 @@ def build_ingestor_system(provider: str = "claude") -> str:
     )
 
 
-# Backward-compatible alias (Claude default)
-INGESTOR_SYSTEM = build_ingestor_system("claude")
+# Backward-compatible alias for the default prompt flavor.
+INGESTOR_SYSTEM = build_ingestor_system("gpt")
 
 INGESTOR_USER = """\
 <context>

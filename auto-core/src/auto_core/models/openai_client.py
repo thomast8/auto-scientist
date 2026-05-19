@@ -43,7 +43,7 @@ async def query_openai(
     """Send a prompt to an OpenAI model and return the response.
 
     Args:
-        model: Model name (e.g., 'gpt-4o').
+        model: Model name (e.g., 'gpt-5.5').
         prompt: The full prompt to send.
         web_search: Enable web search via the Responses API.
         reasoning: Optional reasoning config for reasoning effort.

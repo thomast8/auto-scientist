@@ -319,6 +319,7 @@ class TestValidateModelNames:
     """Test model name validation against provider APIs."""
 
     def test_invalid_model_returns_error(self, monkeypatch):
+        monkeypatch.setattr("auto_core.validation.check_provider_auth", lambda provider: None)
         monkeypatch.setattr(
             "auto_core.validation.check_model_exists",
             lambda provider, model: "not found" if model == "bad-model" else None,

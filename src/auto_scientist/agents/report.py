@@ -25,6 +25,7 @@ from auto_core.sdk_utils import (
     prepare_turn_budget,
     resolve_prompt_provider,
     safe_query,
+    strip_report_preamble,
     validate_report_structure,
 )
 from auto_core.state import ExperimentState
@@ -43,7 +44,7 @@ async def run_report(
     output_dir: Path,
     model: str | None = None,
     message_buffer: list[str] | None = None,
-    provider: str = "anthropic",
+    provider: str = "openai",
     pending_abductions: str = "",
 ) -> str:
     """Generate the final experiment report.
@@ -135,11 +136,7 @@ async def run_report(
                 usage = message.usage
                 collect_text_from_query.last_usage = usage  # type: ignore[attr-defined]
 
-        raw = "\n".join(report_parts)
-        heading_idx = raw.find("\n# ")
-        if heading_idx != -1:
-            raw = raw[heading_idx + 1 :]
-        raw = raw.strip()
+        raw = strip_report_preamble("\n".join(report_parts))
         last_full_text[0] = raw
         return QueryResult(raw_output=raw, session_id=sid, usage={})
 
