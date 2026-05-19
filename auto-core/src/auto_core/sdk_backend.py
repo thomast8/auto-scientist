@@ -950,14 +950,13 @@ class CodexBackend:
         still accessible.  Falls back to a fresh client if the previous
         one was torn down (e.g. after an error).
         """
+        guard_workspace: Path | None = None
         # Codex has no per-tool Python callback; the workspace-write
-        # sandbox is the enforcement layer and its boundary is the
-        # client's cwd. If the caller passed a workspace guard, verify
-        # options.cwd resolves to the same directory so the kernel-level
-        # seatbelt matches what the guard thinks it's protecting. A
-        # mismatch here would silently put the model outside the guard's
-        # jurisdiction — the one case where "fail fast" is strictly
-        # better than trying to recover.
+        # sandbox is the enforcement layer and its boundary must match
+        # the guard workspace. If the caller passed a workspace guard,
+        # verify options.cwd resolves to the same directory, then pass an
+        # explicit sandbox policy below so temp directories do not remain
+        # writable escape hatches.
         if options.pre_tool_use_hook is not None:
             if options.network_access:
                 raise RuntimeError(
@@ -981,11 +980,14 @@ class CodexBackend:
                     "would confine writes to a different directory than "
                     "the guard expects; refusing to proceed."
                 )
+            guard_workspace = cwd_resolved
 
         effort = self._resolve_effort(options.extra_args)
         turn_overrides = TurnOverrides()
         if effort:
             turn_overrides.effort = effort  # type: ignore[assignment]
+        if guard_workspace is not None:
+            turn_overrides.sandbox_policy = self._guarded_workspace_write_policy(guard_workspace)
 
         # Structured output: set output_schema on the turn overrides so
         # Codex mechanically constrains the model to valid JSON.
@@ -1196,6 +1198,23 @@ class CodexBackend:
             raise RuntimeError(
                 f"Codex query failed (model={model}, sandbox={sandbox_mode}): {e}"
             ) from e
+
+    @staticmethod
+    def _guarded_workspace_write_policy(workspace: Path) -> dict[str, Any]:
+        """Strict Codex sandbox policy for guarded reviewer turns.
+
+        Codex's named ``workspace-write`` mode may leave platform temp
+        directories writable. Reviewer agents run against throwaway clones,
+        so the only writable root they need is the review workspace itself.
+        """
+        workspace_str = str(workspace)
+        return {
+            "type": "workspaceWrite",
+            "networkAccess": False,
+            "writableRoots": [workspace_str],
+            "excludeSlashTmp": True,
+            "excludeTmpdirEnvVar": True,
+        }
 
 
 # ---------------------------------------------------------------------------

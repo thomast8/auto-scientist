@@ -197,12 +197,21 @@ async def test_codex_guarded_happy_path_uses_workspace_write(
     backend = CodexBackend()
     _client, chat_kwargs, sandbox_mode = await backend._ensure_client(options, model=None)
     thread_config = chat_kwargs["thread_config"]
+    turn_overrides = chat_kwargs["turn_overrides"]
+    sandbox_policy = turn_overrides.sandbox_policy
 
     assert captured_connect["cwd"] == str(workspace)
     assert thread_config.cwd == str(workspace)
     assert thread_config.sandbox == "workspace-write"
     assert sandbox_mode == "workspace-write"
     assert thread_config.approval_policy == "never"
+    assert sandbox_policy == {
+        "type": "workspaceWrite",
+        "networkAccess": False,
+        "writableRoots": [str(workspace)],
+        "excludeSlashTmp": True,
+        "excludeTmpdirEnvVar": True,
+    }
     await backend.close()
 
 

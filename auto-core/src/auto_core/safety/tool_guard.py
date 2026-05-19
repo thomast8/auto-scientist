@@ -1,10 +1,10 @@
 """PreToolUse guard that confines SDK tool calls to a workspace.
 
 The guard produced by :func:`make_workspace_guard` is a synchronous
-callable the SDK backend adapts to its per-provider hook shape (Claude
-Code SDK's `can_use_tool` callback; Codex has no per-call hook so the
-guard is advisory on that path, with the Codex seatbelt doing the actual
-enforcement).
+callable the SDK backend adapts to its per-provider hook shape. Claude
+Code gets a PreToolUse callback; Codex has no per-call Python hook, so
+the backend validates the guard boundary up front and passes a strict
+workspace-write sandbox policy for enforcement.
 
 Design principles:
 
