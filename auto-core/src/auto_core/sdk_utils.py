@@ -9,6 +9,7 @@ The monkey-patch for unknown message types now lives in sdk_backend.py
 
 import json
 import logging
+import re
 from collections.abc import AsyncIterator, Sequence
 from dataclasses import dataclass
 from typing import Any
@@ -74,10 +75,16 @@ def strip_report_preamble(
 
     headings_to_match = expected_headings if expected_headings is not None else _EXPECTED_HEADINGS
     normalized_expected = [heading.casefold() for heading in headings_to_match if heading.strip()]
+    heading_candidates = []
     for idx, heading in headings:
         heading_key = heading.casefold()
         if any(expected in heading_key for expected in normalized_expected):
-            return "\n".join(lines[idx:]).strip()
+            heading_candidates.append(idx)
+
+    if heading_candidates:
+        has_transcript_markers = any(marker in raw for marker in _REPORT_TRANSCRIPT_MARKERS)
+        start_idx = heading_candidates[-1] if has_transcript_markers else heading_candidates[0]
+        return "\n".join(lines[start_idx:]).strip()
 
     if headings:
         return "\n".join(lines[headings[0][0] :]).strip()
@@ -551,6 +558,43 @@ collect_text_from_query.last_usage = {}  # type: ignore[attr-defined]
 
 
 # ── Report structure validation ─────────────────────────────────────────────
+
+_REPORT_HEADING_RE = re.compile(r"(?m)^#{1,6}\s+(?P<title>\S.*)$")
+_REPORT_START_HEADINGS = {
+    "report",
+    "final report",
+    "investigation report",
+    "review report",
+    "executive summary",
+}
+_REPORT_TRANSCRIPT_MARKERS = ("[userMessage]", "[tool]", "[assistant]")
+
+
+def _normalize_report_heading(title: str) -> str:
+    """Normalize a Markdown heading title for report-start matching."""
+    normalized = title.strip().casefold()
+    normalized = re.sub(r"^(?:\d+[\.)]?\s+)+", "", normalized)
+    return normalized.strip()
+
+
+def strip_preamble_before_report_heading(raw: str) -> str:
+    """Drop SDK transcript chatter before a likely report heading.
+
+    Tool transcripts can contain Markdown-looking headings before the actual
+    report. When transcript markers are present, prefer the last known report
+    start so earlier tool-output headings cannot become the saved artifact.
+    """
+    candidates: list[re.Match[str]] = []
+    for match in _REPORT_HEADING_RE.finditer(raw):
+        title = _normalize_report_heading(match.group("title"))
+        if title in _REPORT_START_HEADINGS or title.startswith("review of "):
+            candidates.append(match)
+    if candidates:
+        has_transcript_markers = any(marker in raw for marker in _REPORT_TRANSCRIPT_MARKERS)
+        match = candidates[-1] if has_transcript_markers else candidates[0]
+        return raw[match.start() :].strip()
+    return raw.strip()
+
 
 # Expected heading keywords for fuzzy matching (case-insensitive substring).
 # Mutable module-level state, populated by `auto_core.roles.install()` from

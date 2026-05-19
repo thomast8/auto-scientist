@@ -13,10 +13,11 @@ import inspect
 import json
 from types import SimpleNamespace
 from typing import Any
-from unittest.mock import patch
+from unittest.mock import MagicMock, patch
 
 import pytest
 from auto_core.notebook import append_entry
+from auto_core.sdk_backend import SDKMessage
 from auto_core.sdk_utils import validate_report_structure
 from auto_core.state import ExperimentState
 from auto_reviewer.agents import adversary, findings, hunter, prober, stop_gate, surveyor
@@ -304,6 +305,41 @@ Sandboxed probe only.
 
         assert "Dead ends:" in captured["prompt"]
         assert "single-thread race closed" in captured["prompt"]
+
+    @pytest.mark.asyncio
+    async def test_findings_strips_transcript_before_review_report(self, tmp_path) -> None:
+        notebook = tmp_path / "lab_notebook.xml"
+        append_entry(notebook, "review complete", version="v00", source="hunter")
+        report = (
+            "[tool]\n"
+            "# Raw diff output\n"
+            "not the report\n"
+            "# Review of owner/repo#1\n\n"
+            "## Summary\n"
+            f"{'Done. ' * 30}"
+        )
+
+        block = MagicMock()
+        block.text = report
+        del block.name
+
+        async def fake_query(**kwargs):
+            yield SDKMessage(type="assistant", content_blocks=[block])
+            yield SDKMessage(type="result", result=None, usage={}, session_id="sid")
+
+        with (
+            patch.object(findings, "get_backend", return_value=object()),
+            patch.object(findings, "safe_query", side_effect=fake_query),
+            patch.object(findings, "validate_report_structure", return_value=[]),
+        ):
+            result = await findings.run_findings(
+                state=ExperimentState(domain="owner/repo#1", goal="review PR"),
+                notebook_path=notebook,
+                output_dir=tmp_path,
+            )
+
+        assert result.startswith("# Review of owner/repo#1")
+        assert "Raw diff output" not in result
 
     @pytest.mark.asyncio
     async def test_stop_gate_entrypoint_injects_dead_ends(self, tmp_path) -> None:

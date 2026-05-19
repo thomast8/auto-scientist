@@ -192,6 +192,40 @@ class TestRunReport:
         assert "```" not in result
 
     @pytest.mark.asyncio
+    @patch("auto_scientist.agents.report.validate_report_structure", return_value=[])
+    @patch("auto_scientist.agents.report.safe_query")
+    async def test_prefers_current_report_when_tool_output_has_report_heading(
+        self, mock_query, _mock_validate, tmp_path
+    ):
+        """Tool output with a report-like heading does not become the saved report."""
+        long_content = "Detailed findings about the investigation. " * 3
+
+        async def fake_query(**kwargs):
+            yield _assistant_msg(
+                "[tool]\n"
+                "## Executive Summary\n"
+                "Earlier report artifact.\n"
+                "[assistant]\n"
+                f"## 1. Executive Summary\n\n{long_content}"
+            )
+            yield _result_msg()
+
+        mock_query.side_effect = fake_query
+
+        state = ExperimentState(domain="test", goal="test goal")
+        notebook_path = tmp_path / "lab_notebook.xml"
+        notebook_path.write_text("# Notebook")
+
+        result = await run_report(
+            state=state,
+            notebook_path=notebook_path,
+            output_dir=tmp_path,
+        )
+
+        assert result.startswith("## 1. Executive Summary")
+        assert "Earlier report artifact" not in result
+
+    @pytest.mark.asyncio
     @patch("auto_scientist.agents.report.safe_query")
     async def test_raises_when_no_text(self, mock_query, tmp_path):
         """If the agent produces no text blocks, raise RuntimeError."""

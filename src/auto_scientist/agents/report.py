@@ -8,7 +8,7 @@ Returns the report content as a string; the orchestrator handles file writing.
 
 import logging
 from pathlib import Path
-from typing import Any
+from typing import Any, cast
 
 from auto_core.agents.notebook_tool import (
     NOTEBOOK_SPEC,
@@ -156,7 +156,7 @@ async def run_report(
         return QueryResult(raw_output=raw, session_id=sid, usage={})
 
     def _validate(result: QueryResult) -> str:
-        text = result.raw_output
+        text = cast(str, result.raw_output)
         if len(text) < MIN_REPORT_LENGTH:
             raise RetryValidationError(
                 "<validation_error>\n"
@@ -197,10 +197,13 @@ async def run_report(
 
         return full_text
 
-    return await agent_retry_loop(
-        query_fn=_query,
-        validate_fn=_validate,
-        prompt=user_prompt,
-        agent_name="Report",
-        on_exhausted=_on_exhausted,
+    return cast(
+        str,
+        await agent_retry_loop(
+            query_fn=_query,
+            validate_fn=_validate,
+            prompt=user_prompt,
+            agent_name="Report",
+            on_exhausted=_on_exhausted,
+        ),
     )
